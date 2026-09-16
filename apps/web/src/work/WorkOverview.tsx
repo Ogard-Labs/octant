@@ -1,5 +1,10 @@
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
-import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderModelOptionValues,
+  ProjectId,
+} from "@octant/contracts";
 import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
 import { CalendarClock, FolderOpen, ShieldCheck } from "lucide-react";
@@ -69,10 +74,12 @@ export interface WorkOverviewProps {
   readonly onCreateThread: (
     draft: string,
     images?: ReadonlyArray<File>,
+    modelOptionValues?: ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onOpenSettings?: () => void;
   readonly projectName?: string;
+  readonly projectId?: ProjectId;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly selectedModelId?: ProviderModelId;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
@@ -97,6 +104,13 @@ export function WorkOverview(props: WorkOverviewProps) {
     ),
   );
   const [draft, setDraft] = useState("");
+  const modelKey = `${props.projectId ?? ""}:${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
+  const [modelChoice, setModelChoice] = useState<{
+    readonly key: string;
+    readonly values: ProviderModelOptionValues;
+  }>({ key: modelKey, values: {} });
+  if (modelChoice.key !== modelKey) setModelChoice({ key: modelKey, values: {} });
+  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
   const [submitting, setSubmitting] = useState(false);
   const images = useWorkComposerImages();
   const imageSupport = selectedModelReadsImages(providerGroups, {
@@ -119,9 +133,15 @@ export function WorkOverview(props: WorkOverviewProps) {
     try {
       const staged = images.filesForSend();
       const created =
-        staged.length === 0
-          ? await props.onCreateThread(normalized)
-          : await props.onCreateThread(normalized, staged);
+        Object.keys(modelOptionValues).length > 0
+          ? await props.onCreateThread(
+              normalized,
+              staged.length === 0 ? undefined : staged,
+              modelOptionValues,
+            )
+          : staged.length === 0
+            ? await props.onCreateThread(normalized)
+            : await props.onCreateThread(normalized, staged);
       if (created) {
         images.clearAfterAccepted();
         setDraft("");
@@ -195,6 +215,16 @@ export function WorkOverview(props: WorkOverviewProps) {
               {...(props.onOpenSettings === undefined
                 ? {}
                 : { onOpenSettings: props.onOpenSettings })}
+              modelOptionValues={modelOptionValues}
+              onModelOptionChange={(id, value) => {
+                const rest = Object.fromEntries(
+                  Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                );
+                setModelChoice({
+                  key: modelKey,
+                  values: value === undefined ? rest : { ...rest, [id]: value },
+                });
+              }}
               onSelect={props.onSelectProvider}
               {...(props.selectedModelId === undefined
                 ? {}

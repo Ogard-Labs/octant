@@ -198,6 +198,7 @@ describe("WorkOverview", () => {
   it("confirms exact Project confinement and allows provider/model selection", async () => {
     const user = userEvent.setup();
     const onSelectProvider = vi.fn();
+    const onCreateThread = vi.fn(async () => true);
     const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
     const modelId = decodeProviderModelId("model-one");
     const provider = decodeProviderInstance({
@@ -249,7 +250,14 @@ describe("WorkOverview", () => {
                 verification: "verified" as const,
                 reasoning: "unavailable" as const,
                 inputModalities: ["text" as const],
-                options: [],
+                options: [
+                  {
+                    id: "effort",
+                    displayName: "Effort",
+                    kind: "selection",
+                    values: ["low", "high"],
+                  },
+                ],
                 capabilityEvidence: [
                   {
                     capability: "tool-calling" as const,
@@ -272,7 +280,7 @@ describe("WorkOverview", () => {
     render(
       <WorkOverview
         model={emptyModel()}
-        onCreateThread={vi.fn(async () => true)}
+        onCreateThread={onCreateThread}
         onSelectProvider={onSelectProvider}
         projectName="Quarterly planning"
         providerGroups={providerGroups}
@@ -290,6 +298,21 @@ describe("WorkOverview", () => {
     await user.click(within(composer).getByRole("button", { name: "Provider and model" }));
     await user.click(await screen.findByRole("option", { name: "Model One" }));
     expect(onSelectProvider).toHaveBeenCalledWith({ providerInstanceId: instanceId, modelId });
+    await user.click(within(composer).getByRole("button", { name: "Provider and model" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
+        name: "High",
+      }),
+    );
+    await user.keyboard("{Escape}");
+    await user.type(
+      within(composer).getByRole("textbox", { name: "Start a new task" }),
+      "Prepare brief",
+    );
+    await user.click(within(composer).getByRole("button", { name: "Start task" }));
+    await waitFor(() =>
+      expect(onCreateThread).toHaveBeenCalledWith("Prepare brief", undefined, { effort: "high" }),
+    );
   });
 
   it("disables quick-start when thread creation is unavailable", () => {

@@ -1540,6 +1540,20 @@ describe("App", () => {
   it("preserves the Work overview draft when authoritative create fails", async () => {
     const user = userEvent.setup();
     const shellApi = client(workShellBootstrap());
+    const providerApi = providersWithToolModel();
+    const providerSnapshot = await providerApi.bootstrap();
+    vi.mocked(providerApi.bootstrap).mockResolvedValue({
+      ...providerSnapshot,
+      observedStates: providerSnapshot.observedStates.map((state) => ({
+        ...state,
+        models: state.models.map((model) => ({
+          ...model,
+          options: [
+            { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+          ],
+        })),
+      })),
+    });
     const workThreadClient = {
       bootstrap: vi.fn(async () => ({ threads: [] })),
       execute: vi.fn(async () => {
@@ -1588,16 +1602,28 @@ describe("App", () => {
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={workProjects()}
         projectWindowCapability={projectWindowCapability}
-        providerClient={providersWithToolModel()}
+        providerClient={providerApi}
         shellClient={shellApi}
       />,
     );
 
     const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
+        name: "High",
+      }),
+    );
+    await user.keyboard("{Escape}");
     await user.type(prompt, "Keep this overview draft");
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
-    expect(workThreadClient.execute).toHaveBeenCalled();
+    expect(workThreadClient.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "create-work-thread",
+        modelOptionValues: { effort: "high" },
+      }),
+    );
     expect(workTurnClient.startFirstTurn).not.toHaveBeenCalled();
     expect(prompt).toHaveValue("Keep this overview draft");
     expect(
