@@ -274,18 +274,30 @@ export function createAgentRunSessionRuntime(
           throw new AgentRunSessionError("spend-ceiling-exhausted", spendAdmission.refusal.message);
         }
       }
-      const reservationId = reserveCapacity({
-        capacityScheduler: options.capacityScheduler,
-        ...(options.serviceLimits === undefined ? {} : { serviceLimits: options.serviceLimits }),
-        ...(options.capacityEnforcement === undefined
-          ? {}
-          : { capacityEnforcement: options.capacityEnforcement }),
-        uuid: options.uuid,
-        subject,
-        providerInstanceId: target.providerInstanceId,
-        modelId: target.modelId,
-        estimatedTokens,
-      });
+      const reservationId = (() => {
+        try {
+          return reserveCapacity({
+            capacityScheduler: options.capacityScheduler,
+            ...(options.serviceLimits === undefined
+              ? {}
+              : { serviceLimits: options.serviceLimits }),
+            ...(options.capacityEnforcement === undefined
+              ? {}
+              : { capacityEnforcement: options.capacityEnforcement }),
+            uuid: options.uuid,
+            subject,
+            providerInstanceId: target.providerInstanceId,
+            modelId: target.modelId,
+            estimatedTokens,
+          });
+        } catch (error) {
+          // Capacity refusal happens before the managed session owns cleanup.
+          if (spendReservationId !== undefined) {
+            options.spendCeiling?.settle({ reservationId: spendReservationId });
+          }
+          throw error;
+        }
+      })();
 
       const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
       let settledOutcome: AgentRunSessionOutcome | undefined;
