@@ -3600,6 +3600,15 @@ describe("App", () => {
         name: /Octant, Code Project, Relink required/,
       }),
     ).toBeVisible();
+    for (const destination of ["Board", "Pull requests", "Inbox"]) {
+      await user.click(within(sidebar).getByRole("button", { name: destination }));
+      expect(within(sidebar).queryByRole("region", { name: "Projects sidebar" })).toBeNull();
+      expect(document.querySelector(".shell-frame")).not.toHaveClass(
+        "shell--projects-sidebar-open",
+      );
+      await user.click(within(sidebar).getByRole("button", { name: "Projects" }));
+      expect(within(sidebar).getByRole("region", { name: "Projects sidebar" })).toBeVisible();
+    }
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);

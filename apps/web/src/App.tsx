@@ -3712,6 +3712,7 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
+  const projectsDirectoryVisible = selectedProjectTabId !== undefined && !readerOpen;
   // Readers hide unrelated thread tools. Selecting a pull request explicitly
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
@@ -5033,16 +5034,14 @@ function LaunchedShell(
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={sidebarCollapsed}
-        projectsSidebarOpen={selectedProjectTabId !== undefined}
+        projectsSidebarOpen={projectsDirectoryVisible}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
-            {...(selectedProjectTabId === undefined
-              ? {}
-              : { activeDestination: "projects" as const })}
+            {...(!projectsDirectoryVisible ? {} : { activeDestination: "projects" as const })}
             imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
@@ -5136,7 +5135,7 @@ function LaunchedShell(
             backgroundCoveredByWorkspace={shellBackdropCoversSidebar}
             resolvedSidebarBackground={resolvedSidebarBackground}
             backgroundFetcher={sidebarBackgroundFetcher}
-            {...(selectedProjectTabId === undefined || activeProjectId === undefined
+            {...(!projectsDirectoryVisible || activeProjectId === undefined
               ? {}
               : {
                   projectsDirectory: (
