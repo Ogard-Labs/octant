@@ -101,7 +101,36 @@ describe("ContextHarnessService integration", () => {
     try {
       const published = await observeWorkContext({
         service: fixture.service,
-        plan,
+        plan: {
+          ...plan,
+          manifest: {
+            ...plan.manifest,
+            entries: [
+              ...plan.manifest.entries,
+              decodeContextEntry({
+                ...requiredEntry(50),
+                id: "81000000-0000-4000-8000-000000000999",
+                source: { kind: "tool", referenceId: "work-read" },
+                category: "octant-tools",
+              }),
+              decodeContextEntry({
+                ...requiredEntry(50),
+                id: "81000000-0000-4000-8000-000000000998",
+                source: { kind: "tool", referenceId: "work-read" },
+                category: "octant-tools",
+              }),
+              decodeContextEntry({
+                ...requiredEntry(50),
+                id: "81000000-0000-4000-8000-000000000997",
+                source: { kind: "tool", referenceId: "work-write" },
+                category: "octant-tools",
+                posture: "removable",
+                state: "omitted",
+                includedSize: 0,
+              }),
+            ],
+          },
+        },
         displayLabel: "Work task",
         signal: new AbortController().signal,
         driver: {
@@ -110,6 +139,7 @@ describe("ContextHarnessService integration", () => {
           acquire: () => Effect.die("Unused"),
         },
       });
+      expect(published?.snapshot.capabilities).toMatchObject({ loadedTools: 1, availableTools: 2 });
       expect(published?.snapshot.modelLimits.source).toBe("conservative-fallback");
       expect(published?.snapshot.modelLimits).not.toHaveProperty("maxOutput");
       expect(published?.snapshot.next.plan.safeInputBudget).toBe(24_000);

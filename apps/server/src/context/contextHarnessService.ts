@@ -249,7 +249,7 @@ export class ContextHarnessService {
         displayLabel: input.displayLabel,
         modelLimits,
         serviceLimits: input.serviceLimits,
-        capabilities: capabilityCounts(input.capabilityCatalog, selection.selected),
+        capabilities: capabilityCounts(input.capabilityCatalog, selection.selected, input.entries),
         requestShape: input.requestShape,
         watchHeadroomTokens: input.watchHeadroomTokens,
       },
@@ -276,7 +276,7 @@ export class ContextHarnessService {
       serviceLimits: input.serviceLimits,
       next: { manifest, plan },
       summaries: [],
-      capabilities: capabilityCounts(input.capabilityCatalog, selection.selected),
+      capabilities: capabilityCounts(input.capabilityCatalog, selection.selected, input.entries),
     });
     const key = subjectKey(input.subject);
     this.#snapshots.set(key, snapshot);
@@ -895,14 +895,33 @@ function harnessPolicyError(error: unknown): ContextHarnessError {
 function capabilityCounts(
   catalog: CapabilityCatalog,
   selected: ReadonlyArray<CapabilityCatalog["entries"][number]>,
+  entries: ReadonlyArray<ContextEntry>,
 ): ContextCapabilityCounts {
   const isMcp = (kind: CapabilityCatalog["entries"][number]["componentKind"]) =>
     kind === "mcp-tool" || kind === "mcp-prompt" || kind === "mcp-resource";
   const isTool = (kind: CapabilityCatalog["entries"][number]["componentKind"]) =>
     kind === "octant-tool";
+  const catalogTools = catalog.entries.filter((entry) => isTool(entry.componentKind));
+  const selectedTools = selected.filter((entry) => isTool(entry.componentKind));
+  const catalogReferences = new Set(catalogTools.map((entry) => entry.source.referenceId));
+  const availableTools = new Set<string>();
+  const loadedTools = new Set<string>();
+  // Work and Chat can supply tool schemas directly in their attributed manifest.
+  for (const entry of entries) {
+    if (entry.category !== "octant-tools" || entry.source.kind !== "tool") continue;
+    if (catalogReferences.has(entry.source.referenceId)) continue;
+    availableTools.add(entry.source.referenceId);
+    if (
+      entry.eligibility.status === "eligible" &&
+      entry.state !== "omitted" &&
+      entry.state !== "reserved"
+    ) {
+      loadedTools.add(entry.source.referenceId);
+    }
+  }
   return {
-    loadedTools: selected.filter((entry) => isTool(entry.componentKind)).length,
-    availableTools: catalog.entries.filter((entry) => isTool(entry.componentKind)).length,
+    loadedTools: selectedTools.length + loadedTools.size,
+    availableTools: catalogTools.length + availableTools.size,
     loadedMcp: selected.filter((entry) => isMcp(entry.componentKind)).length,
     availableMcp: catalog.entries.filter((entry) => isMcp(entry.componentKind)).length,
   };
