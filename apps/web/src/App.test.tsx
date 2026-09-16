@@ -722,6 +722,41 @@ describe("App", () => {
   it("creates a Project-scoped Chat thread through the authoritative quick start", async () => {
     const user = userEvent.setup();
     const chatApi = chats();
+    const originalExecute = vi.mocked(chatApi.execute).getMockImplementation();
+    if (originalExecute === undefined) throw new Error("Expected Chat fixture");
+    vi.mocked(chatApi.execute).mockImplementation(async (command) => {
+      const result = await originalExecute(command);
+      if (command.kind === "change-chat-provider" && result.kind === "thread-created") {
+        return decodeChatCommandResult({
+          kind: "thread-updated",
+          thread: {
+            ...result.thread,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            modelOptionValues: command.modelOptionValues,
+            version: result.thread.version + 1,
+          },
+        });
+      }
+      return result;
+    });
+    const providerApi = providers();
+    const instance = openAiProvider("10000000-0000-4000-8000-000000000001", "Reasoning provider");
+    const bootstrapProviders = await providerApi.bootstrap();
+    vi.mocked(providerApi.bootstrap).mockResolvedValue({
+      ...bootstrapProviders,
+      instances: [instance],
+      observedStates: [
+        observedProvider(instance.id, [
+          {
+            ...providerModel({ id: "model-a", displayName: "Reasoning model" }),
+            options: [
+              { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+            ],
+          },
+        ]),
+      ],
+    });
     const chatProject = {
       id: projectId,
       type: "chat",
@@ -775,18 +810,32 @@ describe("App", () => {
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={projectApi}
         projectWindowCapability={projectWindowCapability}
-        providerClient={providers()}
+        providerClient={providerApi}
         shellClient={shellApi}
       />,
     );
 
     const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
+    await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
+        name: "High",
+      }),
+    );
+    await user.keyboard("{Escape}");
     await user.type(
       within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
       "Prepare launch brief",
     );
     await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
 
+    expect(chatApi.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change-chat-provider",
+        threadId: createdChatThreadId,
+        modelOptionValues: { effort: "high" },
+      }),
+    );
     expect(chatApi.execute).toHaveBeenCalledWith({
       kind: "create-chat-thread",
       projectId,
@@ -795,6 +844,7 @@ describe("App", () => {
     expect(chatApi.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "send-chat-turn",
+        expectedVersion: 2,
         threadId: createdChatThreadId,
         prompt: "Prepare launch brief",
       }),

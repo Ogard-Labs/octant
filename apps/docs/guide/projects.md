@@ -36,6 +36,10 @@ Projects support the following operations:
   Project, Recents, or Unfiled label.
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
 
+## Chat quick start
+
+The Chat Project overview can start a thread directly. Its model picker offers the selected model's declared reasoning or effort levels. The chosen level is applied before the first message and remains part of that thread's model settings. Choosing **Default** leaves the provider default in effect; changing the provider or model clears the quick-start level choice.
+
 ## Project hierarchy
 
 The sidebar displays a mode-aware Project hierarchy. Each mode group lists its Projects, and the active Project is highlighted. Threads belong to exactly one Project. A cross-Project tab drop does not silently change authority; it offers to open the thread in a new window instead.

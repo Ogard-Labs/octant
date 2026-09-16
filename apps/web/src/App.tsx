@@ -3996,6 +3996,7 @@ function LaunchedShell(
   async function handleCreateChatProjectThread(
     projectId: ProjectId,
     prompt: string,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ): Promise<boolean> {
     const project = projectController.allProjects.find(
       (candidate) =>
@@ -4024,7 +4025,8 @@ function LaunchedShell(
     if (
       selection !== undefined &&
       (thread.providerInstanceId !== selection.providerInstanceId ||
-        thread.modelId !== selection.modelId)
+        thread.modelId !== selection.modelId ||
+        modelOptionValues !== undefined)
     ) {
       const changed = await chatController.execute({
         kind: "change-chat-provider",
@@ -4032,6 +4034,7 @@ function LaunchedShell(
         expectedVersion: thread.version,
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
+        ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
       });
       if (changed?.kind !== "thread-updated") return false;
       thread = changed.thread;

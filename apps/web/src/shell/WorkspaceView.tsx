@@ -183,6 +183,7 @@ export interface WorkspaceViewProps {
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly onOpenChatThread?: (
     threadId: ChatThreadId,
@@ -1498,8 +1499,9 @@ function renderNonCodeTab(
                   props.chatController.status === "ready" &&
                   props.onCreateChatProjectThread !== undefined
                     ? {
-                        onCreateThread: (draft: string) =>
-                          props.onCreateChatProjectThread?.(project.id, draft) ?? false,
+                        onCreateThread: (draft, modelOptionValues) =>
+                          props.onCreateChatProjectThread?.(project.id, draft, modelOptionValues) ??
+                          false,
                       }
                     : {})}
                   {...(props.onOpenChatThread === undefined
