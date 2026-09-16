@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { decodeLocalUsageHistoryResponse, type LocalUsageHistoryResponse } from "@octant/contracts";
@@ -194,6 +194,25 @@ describe("Local provider usage history", () => {
     resolveFirst?.({ ...obsolete, totals: { ...obsolete.totals, totalTokens: 999999 } });
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("heading", { name: "1M" })).not.toBeInTheDocument();
+  });
+
+  it("clears the previous host reading when the newly selected host fails", async () => {
+    const original = { load: vi.fn().mockResolvedValue(history()) };
+    const { rerender } = render(<ProviderUsageHistoryWorkspace client={original} />);
+    await showTokens();
+    expect(await screen.findByRole("heading", { name: "1.2K" })).toBeVisible();
+    let rejectNext: ((reason: Error) => void) | undefined;
+    const next = new Promise<LocalUsageHistoryResponse>((_resolve, reject) => {
+      rejectNext = reject;
+    });
+    const replacement = { load: vi.fn().mockReturnValue(next) };
+    rerender(<ProviderUsageHistoryWorkspace client={replacement} />);
+    expect(screen.queryByRole("heading", { name: "1.2K" })).not.toBeInTheDocument();
+    await act(async () => {
+      rejectNext?.(new Error("Host unavailable"));
+    });
+    expect(screen.queryByRole("heading", { name: "1.2K" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Refresh/ })).toBeEnabled();
   });
 
   it("keeps unknown cost unavailable instead of presenting free usage", async () => {
