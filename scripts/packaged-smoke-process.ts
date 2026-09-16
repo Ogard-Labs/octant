@@ -34,6 +34,21 @@ interface CleanupPackagedProcessOptions {
   readonly forceTimeoutMs?: number;
 }
 
+/**
+ * A failed smoke request has to say what the server said. Without the body a
+ * probe failure reads as "status 400" while the answer - discovery-only, an
+ * unrecognized version, a missing privilege - sits unread in the response.
+ */
+export async function describeFailedResponse(response: Response, label: string): Promise<Error> {
+  const body = await response.text().catch(() => "");
+  const detail = body.replace(/\s+/g, " ").trim().slice(0, 500);
+  return new Error(
+    detail.length === 0
+      ? `${label} failed with status ${response.status}.`
+      : `${label} failed with status ${response.status}: ${detail}`,
+  );
+}
+
 export function sanitizedPackagedEnvironment(
   source: NodeJS.ProcessEnv,
   dataDirectory: string,

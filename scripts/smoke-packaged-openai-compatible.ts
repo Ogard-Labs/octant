@@ -11,6 +11,7 @@ import {
   cleanupPackagedProcess,
   packagedServerEnvironment,
   type SmokeChildProcess,
+  describeFailedResponse,
 } from "./packaged-smoke-process";
 
 export const OCTANT_KEYCHAIN_SERVICE = "app.octant.provider-credentials";
@@ -489,8 +490,7 @@ async function providerRequest(path: string, init: RequestInit): Promise<unknown
     ...init,
     signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok)
-    throw new Error(`Packaged Provider API request failed with status ${response.status}.`);
+  if (!response.ok) throw await describeFailedResponse(response, "Packaged Provider API request");
   try {
     return await response.json();
   } catch {

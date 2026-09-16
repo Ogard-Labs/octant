@@ -15,6 +15,7 @@ import {
   runBoundedCommand,
   waitForProcessCleanup,
   type SmokeChildProcess,
+  describeFailedResponse,
 } from "./packaged-smoke-process";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -515,7 +516,7 @@ async function smokeChatTurn(
       signal: AbortSignal.timeout(20_000),
     },
   );
-  if (!response.ok) throw new Error(`Packaged Chat replay failed with status ${response.status}.`);
+  if (!response.ok) throw await describeFailedResponse(response, "Packaged Chat replay");
   const frames = (await response.text())
     .split("\n")
     .filter((line) => line.length > 0)
@@ -567,7 +568,7 @@ async function readChatThread(
       signal: AbortSignal.timeout(20_000),
     },
   );
-  if (!response.ok) throw new Error(`Packaged Chat read failed with status ${response.status}.`);
+  if (!response.ok) throw await describeFailedResponse(response, "Packaged Chat read");
   const result = (await response.json()) as unknown;
   if (!isRecord(result)) throw new Error("Packaged Chat read evidence is invalid.");
   return result;
@@ -584,7 +585,7 @@ async function providerRequest(path: string, capability: string, body: unknown):
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) {
-    throw new Error(`Packaged Provider API request failed with status ${response.status}.`);
+    throw await describeFailedResponse(response, "Packaged Provider API request");
   }
   return await response.json();
 }
@@ -603,8 +604,7 @@ async function uploadChatAttachment(capability: string, threadId: string): Promi
     body: FIXTURE_IMAGE_BYTES,
     signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok)
-    throw new Error(`Packaged Chat attachment upload failed with status ${response.status}.`);
+  if (!response.ok) throw await describeFailedResponse(response, "Packaged Chat attachment upload");
   const result = (await response.json()) as unknown;
   if (!isFinalizedPackagedAttachment(result, threadId, attachmentId)) {
     throw new Error("Packaged Chat attachment evidence is invalid.");
@@ -622,7 +622,7 @@ async function chatRequest(path: string, capability: string, body: unknown): Pro
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok) throw new Error(`Packaged Chat request failed with status ${response.status}.`);
+  if (!response.ok) throw await describeFailedResponse(response, "Packaged Chat request");
   return await response.json();
 }
 
