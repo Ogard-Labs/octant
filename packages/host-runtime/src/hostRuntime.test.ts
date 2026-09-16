@@ -34,11 +34,13 @@ import {
   encodeOwnerReceipt,
   encodeHostInfoReceipt,
   formatHostRuntimeError,
+  CONFIGURATION_FAILURE_EXIT_CODE,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
   readHostRuntimeProcessStart,
   redactHostRuntimeText,
   resolveHostRuntimePaths,
+  startupFailureExitCode,
   writeHostInfoReceipt,
   type HostRuntimeOwner,
 } from "./index";
@@ -334,6 +336,16 @@ describe("owner receipts and redaction", () => {
 
     expect(output).toBe("Octant host path validation failed (invalid-path).");
     expect(output).not.toContain(privatePath);
+  });
+
+  it("reports a path validation failure as a configuration failure, not a crash", () => {
+    expect(
+      startupFailureExitCode(
+        new HostRuntimePathError("unsafe-mode", "Octant requires mode 0700", "/tmp/octant"),
+      ),
+    ).toBe(CONFIGURATION_FAILURE_EXIT_CODE);
+    expect(startupFailureExitCode(new Error("the store could not be opened"))).toBe(1);
+    expect(startupFailureExitCode("not an error")).toBe(1);
   });
 
   it("reads a stable process-start fact for the current supported host", async () => {

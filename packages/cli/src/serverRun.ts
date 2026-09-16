@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
+  CONFIGURATION_FAILURE_EXIT_CODE,
   makeSecretServiceCredentialStore,
   nextRestartBackoff,
   probeSecretService,
@@ -112,6 +113,10 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
       lastExitCode = await currentChild.exited;
       currentChild = undefined;
       if (shutdownRequested || lastExitCode === 0) return lastExitCode;
+      if (lastExitCode === CONFIGURATION_FAILURE_EXIT_CODE) {
+        writeNotice(configurationFailureNotice(env));
+        return lastExitCode;
+      }
       if (now() - startedAt >= 60_000) failures = 0;
       const backoff = nextRestartBackoff({ failures, now: now() });
       if (backoff.crashLoop) return lastExitCode;
@@ -150,6 +155,24 @@ export function resolveServerRunOptions(
 
 function createBridgeSecret(): string {
   return randomBytes(32).toString("base64url");
+}
+
+/**
+ * A configuration failure cannot be fixed by restarting, so the launcher names
+ * the directory it was given, states the requirement, and stops. The path comes
+ * from this process's own environment rather than the server's log line, which
+ * deliberately omits it.
+ */
+function configurationFailureNotice(env: NodeJS.ProcessEnv): string {
+  const dataDirectory = env.OCTANT_DATA_DIR;
+  const subject =
+    dataDirectory === undefined
+      ? "The Octant data directory"
+      : `The Octant data directory (${dataDirectory})`;
+  return (
+    `${subject} failed host path validation. Runtime paths must be owned by you and ` +
+    "must not be accessible to group or other users (mode 0700). Octant stopped instead of retrying."
+  );
 }
 
 function defaultServerStartCommand(): {
