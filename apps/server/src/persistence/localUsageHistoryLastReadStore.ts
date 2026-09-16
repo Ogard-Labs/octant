@@ -44,9 +44,15 @@ export function createLocalUsageHistoryLastReadStore(path: string) {
      */
     write(view: string, response: string, complete: boolean): void {
       withDatabase((connection) => {
+        // The upsert is also the newest-reading guard: out of order is a
+        // reality for an interrupted scan that finishes after a newer one
+        // began, and the newer reading must not be overwritten by the older.
+        // queryAt is a fixed-width UTC instant, so plain text comparison
+        // orders it. A completed reading always wins; among two incomplete
+        // ones the newer one does.
         connection
           .prepare(
-            "INSERT INTO usage_last_reads (view, response, complete) VALUES (?, ?, ?) ON CONFLICT(view) DO UPDATE SET response = excluded.response, complete = excluded.complete WHERE excluded.complete = 1 OR usage_last_reads.complete = 0",
+            "INSERT INTO usage_last_reads (view, response, complete) VALUES (?, ?, ?) ON CONFLICT(view) DO UPDATE SET response = excluded.response, complete = excluded.complete WHERE (excluded.complete = 1 OR usage_last_reads.complete = 0) AND json_extract(excluded.response, '$.queryAt') >= json_extract(usage_last_reads.response, '$.queryAt')",
           )
           .run(view, response, complete ? 1 : 0);
       });

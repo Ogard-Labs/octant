@@ -23,9 +23,11 @@ caller that asks for it first.
 - The answer names itself and carries the range, coverage, and read time of the
   reading it came from. The surface paints those totals and reads again
   immediately: the last reading is a first paint, not an answer.
-- Only a reading that finished is kept. A scan that still has more to do leaves
-  the earlier completed reading in place rather than publishing a subtotal as a
-  total, and the surface keeps the completed reading until this read finishes.
+- A completed reading always replaces what is stored. An unfinished reading is
+  kept only as the fallback for a view that has no completed reading yet; a
+  completed reading replaces that fallback when it finishes. A scan that still
+  has more to do therefore never publishes a subtotal over a completed total,
+  and the surface keeps the completed reading until this read finishes.
 - A view is keyed by the sources it covers, the viewing timezone, and the length
   of the window. The window's instants are deliberately not part of the key: a
   surface asking for "the last 30 days" a minute later means that view, and the

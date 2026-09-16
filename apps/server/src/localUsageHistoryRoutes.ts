@@ -129,11 +129,11 @@ function localUsageHistoryViewKey(
   request: LocalUsageHistoryRequest,
 ): string {
   const kinds = [...new Set(sources.map((source) => source.sourceKind))].sort();
-  const days = Math.max(
-    1,
-    Math.round((Date.parse(request.to) - Date.parse(request.from)) / 86_400_000),
-  );
-  return `${kinds.join(",")}|${request.timeZone}|${days}d`;
+  // Exact length, not rounded days: two windows that round to the same day
+  // count are still different views (24 hours is not 25), and a preferLastRead
+  // answer for the shorter one must not stand in for the longer.
+  const windowMs = Date.parse(request.to) - Date.parse(request.from);
+  return `${kinds.join(",")}|${request.timeZone}|${windowMs}ms`;
 }
 
 /** A stored reading that no longer decodes is a miss; the next read replaces it. */

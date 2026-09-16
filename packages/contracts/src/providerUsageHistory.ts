@@ -133,10 +133,13 @@ export const LocalUsageHistoryRequest = Schema.Struct({
   to: UtcTimestamp,
   timeZone: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   /**
-   * Answer from the host's last completed reading of this view instead of
+   * Answer from the host's last stored reading of this view instead of
    * reading provider history now. A surface that is opened repeatedly asks
    * this way first, paints those totals, and reads again straight away, so an
    * unchanged provider history does not repaint every total from scratch.
+   * The stored reading is normally the last completed one; when no reading
+   * has ever completed for this view it can be an unfinished one. Inspect
+   * coverage[].hasMore and status before treating the totals as complete.
    */
   preferLastRead: Schema.optional(Schema.Boolean),
 }).annotations(strict);

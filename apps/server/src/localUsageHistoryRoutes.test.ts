@@ -444,6 +444,82 @@ describe("local provider usage history route", () => {
     expect(sourceCalls).toBe(1);
   });
 
+  it("does not answer one window length from another window's last read", async () => {
+    const directory = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-last-read-window-"));
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: Date.now() });
+    let sourceCalls = 0;
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: store,
+      sources: [
+        {
+          sourceKind: "codex",
+          read: () => {
+            sourceCalls += 1;
+            return Effect.succeed({
+              records: [],
+              coverage: {
+                sourceKind: "codex",
+                sourceInstallationId: "install-1",
+                status: "ready",
+                scannedFileCount: 0,
+                acceptedRecordCount: 0,
+                omittedRecordCount: 0,
+                truncated: false,
+                hasMore: false,
+                detail: "synthetic",
+              },
+            } as never);
+          },
+        },
+      ],
+      lastReadStore: createLocalUsageHistoryLastReadStore(
+        join(directory, "local-usage-cache.sqlite3"),
+      ),
+      clock: () => "2026-09-09T12:00:00.000Z",
+    });
+    const request = (payload: unknown) =>
+      new Request("http://127.0.0.1/api/usage/local-history", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify(payload),
+      });
+    await handler(
+      request({
+        from: "2026-08-10T12:00:00.000Z",
+        to: "2026-09-09T12:00:00.000Z",
+        timeZone: "UTC",
+      }),
+    );
+    // Same view a minute later, but the window is five minutes longer. The
+    // rounded day count is still 30, so a key over days would answer the
+    // shorter window's totals for the longer one.
+    const longer = await handler(
+      request({
+        from: "2026-08-10T12:00:00.000Z",
+        to: "2026-09-09T12:05:00.000Z",
+        timeZone: "UTC",
+        preferLastRead: true,
+      }),
+    );
+    expect(await longer?.json()).not.toMatchObject({ fromLastRead: true });
+    expect(sourceCalls).toBe(2);
+  });
+
+  it("keeps the newer reading when an older one lands out of order", async () => {
+    const directory = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-last-read-order-"));
+    const lastRead = createLocalUsageHistoryLastReadStore(
+      join(directory, "local-usage-cache.sqlite3"),
+    );
+    // An interrupted scan finishes after the surface has already opened the
+    // view again. Its reading is the older one and must not overwrite.
+    lastRead.write("view", JSON.stringify({ queryAt: "2026-09-09T12:05:00.000Z" }), false);
+    lastRead.write("view", JSON.stringify({ queryAt: "2026-09-09T12:00:00.000Z" }), false);
+    expect(JSON.parse(lastRead.read("view") ?? "{}")).toMatchObject({
+      queryAt: "2026-09-09T12:05:00.000Z",
+    });
+  });
+
   it("does not expose local history without window authority", async () => {
     const handler = createLocalUsageHistoryRouteHandler({
       windowAuthorityStore: new WindowAuthorityStore(),
