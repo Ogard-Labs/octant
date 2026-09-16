@@ -7,6 +7,7 @@ import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createCodexLocalUsageHistorySource } from "./providers/codexUsageHistory";
+import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
@@ -209,6 +210,171 @@ describe("local provider usage history route", () => {
     expect(inverted?.status).toBe(400);
     expect(invalidTimezone?.status).toBe(400);
     expect(sourceCalls).toBe(0);
+  });
+
+  it("opens a repeated view at the host's last completed reading", async () => {
+    const directory = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-last-read-"));
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: Date.now() });
+    let sourceCalls = 0;
+    const counted: ProviderLocalUsageHistorySource = {
+      sourceKind: "codex",
+      read: () => {
+        sourceCalls += 1;
+        return Effect.succeed({
+          records: [],
+          coverage: {
+            sourceKind: "codex",
+            sourceInstallationId: "install-1",
+            status: "ready",
+            scannedFileCount: 0,
+            acceptedRecordCount: 0,
+            omittedRecordCount: 0,
+            truncated: false,
+            hasMore: false,
+            detail: "synthetic",
+          },
+        } as never);
+      },
+    };
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: store,
+      sources: [counted],
+      lastReadStore: createLocalUsageHistoryLastReadStore(
+        join(directory, "local-usage-cache.sqlite3"),
+      ),
+      clock: () => "2026-09-09T12:00:00.000Z",
+    });
+    const request = (payload: unknown) =>
+      new Request("http://127.0.0.1/api/usage/local-history", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify(payload),
+      });
+    const first = await handler(
+      request({
+        from: "2026-08-10T12:00:00.000Z",
+        to: "2026-09-09T12:00:00.000Z",
+        timeZone: "UTC",
+      }),
+    );
+    expect(await first?.json()).toMatchObject({ queryAt: "2026-09-09T12:00:00.000Z" });
+    expect(sourceCalls).toBe(1);
+
+    // The same view a minute later: the window's instants differ, and the
+    // answer is the earlier reading until the caller reads for real.
+    const repeated = await handler(
+      request({
+        from: "2026-08-10T12:05:00.000Z",
+        to: "2026-09-09T12:05:00.000Z",
+        timeZone: "UTC",
+        preferLastRead: true,
+      }),
+    );
+    expect(await repeated?.json()).toMatchObject({
+      fromLastRead: true,
+      from: "2026-08-10T12:00:00.000Z",
+      queryAt: "2026-09-09T12:00:00.000Z",
+    });
+    expect(sourceCalls).toBe(1);
+
+    // A caller that wants the current answer still gets a read.
+    const current = await handler(
+      request({
+        from: "2026-08-10T12:05:00.000Z",
+        to: "2026-09-09T12:05:00.000Z",
+        timeZone: "UTC",
+      }),
+    );
+    expect(await current?.json()).not.toMatchObject({ fromLastRead: true });
+    expect(sourceCalls).toBe(2);
+  });
+
+  it("keeps the last completed reading while a later scan still has more to do", async () => {
+    const directory = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-last-read-scan-"));
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: Date.now() });
+    let sourceCalls = 0;
+    let hasMore = false;
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: store,
+      sources: [
+        {
+          sourceKind: "codex",
+          read: () => {
+            sourceCalls += 1;
+            return Effect.succeed({
+              records: [],
+              coverage: {
+                sourceKind: "codex",
+                sourceInstallationId: "install-1",
+                status: hasMore ? "partial" : "ready",
+                scannedFileCount: 1,
+                acceptedRecordCount: 0,
+                omittedRecordCount: 0,
+                truncated: false,
+                hasMore,
+                detail: hasMore ? "synthetic partial scan" : "synthetic",
+              },
+            } as never);
+          },
+        },
+      ],
+      lastReadStore: createLocalUsageHistoryLastReadStore(
+        join(directory, "local-usage-cache.sqlite3"),
+      ),
+      clock: () => "2026-09-09T12:00:00.000Z",
+    });
+    const request = (payload: unknown) =>
+      new Request("http://127.0.0.1/api/usage/local-history", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify(payload),
+      });
+    const body = {
+      from: "2026-08-10T12:00:00.000Z",
+      to: "2026-09-09T12:00:00.000Z",
+      timeZone: "UTC",
+    };
+    await handler(request(body));
+
+    // The view is asked again while a scan is still incomplete. An interrupted
+    // scan is not a total, so the surface keeps the reading that finished.
+    hasMore = true;
+    const interrupted = await handler(
+      request({
+        from: "2026-08-10T12:05:00.000Z",
+        to: "2026-09-09T12:05:00.000Z",
+        timeZone: "UTC",
+        preferLastRead: true,
+      }),
+    );
+    expect(await interrupted?.json()).toMatchObject({ fromLastRead: true });
+    expect(sourceCalls).toBe(1);
+
+    const scanned = await handler(
+      request({
+        from: "2026-08-10T12:05:00.000Z",
+        to: "2026-09-09T12:05:00.000Z",
+        timeZone: "UTC",
+      }),
+    );
+    expect(await scanned?.json()).toMatchObject({
+      coverage: [expect.objectContaining({ hasMore: true })],
+    });
+    const afterInterrupt = await handler(
+      request({
+        from: "2026-08-10T12:06:00.000Z",
+        to: "2026-09-09T12:06:00.000Z",
+        timeZone: "UTC",
+        preferLastRead: true,
+      }),
+    );
+    expect(await afterInterrupt?.json()).toMatchObject({
+      fromLastRead: true,
+      from: "2026-08-10T12:00:00.000Z",
+    });
+    expect(sourceCalls).toBe(2);
   });
 
   it("does not expose local history without window authority", async () => {

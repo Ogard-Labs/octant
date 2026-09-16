@@ -142,6 +142,7 @@ distilled successor of the earlier long-form design specifications.
 | [0128](0128-workspace-background-owns-covered-sidebar.md) | Workspace background owns a covered sidebar | Accepted |
 | [0129](0129-theme-patterns-may-carry-a-bounded-palette.md) | Theme patterns may carry a bounded palette | Accepted |
 | [0130](0130-fx-runs-in-a-managed-home.md) | fx runs in a managed home | Accepted |
+| [0130](0130-usage-opens-at-its-last-completed-reading.md) | Usage opens at its last completed reading | Accepted |
 
 ## Adding an ADR
 

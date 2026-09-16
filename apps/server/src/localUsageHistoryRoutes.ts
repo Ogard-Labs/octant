@@ -1,8 +1,14 @@
-import { decodeLocalUsageHistoryRequest, type LocalUsageHistoryResponse } from "@octant/contracts";
+import {
+  decodeLocalUsageHistoryRequest,
+  decodeLocalUsageHistoryResponse,
+  type LocalUsageHistoryRequest,
+  type LocalUsageHistoryResponse,
+} from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { readLocalUsageHistoryDashboard } from "./providers/localUsageHistoryService";
+import type { LocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const PATH = "/api/usage/local-history";
@@ -16,6 +22,7 @@ export interface LocalUsageHistoryRouteDependencies {
   readonly sources:
     | ReadonlyArray<ProviderLocalUsageHistorySource>
     | (() => ReadonlyArray<ProviderLocalUsageHistorySource>);
+  readonly lastReadStore?: LocalUsageHistoryLastReadStore;
   readonly now?: () => number;
   readonly clock?: () => string;
 }
@@ -71,12 +78,28 @@ export function createLocalUsageHistoryRouteHandler(
     try {
       const sources =
         typeof dependencies.sources === "function" ? dependencies.sources() : dependencies.sources;
+      const view = localUsageHistoryViewKey(sources, decoded);
+      if (decoded.preferLastRead === true) {
+        const lastRead = readLastRead(dependencies.lastReadStore, view);
+        if (lastRead !== undefined) return json(lastRead, 200, origin);
+      }
       const response: LocalUsageHistoryResponse = await readLocalUsageHistoryDashboard({
         sources,
         request: decoded,
         queryAt: clock(),
         signal: request.signal,
       });
+      // Only a reading that finished reaches the store: a caller returning to
+      // this view should open at a total, not at an interrupted import's
+      // subtotal. A reading that still has more to scan leaves the earlier one
+      // in place, where the surface keeps showing it until this read completes.
+      if (response.coverage.every((source) => source.hasMore !== true)) {
+        try {
+          dependencies.lastReadStore?.write(view, JSON.stringify(response));
+        } catch {
+          // The reading is the answer; a cache that cannot be written is not one.
+        }
+      }
       return json(response, 200, origin);
     } catch {
       if (request.signal.aborted)
@@ -88,6 +111,46 @@ export function createLocalUsageHistoryRouteHandler(
 
 function json(value: unknown, status: number, origin: string | null): Response {
   return Response.json(value, { status, headers: corsHeaders(origin) });
+}
+
+/**
+ * What two openings of the same view have in common, for the last-read cache.
+ *
+ * The window's instants are deliberately not part of it: a surface asks for
+ * "the last 30 days" again a minute later and means that view, so a key over
+ * the instants would never match anything. The answer carries the range and
+ * the read time it actually covers, and the caller reads again.
+ */
+function localUsageHistoryViewKey(
+  sources: ReadonlyArray<ProviderLocalUsageHistorySource>,
+  request: LocalUsageHistoryRequest,
+): string {
+  const kinds = [...new Set(sources.map((source) => source.sourceKind))].sort();
+  const days = Math.max(
+    1,
+    Math.round((Date.parse(request.to) - Date.parse(request.from)) / 86_400_000),
+  );
+  return `${kinds.join(",")}|${request.timeZone}|${days}d`;
+}
+
+/** A stored reading that no longer decodes is a miss; the next read replaces it. */
+function readLastRead(
+  store: LocalUsageHistoryLastReadStore | undefined,
+  view: string,
+): LocalUsageHistoryResponse | undefined {
+  if (store === undefined) return undefined;
+  let stored: string | undefined;
+  try {
+    stored = store.read(view);
+  } catch {
+    return undefined;
+  }
+  if (stored === undefined) return undefined;
+  try {
+    return { ...decodeLocalUsageHistoryResponse(JSON.parse(stored)), fromLastRead: true };
+  } catch {
+    return undefined;
+  }
 }
 
 function failure(message: string, status: number, origin: string | null): Response {

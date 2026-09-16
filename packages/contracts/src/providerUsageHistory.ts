@@ -132,6 +132,13 @@ export const LocalUsageHistoryRequest = Schema.Struct({
   from: UtcTimestamp,
   to: UtcTimestamp,
   timeZone: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  /**
+   * Answer from the host's last completed reading of this view instead of
+   * reading provider history now. A surface that is opened repeatedly asks
+   * this way first, paints those totals, and reads again straight away, so an
+   * unchanged provider history does not repaint every total from scratch.
+   */
+  preferLastRead: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type LocalUsageHistoryRequest = typeof LocalUsageHistoryRequest.Type;
 
@@ -141,6 +148,13 @@ export const LocalUsageHistoryResponse = Schema.Struct({
   to: UtcTimestamp,
   timeZone: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   queryAt: UtcTimestamp,
+  /**
+   * Present and true when these totals are the host's earlier reading of this
+   * view rather than a reading of the request that asked for them. The range
+   * and the read time are that earlier reading's, and the caller is expected
+   * to read again for the current answer.
+   */
+  fromLastRead: Schema.optional(Schema.Boolean),
   totals: LocalUsageHistoryTokenTotals,
   cost: LocalUsageHistoryCostTotals,
   providers: Schema.Array(LocalUsageHistoryGroup).pipe(Schema.maxItems(128)),
