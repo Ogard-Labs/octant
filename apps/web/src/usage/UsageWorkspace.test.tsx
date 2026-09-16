@@ -349,6 +349,24 @@ describe("UsageWorkspace", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows unavailable planning figures for provider-managed turns", async () => {
+    const fixture = dashboard();
+    const detail = fixture.detail.map(
+      ({ plannedInputTokens: _planned, varianceTokens: _variance, ...row }) => ({
+        ...row,
+        requestShape: "code-provider-turn",
+      }),
+    );
+    const { client } = clientReturning(dashboard({ detail }));
+    render(<UsageWorkspace client={client} />);
+    const table = await screen.findByRole("table", { name: "Usage request detail" });
+    const cells = within(table).getAllByRole("row")[1]?.children;
+    if (cells === undefined) throw new Error("Usage detail row is missing");
+    expect(cells[9]).toHaveTextContent("Unavailable");
+    expect(cells[12]).toHaveTextContent("Unavailable");
+    expect(cells[10]).toHaveTextContent("1,000");
+  });
+
   it("shows a detail row with its attribution and measurement", async () => {
     const { client } = clientReturning(dashboard());
     render(<UsageWorkspace client={client} />);

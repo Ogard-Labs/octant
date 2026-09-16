@@ -196,6 +196,7 @@ describe("database CLI runtime composition", () => {
         { name: "providers", lastSequence: 1, lag: 0 },
         { name: "contexts", lastSequence: 1, lag: 0 },
         { name: "usage", lastSequence: 1, lag: 0 },
+        { name: "code-usage", lastSequence: 1, lag: 0 },
         { name: "diagnostics-exports", lastSequence: 1, lag: 0 },
         { name: "shell", lastSequence: 1, lag: 0 },
         { name: "chat", lastSequence: 1, lag: 0 },

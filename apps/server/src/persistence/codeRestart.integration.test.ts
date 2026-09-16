@@ -252,6 +252,7 @@ describe("Code persistence restart", () => {
       { projection_name: "canvas", reason: "unsupported-event-version" },
       { projection_name: "chat", reason: "unsupported-event-version" },
       { projection_name: "code", reason: "unsupported-event-version" },
+      { projection_name: "code-usage", reason: "unsupported-event-version" },
       { projection_name: "contexts", reason: "unsupported-event-version" },
       { projection_name: "diagnostics-exports", reason: "unsupported-event-version" },
       { projection_name: "extensions", reason: "unsupported-event-version" },

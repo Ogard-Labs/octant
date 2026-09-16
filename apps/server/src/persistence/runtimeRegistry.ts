@@ -157,7 +157,7 @@ import {
 import { ShellProjection } from "./shellProjection";
 import { RETIRED_EVENT_NAMES, RetiredEventPayload } from "./retiredEvents";
 import { ZenProjection } from "./zenProjection";
-import { UsageProjection } from "./usageProjection";
+import { CodeUsageProjection, UsageProjection } from "./usageProjection";
 import { ValidationEvidenceProjection } from "../validation/validationEvidenceProjection";
 import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
@@ -408,6 +408,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ProviderProjection())
       .register(new ContextProjection())
       .register(new UsageProjection())
+      .register(new CodeUsageProjection())
       .register(new DiagnosticsExportProjection())
       .register(new ShellProjection())
       .register(new ChatProjection())
