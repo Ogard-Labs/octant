@@ -86,6 +86,39 @@ describe("ContextHarnessService integration", () => {
     }
   });
 
+  it("publishes an explicit Work estimate when the provider has no pre-turn context facts", async () => {
+    const fixture = createFixture();
+    let n = 0;
+    const plan = planWorkTurnContext({
+      threadId: decodeWorkThreadId("81000000-0000-4000-8000-000000000010"),
+      providerInstanceId,
+      modelId: "model-a",
+      createdAt: now,
+      uuid: () => `81000000-0000-4000-8000-${String(++n + 100).padStart(12, "0")}`,
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work instructions fit");
+    try {
+      const published = await observeWorkContext({
+        service: fixture.service,
+        plan,
+        displayLabel: "Work task",
+        signal: new AbortController().signal,
+        driver: {
+          kind: "openai-compatible",
+          probe: () => Effect.die("Unused"),
+          acquire: () => Effect.die("Unused"),
+        },
+      });
+      expect(published?.snapshot.modelLimits.source).toBe("conservative-fallback");
+      expect(published?.snapshot.modelLimits).not.toHaveProperty("maxOutput");
+      expect(published?.snapshot.next.plan.safeInputBudget).toBe(24_000);
+      expect(published?.context).toEqual(plan.context);
+    } finally {
+      fixture.connection.close();
+    }
+  });
+
   it("publishes the dispatched Work composition using reported model limits", () => {
     const fixture = createFixture();
     let n = 0;

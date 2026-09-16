@@ -47,10 +47,13 @@ describe("ContextInspector", () => {
         onRebuild={vi.fn()}
         onSetExcluded={vi.fn()}
         onSetPinned={vi.fn()}
-        snapshot={{ ...snapshot, modelLimits }}
+        snapshot={{ ...snapshot, modelLimits: { ...modelLimits, source: "conservative-fallback" } }}
       />,
     );
     expect(screen.getByText("Maximum output").nextElementSibling).toHaveTextContent("Unavailable");
+    expect(screen.getByText("Limit source").nextElementSibling).toHaveTextContent(
+      "Conservative estimate",
+    );
     expect(
       within(screen.getByRole("region", { name: "Planned next turn" })).getByText(
         "Response reserve",

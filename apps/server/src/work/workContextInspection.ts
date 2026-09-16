@@ -4,7 +4,7 @@ import {
   unavailableProviderServiceLimits,
 } from "@octant/provider-sdk/context-facts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { UtcTimestamp } from "@octant/contracts";
+import { decodeModelContextLimits, UtcTimestamp } from "@octant/contracts";
 import { Schema } from "effect";
 import { resolveEffectiveModelLimits } from "@octant/domain/context-policy";
 import { deriveCatalogEpoch } from "../context/capabilityCatalog";
@@ -15,7 +15,7 @@ import type {
   ProviderServiceLimits,
 } from "@octant/contracts";
 import type { ContextHarnessService } from "../context/contextHarnessService";
-import type { WorkTurnContextPlan } from "./workTurnContext";
+import { WORK_TURN_SAFE_INPUT_TOKENS, type WorkTurnContextPlan } from "./workTurnContext";
 
 export function publishWorkContext(input: {
   readonly service: ContextHarnessService;
@@ -106,16 +106,19 @@ export async function observeWorkContext(input: {
   readonly signal: AbortSignal;
 }) {
   const facts = input.driver.contextFacts;
-  if (facts === undefined || input.signal.aborted) return undefined;
-  const evidence = await Effect.runPromise(
-    Effect.scoped(
-      facts.observeModelLimits({ instanceId: input.plan.manifest.providerInstanceId }),
-    ).pipe(
-      Effect.timeout("2 seconds"),
-      Effect.catchAllCause(() => Effect.succeed([])),
-    ),
-    { signal: input.signal },
-  ).catch(() => []);
+  if (input.signal.aborted) return undefined;
+  const evidence =
+    facts === undefined
+      ? []
+      : await Effect.runPromise(
+          Effect.scoped(
+            facts.observeModelLimits({ instanceId: input.plan.manifest.providerInstanceId }),
+          ).pipe(
+            Effect.timeout("2 seconds"),
+            Effect.catchAllCause(() => Effect.succeed([])),
+          ),
+          { signal: input.signal },
+        ).catch(() => []);
   if (input.signal.aborted) return undefined;
   const modelLimitObservations = evidence.flatMap((item) => {
     try {
@@ -125,6 +128,23 @@ export async function observeWorkContext(input: {
       return [];
     }
   });
+  if (modelLimitObservations.length === 0) {
+    modelLimitObservations.push(
+      decodeModelContextLimits({
+        providerInstanceId: input.plan.manifest.providerInstanceId,
+        modelId: input.plan.manifest.modelId,
+        contextWindow: WORK_TURN_SAFE_INPUT_TOKENS + 4_096,
+        extendedContext: { kind: "unavailable" },
+        reasoning: "unknown",
+        compaction: "unknown",
+        tokenizer: { kind: "unavailable" },
+        source: "conservative-fallback",
+        confidence: "low",
+        conflicts: [],
+        verifiedAt: input.plan.manifest.createdAt,
+      }),
+    );
+  }
   return publishWorkContext({
     service: input.service,
     plan: input.plan,

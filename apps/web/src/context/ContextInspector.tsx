@@ -80,6 +80,19 @@ export function ContextInspector(props: ContextInspectorProps) {
           </p>
           <dl className="context-inspector__facts">
             <Fact label="Model" value={snapshot.modelLimits.modelId} />
+            <Fact
+              label="Limit source"
+              value={
+                {
+                  "conservative-fallback": "Conservative estimate",
+                  "runtime-reported": "Provider runtime",
+                  "provider-discovery": "Provider discovery",
+                  "reviewed-catalog": "Reviewed catalog",
+                  "user-supplied": "User supplied",
+                  "observed-evidence": "Observed evidence",
+                }[snapshot.modelLimits.source]
+              }
+            />
             <Fact label="Context window" value={formatNumber(snapshot.modelLimits.contextWindow)} />
             <Fact
               label="Maximum output"
