@@ -30,6 +30,8 @@ export const SIGNING_ORDER = [
   "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib",
   "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib",
   "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib",
+  // Apple notarization checks this executable separately from the framework seal.
+  "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler",
   "Contents/Frameworks/Electron Framework.framework",
   // The updater frameworks ship linker-adhoc signatures that strict
   // verification refuses ("code has no resources but signature indicates they

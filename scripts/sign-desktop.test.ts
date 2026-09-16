@@ -173,6 +173,22 @@ describe("signAndNotarizeDesktop", () => {
     }
   });
 
+  it("signs the crash reporter before sealing its framework", async () => {
+    const argv = await record();
+    const framework = "/repo/out/Octant.app/Contents/Frameworks/Electron Framework.framework";
+    const crashpad = `${framework}/Versions/A/Helpers/chrome_crashpad_handler`;
+    const index = argv.findIndex(
+      (command) => command.includes("--sign") && command.includes(crashpad),
+    );
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(argv[index]).toEqual(
+      expect.arrayContaining(["--sign", "Developer ID", "--timestamp", "--options", "runtime"]),
+    );
+    expect(index).toBeLessThan(
+      argv.findIndex((command) => command.includes("--sign") && command.includes(framework)),
+    );
+  });
+
   it("verifies the finished bundle rather than trusting exit codes", async () => {
     const argv = await record();
 
