@@ -47,6 +47,7 @@ let ownerPaths: HostRuntimePaths | undefined;
 let diagnostics: (() => HostRuntimeDiagnostics) | undefined;
 let ownerBackup: ((label?: string) => HostRuntimeBackupOutcome) | undefined;
 let serviceLogs: BoundedHostLogStore | undefined;
+let failedStartup = false;
 
 try {
   // Packaged-artifact startup inspection runs before ownership and before any
@@ -196,6 +197,7 @@ try {
     if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
       const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
       console.error(fatalStartupOutput(failure));
+      failedStartup = true;
       process.exitCode = 1;
     }
   }
@@ -222,6 +224,15 @@ try {
     await owner.release();
   }
 }
+
+// A start-up that failed on purpose has already reported and cleaned up, but it
+// leaves handles behind - the owner socket, the desktop parent watcher, and
+// whatever else the failing stage had opened - so the event loop never drains
+// and the process sits there. That is how a host that cannot bind its port (a
+// second host already running, or anything else holding the port) printed its
+// report once and then waited indefinitely, with every launcher waiting on the
+// child waiting with it. Leaving is the only step left once cleanup has run.
+if (failedStartup) process.exit(1);
 
 function canonicalTemporaryDirectory(): string {
   try {
