@@ -177,12 +177,18 @@ async function ensureProcessTreeExited(
   killGroup: (signal: NodeJS.Signals) => void,
   graceMs: number,
 ): Promise<"released" | "unconfirmed"> {
-  if (!groupExists()) return "released";
-  killGroup("SIGTERM");
-  if (await waitUntilReleased(groupExists, graceMs)) return "released";
-  killGroup("SIGKILL");
-  if (await waitUntilReleased(groupExists, graceMs)) return "released";
-  return "unconfirmed";
+  try {
+    if (!groupExists()) return "released";
+    killGroup("SIGTERM");
+    if (await waitUntilReleased(groupExists, graceMs)) return "released";
+    killGroup("SIGKILL");
+    if (await waitUntilReleased(groupExists, graceMs)) return "released";
+    return "unconfirmed";
+  } catch {
+    // An OS refusal to inspect or signal the group cannot establish cleanup.
+    // Keep the updater blocked instead of leaking a detached rejection.
+    return "unconfirmed";
+  }
 }
 
 async function waitUntilReleased(groupExists: () => boolean, timeoutMs: number): Promise<boolean> {

@@ -101,6 +101,26 @@ setInterval(() => {}, 1000);`,
     });
   });
 
+  it("reports unconfirmed cleanup when signaling the updater is denied", async () => {
+    await expect(
+      runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: ["-e", "process.exit(0)"],
+        timeoutMs: 100,
+        terminationGraceMs: 10,
+        processGroupExists: () => true,
+        killProcessGroup: () => {
+          throw Object.assign(new Error("private process details"), { code: "EPERM" });
+        },
+      }),
+    ).rejects.toMatchObject({
+      category: "unavailable",
+      message:
+        "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
+      diagnostic: { stage: "cleanup", kind: "cleanup-unconfirmed" },
+    });
+  }, 2000);
+
   it("bounds captured updater output in bytes and drains the rest without growing memory", async () => {
     const result = await runProviderCliUpdate({
       binaryPath: process.execPath,
