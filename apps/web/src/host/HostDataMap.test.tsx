@@ -29,6 +29,13 @@ const populated: HostDataMap = {
     ],
     caches: [
       {
+        name: "Local provider usage history",
+        location: {
+          kind: "known",
+          path: "/Users/ada/Library/Application Support/Octant/local-usage-cache.sqlite3",
+        },
+      },
+      {
         name: "Chat scratch",
         location: { kind: "known", path: "/Users/ada/Library/Application Support/Octant/scratch" },
       },
@@ -109,6 +116,10 @@ describe("HostDataMapView", () => {
     render(<HostDataMapView report={populated} />);
 
     expect(screen.getByText("Data map")).toBeInTheDocument();
+    expect(screen.getByText("Local provider usage history")).toBeVisible();
+    expect(
+      screen.getByText("/Users/ada/Library/Application Support/Octant/local-usage-cache.sqlite3"),
+    ).toBeVisible();
     expect(screen.getByText(localHostDisplayName())).toBeInTheDocument();
     expect(screen.getByText("Desktop app")).toBeInTheDocument();
     expect(

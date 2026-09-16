@@ -77,7 +77,8 @@ remote client merely because it can read a Project.
 ## Restart-safe local history
 
 Octant saves its bounded local accounting index and import checkpoints in its
-own data directory. Restarting restores imported usage instead of recounting
+own data directory. The Host settings Data map lists this file as **Local provider
+usage history**. Restarting restores imported usage instead of recounting
 unchanged provider logs. Refresh reads new or changed files and continues any
 unfinished import. Changing the date range or viewing timezone summarizes the
 saved accounting records; it does not reset the importer.
