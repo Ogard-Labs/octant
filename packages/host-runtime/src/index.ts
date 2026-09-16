@@ -62,6 +62,7 @@ export {
   type ProbeHostPlatformCapabilitiesOptions,
 } from "./platformCapabilities";
 export { formatHostRuntimeError, redactHostRuntimeText } from "./redaction";
+export { CONFIGURATION_FAILURE_EXIT_CODE, startupFailureExitCode } from "./startupFailure";
 export { redactHostRuntimeValue } from "./redaction";
 export { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 export {

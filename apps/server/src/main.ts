@@ -15,6 +15,7 @@ import {
   readHostRuntimeProcessStart,
   resolveHostRuntimePaths,
   ServicePolicyStore,
+  startupFailureExitCode,
   writeHostInfoReceipt,
   writeBridgeSecretProjection,
   type HostRuntimeBackupOutcome,
@@ -209,7 +210,7 @@ try {
     })
     .catch(() => undefined);
   console.error(formatHostRuntimeError(error));
-  process.exitCode = 1;
+  process.exitCode = startupFailureExitCode(error);
 } finally {
   process.removeListener("SIGINT", stop);
   process.removeListener("SIGTERM", stop);

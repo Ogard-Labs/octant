@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { CONFIGURATION_FAILURE_EXIT_CODE } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { resolveServerRunOptions, runServerRunCommand, type ServerRunSpawnSpec } from "./serverRun";
 
@@ -138,6 +139,33 @@ describe("runServerRunCommand", () => {
     expect(specs[0]?.env.OCTANT_DESKTOP_BRIDGE_SECRET).not.toBe(
       specs[1]?.env.OCTANT_DESKTOP_BRIDGE_SECRET,
     );
+  });
+
+  it("stops instead of retrying when host path validation fails", async () => {
+    const spawn = vi.fn(() => ({
+      exited: Promise.resolve(CONFIGURATION_FAILURE_EXIT_CODE),
+      kill: vi.fn(),
+    }));
+    const sleep = vi.fn(async () => undefined);
+    const writeNotice = vi.fn();
+    const result = await runServerRunCommand({
+      env: { OCTANT_DATA_DIR: "/tmp/octant-unsafe" },
+      spawn,
+      sleep,
+      writeNotice,
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: () => () => undefined,
+      instanceId: () => "11111111-1111-4111-8111-111111111111",
+    });
+
+    expect(result).toBe(CONFIGURATION_FAILURE_EXIT_CODE);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(writeNotice).toHaveBeenCalledTimes(1);
+    const notice = String(writeNotice.mock.calls[0]?.[0]);
+    expect(notice).toContain("/tmp/octant-unsafe");
+    expect(notice).toContain("0700");
+    expect(notice).not.toContain("restarting");
   });
 
   it("settles backoff delay when shutdown is requested after the child has exited", async () => {
