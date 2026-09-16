@@ -4,7 +4,11 @@ import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
-import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import type {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderModelOptionValues,
+} from "@octant/contracts/providers";
 import {
   draftThreadModePresentation,
   type CreateHostViewScope,
@@ -37,7 +41,7 @@ export interface ChatWelcomeProps {
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
-  readonly onCreateChat: (prompt: string) => void;
+  readonly onCreateChat: (prompt: string, modelOptionValues?: ProviderModelOptionValues) => void;
   readonly onSelectProvider?: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
   readonly onRetry?: () => void;
@@ -72,6 +76,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const presentation = draftThreadModePresentation("chat");
   const tip = useComposerTip({ scopeKey: "chat-welcome" });
   const [prompt, setPrompt] = useState("");
+  const modelKey = `${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
+  const [modelChoice, setModelChoice] = useState<{
+    readonly key: string;
+    readonly values: ProviderModelOptionValues;
+  }>({ key: modelKey, values: {} });
+  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && ready && !props.creating;
@@ -87,8 +97,9 @@ export function ChatWelcome(props: ChatWelcomeProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    props.onCreateChat(trimmed);
-  }, [canSubmit, props, trimmed]);
+    if (Object.keys(modelOptionValues).length === 0) props.onCreateChat(trimmed);
+    else props.onCreateChat(trimmed, modelOptionValues);
+  }, [canSubmit, props, trimmed, modelOptionValues]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -153,6 +164,16 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                     disabled={!ready || props.creating === true}
                     groups={props.providerGroups ?? []}
                     menuSide="bottom"
+                    modelOptionValues={modelOptionValues}
+                    onModelOptionChange={(id, value) => {
+                      const rest = Object.fromEntries(
+                        Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                      );
+                      setModelChoice({
+                        key: modelKey,
+                        values: value === undefined ? rest : { ...rest, [id]: value },
+                      });
+                    }}
                     onSelect={props.onSelectProvider ?? (() => undefined)}
                     {...(props.onOpenSettings === undefined
                       ? {}

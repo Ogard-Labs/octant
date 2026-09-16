@@ -176,7 +176,10 @@ export interface WorkspaceViewProps {
   readonly onActivatePane: (paneId: PaneId) => void;
   readonly onClearFocus: () => void;
   readonly onClosePane: (paneId: PaneId) => Promise<boolean | void> | boolean | void;
-  readonly onCreateChat: (prompt?: string) => void;
+  readonly onCreateChat: (
+    prompt?: string,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+  ) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
@@ -1737,7 +1740,7 @@ function renderNonCodeTab(
         {...(props.chatWelcomeCreating === undefined
           ? {}
           : { creating: props.chatWelcomeCreating })}
-        onCreateChat={(prompt) => props.onCreateChat(prompt)}
+        onCreateChat={props.onCreateChat}
         providerGroups={props.draftProviderGroups ?? []}
         {...(props.draftSelectedProviderInstanceId === undefined
           ? {}

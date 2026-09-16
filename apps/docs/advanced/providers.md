@@ -232,6 +232,10 @@ ends with the honest state **"Provider turn interrupted."**
 
 ## Effort, reasoning and speed
 
+Chat also offers these levels on its start screen, before the first message.
+The chosen level is applied to the new thread before that message is sent.
+Changing the selected model starts with that model's default level.
+
 When a provider declares reasoning or effort levels, the model picker in Chat
 and Code shows the selected model's levels below the model list. Code offers
 this control both when creating a thread and in an existing thread's composer.
