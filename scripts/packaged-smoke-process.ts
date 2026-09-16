@@ -17,6 +17,52 @@ export interface BoundedCommandHandle {
 }
 
 export const PACKAGED_SMOKE_SERVER_PORT = 13_773;
+/** What the app last wrote, for a poll that timed out before it could answer. */
+export function appOutputContext(outputTail: () => string): string {
+  const output = outputTail().replace(/\s+/g, " ").trim();
+  return output.length === 0 ? "" : ` The app last wrote: ${output.slice(-800)}`;
+}
+
+/**
+ * The last few kilobytes a packaged app wrote, for a failure that has to say
+ * why. A smoke that discards the app's output can report only the symptom it
+ * polls for — a bundle whose server dies on a missing import reads as "was not
+ * storage-ready" — and the line that names the import is gone with it.
+ */
+export function boundedOutputTail(maxBytes = 4_096): {
+  readonly append: (chunk: Buffer | string) => void;
+  readonly text: () => string;
+} {
+  let buffer = "";
+  return {
+    append(chunk) {
+      buffer = (buffer + chunk.toString()).slice(-maxBytes);
+    },
+    text() {
+      return buffer;
+    },
+  };
+}
+
+/**
+ * Launch the packaged app the way a smoke must: detached, with its output kept.
+ */
+export function spawnPackagedApplication(input: {
+  readonly executable: string;
+  readonly args?: ReadonlyArray<string>;
+  readonly env: NodeJS.ProcessEnv;
+}): { readonly child: ChildProcess; readonly outputTail: () => string } {
+  const child = spawn(input.executable, [...(input.args ?? [])], {
+    detached: true,
+    env: input.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const output = boundedOutputTail();
+  child.stdout?.on("data", (chunk: Buffer) => output.append(chunk));
+  child.stderr?.on("data", (chunk: Buffer) => output.append(chunk));
+  return { child, outputTail: output.text };
+}
+
 /**
  * Where a packaged smoke launches the app from: a copy outside the checkout.
  *

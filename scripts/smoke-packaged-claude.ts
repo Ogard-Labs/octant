@@ -8,8 +8,10 @@ import { domainToASCII, fileURLToPath } from "node:url";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
   PACKAGED_SMOKE_SERVER_URL,
+  appOutputContext,
   cleanupPackagedProcess,
   packagedServerEnvironment,
+  spawnPackagedApplication,
   stagePackagedAppBundle,
   type SmokeChildProcess,
 } from "./packaged-smoke-process";
@@ -732,7 +734,7 @@ async function smokePackagedLifecycle(
           throw new Error("Packaged Claude Keychain creation evidence failed.");
         }
       }
-      const app = spawn(executable, [], { detached: true, env, stdio: "ignore" });
+      const { child: app, outputTail } = spawnPackagedApplication({ executable, env });
       registerCleanup(
         "application",
         async () => {
@@ -752,7 +754,7 @@ async function smokePackagedLifecycle(
         async () => signalProcessGroup(app, "SIGKILL"),
       );
       await waitForClaudeChildLaunch(app);
-      await waitForStorageReady(20_000);
+      await waitForStorageReady(20_000, outputTail);
       const capability = await waitForWindowCapability(dataDirectory, 20_000);
       const provider = await configureAndProbeProvider(
         capability,
@@ -913,7 +915,7 @@ async function providerRequest(path: string, init: RequestInit): Promise<unknown
   }
 }
 
-async function waitForStorageReady(timeoutMs: number): Promise<void> {
+async function waitForStorageReady(timeoutMs: number, outputTail: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -925,7 +927,7 @@ async function waitForStorageReady(timeoutMs: number): Promise<void> {
     }
     await delay(100);
   }
-  throw new Error("Packaged Octant server was not storage-ready.");
+  throw new Error(`Packaged Octant server was not storage-ready.${appOutputContext(outputTail)}`);
 }
 
 async function waitForWindowCapability(dataDirectory: string, timeoutMs: number): Promise<string> {

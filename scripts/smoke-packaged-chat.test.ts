@@ -19,7 +19,7 @@ describe("packaged Chat smoke isolation", () => {
     const source = await readFile(new URL("./smoke-packaged-chat.ts", import.meta.url), "utf8");
 
     expect(source).toContain("access(serverEntry)");
-    expect(source).toContain("spawn(executable");
+    expect(source).toContain("spawnPackagedApplication({ executable");
     expect(source).not.toContain("createRequire");
     expect(source).not.toContain("pathToFileURL");
     expect(source).not.toContain("CHAT_RUNTIME_IMPORTS");

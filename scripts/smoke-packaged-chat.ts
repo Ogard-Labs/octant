@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -9,11 +9,13 @@ import { fileURLToPath } from "node:url";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
   PACKAGED_SMOKE_SERVER_URL,
+  appOutputContext,
   cleanupPackagedProcess,
   PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS,
   packagedServerEnvironment,
   runBoundedCommand,
   waitForProcessCleanup,
+  spawnPackagedApplication,
   stagePackagedAppBundle,
   type SmokeChildProcess,
 } from "./packaged-smoke-process";
@@ -373,14 +375,18 @@ async function main(): Promise<void> {
       };
     },
     inspectBaseline: () => processIdentities(),
-    spawnApp: (_root, setup) => ({
-      child: spawn(executable, [], { detached: true, env: setup.env, stdio: "ignore" }),
-      identities: undefined as
-        | { readonly app: PackagedChatProcess; readonly server: PackagedChatProcess }
-        | undefined,
-    }),
+    spawnApp: (_root, setup) => {
+      const app = spawnPackagedApplication({ executable, env: setup.env });
+      return {
+        child: app.child,
+        outputTail: app.outputTail,
+        identities: undefined as
+          | { readonly app: PackagedChatProcess; readonly server: PackagedChatProcess }
+          | undefined,
+      };
+    },
     verify: async (_root, setup, _baseline, app) => {
-      await waitForStorageReady(20_000);
+      await waitForStorageReady(20_000, app.outputTail);
       app.identities = await waitForOwnedProcesses(app.child, 5_000);
       const capability = await waitForWindowCapability(setup.directories.dataDirectory, 20_000);
       const providerInstanceId = randomUUID();
@@ -627,7 +633,7 @@ async function chatRequest(path: string, capability: string, body: unknown): Pro
   return await response.json();
 }
 
-async function waitForStorageReady(timeoutMs: number): Promise<void> {
+async function waitForStorageReady(timeoutMs: number, outputTail: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -646,7 +652,9 @@ async function waitForStorageReady(timeoutMs: number): Promise<void> {
     }
     await delay(100);
   }
-  throw new Error(`Packaged Octant server was not storage-ready within ${timeoutMs}ms.`);
+  throw new Error(
+    `Packaged Octant server was not storage-ready within ${timeoutMs}ms.${appOutputContext(outputTail)}`,
+  );
 }
 
 async function waitForWindowCapability(dataDirectory: string, timeoutMs: number): Promise<string> {
