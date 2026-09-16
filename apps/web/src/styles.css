@@ -3440,6 +3440,17 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: hidden;
   background: var(--octant-sidebar);
   border-right: 1px solid var(--oct-border);
+  /* Directory chrome, like the sidebar it replaces: labels and statuses are
+     not a document, so a drag across the panel must not select them. Fields
+     opt back in below. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.projects-directory
+  :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .projects-directory__header {
