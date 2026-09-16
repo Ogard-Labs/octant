@@ -3779,7 +3779,10 @@ function LaunchedShell(
     void controller.openDraftThread(mode);
   }
 
-  function createChat(prompt?: string) {
+  function createChat(
+    prompt?: string,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+  ) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
       setDraftError(undefined);
@@ -3789,7 +3792,21 @@ function LaunchedShell(
       void controller.openDraftThread("chat");
       return;
     }
-    void handleDraftCreateThread("chat", prompt);
+    void handleDraftCreateThread(
+      "chat",
+      prompt,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      modelOptionValues,
+    );
   }
 
   // Skills and plugins have a real Settings destination; the sidebar entry goes
@@ -4252,6 +4269,7 @@ function LaunchedShell(
     // a posture the user explicitly changed.
     executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -4285,7 +4303,8 @@ function LaunchedShell(
         if (
           draftSelection !== undefined &&
           (thread.providerInstanceId !== draftSelection.providerInstanceId ||
-            thread.modelId !== draftSelection.modelId)
+            thread.modelId !== draftSelection.modelId ||
+            modelOptionValues !== undefined)
         ) {
           const changed = await chatController.execute({
             kind: "change-chat-provider",
@@ -4293,6 +4312,7 @@ function LaunchedShell(
             expectedVersion: thread.version,
             providerInstanceId: draftSelection.providerInstanceId,
             modelId: draftSelection.modelId,
+            ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
             setDraftError("The selected Chat provider and model could not be applied.");

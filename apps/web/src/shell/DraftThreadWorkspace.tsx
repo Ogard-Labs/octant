@@ -18,6 +18,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderModelOptionValues,
 } from "@octant/contracts/providers";
 import { LOCAL_HOST_ID, type HostId, type HostIdentity } from "@octant/contracts/host";
 import type { GithubClient } from "@octant/client-runtime/github-client";
@@ -137,6 +138,7 @@ export interface DraftThreadWorkspaceProps {
     /** The access posture the composer submitted with, not a project default. */
     executionPolicy?: ProviderExecutionPolicy,
     permissionPersistence?: PermissionPersistence,
+    modelOptionValues?: ProviderModelOptionValues,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -789,6 +791,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
   }
 
+  const modelKey = `${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
+  const [modelChoice, setModelChoice] = useState<{
+    readonly key: string;
+    readonly values: ProviderModelOptionValues;
+  }>({ key: modelKey, values: {} });
+  if (modelChoice.key !== modelKey) {
+    setModelChoice({ key: modelKey, values: {} });
+  }
+  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
   const computer = useComputerUseMention({
@@ -808,6 +820,23 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    if (Object.keys(modelOptionValues).length > 0) {
+      void props.onCreateThread(
+        trimmed,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        issueContext,
+        linearIssueContext,
+        computer.selection,
+        undefined,
+        undefined,
+        undefined,
+        modelOptionValues,
+      );
+      return;
+    }
     if (computer.selection !== undefined) {
       void props.onCreateThread(
         trimmed,
@@ -834,7 +863,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       issueContext,
       linearIssueContext,
     );
-  }, [canSubmit, computer.selection, issueContext, linearIssueContext, props, trimmed]);
+  }, [
+    canSubmit,
+    computer.selection,
+    issueContext,
+    linearIssueContext,
+    modelOptionValues,
+    props,
+    trimmed,
+  ]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (computer.handleKeyDown(event)) return;
@@ -910,6 +947,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     ariaLabel="Provider and model"
                     menuSide="bottom"
                     groups={props.providerGroups}
+                    modelOptionValues={modelOptionValues}
+                    onModelOptionChange={(id, value) => {
+                      const rest = Object.fromEntries(
+                        Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                      );
+                      setModelChoice({
+                        key: modelKey,
+                        values: value === undefined ? rest : { ...rest, [id]: value },
+                      });
+                    }}
                     onSelect={props.onSelectProvider}
                     {...(props.selectedModelId === undefined
                       ? {}

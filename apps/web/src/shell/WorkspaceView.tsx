@@ -176,7 +176,10 @@ export interface WorkspaceViewProps {
   readonly onActivatePane: (paneId: PaneId) => void;
   readonly onClearFocus: () => void;
   readonly onClosePane: (paneId: PaneId) => Promise<boolean | void> | boolean | void;
-  readonly onCreateChat: (prompt?: string) => void;
+  readonly onCreateChat: (
+    prompt?: string,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+  ) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
@@ -357,6 +360,7 @@ export interface WorkspaceViewProps {
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
     executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1125,6 +1129,7 @@ function renderNonCodeTab(
             extensionSelections,
             executionPolicy,
             permissionPersistence,
+            modelOptionValues,
           ) => {
             // Returning quietly here made a wired-up composer look dead: the user
             // pressed Create thread and nothing happened anywhere. A missing
@@ -1145,6 +1150,7 @@ function renderNonCodeTab(
               extensionSelections,
               executionPolicy,
               permissionPersistence,
+              modelOptionValues,
             );
           }}
           {...(props.onCreateProject === undefined
@@ -1737,7 +1743,7 @@ function renderNonCodeTab(
         {...(props.chatWelcomeCreating === undefined
           ? {}
           : { creating: props.chatWelcomeCreating })}
-        onCreateChat={(prompt) => props.onCreateChat(prompt)}
+        onCreateChat={props.onCreateChat}
         providerGroups={props.draftProviderGroups ?? []}
         {...(props.draftSelectedProviderInstanceId === undefined
           ? {}
