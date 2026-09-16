@@ -39,6 +39,25 @@ const lsofOutput = [
 ].join("\n");
 
 describe("local listener observation", () => {
+  it.each([
+    { roots: [4321], owned: true },
+    { roots: [777], owned: false },
+    { roots: [], owned: false },
+  ])("uses verified roots $roots to classify terminal descendants", async ({ roots, owned }) => {
+    const port = createLiveLocalListenerPort({
+      execute: async () => "p4213\ncnode\nu501\nn127.0.0.1:5173",
+      currentUid: 501,
+      resolveWorkingDirectory: async () => "/repo",
+      readProcessTable: async () =>
+        new Map([
+          [4213, { parentPid: 4321, commandName: "node" }],
+          [4321, { parentPid: 1, commandName: "Octant" }],
+        ]),
+      ownedProcessRoots: async () => new Set(roots),
+    });
+    expect((await observed(port))[0]?.ownedByOctant === true).toBe(owned);
+  });
+
   it("parses lsof field records and classifies ownership by uid", () => {
     const listeners = parseLsofFields(lsofOutput, 501);
     expect(listeners).toEqual([

@@ -32,6 +32,29 @@ function confinedOptions(overrides: ConstructorParameters<typeof TerminalProcess
 }
 
 describe("TerminalProcessPort", () => {
+  it("reports only live terminal roots whose process identity still matches", async () => {
+    const pty = fakePty();
+    const identity = vi.fn(async () => "original");
+    const port = new TerminalProcessPort(
+      confinedOptions({ spawn: () => pty, processIdentity: identity }),
+    );
+    const handle = port.start({
+      shell: "/bin/zsh",
+      cwd: tmpdir(),
+      stateScope: "ownership",
+      environment: {},
+      columns: 80,
+      rows: 24,
+    });
+    await handle.receiptReady;
+    expect(await port.ownedProcessRoots()).toEqual(new Set([pty.pid]));
+    identity.mockResolvedValue("replacement");
+    expect(await port.ownedProcessRoots()).toEqual(new Set());
+    identity.mockResolvedValue("original");
+    for (const [listener] of pty.onExit.mock.calls) listener({ exitCode: 0 });
+    expect(await port.ownedProcessRoots()).toEqual(new Set());
+  });
+
   it("executes commands through the runtime PTY instead of only echoing terminal input", async () => {
     const handle = new TerminalProcessPort(confinedOptions()).start({
       shell: process.platform === "darwin" ? "/bin/zsh" : "/bin/sh",

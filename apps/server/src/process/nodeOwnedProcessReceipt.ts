@@ -221,7 +221,7 @@ function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-async function readProcessIdentity(pid: number): Promise<string | undefined> {
+export async function readProcessIdentity(pid: number): Promise<string | undefined> {
   if (!Number.isSafeInteger(pid) || pid < 1) return undefined;
   if (process.platform === "linux") {
     let processStat: string;

@@ -7,6 +7,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
 import * as nodePty from "node-pty";
 import {
   persistProcessReceipt,
+  readProcessIdentity,
   reconcileProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
@@ -225,6 +226,28 @@ function shellStateAncestorMetadataRules(directory: string): ReadonlyArray<strin
 }
 
 export class TerminalProcessPort {
+  readonly #ownedRoots = new Map<number, Promise<string | undefined>>();
+
+  /** A reused PID or an exited shell cannot authorize a listener stop. */
+  async ownedProcessRoots(): Promise<ReadonlySet<number>> {
+    const owned = new Set<number>();
+    const readIdentity = this.#dependencies.processIdentity ?? readProcessIdentity;
+    for (const [pid, original] of this.#ownedRoots) {
+      try {
+        const expected = await original;
+        if (
+          expected !== undefined &&
+          (await readIdentity(pid)) === expected &&
+          this.#ownedRoots.get(pid) === original
+        )
+          owned.add(pid);
+      } catch {
+        // An unreadable identity is not ownership evidence.
+      }
+    }
+    return owned;
+  }
+
   readonly #dependencies: {
     readonly spawn: NonNullable<TerminalProcessDependencies["spawn"]>;
     readonly killProcessGroup: NonNullable<TerminalProcessDependencies["killProcessGroup"]>;
@@ -388,6 +411,13 @@ export class TerminalProcessPort {
       cols: input.columns,
       rows: input.rows,
     });
+    const rootIdentity = (this.#dependencies.processIdentity ?? readProcessIdentity)(pty.pid).catch(
+      () => undefined,
+    );
+    this.#ownedRoots.set(pty.pid, rootIdentity);
+    const releaseOwnership = () => {
+      if (this.#ownedRoots.get(pty.pid) === rootIdentity) this.#ownedRoots.delete(pty.pid);
+    };
     let receipt: OwnedProcessReceiptHandle = {
       ready: Promise.resolve(),
       remove: async () => undefined,
@@ -398,9 +428,7 @@ export class TerminalProcessPort {
         ...(this.#dependencies.receiptDirectory === undefined
           ? {}
           : { receiptDirectory: this.#dependencies.receiptDirectory }),
-        ...(this.#dependencies.processIdentity === undefined
-          ? {}
-          : { processIdentity: this.#dependencies.processIdentity }),
+        processIdentity: () => rootIdentity,
       },
       `${input.cwd}:${pty.pid}`,
       pty.pid,
@@ -419,7 +447,10 @@ export class TerminalProcessPort {
         }
         throw error;
       });
-    pty.onExit(() => void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt));
+    pty.onExit(() => {
+      releaseOwnership();
+      void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt);
+    });
     let closeOperation: Promise<void> | undefined;
     return {
       write: (data) => {
@@ -443,6 +474,7 @@ export class TerminalProcessPort {
       pause: () => pty.pause(),
       resume: () => pty.resume(),
       close: () => {
+        releaseOwnership();
         closeOperation ??= this.#close(pty);
         return closeOperation.then(async () => {
           await receiptReady.catch(() => undefined);

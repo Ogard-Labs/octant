@@ -348,6 +348,7 @@ export class LocalServerService {
     if (
       current === undefined ||
       current.observation.pid !== target.observation.pid ||
+      current.ownership !== target.ownership ||
       current.listener.stop.status !== "available"
     ) {
       return this.#rejected(command, {
@@ -418,7 +419,10 @@ export class LocalServerService {
       const probed = probes[index];
       if (probed === undefined && abandoned) continue;
       const probe = probed ?? unanswered(observation);
-      const ownership = scope.ownedPids.has(observation.pid) ? "octant-owned" : "leftover";
+      const ownership =
+        scope.ownedPids.has(observation.pid) || observation.ownedByOctant === true
+          ? "octant-owned"
+          : "leftover";
       const stopDecision = authorizeLocalServerAction({
         action: "stop",
         actor: scope.actor,
