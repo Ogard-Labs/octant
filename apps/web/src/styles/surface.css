@@ -556,7 +556,7 @@
 }
 
 .shell--app-backdrop.shell-frame > .workspace-layer {
-  background: color-mix(in srgb, var(--octant-workspace) 88%, transparent);
+  background: transparent;
 }
 
 .shell--app-backdrop.shell-frame .workspace,
@@ -570,14 +570,13 @@
   background: transparent;
 }
 
-/* Where a conversation reads, the whole pane is the plate: the ground shows
-   through it faintly and stays full strength around the pane. A plate the
-   width of the text column alone left the cloud at full strength in the
-   gutters beside every line, which read as the page bleeding through. */
+/* Conversation panes stay on the application ground. Assistant turns carry
+   their own reading card, so the dither remains one continuous atmosphere
+   instead of disappearing behind a second pane-sized wash. */
 .shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-thread-workspace,
 .shell--app-backdrop.shell-frame .code-thread-workspace {
-  background: color-mix(in srgb, var(--octant-workspace) 94%, transparent);
+  background: transparent;
 }
 
 /* A terminal is a plate of its own: the engine paints the workspace ground

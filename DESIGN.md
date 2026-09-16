@@ -150,11 +150,11 @@ printed through the same dither with the cloud over it, or the plain page.
 Behind a start screen the ground is masked away behind the composer and fades
 out below it, so the prompt and the recent-thread list read on the plain
 page. A person may instead put the ground behind everything, sidebar
-included, where the workspace layer and its page surfaces go translucent over
-it the way workspace translucency does; the pattern's opacity, speed, and
+included, where the workspace stays transparent over it and transcript
+responses carry their own reading cards. The pattern's opacity, speed, and
 intensity and a photo's opacity are dials on the same row. Increased contrast
-turns the ground off; reduced motion holds it still. It is chosen in
-Settings › Appearance › Background.
+turns the ground off; reduced motion holds it still. It is chosen in Settings ›
+Appearance › Background.
 
 ## Source of truth and CSS layers
 

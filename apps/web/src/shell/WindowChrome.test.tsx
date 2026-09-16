@@ -580,9 +580,19 @@ describe("WindowChrome", () => {
     expect(styles).not.toContain(
       ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
     );
-    expect(cssRule(".shell--app-backdrop.shell-frame .code-thread-workspace")).toContain(
-      "background: color-mix(in srgb, var(--octant-workspace) 94%, transparent);",
+  });
+
+  it("leaves the application ground visible around contained transcript responses", () => {
+    expect(cssRule(".shell--app-backdrop.shell-frame > .workspace-layer")).toContain(
+      "background: transparent;",
     );
+    for (const workspace of [
+      ".shell--app-backdrop.shell-frame .chat-workspace",
+      ".shell--app-backdrop.shell-frame .work-thread-workspace",
+      ".shell--app-backdrop.shell-frame .code-thread-workspace",
+    ]) {
+      expect(cssRule(workspace)).toContain("background: transparent;");
+    }
   });
 
   it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
