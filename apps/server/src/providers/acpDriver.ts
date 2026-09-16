@@ -957,15 +957,21 @@ function makeConnection(
           // malformed success there would otherwise register a session whose
           // model and authority mode were never confirmed.
           const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+          // The agent's config options can change with the model selection, so
+          // the reply to each standard call carries the current set; keep the
+          // newest one rather than the session's original list.
+          let configOptions = source.configOptions ?? [];
           if (setModelCall === undefined) {
-            await client.setConfigOption(source.sessionId, "model", input.modelId);
+            const result = await client.setConfigOption(source.sessionId, "model", input.modelId);
+            configOptions = result.configOptions;
           } else {
             await client.call(setModelCall.method, setModelCall.params);
           }
           const modeValue = profile.sessionMode(mode, input.executionPolicy);
           const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
           if (setModeCall === undefined) {
-            await client.setConfigOption(source.sessionId, "mode", modeValue);
+            const result = await client.setConfigOption(source.sessionId, "mode", modeValue);
+            configOptions = result.configOptions;
           } else {
             await client.call(setModeCall.method, setModeCall.params);
           }
@@ -974,7 +980,7 @@ function makeConnection(
           // user chose for this model is applied here. A value the agent does
           // not offer is left alone: the probe declares the option from the
           // agent's own choices, which is the same check from the other side.
-          const reasoningOption = resolveReasoningOption(profile, source.configOptions ?? []);
+          const reasoningOption = resolveReasoningOption(profile, configOptions);
           const requestedReasoning =
             reasoningOption === undefined
               ? undefined

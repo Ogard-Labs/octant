@@ -793,22 +793,26 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
 
   it("applies a reasoning level the agent names differently", async () => {
     const { driver, client } = fixture(profile);
+    const renamedOptions = client.configOptions.map((option) =>
+      option.id === profile.reasoningOptionId
+        ? {
+            ...option,
+            id: "reasoning_effort",
+            name: "Reasoning Effort",
+            category: "thought_level",
+          }
+        : option,
+    );
     client.newSession.mockImplementationOnce(async () => {
       client.emitCommands("agent-session-renamed");
       return {
         sessionId: "agent-session-renamed",
-        configOptions: client.configOptions.map((option) =>
-          option.id === profile.reasoningOptionId
-            ? {
-                ...option,
-                id: "reasoning_effort",
-                name: "Reasoning Effort",
-                category: "thought_level",
-              }
-            : option,
-        ),
+        configOptions: renamedOptions,
       };
     });
+    client.setConfigOption.mockImplementation(async () => ({
+      configOptions: renamedOptions,
+    }));
 
     await Effect.runPromise(
       Effect.scoped(
@@ -855,6 +859,49 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       (call) => (call as ReadonlyArray<unknown>)[1] === profile.reasoningOptionId,
     );
     expect(reasoningCalls).toEqual([]);
+  });
+
+  it("applies a reasoning level the agent reports with the model selection", async () => {
+    const { driver, client } = fixture(profile);
+    // The agent omits its reasoning control until a model is selected, and the
+    // reply to the model selection carries it. Resolving the option from the
+    // session's original list would read it as absent and drop the choice.
+    // Profiles that set the model with a vendor-shaped call do not receive the
+    // updated options in a standard reply, so the refresh does not reach them.
+    if (profile.setModelCall !== undefined) return;
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-1");
+      return {
+        sessionId: "agent-session-1",
+        configOptions: client.configOptions.filter(
+          (option) => option.id !== profile.reasoningOptionId,
+        ),
+      };
+    });
+    client.setConfigOption.mockImplementationOnce(async () => ({
+      configOptions: client.configOptions,
+    }));
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "on" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.setConfigOption).toHaveBeenCalledWith(
+      "agent-session-1",
+      profile.reasoningOptionId,
+      "on",
+    );
   });
 
   it("tells the user to sign in again when a turn is refused for a stale credential", async () => {
