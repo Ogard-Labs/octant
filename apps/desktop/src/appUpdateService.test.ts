@@ -121,6 +121,40 @@ function service(
 }
 
 describe("update verification", () => {
+  it("shows an empty channel without claiming the installed build is current or offering a download", async () => {
+    const { updates, port, fetchImpl } = service({
+      document: { schemaVersion: 1, status: "empty" },
+    });
+    expect(await updates.check()).toMatchObject({
+      status: "idle",
+      message: "No release is available in this channel.",
+    });
+    expect(updates.state().available).toBeUndefined();
+    await updates.download();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(port.calls.setFeedURL).toHaveLength(0);
+  });
+
+  it("clears an earlier offer when the channel becomes empty", async () => {
+    const { updates, port, fetchImpl } = service();
+    await updates.check();
+    expect(updates.state().available).toBeDefined();
+    vi.mocked(fetchImpl).mockResolvedValueOnce(
+      new Response(JSON.stringify({ schemaVersion: 1, status: "empty" })),
+    );
+    await updates.check();
+    expect(updates.state().status).toBe("idle");
+    expect(updates.state().available).toBeUndefined();
+    await updates.download();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(port.calls.setFeedURL).toHaveLength(0);
+  });
+
+  it("does not treat a release disguised as an empty channel as an empty response", async () => {
+    const { updates } = service({ document: { schemaVersion: 1, status: "empty", release } });
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "malformed" });
+  });
+
   it("offers a release its own key signed", async () => {
     const { updates } = service();
 

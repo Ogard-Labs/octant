@@ -241,6 +241,24 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
               : "The update service answered with something Octant could not read.",
         });
       }
+      const document = fetched.document;
+      // The feed can report an unpublished channel, but that unsigned marker
+      // proves nothing about the installed version and must never carry an offer.
+      if (
+        typeof document === "object" &&
+        document !== null &&
+        "schemaVersion" in document &&
+        document.schemaVersion === 1 &&
+        "status" in document &&
+        document.status === "empty" &&
+        Object.keys(document).length === 2
+      ) {
+        return publishWithoutOffer({
+          status: "idle",
+          checkedAt: clock() as AppUpdateState["checkedAt"],
+          message: "No release is available in this channel.",
+        });
+      }
       const offer = resolveUpdateOffer({
         document: fetched.document,
         app: { ...options.app, ring },

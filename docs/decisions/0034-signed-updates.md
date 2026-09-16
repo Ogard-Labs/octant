@@ -69,6 +69,11 @@ than only that it is small.
   path. A refusal says which check refused, because a person deciding whether to
   worry needs the difference between "the server is down", "the signature is
   wrong", and "the download did not match".
+- **An empty channel is not a release or a freshness claim.** The exact
+  `{ "schemaVersion": 1, "status": "empty" }` response displays that no release
+  is available in this channel and clears any previous offer. It does not say
+  the installed build is current. Additional fields do not qualify as the empty
+  marker; release documents still pass every signature and artifact gate.
 - **The platform updater never fetches anything Octant has not verified.** It is
   handed the verified bytes through a loopback server Octant runs for the length
   of the install, rather than being pointed at the public feed. Pointing it at
