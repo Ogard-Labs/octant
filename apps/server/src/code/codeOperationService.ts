@@ -761,6 +761,22 @@ export interface CodeOperationServiceOptions {
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
+  readonly #pendingTests = new Map<
+    string,
+    {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly controller: AbortController;
+      readonly done: Promise<void>;
+    }
+  >();
+
+  async cancelPendingRepositoryTests(): Promise<void> {
+    const pending = [...this.#pendingTests.values()];
+    for (const test of pending) test.controller.abort();
+    await Promise.all(pending.map((test) => test.done));
+  }
+
   /** Counts reads, so the least recently read terminal reader is identifiable. */
   #terminalReadTick = 0;
 
@@ -1477,10 +1493,41 @@ export class CodeOperationService {
             "Repository tests need a Git repository; this folder has none.",
           );
         }
-        const discovered = await this.#options.repositoryTests.discover({
-          checkoutId: String(checkout.id),
-          rootPath: root.checkoutRoot,
+        if (this.#pendingTests.has(command.testRunId))
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Repository test is already starting.",
+          );
+        const controller = new AbortController();
+        let finish = () => {};
+        const done = new Promise<void>((resolve) => {
+          finish = resolve;
         });
+        this.#pendingTests.set(command.testRunId, {
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          controller,
+          done,
+        });
+        let discovered: ReadonlyArray<CodeRepositoryTestDefinition>;
+        try {
+          discovered = await this.#options.repositoryTests.discover({
+            checkoutId: String(checkout.id),
+            rootPath: root.checkoutRoot,
+          });
+        } finally {
+          this.#pendingTests.delete(command.testRunId);
+          finish();
+        }
+        if (controller.signal.aborted)
+          return decodeCodeOperationResult({
+            kind: "repository-test-state",
+            operationId: command.operationId,
+            testRunId: command.testRunId,
+            state: "interrupted",
+            concerns: [],
+          });
         if (
           !discovered.some((candidate) =>
             codeRepositoryTestDefinitionsMatch(candidate, command.definition),
@@ -1526,6 +1573,21 @@ export class CodeOperationService {
         });
       }
       case "cancel-repository-test": {
+        const pending = this.#pendingTests.get(command.testRunId);
+        if (
+          pending !== undefined &&
+          pending.threadId === thread.id &&
+          pending.checkoutId === checkout.id
+        ) {
+          pending.controller.abort();
+          return decodeCodeOperationResult({
+            kind: "repository-test-state",
+            operationId: command.operationId,
+            testRunId: command.testRunId,
+            state: "interrupted",
+            concerns: [],
+          });
+        }
         const cancelled = await this.#options.repositoryTests.cancel({
           testRunId: command.testRunId,
           threadId: thread.id,

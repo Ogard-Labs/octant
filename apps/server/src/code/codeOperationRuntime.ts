@@ -1007,9 +1007,10 @@ export function createCodeOperationRuntime(
       }
     },
     close: async () => {
+      const pendingTests = service.cancelPendingRepositoryTests();
       const tests = [...activeTests.values()];
       for (const test of tests) test.controller.abort();
-      await Promise.allSettled(tests.map((test) => test.done));
+      await Promise.allSettled([pendingTests, ...tests.map((test) => test.done)]);
       await turns.closeAll();
       await terminal.closeAll();
     },

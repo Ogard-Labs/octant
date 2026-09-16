@@ -8,6 +8,7 @@ import {
   CodeRuntimeWorkUpdated,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeCodeCheckoutId,
+  decodeCodeRepositoryTestDefinition,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationId,
@@ -1519,6 +1520,77 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it.each(["cancel", "shutdown"] as const)(
+    "prevents process launch when %s occurs during repository discovery",
+    async (action) => {
+      const definition = decodeCodeRepositoryTestDefinition({
+        id: "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd",
+        name: "test",
+        source: {
+          kind: "package-script",
+          packagePath: "package.json",
+          packageManager: "bun",
+          script: "test",
+        },
+        argv: ["bun", "run", "test"],
+        cwd: ".",
+        environmentRefs: [],
+        timeoutMs: 900_000,
+        artifactPaths: [],
+      });
+      let releaseDiscovery: () => void = () => undefined;
+      const pending = new Promise<void>((resolve) => {
+        releaseDiscovery = resolve;
+      });
+      const discover = vi.fn(async () => {
+        await pending;
+        return [definition];
+      });
+      const execute = vi.fn(async () => ({
+        termination: "unavailable" as const,
+        exitCode: null,
+        stdout: new Uint8Array(),
+        stderr: new Uint8Array(),
+        parserFailed: false,
+        cleanupUncertain: false,
+      }));
+      const fixture = runtimeFixture({
+        repositoryTestDiscovery: { discover },
+        repositoryTestProcessPort: { execute, readArtifact: async () => undefined },
+      });
+      const testRunId = operationId(80);
+      const running = fixture.runtime.execute(windowId, {
+        kind: "run-repository-test",
+        operationId: operationId(81),
+        threadId,
+        checkoutId,
+        testRunId,
+        definition,
+      });
+      await vi.waitFor(() => expect(discover).toHaveBeenCalledOnce());
+      const shutdown = action === "shutdown" ? fixture.runtime.close() : undefined;
+      const cancelled =
+        action === "cancel"
+          ? await fixture.runtime.execute(windowId, {
+              kind: "cancel-repository-test",
+              operationId: operationId(82),
+              threadId,
+              checkoutId,
+              testRunId,
+            })
+          : undefined;
+      releaseDiscovery();
+      const result = await running;
+      await shutdown;
+      await fixture.runtime.close();
+      if (action === "cancel")
+        expect(cancelled).toMatchObject({ kind: "repository-test-state", state: "interrupted" });
+      expect(result).toMatchObject({ kind: "repository-test-state", state: "interrupted" });
+      expect(execute).not.toHaveBeenCalled();
+      fixture.close();
+    },
+  );
+
   it("closes a repository test run that could not be executed", async () => {
     const fixture = runtimeFixture({});
     const testRunId = operationId(80);
@@ -1838,6 +1910,9 @@ function runtimeFixture(options: {
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
+  repositoryTestDiscovery?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["repositoryTestDiscovery"];
   repositoryTestProcessPort?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["repositoryTestProcessPort"];
@@ -1997,6 +2072,9 @@ function runtimeFixture(options: {
         };
       },
     },
+    ...(options.repositoryTestDiscovery === undefined
+      ? {}
+      : { repositoryTestDiscovery: options.repositoryTestDiscovery }),
     repositoryTestProcessPort: options.repositoryTestProcessPort ?? {
       execute: async () => ({
         termination: "unavailable" as const,
