@@ -143,7 +143,7 @@ The row wraps rather than grows: a control that needs a list ("Create
 from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
 
-The screen sits on the application ground (0091, 0128): an ordered-dither cloud
+The screen sits on the application ground (0091, 0129): an ordered-dither cloud
 drawn from the theme's bounded pattern palette at one cell per three pixels, one of the
 first-party Zen backgrounds with its still-frame fallback, a person's photo
 printed through the same dither with the cloud over it, or the plain page.

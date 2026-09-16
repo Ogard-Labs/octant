@@ -1,4 +1,4 @@
-# 0128. Theme patterns may carry a bounded palette
+# 0129. Theme patterns may carry a bounded palette
 
 **Status:** Accepted
 
@@ -16,6 +16,9 @@ The artwork should not add image assets, a second renderer, or unbounded theme
 data.
 
 ## Decision
+
+This is a scoped exception to 0091's rule that the pattern is drawn in the
+accent alone, with no per-theme artwork. All other rules in 0091 remain.
 
 - A built-in theme may define an ordered `patternPalette` of one to six
   six-digit hex colours. Presets without one continue to use the resolved accent

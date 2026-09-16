@@ -1,6 +1,6 @@
 # 0091. The application ground is the theme's pattern or a person's photo
 
-**Status:** Superseded by 0128
+**Status:** Accepted
 
 ## Context
 
