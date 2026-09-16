@@ -344,6 +344,45 @@ describe("Code operation approval view controller", () => {
     expect(fixture.cancel).toHaveBeenCalledTimes(1);
   });
 
+  it("returns no approval after the owner changes during confirmation", async () => {
+    const fixture = makeFixture();
+    let release: ((value: CodeApprovalId) => void) | undefined;
+    fixture.confirm.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const result = fixture.controller.request({
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const decision = fixture.controller.decision({
+      senderId: 41,
+      token: "approval-view-token",
+      challengeId: ids.challenge,
+      decision: "approve",
+    });
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: { ...anchor(), threadId: "another-thread" },
+    });
+    if (release === undefined) throw new Error("Expected confirmation to start.");
+    release(ids.approval as CodeApprovalId);
+    await expect(decision).resolves.toBeUndefined();
+    await expect(result).resolves.toBeUndefined();
+    expect(fixture.cancel).toHaveBeenCalled();
+  });
+
   it("cancels a server challenge that arrives after the owner closes during preparation", async () => {
     const fixture = makeFixture();
     let release: ((value: typeof challenge) => void) | undefined;

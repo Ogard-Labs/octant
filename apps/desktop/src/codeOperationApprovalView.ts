@@ -480,16 +480,18 @@ export function createCodeOperationApprovalViewController<TWindow>(
         return undefined;
       }
       pending.decisionStarted = true;
+      const generation = pending.generation;
       try {
         const approval = await options.confirm({
           challengeId: pending.challenge.challengeId,
           windowId: pending.windowId,
           windowCapability: pending.windowCapability,
         });
+        if (pending.finished || pending.generation !== generation) return undefined;
         finish(pending, approval);
         return approval;
       } catch {
-        finish(pending, undefined);
+        if (!pending.finished) finish(pending, undefined);
         return undefined;
       }
     },
