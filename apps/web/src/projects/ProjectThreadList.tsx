@@ -941,6 +941,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   const virtualizer = useVirtualizer({
     count: virtualized ? threads.length : 0,
     estimateSize: () => THREAD_ROW_ESTIMATE,
+    useAnimationFrameWithResizeObserver: true,
     getItemKey: (index) => {
       const thread = threads[index];
       return thread === undefined ? String(index) : (thread.navigationId ?? thread.threadId);
