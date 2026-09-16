@@ -1442,6 +1442,13 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
     blocked &&
     (skill.effectiveState.reason === "review-required" ||
       skill.effectiveState.reason === "untrusted");
+  const runtimeBlocked =
+    skill.effectiveState.kind === "blocked" &&
+    ENABLE_BLOCKING_STATES.has(skill.effectiveState.reason);
+  // The same direction rule as the plugin and component controls: an unresolved
+  // runtime state blocks turning the skill on, but never blocks turning it off,
+  // so the supervisor can still drain a skill the user no longer wants.
+  const enableDisabled = (runtimeBlocked && !skill.desiredEnabled) || props.busy;
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
@@ -1493,7 +1500,7 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
           aria-label={
             skill.desiredEnabled ? `Disable ${skill.displayName}` : `Enable ${skill.displayName}`
           }
-          disabled={props.busy}
+          disabled={enableDisabled}
           onClick={() => void props.onDesired(!skill.desiredEnabled)}
           size="sm"
           type="button"

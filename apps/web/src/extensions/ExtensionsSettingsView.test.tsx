@@ -457,6 +457,73 @@ describe("ExtensionsSettingsView", () => {
     expect(screen.getByRole("button", { name: "Clear installed skill filter" })).toBeVisible();
   });
 
+  function standaloneSkillSnapshot(options: {
+    readonly desiredEnabled: boolean;
+    readonly effectiveState: unknown;
+  }): ExtensionSnapshot {
+    const base = installedSnapshot({ activation: baseActivation({ installed: false }) });
+    return {
+      ...base,
+      packages: [],
+      skills: [
+        {
+          skill: {
+            qualifiedId: `agents-skills-directory:review:${digest}` as never,
+            name: "review",
+            sourceKind: "agents-skills-directory" as const,
+            digest: digest as never,
+            available: true,
+          },
+          source: { kind: "agents-skills-directory" as const, sourceRef: "user-global" },
+          displayName: "Review helper",
+          provenance: { reviewed: true },
+          contentBytes: 128,
+          reviewed: true,
+          desiredEnabled: options.desiredEnabled,
+          effectiveState: options.effectiveState,
+        },
+      ],
+    } as unknown as ExtensionSnapshot;
+  }
+
+  it("keeps enabling a standalone skill disabled while runtime cleanup is unresolved", async () => {
+    const c = client({
+      snapshot: standaloneSkillSnapshot({
+        desiredEnabled: false,
+        effectiveState: { kind: "blocked", reason: "unavailable" },
+      }),
+    });
+
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    const enable = await screen.findByRole("button", { name: "Enable Review helper" });
+    expect(enable).toBeDisabled();
+    fireEvent.click(enable);
+    expect(c.calls.some((command) => command.kind === "set-skill-desired")).toBe(false);
+  });
+
+  it("still allows disabling a standalone skill that is desired-on while runtime-blocked", async () => {
+    const c = client({
+      snapshot: standaloneSkillSnapshot({
+        desiredEnabled: true,
+        effectiveState: { kind: "blocked", reason: "draining" },
+      }),
+    });
+
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    const disable = await screen.findByRole("button", { name: "Disable Review helper" });
+    expect(disable).not.toBeDisabled();
+    fireEvent.click(disable);
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) => command.kind === "set-skill-desired" && command.desired === false,
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("shows an honest blocked state and reason when a component is not effective", async () => {
     const snapshot = installedSnapshot();
     const c = client({ snapshot });
