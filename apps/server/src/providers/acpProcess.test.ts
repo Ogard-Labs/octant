@@ -483,6 +483,8 @@ describe("ACP child-server profiles", () => {
       "acp",
     ]);
     expect(opencode.process.versionPattern.test("opencode2 v0.0.0-beta-18721")).toBe(true);
+    // The 2.0.x CLI declares both executable names and prints the bare one.
+    expect(opencode.process.versionPattern.test("opencode v2.0.1")).toBe(true);
     expect(opencode.userQuestions).toBe("unsupported");
     const environment = sanitizeAcpEnvironment(
       opencode,
