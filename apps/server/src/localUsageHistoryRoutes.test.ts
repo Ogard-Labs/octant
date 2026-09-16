@@ -377,6 +377,73 @@ describe("local provider usage history route", () => {
     expect(sourceCalls).toBe(2);
   });
 
+  it("answers a repeated view from an unfinished reading when nothing has finished", async () => {
+    const directory = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-last-read-open-"));
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: Date.now() });
+    let sourceCalls = 0;
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: store,
+      sources: [
+        {
+          sourceKind: "codex",
+          read: () => {
+            sourceCalls += 1;
+            return Effect.succeed({
+              records: [],
+              coverage: {
+                sourceKind: "codex",
+                sourceInstallationId: "install-1",
+                status: "partial",
+                scannedFileCount: 1,
+                acceptedRecordCount: 12,
+                omittedRecordCount: 0,
+                truncated: false,
+                hasMore: true,
+                detail: "synthetic unfinished scan",
+              },
+            } as never);
+          },
+        },
+      ],
+      lastReadStore: createLocalUsageHistoryLastReadStore(
+        join(directory, "local-usage-cache.sqlite3"),
+      ),
+      clock: () => "2026-09-09T12:00:00.000Z",
+    });
+    const open = (offsetMinutes: number, preferLastRead = false) =>
+      new Request("http://127.0.0.1/api/usage/local-history", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify({
+          from: new Date(
+            Date.parse("2026-09-09T12:00:00.000Z") - 30 * 86400000 + offsetMinutes * 60000,
+          ).toISOString(),
+          to: new Date(
+            Date.parse("2026-09-09T12:00:00.000Z") + offsetMinutes * 60000,
+          ).toISOString(),
+          timeZone: "UTC",
+          ...(preferLastRead ? { preferLastRead: true } : {}),
+        }),
+      });
+
+    const first = await handler(open(0));
+    expect(await first?.json()).toMatchObject({
+      coverage: [expect.objectContaining({ hasMore: true })],
+    });
+    expect(sourceCalls).toBe(1);
+
+    // The view is opened again while that reading is still unfinished. On a
+    // large provider history that is the normal case, and the earlier reading
+    // is the only answer the surface can paint at once.
+    const repeated = await handler(open(5, true));
+    expect(await repeated?.json()).toMatchObject({
+      fromLastRead: true,
+      queryAt: "2026-09-09T12:00:00.000Z",
+    });
+    expect(sourceCalls).toBe(1);
+  });
+
   it("does not expose local history without window authority", async () => {
     const handler = createLocalUsageHistoryRouteHandler({
       windowAuthorityStore: new WindowAuthorityStore(),

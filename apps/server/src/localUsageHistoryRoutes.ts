@@ -89,16 +89,19 @@ export function createLocalUsageHistoryRouteHandler(
         queryAt: clock(),
         signal: request.signal,
       });
-      // Only a reading that finished reaches the store: a caller returning to
-      // this view should open at a total, not at an interrupted import's
-      // subtotal. A reading that still has more to scan leaves the earlier one
-      // in place, where the surface keeps showing it until this read completes.
-      if (response.coverage.every((source) => source.hasMore !== true)) {
-        try {
-          dependencies.lastReadStore?.write(view, JSON.stringify(response));
-        } catch {
-          // The reading is the answer; a cache that cannot be written is not one.
-        }
+      // A reading that finished replaces whatever was stored. An unfinished one
+      // is kept only as the fallback for a view that has no finished reading
+      // yet: on a large provider history the import rarely completes in one
+      // open, and a surface returning to this view is better served by the
+      // totals it saw last than by nothing.
+      try {
+        dependencies.lastReadStore?.write(
+          view,
+          JSON.stringify(response),
+          response.coverage.every((source) => source.hasMore !== true),
+        );
+      } catch {
+        // The reading is the answer; a cache that cannot be written is not one.
       }
       return json(response, 200, origin);
     } catch {

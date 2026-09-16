@@ -16,7 +16,7 @@ export function createLocalUsageHistoryLastReadStore(path: string) {
     const connection = openSqlite(path);
     try {
       connection.exec(
-        "CREATE TABLE IF NOT EXISTS usage_last_reads (view TEXT PRIMARY KEY, response TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS usage_last_reads (view TEXT PRIMARY KEY, response TEXT NOT NULL, complete INTEGER NOT NULL)",
       );
       return run(connection);
     } finally {
@@ -37,13 +37,18 @@ export function createLocalUsageHistoryLastReadStore(path: string) {
           : undefined;
       });
     },
-    write(view: string, response: string): void {
+    /**
+     * Keep the newest reading, except that an unfinished one never replaces a
+     * finished one: a surface that opens this view should see the reading that
+     * came back complete until another one does.
+     */
+    write(view: string, response: string, complete: boolean): void {
       withDatabase((connection) => {
         connection
           .prepare(
-            "INSERT INTO usage_last_reads (view, response) VALUES (?, ?) ON CONFLICT(view) DO UPDATE SET response = excluded.response",
+            "INSERT INTO usage_last_reads (view, response, complete) VALUES (?, ?, ?) ON CONFLICT(view) DO UPDATE SET response = excluded.response, complete = excluded.complete WHERE excluded.complete = 1 OR usage_last_reads.complete = 0",
           )
-          .run(view, response);
+          .run(view, response, complete ? 1 : 0);
       });
     },
   };
