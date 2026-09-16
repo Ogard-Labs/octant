@@ -482,7 +482,21 @@ Refusal fails creation visibly. No Linear write-back path exists.
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. Optional Project and
+composition inspector for pin, exclude, and rebuild. New context plans retain
+model and service limit provenance and inspection metadata in the journal-backed
+plan projection. Inspection restores those saved facts after a host restart
+without querying the provider; saved observation timestamps remain unchanged.
+Older plans without inspection metadata remain unavailable until a new turn
+establishes it. Work includes native instructions, Browser guidance, and tool
+definitions in its planned input, checks available provider-reported context bounds
+before dispatch, and reconciles reported usage with the dispatched plan. Maximum
+output is optional: an unknown limit stays unavailable rather than being inferred
+from a response reservation. Emergency admission budgets are explicitly marked as
+conservative fallbacks. A matching runtime window from the same provider, model,
+and request shape is retained across restart and participates in subsequent
+planning; it replaces emergency estimates while conflicting model facts retain
+the more conservative bound.
+Optional Project and
 thread token spend ceilings (0060) are host owner policy: the server refuses a
 provider-consuming turn at admission when remaining reserved capacity cannot
 cover a declared per-turn bound, and the composer and Environment name a

@@ -1615,17 +1615,16 @@ function LaunchedShell(
     activeMode,
     activeWorkThreadId,
   ]);
-  // Chat transcripts belong to pane controllers, not the navigation-only App
-  // controller. The host change feed also covers newly created threads before
-  // they appear in its bootstrap list. Work threads run
-  // their controller inside their workspace rather than here, so their meter
-  // still only refreshes on thread change.
+  // Chat and Work transcripts belong to pane controllers. Their host change
+  // feed includes turn updates, including the first turn of a new thread.
   const contextRevision =
     activeMode === "chat"
       ? machineChanges.chatNavigation
-      : activeMode === "code"
-        ? activeCodeThreadView?.lastSequence
-        : undefined;
+      : activeMode === "work"
+        ? machineChanges.workNavigation
+        : activeMode === "code"
+          ? activeCodeThreadView?.lastSequence
+          : undefined;
   const contextController = useContextController({
     client: contextClient,
     ...(contextRevision === undefined ? {} : { revision: Number(contextRevision) }),

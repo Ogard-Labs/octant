@@ -81,7 +81,14 @@ export function ContextInspector(props: ContextInspectorProps) {
           <dl className="context-inspector__facts">
             <Fact label="Model" value={snapshot.modelLimits.modelId} />
             <Fact label="Context window" value={formatNumber(snapshot.modelLimits.contextWindow)} />
-            <Fact label="Maximum output" value={formatNumber(snapshot.modelLimits.maxOutput)} />
+            <Fact
+              label="Maximum output"
+              value={
+                snapshot.modelLimits.maxOutput === undefined
+                  ? "Unavailable"
+                  : formatNumber(snapshot.modelLimits.maxOutput)
+              }
+            />
             <Fact label="Safe input budget" value={formatNumber(plan.safeInputBudget)} />
             <Fact label="Planned input" value={formatNumber(plan.plannedInputTokens)} />
             <Fact label="Response reserve" value={formatNumber(plan.reserves.response)} />

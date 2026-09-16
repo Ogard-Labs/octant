@@ -37,6 +37,27 @@ describe("ContextInspector", () => {
     expect(within(inspector).getByText(/Request details hidden/)).toBeVisible();
   });
 
+  it("shows an unknown maximum output separately from the response reservation", () => {
+    const snapshot = contextFixture();
+    const { maxOutput: _maxOutput, ...modelLimits } = snapshot.modelLimits;
+    render(
+      <ContextInspector
+        busy={false}
+        onClose={vi.fn()}
+        onRebuild={vi.fn()}
+        onSetExcluded={vi.fn()}
+        onSetPinned={vi.fn()}
+        snapshot={{ ...snapshot, modelLimits }}
+      />,
+    );
+    expect(screen.getByText("Maximum output").nextElementSibling).toHaveTextContent("Unavailable");
+    expect(
+      within(screen.getByRole("region", { name: "Planned next turn" })).getByText(
+        "Response reserve",
+      ).nextElementSibling,
+    ).toHaveTextContent("50");
+  });
+
   it("never renders canonical source references or hidden sensitive values", () => {
     const secret = "SECRET-SOURCE-token=private";
     const { container } = render(

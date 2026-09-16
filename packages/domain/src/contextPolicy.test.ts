@@ -116,6 +116,54 @@ describe("context policy", () => {
     ).toThrow(ContextPolicyRejected);
   });
 
+  it("budgets against a known window while preserving an unknown output limit", () => {
+    const { maxOutput: _maxOutput, ...unknownOutput } = modelLimits();
+    const resolved = resolveEffectiveModelLimits([unknownOutput]);
+    expect(resolved).not.toHaveProperty("maxOutput");
+    expect(
+      calculateSafeInputBudget(resolved, {
+        response: 500,
+        reasoning: 0,
+        framing: 0,
+        variance: 0,
+        safety: 0,
+      }),
+    ).toEqual({ safeInputBudget: 9_500, blocked: false });
+    expect(
+      calculateSafeInputBudget(resolved, {
+        response: 10_001,
+        reasoning: 0,
+        framing: 0,
+        variance: 0,
+        safety: 0,
+      }),
+    ).toEqual({ safeInputBudget: 0, blocked: true });
+    expect(
+      resolveEffectiveModelLimits([unknownOutput, modelLimits({ maxOutput: 1_000 })]).maxOutput,
+    ).toBe(1_000);
+  });
+
+  it("replaces emergency estimates with reported model limits without inventing output capacity", () => {
+    const { maxOutput: _maxOutput, ...reported } = modelLimits({
+      contextWindow: 200_000,
+      source: "runtime-reported",
+      confidence: "high",
+    });
+    const resolved = resolveEffectiveModelLimits([
+      modelLimits({
+        contextWindow: 4_096,
+        maxOutput: 1_024,
+        source: "conservative-fallback",
+        confidence: "low",
+      }),
+      reported,
+    ]);
+    expect(resolved.contextWindow).toBe(200_000);
+    expect(resolved.source).toBe("runtime-reported");
+    expect(resolved).not.toHaveProperty("maxOutput");
+    expect(resolved.conflicts).toEqual([]);
+  });
+
   it("resolves conflicting limits conservatively and retains conflict evidence", () => {
     const resolved = resolveEffectiveModelLimits([
       modelLimits({ contextWindow: 32_000, maxOutput: 8_000, source: "runtime-reported" }),

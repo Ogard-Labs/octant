@@ -47,6 +47,7 @@ export interface WorkTurnRuntimePort {
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly appManagedTools?: AppManagedToolSet;
+    readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
@@ -79,6 +80,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly appManagedTools?: AppManagedToolSet;
+    readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
@@ -125,6 +127,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
       readonly context?: ReadonlyArray<ProviderContextBlock>;
       readonly appManagedTools?: AppManagedToolSet;
+      readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
       readonly onDelta?: (response: string) => void;
       /** The provider's restated task list, whole, whenever it moves. */
       readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
@@ -186,6 +189,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
+                if (event.kind === "usage") input.onUsage?.(event);
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);

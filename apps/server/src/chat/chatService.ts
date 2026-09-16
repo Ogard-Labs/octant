@@ -3428,34 +3428,23 @@ export class ChatService {
         const observed = await Effect.runPromise(
           Effect.scoped(driver.contextFacts.observeModelLimits({ instanceId: probe.instanceId })),
         );
-        const matching = observed
-          .filter((evidence) => String(evidence.modelId) === String(modelId))
-          .map((evidence) => this.#withConservativeMaxOutput(evidence));
+        const matching = observed.filter(
+          (evidence) => String(evidence.modelId) === String(modelId),
+        );
         if (matching.length > 0) return matching;
         // A provider may expose service/quota facts without model bounds. An
         // empty or unmatched model observation must not hide the model limits
         // already established by this probe.
-        return modelEvidenceFromObservedState(probe)
-          .filter((evidence) => String(evidence.modelId) === String(modelId))
-          .map((evidence) => this.#withConservativeMaxOutput(evidence));
+        return modelEvidenceFromObservedState(probe).filter(
+          (evidence) => String(evidence.modelId) === String(modelId),
+        );
       } catch {
         // Fall back to probe-derived evidence.
       }
     }
-    return modelEvidenceFromObservedState(probe)
-      .filter((evidence) => String(evidence.modelId) === String(modelId))
-      .map((evidence) => this.#withConservativeMaxOutput(evidence));
-  }
-
-  #withConservativeMaxOutput(evidence: ProviderModelLimitEvidence): ProviderModelLimitEvidence {
-    if (evidence.maxOutput !== undefined || evidence.contextWindow === undefined) {
-      return evidence;
-    }
-    return {
-      ...evidence,
-      maxOutput: Math.min(4_096, Math.max(1, Math.floor(evidence.contextWindow / 4))),
-      confidence: "low",
-    };
+    return modelEvidenceFromObservedState(probe).filter(
+      (evidence) => String(evidence.modelId) === String(modelId),
+    );
   }
 
   #modelLimitEvidenceFromProbeModel(
@@ -3464,7 +3453,7 @@ export class ChatService {
   ): ProviderModelLimitEvidence | undefined {
     const model = probe.models.find((candidate) => String(candidate.id) === String(modelId));
     if (model?.contextLimit === undefined) return undefined;
-    return this.#withConservativeMaxOutput({
+    return {
       providerInstanceId: probe.instanceId,
       modelId: model.id,
       contextWindow: model.contextLimit,
@@ -3472,7 +3461,7 @@ export class ChatService {
       source: model.source === "discovered" ? "provider-discovery" : "user-supplied",
       confidence: model.verification === "verified" ? "medium" : "low",
       observedAt: probe.observedAt,
-    });
+    };
   }
 
   /**
@@ -3492,7 +3481,7 @@ export class ChatService {
       contextWindow: reviewed?.contextWindow ?? FALLBACK_CHAT_CONTEXT_WINDOW,
       maxOutput: reviewed?.maxOutput ?? FALLBACK_CHAT_MAX_OUTPUT,
       ...(reviewed === undefined ? {} : { reasoning: reviewed.reasoning }),
-      source: "reviewed-catalog",
+      source: reviewed === undefined ? "conservative-fallback" : "reviewed-catalog",
       confidence: "low",
       observedAt: probe.observedAt,
     };

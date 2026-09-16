@@ -1,3 +1,11 @@
+import { decodeContextSubjectRef, decodeProviderRuntimeEvent } from "@octant/contracts";
+import { ContextHarnessService } from "../context/contextHarnessService";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts";
+import { unavailableProviderServiceLimits } from "@octant/provider-sdk/context-facts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -50,6 +58,209 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it("refuses a Work request that exceeds the provider-reported context window", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const run = vi.fn(async () => ({ kind: "completed" as const, response: "Should not run" }));
+      const close = vi.fn(async () => undefined);
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: { run },
+        resolveAppManagedTools: () => ({
+          definitions: [],
+          execute: async () => ({ result: {} }),
+          close,
+        }),
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: decodeProviderInstanceId(ids.provider),
+                modelId: decodeProviderModelId("model-a"),
+                contextWindow: 100,
+                maxOutput: 20,
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: now,
+              },
+            ]),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledOnce();
+      expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+        kind: "accepted",
+        turn: { status: "failed", failure: { category: "invalid" } },
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("publishes reported usage for a Work request that fits the model window", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        const usage = decodeProviderRuntimeEvent({
+          instanceId: ids.provider,
+          sessionId: input.providerSessionId,
+          sequence: 1,
+          correlationId: ids.request,
+          occurredAt: now,
+          kind: "usage",
+          inputTokens: 180,
+          outputTokens: 8,
+          contextTokens: 188,
+          contextWindow: 1000,
+        });
+        if (usage.kind !== "usage") throw new Error("Expected usage fixture");
+        input.onUsage?.(usage);
+        return { kind: "completed" as const, response: "Ready" };
+      });
+      const close = vi.fn(async () => undefined);
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: { run },
+        resolveAppManagedTools: () => ({
+          definitions: [],
+          execute: async () => ({ result: {} }),
+          close,
+        }),
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: decodeProviderInstanceId(ids.provider),
+                modelId: decodeProviderModelId("model-a"),
+                contextWindow: 1000,
+                maxOutput: 20,
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: now,
+              },
+            ]),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).toHaveBeenCalledOnce();
+      expect(
+        contextHarness.inspect(
+          decodeContextSubjectRef({
+            aggregateType: "work-thread",
+            aggregateId: String(ids.thread),
+          }),
+        ).latestUsage,
+      ).toMatchObject({
+        actualInputTokens: 180,
+        actualOutputTokens: 8,
+        contextTokens: 188,
+        contextWindow: 1000,
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it.each([false, true])(
+    "refuses oversized tools even when cleanup fails: %s",
+    async (cleanupFails) => {
+      const run = vi.fn(async () => ({ kind: "completed" as const, response: "Should not run" }));
+      const close = vi.fn(async () => {
+        if (cleanupFails) throw new Error("Tool cleanup failed");
+      });
+      const fixture = serviceFixture({
+        safeInputBudgetTokens: 500,
+        turnRuntime: { run },
+        resolveAppManagedTools: () => ({
+          definitions: [
+            { name: "large_tool", description: "x".repeat(8000), inputSchema: { type: "object" } },
+          ],
+          execute: async () => ({ result: {} }),
+          close,
+        }),
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledOnce();
+      expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+        kind: "accepted",
+        turn: { status: "failed", failure: { category: "invalid" } },
+      });
+    },
+  );
+
+  it("refuses oversized native instructions before accepting or starting the Work turn", async () => {
+    const run = vi.fn(async () => ({ kind: "completed" as const, response: "Should not run" }));
+    const turnStarted = vi.fn();
+    const fixture = serviceFixture({
+      safeInputBudgetTokens: 500,
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [{ kind: "instructions", text: "x".repeat(8000) }],
+        turnStarted,
+        turnCompleted: vi.fn(async () => undefined),
+      },
+    });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(turnStarted).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("validates host, Project, binding, working directory, and confinement before launching", async () => {
     const fixture = serviceFixture();
     const result = await fixture.service.startFirstTurn(ids.window, startCommand());
@@ -246,6 +457,31 @@ describe("WorkTurnService", () => {
     expect(fixture.acquireInputs).toHaveLength(0);
   });
 
+  it("counts Browser instructions before accepting a Work turn at its input limit", async () => {
+    const plain = serviceFixture({ safeInputBudgetTokens: 200 });
+    await expect(plain.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject({
+      kind: "accepted",
+    });
+    await plain.waitForIdle();
+    const run = vi.fn(async () => ({ kind: "completed" as const, response: "Should not run" }));
+    const browser = serviceFixture({
+      safeInputBudgetTokens: 200,
+      turnRuntime: { run },
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    await expect(
+      browser.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        extensionSelections: [browserUseSelection("budget-check")],
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(run).not.toHaveBeenCalled();
+    expect(browser.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("forwards fixed Browser guidance when Work exposes Browser", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     const fixture = serviceFixture({
@@ -270,6 +506,9 @@ describe("WorkTurnService", () => {
       kind: "instructions",
       text: expect.stringContaining("Octant's built-in Browser"),
     });
+    expect(
+      contexts.flat().filter((block) => block.text.includes("Octant's built-in Browser")),
+    ).toHaveLength(1);
   });
 
   it("opens every task with the Project's brief and status, and takes stock when the status is stale", async () => {
@@ -843,6 +1082,8 @@ function serviceFixture(
     readonly turnRuntime?: WorkTurnRuntimePort;
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
+    readonly contextHarness?: ContextHarnessService;
+    readonly contextFacts?: ProviderDriver["contextFacts"];
     readonly safeInputBudgetTokens?: number;
     readonly resolveSelectedSkillContext?: WorkTurnServiceDependencies["resolveSelectedSkillContext"];
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
@@ -857,6 +1098,7 @@ function serviceFixture(
   const acquireInputs: unknown[] = [];
   const defaultDriver: ProviderDriver = {
     kind: "openai-compatible",
+    ...(options.contextFacts === undefined ? {} : { contextFacts: options.contextFacts }),
     probe: () => Effect.die("unused"),
     acquire: (input) => {
       acquireInputs.push(input);
@@ -968,6 +1210,7 @@ function serviceFixture(
     })),
   };
   const service = new WorkTurnService({
+    ...(options.contextHarness === undefined ? {} : { contextHarness: options.contextHarness }),
     persistence: persistence as never,
     threads: threads as never,
     projects: projects as never,
