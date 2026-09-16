@@ -260,7 +260,7 @@ function normalizeModels(
       ? model.options.map((item) => ({ value: item.value, name: item.name }))
       : (models?.availableModels.map((item) => ({ value: item.modelId, name: item.name })) ?? []);
   if (selectable.length === 0) return [];
-  const reasoning = options.find((option) => option.id === profile.reasoningOptionId);
+  const reasoning = resolveReasoningOption(profile, options);
   const reasoningValues = (reasoning?.options ?? [])
     .map((choice) => choice.value.trim())
     .filter((value) => value.length > 0);
@@ -281,13 +281,35 @@ function normalizeModels(
         ? []
         : [
             {
-              id: profile.reasoningOptionId,
+              id: reasoning?.id ?? profile.reasoningOptionId,
               displayName: reasoning?.name ?? "Reasoning",
               kind: "selection" as const,
               values: reasoningValues as [string, ...string[]],
             },
           ],
   }));
+}
+
+/**
+ * Find the session config option that carries the agent's reasoning level.
+ *
+ * The profile names the id its agent is known to use, and the agent's own
+ * `category` is the portable spelling of the same thing: the ACP spec's
+ * `thought_level`, or plain `thinking` as some agents write it. Matching only
+ * the profile's id read the installed Grok agent — which reports
+ * `reasoning_effort` under `category: "thought_level"` — as an agent that
+ * cannot reason at all, so the composer never offered a level.
+ */
+function resolveReasoningOption(
+  profile: AcpProviderProfile,
+  options: ReadonlyArray<AcpSessionConfigOption>,
+): AcpSessionConfigOption | undefined {
+  const byProfileId = options.find((option) => option.id === profile.reasoningOptionId);
+  if (byProfileId !== undefined) return byProfileId;
+  return options.find(
+    (option) =>
+      option.category === "thought_level" || option.category === "thinking",
+  );
 }
 
 function normalizeProbe(
@@ -300,7 +322,7 @@ function normalizeProbe(
   observedAt: string,
   credentialStatus?: "stored",
 ): ProviderProbeResult {
-  const reasoning = options.some((option) => option.id === profile.reasoningOptionId)
+  const reasoning = resolveReasoningOption(profile, options) !== undefined
     ? ("supported" as const)
     : ("unavailable" as const);
   const resume =
@@ -952,20 +974,18 @@ function makeConnection(
           // user chose for this model is applied here. A value the agent does
           // not offer is left alone: the probe declares the option from the
           // agent's own choices, which is the same check from the other side.
-          const requestedReasoning = input.modelOptionValues?.[profile.reasoningOptionId];
-          if (requestedReasoning !== undefined && requestedReasoning.trim().length > 0) {
-            const offered = source.configOptions?.find(
-              (option) => option.id === profile.reasoningOptionId,
-            );
-            const allowed =
-              offered?.options.some((choice) => choice.value === requestedReasoning) ?? false;
-            if (allowed) {
-              await client.setConfigOption(
-                source.sessionId,
-                profile.reasoningOptionId,
-                requestedReasoning,
-              );
-            }
+          const reasoningOption = resolveReasoningOption(profile, source.configOptions ?? []);
+          const requestedReasoning =
+            reasoningOption === undefined
+              ? undefined
+              : input.modelOptionValues?.[reasoningOption.id];
+          if (
+            reasoningOption !== undefined &&
+            requestedReasoning !== undefined &&
+            requestedReasoning.trim().length > 0 &&
+            reasoningOption.options.some((choice) => choice.value === requestedReasoning)
+          ) {
+            await client.setConfigOption(source.sessionId, reasoningOption.id, requestedReasoning);
           }
           const state = await register(input, source, scope, client, managedTools, appManagedTools);
           stateRef.state = state;

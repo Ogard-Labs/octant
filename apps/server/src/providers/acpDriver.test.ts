@@ -390,6 +390,42 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     ]);
   });
 
+  it("finds a reasoning option the agent names differently", async () => {
+    const { driver, client } = fixture(profile);
+    // The installed Grok agent reports `reasoning_effort` under
+    // `category: "thought_level"`; matching the profile's id alone read it as
+    // an agent that cannot reason.
+    const renamed = (sourceSessionId: string): AcpNewSessionResult => ({
+      sessionId: sourceSessionId,
+      configOptions: client.configOptions.map((option) =>
+        option.id === profile.reasoningOptionId
+          ? {
+              ...option,
+              id: "reasoning_effort",
+              name: "Reasoning Effort",
+              category: "thought_level",
+            }
+          : option,
+      ),
+    });
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-renamed");
+      return renamed("agent-session-renamed");
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.capabilities.reasoning).toBe("supported");
+    expect(result.models[0]?.options).toEqual([
+      {
+        id: "reasoning_effort",
+        displayName: "Reasoning Effort",
+        kind: "selection",
+        values: ["off", "on"],
+      },
+    ]);
+  });
+
   it("declares no selectable option when the agent exposes no reasoning control", async () => {
     const { driver, client } = fixture(profile);
     client.newSession.mockImplementationOnce(async () => {
@@ -751,6 +787,47 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(client.setConfigOption).toHaveBeenCalledWith(
       "agent-session-1",
       profile.reasoningOptionId,
+      "on",
+    );
+  });
+
+  it("applies a reasoning level the agent names differently", async () => {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-renamed");
+      return {
+        sessionId: "agent-session-renamed",
+        configOptions: client.configOptions.map((option) =>
+          option.id === profile.reasoningOptionId
+            ? {
+                ...option,
+                id: "reasoning_effort",
+                name: "Reasoning Effort",
+                category: "thought_level",
+              }
+            : option,
+        ),
+      };
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { reasoning_effort: "on" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.setConfigOption).toHaveBeenCalledWith(
+      "agent-session-renamed",
+      "reasoning_effort",
       "on",
     );
   });
