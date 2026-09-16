@@ -20,6 +20,26 @@ const truthfulInput = {
 } as const satisfies SidebarNavigationInput;
 
 describe("SidebarNavigation", () => {
+  it.each(["chat", "work", "code"] as const)(
+    "keeps More with static destinations above thread content in %s",
+    (activeMode) => {
+      render(
+        <SidebarNavigation
+          actions={{ projects: vi.fn(), inbox: vi.fn() }}
+          input={{ ...truthfulInput, activeMode }}
+          rows={["projects", "inbox"]}
+          more={<button type="button">More destinations</button>}
+          projectSection={<nav aria-label="Thread list">A thread</nav>}
+        />,
+      );
+      const more = screen.getByRole("button", { name: "More destinations" });
+      const inbox = screen.getByRole("button", { name: "Inbox" });
+      const threads = screen.getByRole("navigation", { name: "Thread list" });
+      expect(inbox.compareDocumentPosition(more)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(more.compareDocumentPosition(threads)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    },
+  );
+
   it("opens Projects as a first-class destination alongside the Project thread tree", async () => {
     const user = userEvent.setup();
     const openProjects = vi.fn();

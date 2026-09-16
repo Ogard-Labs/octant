@@ -33,7 +33,7 @@ placement, or **Don't show**, and use the chevrons to move it up or down.
 **Reset sidebar destinations** restores the untouched placement and order.
 
 **More row in the sidebar** (on by default) ends the sidebar's navigation with
-a More row whose popup holds the **Menu only** destinations and **Customize
+a More row above the Project and thread lists. Its popup holds the **Menu only** destinations and **Customize
 sidebar**, so a destination set to Menu only opens from the rail it was hidden
 from. Turning it off returns those destinations to the account menu. A
 **Don't show** destination appears nowhere either way.
