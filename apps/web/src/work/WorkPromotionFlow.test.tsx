@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -103,31 +103,47 @@ describe("WorkPromotionFlow", () => {
     expect(dismiss).toHaveBeenCalled();
   });
 
-  it("does not submit a proposal without an explicitly selected artifact ref", async () => {
-    const propose = vi.fn(async () => pendingProposal);
-    const controller: WorkPromotionController = {
-      pendingProposals: [],
-      availableArtifactRefs: [],
-      deliveryTargetsByProject: new Map(),
-      proposing: false,
-      reload: vi.fn(async () => undefined),
-      propose,
-      approve: vi.fn(async () => undefined),
-      dismiss: vi.fn(async () => true),
-    };
+  it.each(["artifact", "project"] as const)(
+    "explains a missing %s and disables proposal submission",
+    async (missing) => {
+      const propose = vi.fn(async () => pendingProposal);
+      const controller: WorkPromotionController = {
+        pendingProposals: [],
+        availableArtifactRefs: missing === "artifact" ? [] : ["artifact-token-a"],
+        deliveryTargetsByProject: new Map(),
+        proposing: false,
+        reload: vi.fn(async () => undefined),
+        propose,
+        approve: vi.fn(async () => undefined),
+        dismiss: vi.fn(async () => true),
+      };
 
-    render(
-      <WorkPromotionFlow
-        controller={controller}
-        originProjectName="Workspace"
-        targetCodeProjectLabels={[{ id: targetProjectId, name: "Repository" }]}
-        providerChoices={[]}
-      />,
-    );
+      render(
+        <WorkPromotionFlow
+          controller={controller}
+          originProjectName="Workspace"
+          targetCodeProjectLabels={
+            missing === "project" ? [] : [{ id: targetProjectId, name: "Repository" }]
+          }
+          providerChoices={[]}
+        />,
+      );
 
-    expect(screen.getByRole("button", { name: "Propose a Code thread" })).toBeDisabled();
-    expect(propose).not.toHaveBeenCalled();
-  });
+      expect(screen.getByRole("button", { name: "Propose a Code thread" })).toBeDisabled();
+      expect(propose).not.toHaveBeenCalled();
+      const selector = screen.getByRole("combobox", {
+        name: missing === "artifact" ? "Selected Work artifact" : "Target Code Project",
+      });
+      expect(selector).toHaveTextContent(
+        missing === "artifact" ? "No Work artifacts available" : "No Code Projects available",
+      );
+      expect(selector).toBeDisabled();
+      const form = selector.closest("form");
+      if (form === null) throw new Error("Expected the proposal form");
+      fireEvent.submit(form);
+      expect(propose).not.toHaveBeenCalled();
+    },
+  );
 
   it("fails closed when the target Code Project has no authoritative delivery target", async () => {
     const user = userEvent.setup();

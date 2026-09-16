@@ -44,6 +44,10 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
   // Every Code model this host reports may be unusable for Code. Approving with
   // no choice would create a linked Code thread with no model, so the flow says
   // so and refuses instead of presenting an empty picker and a dead button.
+  const selectedArtifact = props.controller.availableArtifactRefs[Number(artifactIndex)];
+  const selectedTarget = props.targetCodeProjectLabels[Number(targetIndex)];
+  const noArtifacts = props.controller.availableArtifactRefs.length === 0;
+  const noTargets = props.targetCodeProjectLabels.length === 0;
   const noUsableCodeModel = props.providerChoices.length === 0;
 
   return (
@@ -66,14 +70,19 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          const target = props.targetCodeProjectLabels[Number(targetIndex)];
-          if (target === undefined || props.controller.proposing) return;
+          if (
+            selectedTarget === undefined ||
+            selectedArtifact === undefined ||
+            selectedArtifact.trim() === "" ||
+            props.controller.proposing
+          )
+            return;
           setLocalError(undefined);
           void props.controller
             .propose({
-              targetCodeProjectId: target.id,
+              targetCodeProjectId: selectedTarget.id,
               summary,
-              artifactRefs: [props.controller.availableArtifactRefs[Number(artifactIndex)] ?? ""],
+              artifactRefs: [selectedArtifact],
             })
             .then((proposal) => {
               if (proposal !== undefined) setSummary("");
@@ -91,6 +100,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
           <span>Selected Work artifact</span>
           <OctantSelectField
             aria-label="Selected Work artifact"
+            disabled={noArtifacts}
             onValueChange={setArtifactIndex}
             options={
               props.controller.availableArtifactRefs.length === 0
@@ -100,25 +110,32 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
                     label: ref,
                   }))
             }
-            value={artifactIndex}
+            value={noArtifacts ? "" : artifactIndex}
           />
         </label>
         <label className="work-promotion__field">
           <span>Target Code Project</span>
           <OctantSelectField
+            aria-label="Target Code Project"
+            disabled={noTargets}
             onValueChange={setTargetIndex}
-            options={props.targetCodeProjectLabels.map((project, index) => ({
-              id: String(index),
-              label: project.name,
-            }))}
-            value={targetIndex}
+            options={
+              noTargets
+                ? [{ id: "", label: "No Code Projects available" }]
+                : props.targetCodeProjectLabels.map((project, index) => ({
+                    id: String(index),
+                    label: project.name,
+                  }))
+            }
+            value={noTargets ? "" : targetIndex}
           />
         </label>
         <OctantButton
           className="project-button"
           disabled={
             props.controller.proposing ||
-            (props.controller.availableArtifactRefs[Number(artifactIndex)] ?? "").trim() === ""
+            selectedTarget === undefined ||
+            (selectedArtifact ?? "").trim() === ""
           }
           type="submit"
           variant="secondary"
