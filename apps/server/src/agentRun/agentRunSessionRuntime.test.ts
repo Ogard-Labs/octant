@@ -940,6 +940,29 @@ describe("createAgentRunSessionRuntime", () => {
     ).toThrowError(expect.objectContaining({ reason: "workspace-unavailable" }));
   });
 
+  it("releases reserved spend when provider capacity prevents a child from starting", () => {
+    const settle = vi.fn();
+    const admit = vi.fn().mockReturnValue({
+      status: "admitted",
+      reservedTokens: 100,
+      reservations: [],
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider(), {
+        serviceLimits: () => undefined,
+        spendCeiling: { admit, settle },
+      }),
+    );
+
+    expect(() => runtime.start(agentRun())).toThrowError(
+      expect.objectContaining({ reason: "capacity-unavailable" }),
+    );
+    expect(admit).toHaveBeenCalledOnce();
+    expect(settle).toHaveBeenCalledExactlyOnceWith({
+      reservationId: admit.mock.calls[0]?.[0].reservationId,
+    });
+  });
+
   it("fails closed when provider capacity facts are unavailable", () => {
     const options = runtimeOptions(fakeProvider());
     const runtime = createAgentRunSessionRuntime({
