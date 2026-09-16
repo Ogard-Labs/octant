@@ -44,6 +44,7 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "copilot":
     case "cline":
     case "qwen":
+    case "fx":
     case "openai-image":
     case "gemini-native-image":
     case "bfl-image":

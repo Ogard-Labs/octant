@@ -152,7 +152,8 @@ export function makeProviderDriver(
     case "gemini":
     case "copilot":
     case "cline":
-    case "qwen": {
+    case "qwen":
+    case "fx": {
       if (options.acpProcess === undefined || options.acpHome === undefined) {
         throw new ProviderDriverConfigurationError();
       }
@@ -169,7 +170,8 @@ export function makeProviderDriver(
         configuration.kind === "glm-acp" ||
         configuration.kind === "gemini-acp" ||
         configuration.kind === "cline-acp" ||
-        configuration.kind === "qwen-acp"
+        configuration.kind === "qwen-acp" ||
+        configuration.kind === "fx-acp"
           ? { authentication: configuration.authentication }
           : {}),
         ...(options.credentialResolver === undefined

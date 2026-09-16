@@ -90,5 +90,5 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
 - 0012 Mixed-provider subagents
 - 0121 Provider-owned CLI runtimes (scoped supersession of managed-profile
   authentication only)
-- [fx ACP compatibility](../fx-acp-compatibility.md): probed; remains unselectable
-  until a managed process can exclude the interactive `~/.fx` profile.
+- [fx ACP compatibility](../fx-acp-compatibility.md): probed GO; ships as a
+  managed-home provider under 0130.

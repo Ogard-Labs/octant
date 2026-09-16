@@ -30,6 +30,7 @@ import {
   CopilotConfigurationForm,
   ClineConfigurationForm,
   QwenConfigurationForm,
+  FxConfigurationForm,
   GooseConfigurationForm,
   HttpConfigurationForm,
   IdeogramImageConfigurationForm,
@@ -80,6 +81,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeCopilotConfiguration"
   | "onChangeClineConfiguration"
   | "onChangeQwenConfiguration"
+  | "onChangeFxConfiguration"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
@@ -215,6 +217,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
         onChangeClineConfiguration={props.onChangeClineConfiguration}
         onChangeQwenConfiguration={props.onChangeQwenConfiguration}
+        onChangeFxConfiguration={props.onChangeFxConfiguration}
         onChangeDevinConfiguration={props.onChangeDevinConfiguration}
         onChangeKiloConfiguration={props.onChangeKiloConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
@@ -523,6 +526,7 @@ interface ProviderRowProps {
   readonly onChangeCopilotConfiguration: ProviderSettingsViewProps["onChangeCopilotConfiguration"];
   readonly onChangeClineConfiguration: ProviderSettingsViewProps["onChangeClineConfiguration"];
   readonly onChangeQwenConfiguration: ProviderSettingsViewProps["onChangeQwenConfiguration"];
+  readonly onChangeFxConfiguration: ProviderSettingsViewProps["onChangeFxConfiguration"];
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
@@ -598,6 +602,7 @@ function ProviderRow(props: ProviderRowProps) {
   const isCopilot = props.instance.driverKind === "copilot";
   const isCline = props.instance.driverKind === "cline";
   const isQwen = props.instance.driverKind === "qwen";
+  const isFx = props.instance.driverKind === "fx";
   const isDevin = props.instance.driverKind === "devin";
   const isKilo = props.instance.driverKind === "kilo";
   const isPi = props.instance.driverKind === "pi";
@@ -1006,6 +1011,14 @@ function ProviderRow(props: ProviderRowProps) {
                   key={`qwen:${props.instance.version}`}
                   onChange={props.onChangeQwenConfiguration}
                 />
+              ) : isFx ? (
+                <FxConfigurationForm
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`fx:${props.instance.version}`}
+                  onChange={props.onChangeFxConfiguration}
+                />
               ) : isDevin ? (
                 <DevinConfigurationForm
                   disabled={disabled}
@@ -1407,6 +1420,11 @@ function ProviderRow(props: ProviderRowProps) {
                     <span>Authentication: OpenAI-compatible API key</span>
                   </div>
                 )}
+                {!isFx ? null : (
+                  <div className="provider-card__facts provider-card__facts--fx">
+                    <span>Authentication: Vercel AI Gateway API key</span>
+                  </div>
+                )}
                 {!isDevin ? null : (
                   <div className="provider-card__facts provider-card__facts--devin">
                     <span>Authentication: Devin subscription</span>
@@ -1664,6 +1682,8 @@ function authenticationGuidance(instance: ProviderInstance): string {
       return instance.configuration.authentication === "api-key"
         ? "Add or replace the OpenAI-compatible API key in the Octant host, then check the connection again."
         : "Run the provider-owned Qwen CLI login in your terminal, then check the connection again.";
+    case "fx":
+      return "Add or replace the Vercel AI Gateway API key in the Octant host, then check the connection again.";
     case "anthropic-compatible":
       return "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again.";
     case "azure-foundry":

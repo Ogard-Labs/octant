@@ -121,6 +121,7 @@ function configuredBinaryPath(instance: ProviderInstance): string | undefined {
     case "copilot-acp":
     case "cline-acp":
     case "qwen-acp":
+    case "fx-acp":
     case "devin-acp":
     case "kilo-acp":
     case "pi-rpc":

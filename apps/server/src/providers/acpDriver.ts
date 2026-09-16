@@ -916,6 +916,8 @@ function makeConnection(
         let scope: Scope.CloseableScope | undefined;
         let managedTools: AcpManagedToolsLease | undefined;
         try {
+          const refusal = profile.refuses?.(mode, input.executionPolicy);
+          if (refusal !== undefined) throw failure("incompatible", refusal);
           if (input.tools.length > 0 && process.platform !== "darwin") {
             throw failure(
               "unsupported",

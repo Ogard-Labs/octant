@@ -76,6 +76,7 @@ const AUTO_DETECTABLE_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([
   "copilot",
   "cline",
   "qwen",
+  "fx",
 ]);
 
 const MANUAL_ENDPOINT_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([

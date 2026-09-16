@@ -24,6 +24,7 @@ function props(overrides: Partial<ProviderCreateFormProps> = {}): ProviderCreate
     onCreateOpenAiCompatible: callback,
     onCreateOpenAiImage: callback,
     onCreateQwen: callback,
+    onCreateFx: callback,
     ...overrides,
   };
 }

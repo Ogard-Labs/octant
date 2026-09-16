@@ -1479,6 +1479,39 @@ WHERE EXISTS (
 );
 `;
 
+const ADD_FX_PROVIDER_PROJECTION_SQL = `
+DROP INDEX provider_instance_projection_driver_idx;
+DROP INDEX provider_instance_projection_enabled_idx;
+
+ALTER TABLE provider_instance_projection RENAME TO provider_instance_projection_v59;
+
+CREATE TABLE provider_instance_projection (
+  instance_id TEXT PRIMARY KEY CHECK(length(trim(instance_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  driver_kind TEXT NOT NULL CHECK(driver_kind IN (
+    'codex', 'claude', 'cursor', 'opencode', 'kilo', 'pi', 'oh-my-pi', 'devin',
+    'mistral-vibe', 'ollama', 'openai-compatible', 'kimi-code', 'anthropic-compatible',
+    'azure-foundry', 'grok', 'goose', 'glm', 'gemini', 'copilot', 'cline', 'qwen', 'fx'
+  )),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  instance_json TEXT NOT NULL CHECK(json_valid(instance_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0)
+) STRICT;
+
+INSERT INTO provider_instance_projection (
+  instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+)
+SELECT instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+FROM provider_instance_projection_v59;
+
+DROP TABLE provider_instance_projection_v59;
+
+CREATE INDEX provider_instance_projection_driver_idx
+  ON provider_instance_projection(driver_kind);
+CREATE INDEX provider_instance_projection_enabled_idx
+  ON provider_instance_projection(enabled);
+`;
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   {
     version: 1,
@@ -1794,6 +1827,11 @@ ALTER TABLE code_runtime_projection
     version: 59,
     name: "record_usage_planning_availability",
     sql: "ALTER TABLE usage_record_projection ADD COLUMN planning_available INTEGER NOT NULL DEFAULT 1 CHECK(planning_available IN (0, 1));",
+  },
+  {
+    version: 60,
+    name: "add_fx_provider_projection",
+    sql: ADD_FX_PROVIDER_PROJECTION_SQL,
   },
 ];
 

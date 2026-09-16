@@ -28,6 +28,7 @@ export type AcpProviderKind = Extract<
   | "copilot"
   | "cline"
   | "qwen"
+  | "fx"
 >;
 export type AcpSessionMode = "chat" | "work" | "code";
 
@@ -110,6 +111,14 @@ export interface AcpProviderProfile {
   readonly reasoningOptionId: "effort" | "thinking";
   /** ACP `mode` config value for a product mode and execution policy. */
   readonly sessionMode: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string;
+  /**
+   * Product modes and execution policies this agent refuses before a session
+   * process starts, with the sentence the refusal shows. An agent that always
+   * advertises runtime tools cannot be offered a read-only mode: fx reports
+   * `ask` and `code`, and Octant never maps an approval-gated turn onto the
+   * auto-reviewing `code` mode.
+   */
+  readonly refuses?: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string | undefined;
   /** Overrides the default `session/set_config_option` call for setting the model. */
   readonly setModelCall?: (
     sessionId: string,
@@ -830,6 +839,72 @@ const qwenProfile: AcpProviderProfile = {
   },
 };
 
+const FX_WORKSPACE_DENIED_ENTRIES = [".fx.json", ".mcp.json", "AGENTS.md", ".agents"] as const;
+
+/**
+ * fx has no profile-path variable: its settings, sessions, permission rules,
+ * and skills all resolve through `$HOME/.fx`. Octant therefore gives it an
+ * isolated managed home rather than pointing it at the interactive profile,
+ * and authenticates it with a Vercel AI Gateway key from the host credential
+ * broker. Live probing of `fx acp` 0.0.10 confirmed the relocation (sessions
+ * written under the managed home, the real `~/.fx` untouched) and confirmed
+ * that fx still negotiates when its workspace instruction, project config,
+ * skill, and project MCP surfaces are unreadable.
+ */
+const fxProfile: AcpProviderProfile = {
+  kind: "fx",
+  displayName: "fx",
+  reasoningOptionId: "effort",
+  refuses: (mode, policy) => {
+    if (mode === "chat" || policy === "plan") {
+      return "fx always advertises runtime tools and cannot run read-only; use Work or Code with approval-gated or full access.";
+    }
+    return undefined;
+  },
+  sessionMode: (_mode, policy) => (policy === "full-access" ? "code" : "ask"),
+  chatSessionRoot: "managed-home",
+  userQuestions: "unsupported",
+  resumeMethod: "session/resume",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage:
+    "fx is not authenticated. Add a Vercel AI Gateway API key for this provider, then retry.",
+  process: {
+    agentName: "fx",
+    versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
+    minimumVersion: [0, 0, 10],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: {
+      // fx's default `permission_mode` is `auto`, and its ACP `code` mode maps
+      // to that same auto-review. Pin the profile default to `ask` and select
+      // the mode per session; the ACP mode is the authority either way.
+      FX_PERMISSION_MODE: "ask",
+      FX_AUTO_UPGRADE: "0",
+      FX_SKIP_ONBOARDING: "1",
+      FX_NO_OPEN_BROWSER: "1",
+      FX_DISABLE_KEYCHAIN: "1",
+      NO_COLOR: "1",
+    },
+    environment: ({ managedHome, apiKey }) => ({
+      HOME: managedHome,
+      XDG_CONFIG_HOME: join(managedHome, ".config"),
+      XDG_CACHE_HOME: join(managedHome, ".cache"),
+      XDG_DATA_HOME: join(managedHome, ".local/share"),
+      XDG_STATE_HOME: join(managedHome, ".local/state"),
+      ...(apiKey === undefined ? {} : { AI_GATEWAY_API_KEY: apiKey }),
+    }),
+    args: () => ["acp"],
+    managedFiles: () => [],
+    // `fx acp` merges the workspace `AGENTS.md`, approved project `.mcp.json`
+    // servers, project `.fx.json`, and workspace skill roots on its own. Octant
+    // admits none of those for fx, and a project `.mcp.json` would start
+    // executables outside the approval flow, so the root denies them.
+    forbiddenRootEntries: FX_WORKSPACE_DENIED_ENTRIES,
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
 const KIMI_REVIEWED_COMMANDS = [
   "compact",
   "status",
@@ -914,6 +989,7 @@ export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderPr
   copilot: copilotProfile,
   cline: clineProfile,
   qwen: qwenProfile,
+  fx: fxProfile,
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {

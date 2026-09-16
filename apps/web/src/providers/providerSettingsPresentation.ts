@@ -92,6 +92,7 @@ export function driverLabel(
   | "GitHub Copilot"
   | "Cline"
   | "Qwen Code"
+  | "fx"
   | "OpenAI-compatible"
   | "Anthropic-compatible"
   | "Azure AI Foundry"
@@ -116,6 +117,7 @@ export function driverLabel(
   if (driverKind === "copilot") return "GitHub Copilot";
   if (driverKind === "cline") return "Cline";
   if (driverKind === "qwen") return "Qwen Code";
+  if (driverKind === "fx") return "fx";
   if (driverKind === "anthropic-compatible") return "Anthropic-compatible";
   if (driverKind === "azure-foundry") return "Azure AI Foundry";
   if (driverKind === "openai-image") return "OpenAI Image";

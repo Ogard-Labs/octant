@@ -104,7 +104,10 @@ manual binary path field for those cases.
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
-GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
+GitHub Copilot ACP, Cline ACP, Qwen Code ACP, and fx ACP.
+fx is the one ACP provider Octant runs in a managed home rather than against a
+native profile, because its ACP entrypoint exposes no profile-path variable;
+it authenticates with a Vercel AI Gateway API key instead of a CLI login.
 
 Codex commentary and subsequent answer messages retain paragraph boundaries
 in new responses, including when the provider sends a completed message

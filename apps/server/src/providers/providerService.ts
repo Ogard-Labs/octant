@@ -43,6 +43,7 @@ import {
   changeCopilotConfiguration,
   changeClineConfiguration,
   changeQwenConfiguration,
+  changeFxConfiguration,
   changeKiloConfiguration,
   changeMistralVibeConfiguration,
   changeOllamaConfiguration,
@@ -64,6 +65,7 @@ import {
   createCopilotProvider,
   createClineProvider,
   createQwenProvider,
+  createFxProvider,
   createKiloProvider,
   createOpenAiCompatibleProvider,
   createOpenAiImageProvider,
@@ -617,6 +619,7 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-copilot-provider" ||
           command.kind === "create-cline-provider" ||
           command.kind === "create-qwen-provider" ||
+          command.kind === "create-fx-provider" ||
           command.kind === "create-openai-compatible-provider" ||
           command.kind === "create-anthropic-compatible-provider" ||
           command.kind === "create-azure-foundry-provider" ||
@@ -728,6 +731,12 @@ export class ProviderService implements ProviderServiceApi {
               break;
             case "create-qwen-provider":
               instance = createQwenProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-fx-provider":
+              instance = createFxProvider({
                 ...common,
                 configuration: command.configuration,
               });
@@ -1042,6 +1051,18 @@ export class ProviderService implements ProviderServiceApi {
           );
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-fx-configuration") {
+          if (current.driverKind !== "fx") {
+            throw this.#unsupported("This provider does not use fx configuration.");
+          }
+          instance = changeFxConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-devin-configuration") {
           if (current.driverKind !== "devin") {
             throw this.#unsupported("This provider does not use Devin configuration.");
@@ -1140,6 +1161,7 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "change-gemini-configuration" ||
           command.kind === "change-cline-configuration" ||
           command.kind === "change-qwen-configuration" ||
+          command.kind === "change-fx-configuration" ||
           command.kind === "change-devin-configuration"
         ) {
           this.#publishSelectedAuthenticationObservation(authoritative);
@@ -1519,6 +1541,7 @@ export class ProviderService implements ProviderServiceApi {
       instance.driverKind !== "gemini" &&
       instance.driverKind !== "cline" &&
       instance.driverKind !== "qwen" &&
+      instance.driverKind !== "fx" &&
       instance.driverKind !== "devin"
     ) {
       return;

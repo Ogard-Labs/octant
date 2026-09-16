@@ -40,10 +40,11 @@ const gemini = acpProviderProfiles.gemini;
 const copilot = acpProviderProfiles.copilot;
 const cline = acpProviderProfiles.cline;
 const qwen = acpProviderProfiles.qwen;
+const fx = acpProviderProfiles.fx;
 const profiles = Object.values(acpProviderProfiles).filter(
   (profile) => profile.kind !== "opencode",
 );
-const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen];
+const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen, fx];
 
 /** `--version` outputs per profile: [ready, too-old, malformed]. */
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
@@ -67,6 +68,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   ],
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
+  fx: ["0.0.10", "0.0.9", "fx release 0.0.10 private-noise"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   opencode: "0.0.0",
@@ -81,6 +83,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   copilot: "1.0.82",
   cline: "3.0.61",
   qwen: "0.23.0",
+  fx: "0.0.10",
 };
 
 function fixture(profile: AcpProviderProfile, mode = "ready") {
@@ -637,7 +640,22 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
         environment: { PATH: "/usr/bin" },
       }),
     );
-    expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
+    if ((profile.process.forbiddenRootEntries ?? []).length === 0) {
+      expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
+    } else {
+      // 0006's static extension denials outlive Full access: a workspace
+      // instruction, project config, skill root, or project MCP server the
+      // agent would otherwise load on its own stays denied even when the rest
+      // of the sandbox is opened.
+      expect(fullAccess.command).toBe(target.sandboxPath);
+      const fullAccessProfile = fullAccess.args[1]!;
+      expect(fullAccessProfile).toContain("(allow default)");
+      for (const entry of profile.process.forbiddenRootEntries ?? []) {
+        expect(fullAccessProfile).toContain(
+          `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+      }
+    }
     for (const file of profile.process.managedFiles({
       managedHome,
       executionPolicy: "full-access",

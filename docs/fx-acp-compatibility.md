@@ -1,76 +1,89 @@
 # fx ACP compatibility
 
-This note records a bounded Agent Client Protocol probe of Vercel's fx
-harness. It does not authorize a selectable provider, a reserved profile, a
-new transport, or an Octant-owned OAuth flow. fx stays outside the production
-provider surface until a later probe proves managed-home isolation against a
-live `fx acp` binary.
+This note records a bounded Agent Client Protocol probe of Vercel's fx harness.
+It is the compatibility evidence behind 0130, which ships fx as a managed-home
+provider. It authorizes no Octant-owned OAuth flow, no new transport, and no
+exception to 0009's confinement.
 
 ## Pin
 
-- **Live binary:** unavailable. `fx` was not on `PATH`; no local cache existed;
-  nothing was installed.
-- **Published version:** `v0.0.8` (`pub const version = "0.0.8"` in
-  `vercel-labs/fx` `src/main.zig`; GitHub release 2026-09-07).
-- **Docs:** [ACP server](https://fx.sh/docs/using-fx/acp) and the related
-  configuration, sessions, permissions, skills, MCP, and authentication pages,
-  retrieved 2026-09-09, compared with `vercel-labs/fx` at that tag and with the
-  shipped ACP stack (`acpDriver.ts`, `acpProcess.ts`, `acpProtocol.ts`,
-  `acpProfiles.ts`).
+- **Live binary:** `fx v0.0.10`, `fx-macos-aarch64.tar.gz` from
+  `vercel-labs/fx` release `v0.0.10` (published 2026-09-14), sha256
+  `b3f0121e46f8227690def72b920d9d1fc299f0b73dd7eb91382bd83674219876`. Probed
+  on macOS 27.0 arm64.
+- **Docs:** the ACP, configuration, sessions, permissions, skills, MCP, and
+  authentication pages at `fx.sh/docs`, compared with `vercel-labs/fx` at
+  `v0.0.10` and with the shipped ACP stack (`acpDriver.ts`, `acpProcess.ts`,
+  `acpProtocol.ts`, `acpProfiles.ts`).
 
-ACP availability is not attestation. The shipped ACP profiles now reuse each
-provider's documented native login profile when one exists; Kimi Code's former
-`immutable-managed-profile` is no longer the generic isolation pattern. fx is
-still blocked because its ACP command exposes no supported host-profile override
-and documents the interactive profile and workspace instructions as shared.
+ACP availability is not attestation. The earlier probe returned NO-GO for two
+reasons: no documented way to relocate the interactive `~/.fx` profile, and
+workspace instructions, skill roots, and approved project `.mcp.json` servers
+entering the session uninvited. The live probe answered the first, and the
+shared ACP profile answers the second with the same root denials it already
+applies elsewhere.
 
 ## Verdict
 
-**NO-GO.** Do not add a selectable fx provider. Do not add a reserved
-unselectable profile. Isolation cannot be proven, and the documented ACP
-runtime shares the interactive fx profile.
+**GO**, scoped exactly to 0130: fx is selectable as an ACP host-profile
+provider, runs with `HOME` in a per-instance managed home, authenticates with a
+brokered Vercel AI Gateway key, and denies the workspace surfaces it would
+otherwise merge.
 
-### Missing upstream guarantee
+### Managed-home isolation
 
-A documented, supported isolation contract for the `fx acp` CLI that:
+`fx acp` exposes no profile-path variable, and its documented environment list
+still has no `FX_HOME` or XDG config-home override. `$HOME` is therefore the
+seam, and the probe proved it works:
 
-1. Relocates settings, global `AGENTS.md`, managed skills, sessions, and
-   permission rules away from the interactive `~/.fx` profile (an `FX_HOME` /
-   equivalent, not an undocumented `HOME` rewrite).
-2. Does not load workspace project instructions, workspace skill roots, or
-   approved project `.mcp.json` servers unless the client admits them.
-3. Does not auto-review or auto-allow tool calls (`code` mode /
-   `permission_mode: auto`) in a way that would widen Octant approvals.
+- With `HOME` set to a temp directory, `fx acp` wrote
+  `.fx/sessions/<id>/{session.json,permissions.json,usage-v2.json,events.jsonl,session.lock}`
+  under that directory.
+- The real `~/.fx` was not created, and no fx process read it.
+- The confined process is also under the profile's private-home denial, so even
+  without the relocation the interactive profile would stay unreadable.
 
-`home_override` exists on the libfx ACP `Config` and is used in tests. `fx acp`
-does not expose it. The documented environment list has no `FX_HOME` or XDG
-config-home override. Embedding libfx or rewriting `HOME` is not that
-guarantee: the ACP docs state the server uses the same settings, project
-instructions, skills, sessions, permissions, and tools as interactive fx, and
-even a relocated profile still merges approved workspace `.mcp.json` and
-workspace `AGENTS.md`.
+### Workspace surfaces
+
+`fx acp` merges the workspace `AGENTS.md`, approved project `.mcp.json`
+servers, project `.fx.json`, and workspace skill roots on its own. Octant
+denies all four to the confined process. The probe confirmed this does not
+break the provider: with `AGENTS.md`, `.mcp.json`, `.fx.json`, and `.agents`
+unreadable, `initialize` and `session/new` both returned exactly as they did
+with the files readable.
+
+### Modes
+
+`session/new` reports `mode` as a select of `ask` and `code`, where `code`
+carries `permissionMode: "auto"`. Octant therefore never maps an approval-gated
+turn onto `code`, and refuses Chat and Plan before a session process starts.
 
 ## Matrix
 
 Each row is `proven` (live binary), `documented-only` (published docs and/or
-pinned source, no live `initialize`), or `missing` (required contract absent).
+pinned source, no live round trip), or `missing` (required contract absent).
 
-| Surface                                           | Status          | Evidence                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| initialize                                        | documented-only | Client must call `initialize` first. fx reports ACP protocol version `1`. Methods: `initialize`, `session/new`, `session/load`, `session/resume`, `session/close`, `session/list`, `session/prompt`, `session/cancel`, `session/set_config_option`, `session/set_mode`. Stdio newline-delimited JSON-RPC; 8 MiB input limit. `fx acp` flags: `--model`, `--log-file`.                                       |
-| session identity                                  | documented-only | `session/new` creates a saved session and returns an opaque `sessionId`. Source writes `{"sessionId":…,"configOptions":[…],"modes":{…}}`. New IDs are 12 characters as of `v0.0.8`; older IDs remain resumable. Each connection has one active session. ACP requests must target that session. Not live-proven.                                                                                             |
-| resume                                            | documented-only | `session/load` takes an exact `sessionId` and replays history. `session/resume` reconnects without replay. Interactive `last` / `-c` aliases are not ACP methods. Child subagent sessions cannot be resumed directly. Ambiguous resume would stay Waiting under 0006; exact-id restore is documented, not live-proven.                                                                                      |
-| cancel, tool-result correlation, streamed updates | documented-only | `session/cancel` cancels the active prompt. Clients receive streamed user and agent messages, tool status updates, and permission requests. `v0.0.8` changelog: cancelling an ACP prompt stops the work. Correlation of tool results to calls is implied by ACP session updates, not live-proven.                                                                                                           |
-| permissions                                       | documented-only | Modes `ask` (request approval for unresolved sensitive calls) and `code` (automatically review them). Both expose runtime tools. Before the client selects a mode, fx uses the configured permission mode (default `auto`). Session "Allow for this session" grants are not restored on load.                                                                                                               |
-| MCP merge                                         | documented-only | ACP combines client `mcpServers` with approved workspace `.mcp.json`. A client entry wins a same-name project entry. Pending or rejected project servers stay unavailable. ACP never inherits `~/.fx/mcp.json`. That last rule is not isolation: approved project MCP still enters the session.                                                                                                             |
-| managed-home isolation                            | missing         | See [Missing upstream guarantee](#missing-upstream-guarantee). Profile state is `~/.fx/` (`settings.json`, `AGENTS.md`, `skills/`, `sessions/`, permission rules). Skills also scan other-agent user roots. `fx acp` shares that profile. `HOME` remapping is undocumented and was not live-proven.                                                                                                         |
-| mode mapping                                      | documented-only | fx `ask` / `code` are permission behaviors, not Octant Chat / Plan / Work / Code. Octant server policy and OS confinement remain the authority. Unsupported Octant modes stay `unavailable`. Mapping Plan or approval-gated Code onto fx `code` (or default `auto`) would auto-review unresolved calls and widen 0009 approvals. Both fx modes still expose runtime tools, so they are not Plan-equivalent. |
-| auth                                              | documented-only | Provider-native only: `fx login`, `fx setup`, `AI_GATEWAY_API_KEY`, `VERCEL_OIDC_TOKEN`. OAuth lives in `~/.fx/auth.json` (macOS Keychain for API keys). No Octant-owned subscription OAuth. `FX_AUTH_MODE=host-managed` is a libfx embedding switch, not an `fx acp` CLI contract.                                                                                                                         |
+| Surface                                           | Status          | Evidence                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| initialize                                        | proven          | `initialize` returns protocolVersion `1`, `agentInfo {name: "fx", version: "0.0.10"}`, `loadSession: true`, `sessionCapabilities {list, resume, close}`, `mcpCapabilities {http, sse}`, `promptCapabilities {image, embeddedContext}`, and an empty `authMethods`. Stdio newline-delimited JSON-RPC. `fx acp` flags: `--model`, `--log-file`. |
+| auth gate                                         | proven          | Without any AI Gateway credential, `initialize` fails with JSON-RPC `-32600` naming `fx login`, `fx setup`, and `AI_GATEWAY_API_KEY`. With a syntactically present key it succeeds, so the handshake gates on credential presence and the first model call is where validity is judged.                                                       |
+| session identity                                  | proven          | `session/new` creates saved state and returns an opaque 12-character `sessionId` plus `configOptions` (provider, model, mode, effort) and `modes`. Each connection has one active session.                                                                                                                                                    |
+| resume                                            | proven          | Both `session/load` and `session/resume` reattach an exact `sessionId` across processes. An unknown id returns `-32602 Session not found`. Octant selects `session/resume` so its own transcript is not replayed.                                                                                                                             |
+| cancel, tool-result correlation, streamed updates | documented-only | `session/cancel` cancels the active prompt; clients receive streamed user and agent messages, tool status updates, and permission requests. Correlation of tool results to calls is implied by ACP session updates, not live-proven.                                                                                                          |
+| permissions                                       | documented-only | Modes `ask` (request approval for unresolved sensitive calls) and `code` (auto-review). Both expose runtime tools. Session "Allow for this session" grants are not restored on load. No live permission round trip was run.                                                                                                                   |
+| MCP merge                                         | documented-only | ACP combines client `mcpServers` with approved workspace `.mcp.json`, and never inherits `~/.fx/mcp.json`. The workspace path is denied to the process under 0130.                                                                                                                                                                            |
+| managed-home isolation                            | proven          | Session state lands under `$HOME/.fx` for a relocated `HOME`, and the real `~/.fx` stays untouched. See above.                                                                                                                                                                                                                                |
+| mode mapping                                      | proven          | `ask` / `code` are permission behaviors, not Octant Chat / Plan / Work / Code. Octant maps an approval-gated turn to `ask`, Full access to `code`, and refuses Chat and Plan.                                                                                                                                                                 |
+| auth                                              | documented-only | Provider-native: `fx login`, `fx setup`, `AI_GATEWAY_API_KEY`, `VERCEL_OIDC_TOKEN`. OAuth lives in `~/.fx/auth.json`; macOS Keychain holds API keys. Under 0130 Octant grants neither, and supplies only a brokered `AI_GATEWAY_API_KEY`. `FX_AUTH_MODE=host-managed` is a libfx embedding switch, not an `fx acp` CLI contract.              |
 
-## What a later GO still needs
+## Residual risk
 
-A live `fx --version` pin plus a non-mutating `initialize` against a temp dir.
-Proof that a managed home excludes inherited instructions, skills, and
-executable MCP. An Octant mode map that keeps Chat and Plan unavailable unless
-fx can run without process-spawn and without auto-review, and that never treats
-fx `code` as Full access or as a substitute for Octant approvals.
+- The model list was read with a placeholder key. A real key was not available
+  during the probe, so no model call, no permission round trip, and no
+  cancellation were executed against fx's backend.
+- Managed-home relocation depends on fx resolving its profile through `$HOME`
+  rather than a platform home API. The probe proves it for `v0.0.10`; a future
+  release that changes that resolution is a new probe, not an assumption.
+- `FX_PERMISSION_MODE=ask` and the ACP session mode are both set. `permission_mode`
+  is a profile-owned key that a project `.fx.json` cannot raise, so the two
+  cannot disagree in fx's favour.

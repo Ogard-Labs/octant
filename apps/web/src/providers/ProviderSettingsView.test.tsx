@@ -2440,6 +2440,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
       onChangeClineConfiguration={controller.changeClineConfiguration}
       onChangeQwenConfiguration={controller.changeQwenConfiguration}
+      onChangeFxConfiguration={controller.changeFxConfiguration}
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
@@ -2458,6 +2459,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateGemini={controller.createGemini}
       onCreateCline={controller.createCline}
       onCreateQwen={controller.createQwen}
+      onCreateFx={controller.createFx}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
@@ -2587,6 +2589,10 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateFx: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onCreateOllama: vi.fn(async () => true),
     onCreateOpenAiCompatible: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
@@ -2650,6 +2656,10 @@ function fixture(
       return true;
     }),
     onChangeQwenConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeFxConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),

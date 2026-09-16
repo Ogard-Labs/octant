@@ -767,6 +767,7 @@ function ProvidersSection(props: {
         onChangeCopilotConfiguration={props.providerController.changeCopilotConfiguration}
         onChangeClineConfiguration={props.providerController.changeClineConfiguration}
         onChangeQwenConfiguration={props.providerController.changeQwenConfiguration}
+        onChangeFxConfiguration={props.providerController.changeFxConfiguration}
         onChangeOpenAiCompatibleConfiguration={
           props.providerController.changeOpenAiCompatibleConfiguration
         }
@@ -792,6 +793,7 @@ function ProvidersSection(props: {
         onCreateGemini={props.providerController.createGemini}
         onCreateCline={props.providerController.createCline}
         onCreateQwen={props.providerController.createQwen}
+        onCreateFx={props.providerController.createFx}
         onCreateOllama={props.providerController.createOllama}
         onCreateOpenAiCompatible={props.providerController.createOpenAiCompatible}
         onCreateAnthropicCompatible={props.providerController.createAnthropicCompatible}
