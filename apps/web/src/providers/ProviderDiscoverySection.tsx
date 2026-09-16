@@ -55,7 +55,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
           <p className="settings-section-line" role="status">
             {candidates.length === 0
               ? "No providers found on this host. Use “Add provider manually” for a custom endpoint or binary."
-              : "Every provider detected on this host is already configured."}
+              : "Every provider detected on this host is already listed below."}
           </p>
         ) : null}
         {scanning && snapshot === undefined ? (
