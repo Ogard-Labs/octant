@@ -335,15 +335,24 @@ async function processIdentities(): Promise<ReadonlyArray<ProcessIdentity>> {
     }));
 }
 
+/**
+ * Discovery prefers the OpenCode 2 executable and the server routes on that
+ * name: a smoke that resolves the bare `opencode` reaches the legacy driver,
+ * which refuses the beta runtime before a session can start, so the packaged
+ * provider path this smoke exists for would never be exercised.
+ */
 async function resolveOpenCodeBinary(): Promise<string> {
-  const output = (await runCommand("/usr/bin/which", ["opencode"], process.env)).trim();
-  if (!output.startsWith("/")) throw new Error("OpenCode CLI is not installed on the host PATH.");
-  try {
-    await access(output, constants.X_OK);
-  } catch {
-    throw new Error(`OpenCode CLI resolved to ${output}, but the path is not executable.`);
+  for (const name of ["opencode2", "opencode"]) {
+    const output = (await runCommand("/usr/bin/which", [name], process.env)).trim();
+    if (!output.startsWith("/")) continue;
+    try {
+      await access(output, constants.X_OK);
+      return output;
+    } catch {
+      throw new Error(`OpenCode CLI resolved to ${output}, but the path is not executable.`);
+    }
   }
-  return output;
+  throw new Error("OpenCode CLI is not installed on the host PATH.");
 }
 
 async function quitApplication(env: NodeJS.ProcessEnv): Promise<void> {
