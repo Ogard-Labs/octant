@@ -109,7 +109,7 @@ describe("ProviderDiscoverySection", () => {
     expect(screen.getByText("Claude Code")).toBeDefined();
   });
 
-  it("does not claim nothing is detected when every candidate is already configured", () => {
+  it("does not claim nothing is detected when every candidate already has a row", () => {
     const snapshot = { ...baseSnapshot, candidates: [ollamaCandidate] };
     const configuredOllama = {
       id: "00000000-0000-4000-8000-000000000903",
@@ -127,7 +127,9 @@ describe("ProviderDiscoverySection", () => {
     );
 
     expect(screen.queryByText("Ollama")).toBeNull();
-    expect(screen.getByText(/already configured/i)).toBeDefined();
+    // A row is a configuration fact, not readiness: the readiness summary below
+    // this line is the one that says whether anything still needs setup.
+    expect(screen.getByText(/already listed below/i)).toBeDefined();
     expect(screen.queryByText(/No providers found on this host/)).toBeNull();
   });
 
