@@ -2310,7 +2310,7 @@ describe("ProviderSettingsView", () => {
           instance: { ...devinProvider(), enabled: false },
           discoverySnapshot: discoverySnapshot({
             candidates: [],
-            searchedDirectories: searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+            searchedDirectories: searchedDirectoriesFor("devin", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2321,6 +2321,28 @@ describe("ProviderSettingsView", () => {
     const control = within(card).getByRole("switch", { name: "Enable Devin local" });
     expect(control).not.toHaveAttribute("aria-disabled", "true");
     expect(within(card).getByText(/not found by the latest scan/i)).toBeVisible();
+  });
+
+  it("says a provider the scan never reached was not checked rather than not found", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: { ...devinProvider(), enabled: false },
+          discoverySnapshot: discoverySnapshot({
+            candidates: [],
+            status: "partial",
+            message: "Discovery scan exceeded its time budget.",
+            searchedDirectories: searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Devin local" });
+    const control = within(card).getByRole("switch", { name: "Enable Devin local" });
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(card).getByText(/did not check this provider/i)).toBeVisible();
+    expect(within(card).queryByText(/not found by the latest scan/i)).toBeNull();
   });
 
   it("keeps detected Ollama enablement visible after a repeated scan", () => {
