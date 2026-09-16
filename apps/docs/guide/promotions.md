@@ -14,6 +14,8 @@ When Work work becomes software engineering, Octant offers an explicit promotion
 4. On approval, a new Code thread starts in a linked Code Project.
 5. The Code thread starts **approval-gated**, never inheriting the Work thread's authority.
 
+The Work Project overview's **Continue this in Code** form needs an available Work artifact and a target Code Project. Missing choices show **No Work artifacts available** or **No Code Projects available**. The corresponding selector and **Propose a Code thread** stay disabled until those prerequisites exist.
+
 ## Authority boundary
 
 A promotion proposal:
