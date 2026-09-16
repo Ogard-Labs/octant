@@ -719,152 +719,164 @@ describe("App", () => {
     expect(sendCallOrder!).toBeLessThan(openCallOrder!);
   });
 
-  it("creates a Project-scoped Chat thread through the authoritative quick start", async () => {
-    const user = userEvent.setup();
-    const chatApi = chats();
-    const originalExecute = vi.mocked(chatApi.execute).getMockImplementation();
-    if (originalExecute === undefined) throw new Error("Expected Chat fixture");
-    vi.mocked(chatApi.execute).mockImplementation(async (command) => {
-      const result = await originalExecute(command);
-      if (command.kind === "change-chat-provider" && result.kind === "thread-created") {
-        return decodeChatCommandResult({
-          kind: "thread-updated",
-          thread: {
-            ...result.thread,
-            providerInstanceId: command.providerInstanceId,
-            modelId: command.modelId,
-            modelOptionValues: command.modelOptionValues,
-            version: result.thread.version + 1,
-          },
-        });
-      }
-      return result;
-    });
-    const providerApi = providers();
-    const instance = openAiProvider("10000000-0000-4000-8000-000000000001", "Reasoning provider");
-    const bootstrapProviders = await providerApi.bootstrap();
-    vi.mocked(providerApi.bootstrap).mockResolvedValue({
-      ...bootstrapProviders,
-      instances: [instance],
-      observedStates: [
-        observedProvider(instance.id, [
-          {
-            ...providerModel({ id: "model-a", displayName: "Reasoning model" }),
-            options: [
-              { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
-            ],
-          },
-        ]),
-      ],
-    });
-    const chatProject = {
-      id: projectId,
-      type: "chat",
-      name: "Launch planning",
-      lifecycle: "active",
-      pinned: true,
-      rank: "0/1",
-      version: 1,
-      createdAt: "2026-07-20T08:00:00.000Z",
-      updatedAt: "2026-07-20T08:00:00.000Z",
-    } as never;
-    const projectApi = projects({
-      active: [chatProject],
-      archived: [],
-      availability: [],
-      memory: [],
-    });
-    projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
-    const initial = chatShellBootstrap();
-    const layout = initial.workspace.layouts.chat;
-    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
-    const projectWorkspace = applyWorkspaceOperation(initial.workspace, {
-      kind: "open-surface",
-      mode: "chat",
-      paneId: layout.paneId,
-      surface: {
-        kind: "project",
-        id: "00000000-0000-4000-8000-000000000890" as never,
-        projectId,
+  it.each(["accepted", "refused"] as const)(
+    "keeps quick-start sending conditional on reasoning settings being %s",
+    async (outcome) => {
+      const user = userEvent.setup();
+      const chatApi = chats();
+      const originalExecute = vi.mocked(chatApi.execute).getMockImplementation();
+      if (originalExecute === undefined) throw new Error("Expected Chat fixture");
+      vi.mocked(chatApi.execute).mockImplementation(async (command) => {
+        if (command.kind === "change-chat-provider" && outcome === "refused") {
+          throw new Error("Model settings could not be applied.");
+        }
+        const result = await originalExecute(command);
+        if (command.kind === "change-chat-provider" && result.kind === "thread-created") {
+          return decodeChatCommandResult({
+            kind: "thread-updated",
+            thread: {
+              ...result.thread,
+              providerInstanceId: command.providerInstanceId,
+              modelId: command.modelId,
+              modelOptionValues: command.modelOptionValues,
+              version: result.thread.version + 1,
+            },
+          });
+        }
+        return result;
+      });
+      const providerApi = providers();
+      const instance = openAiProvider("10000000-0000-4000-8000-000000000001", "Reasoning provider");
+      const bootstrapProviders = await providerApi.bootstrap();
+      vi.mocked(providerApi.bootstrap).mockResolvedValue({
+        ...bootstrapProviders,
+        instances: [instance],
+        observedStates: [
+          observedProvider(instance.id, [
+            {
+              ...providerModel({ id: "model-a", displayName: "Reasoning model" }),
+              options: [
+                { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+              ],
+            },
+          ]),
+        ],
+      });
+      const chatProject = {
+        id: projectId,
+        type: "chat",
+        name: "Launch planning",
+        lifecycle: "active",
+        pinned: true,
+        rank: "0/1",
+        version: 1,
+        createdAt: "2026-07-20T08:00:00.000Z",
+        updatedAt: "2026-07-20T08:00:00.000Z",
+      } as never;
+      const projectApi = projects({
+        active: [chatProject],
+        archived: [],
+        availability: [],
+        memory: [],
+      });
+      projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
+      const initial = chatShellBootstrap();
+      const layout = initial.workspace.layouts.chat;
+      if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+      const projectWorkspace = applyWorkspaceOperation(initial.workspace, {
+        kind: "open-surface",
         mode: "chat",
-        title: "Launch planning",
-      },
-    });
-    const shellApi = client({
-      ...initial,
-      workspace: {
-        ...projectWorkspace,
-        contextByMode: {
-          ...projectWorkspace.contextByMode,
-          chat: {
-            ...projectWorkspace.contextByMode.chat,
-            projectId: otherProjectId,
+        paneId: layout.paneId,
+        surface: {
+          kind: "project",
+          id: "00000000-0000-4000-8000-000000000890" as never,
+          projectId,
+          mode: "chat",
+          title: "Launch planning",
+        },
+      });
+      const shellApi = client({
+        ...initial,
+        workspace: {
+          ...projectWorkspace,
+          contextByMode: {
+            ...projectWorkspace.contextByMode,
+            chat: {
+              ...projectWorkspace.contextByMode.chat,
+              projectId: otherProjectId,
+            },
           },
         },
-      },
-    });
+      });
 
-    render(
-      <App
-        chatClient={chatApi}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projectApi}
-        projectWindowCapability={projectWindowCapability}
-        providerClient={providerApi}
-        shellClient={shellApi}
-      />,
-    );
+      render(
+        <App
+          chatClient={chatApi}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projectApi}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providerApi}
+          shellClient={shellApi}
+        />,
+      );
 
-    const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
-    await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
-    await user.click(
-      within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
-        name: "High",
-      }),
-    );
-    await user.keyboard("{Escape}");
-    await user.type(
-      within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
-      "Prepare launch brief",
-    );
-    await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
+      const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
+      await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
+      await user.click(
+        within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
+          name: "High",
+        }),
+      );
+      await user.keyboard("{Escape}");
+      await user.type(
+        within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
+        "Prepare launch brief",
+      );
+      await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
 
-    expect(chatApi.execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "change-chat-provider",
-        threadId: createdChatThreadId,
-        modelOptionValues: { effort: "high" },
-      }),
-    );
-    expect(chatApi.execute).toHaveBeenCalledWith({
-      kind: "create-chat-thread",
-      projectId,
-      title: "Prepare launch brief",
-    });
-    expect(chatApi.execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "send-chat-turn",
-        expectedVersion: 2,
-        threadId: createdChatThreadId,
-        prompt: "Prepare launch brief",
-      }),
-    );
-    await waitFor(() =>
-      expect(shellApi.execute).toHaveBeenCalledWith(
+      expect(chatApi.execute).toHaveBeenCalledWith(
         expect.objectContaining({
-          kind: "apply-workspace-operation",
-          operation: expect.objectContaining({
-            kind: "switch-project-surface",
-            mode: "chat",
-            surface: expect.objectContaining({
-              kind: "chat-thread",
-              threadId: createdChatThreadId,
+          kind: "change-chat-provider",
+          threadId: createdChatThreadId,
+          modelOptionValues: { effort: "high" },
+        }),
+      );
+      expect(chatApi.execute).toHaveBeenCalledWith({
+        kind: "create-chat-thread",
+        projectId,
+        title: "Prepare launch brief",
+      });
+      if (outcome === "accepted") {
+        expect(chatApi.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "send-chat-turn",
+            expectedVersion: 2,
+            threadId: createdChatThreadId,
+            prompt: "Prepare launch brief",
+          }),
+        );
+      } else {
+        expect(chatApi.execute).not.toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "send-chat-turn" }),
+        );
+      }
+      await waitFor(() =>
+        expect(shellApi.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "apply-workspace-operation",
+            operation: expect.objectContaining({
+              kind: "switch-project-surface",
+              mode: "chat",
+              surface: expect.objectContaining({
+                kind: "chat-thread",
+                threadId: createdChatThreadId,
+              }),
             }),
           }),
-        }),
-      ),
-    );
-  });
+        ),
+      );
+    },
+  );
 
   it("opens the created Project Chat thread when its first turn cannot be dispatched", async () => {
     const user = userEvent.setup();
