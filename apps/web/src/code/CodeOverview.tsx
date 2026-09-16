@@ -288,6 +288,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
   // error-message change must not, or an unrelated reconnect blanks a board
   // that is still the truthful answer for this Project.
   const lastBoardProjectId = useRef<string | undefined>(props.projectId);
+  const lastBoardClient = useRef(props.controller.client);
   const [reload, setReload] = useState(0);
   const ready = props.controller.status === "ready";
   const { remoteFacts } = useWorktreeRemoteFacts({
@@ -297,6 +298,11 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
   });
 
   useEffect(() => {
+    const projectChanged =
+      lastBoardProjectId.current !== props.projectId ||
+      lastBoardClient.current !== props.controller.client;
+    lastBoardProjectId.current = props.projectId;
+    lastBoardClient.current = props.controller.client;
     if (props.controller.status === "disconnected") {
       setBoardState({
         kind: "unavailable",
@@ -305,12 +311,14 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
       return;
     }
     if (!ready) {
-      setBoardState({ kind: "loading" });
+      setBoardState((previous) =>
+        !projectChanged && props.controller.status === "loading" && previous.kind === "ready"
+          ? previous
+          : { kind: "loading" },
+      );
       return;
     }
     let active = true;
-    const projectChanged = lastBoardProjectId.current !== props.projectId;
-    lastBoardProjectId.current = props.projectId;
     setBoardState((previous) =>
       !projectChanged && previous.kind === "ready" ? previous : { kind: "loading" },
     );

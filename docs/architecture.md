@@ -487,7 +487,10 @@ thread token spend ceilings (0060) are host owner policy: the server refuses a
 provider-consuming turn at admission when remaining reserved capacity cannot
 cover a declared per-turn bound, and the composer and Environment name a
 recovery. Spend is the existing `UsageRecord` ledger, never imported provider
-history. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
+history. Project overviews retain loaded content during same-Project refreshes
+on the same client connection. Changing Project or client clears retained
+content; disconnect and authorization failures remain explicit unavailable
+states. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
 as an app-wide popover from the bottom-left profile and Settings control, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a

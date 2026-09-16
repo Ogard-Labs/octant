@@ -31,10 +31,18 @@ export function useWorkOverviewController(
   const [status, setStatus] = useState<WorkOverviewController["status"]>("idle");
   const [retryToken, setRetryToken] = useState(0);
   const generation = useRef(0);
+  const loadedScope = useRef<
+    | {
+        readonly projectId: ProjectId;
+        readonly client: WorkOverviewClient;
+      }
+    | undefined
+  >(undefined);
 
   useEffect(() => {
     const operation = ++generation.current;
     if (!options.enabled || options.client === undefined || options.projectId === undefined) {
+      loadedScope.current = undefined;
       setStatus("idle");
       setModel(
         buildWorkOverviewModel(
@@ -44,21 +52,27 @@ export function useWorkOverviewController(
       return;
     }
 
+    const client = options.client;
     setStatus("loading");
-    setModel(
-      buildWorkOverviewModel({
-        ...(options.availability === undefined ? {} : { availability: options.availability }),
-        sectionStatus: allSections("loading"),
-        sectionMessage: {
-          folder: "Loading the folder.",
-          filesAndArtifacts: "Loading recent files and artifacts.",
-          workflowsAndThreads: "Loading active workflows and threads.",
-          approvals: "Loading approvals.",
-          versions: "Loading versions.",
-          validation: "Loading validation.",
-          exports: "Loading exports and handoffs.",
-        },
-      }),
+    const retainLoaded =
+      loadedScope.current?.projectId === options.projectId &&
+      loadedScope.current?.client === options.client;
+    setModel((previous) =>
+      retainLoaded
+        ? previous
+        : buildWorkOverviewModel({
+            ...(options.availability === undefined ? {} : { availability: options.availability }),
+            sectionStatus: allSections("loading"),
+            sectionMessage: {
+              folder: "Loading the folder.",
+              filesAndArtifacts: "Loading recent files and artifacts.",
+              workflowsAndThreads: "Loading active workflows and threads.",
+              approvals: "Loading approvals.",
+              versions: "Loading versions.",
+              validation: "Loading validation.",
+              exports: "Loading exports and handoffs.",
+            },
+          }),
     );
 
     void options.client
@@ -76,11 +90,13 @@ export function useWorkOverviewController(
           ...(projection.folder === undefined ? {} : { folder: projection.folder }),
           ...(projection.status === undefined ? {} : { status: projection.status }),
         };
+        loadedScope.current = { projectId: projection.projectId, client };
         setModel(buildWorkOverviewModel(input));
         setStatus("ready");
       })
       .catch((error: unknown) => {
         if (operation !== generation.current) return;
+        loadedScope.current = undefined;
         const failureStatus = mapFailure(error);
         setStatus(failureStatus);
         setModel(

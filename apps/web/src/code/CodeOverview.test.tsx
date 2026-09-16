@@ -232,7 +232,7 @@ describe("CodeOverview", () => {
         ]),
       ),
     } as never;
-    render(
+    const { rerender } = render(
       <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
     );
 
@@ -240,6 +240,37 @@ describe("CodeOverview", () => {
     // Exactly one Branch row: the thread whose worktree the host reported.
     expect(screen.getAllByText("Branch")).toHaveLength(1);
     expect(screen.getByText("Worktree pending")).toBeVisible();
+    rerender(
+      <CodeOverview
+        controller={{ ...value, status: "loading" }}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+      />,
+    );
+    expect(screen.getByText("feature/controller")).toBeVisible();
+    expect(screen.queryByText("Loading threads…")).not.toBeInTheDocument();
+    rerender(
+      <CodeOverview
+        controller={{ ...value, status: "loading" }}
+        onOpenThread={vi.fn()}
+        projectId={"20000000-0000-4000-8000-000000000099" as never}
+      />,
+    );
+    expect(screen.queryByText("feature/controller")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading threads…")).toBeVisible();
+    rerender(
+      <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
+    );
+    expect(await screen.findByText("feature/controller")).toBeVisible();
+    rerender(
+      <CodeOverview
+        controller={{ ...value, status: "disconnected" }}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+      />,
+    );
+    expect(screen.queryByText("feature/controller")).not.toBeInTheDocument();
+    expect(screen.getByText("Code projections unavailable")).toBeVisible();
   });
 
   it("renders no placeholder for a facet the host did not report", async () => {
