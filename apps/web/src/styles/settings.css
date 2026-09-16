@@ -17,6 +17,10 @@
 }
 
 .settings-view__sidebar {
+  /* Settings navigation is chrome like the sidebar it replaces: a drag across
+     it must not select the section labels. Its own search field opts back in. */
+  user-select: none;
+  -webkit-user-select: none;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -24,6 +28,12 @@
   overflow: hidden;
   background: var(--octant-sidebar-opaque);
   border-right: 1px solid var(--octant-border);
+}
+
+.settings-view__sidebar
+  :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .shell--material-translucent .settings-view {
