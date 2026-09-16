@@ -74,6 +74,44 @@ describe("shared Seatbelt profile builder", () => {
     },
   );
 
+  it("grants the resolved form of a launch root reached through a symlink", () => {
+    const root = temporaryRoot();
+    const checkout = join(root, "project");
+    mkdirSync(checkout);
+    const lexical = join(root, "project-link");
+    symlinkSync(checkout, lexical);
+
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: lexical,
+      temporaryDirectory: lexical,
+      networkEgress: "none",
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    });
+
+    const resolved = realpathSync(lexical);
+    expect(resolved).not.toBe(lexical);
+    expect(profile).toContain(seatbeltAllowRule("file-read*", resolved));
+    expect(profile).toContain(seatbeltAllowRule("file-write*", resolved));
+    expect(profile).toContain(seatbeltAllowRule("file-read*", lexical));
+  });
+
+  it("refuses a launch root whose resolved form is an ancestor of a denied path", () => {
+    const root = temporaryRoot();
+    const link = join(root, "root-link");
+    symlinkSync("/", link);
+
+    expect(() =>
+      buildDenyDefaultSeatbeltProfile({
+        boundRoot: link,
+        temporaryDirectory: join(root, "tmp"),
+        networkEgress: "none",
+        allowFileReadStar: true,
+        privateHomeAllowPaths: [],
+      }),
+    ).toThrow(SeatbeltConfinementError);
+  });
+
   it("builds a deny-default profile with exactly one bound root write plus private temp", () => {
     const root = temporaryRoot();
     const boundRoot = join(root, "project");
