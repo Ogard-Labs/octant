@@ -3841,6 +3841,7 @@ function LaunchedShell(
   function handleSelectMode(mode: OctantMode) {
     markInteraction("renderer", "mode-switch-requested");
     markInteractionAfterPaint("mode-switch");
+    setProjectsListOpen(false);
     setRailPlaceholder(undefined);
     controller.setMode(mode);
     if (mode !== "code") setCodeBoardOpen(false);

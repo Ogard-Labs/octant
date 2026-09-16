@@ -22,7 +22,7 @@ Chat Projects are virtual, memory-scoped containers with no implicit filesystem 
 
 ## Creating a Project
 
-1. Click **New Project** in the sidebar.
+1. Open **Projects** in primary navigation, then click **Add Project** in the directory.
 2. Select the mode (Chat, Work, or Code).
 3. For Work and Code, use the native picker to select a directory.
 4. Name the Project.

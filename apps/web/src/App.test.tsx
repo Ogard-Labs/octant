@@ -3609,6 +3609,14 @@ describe("App", () => {
       expect(within(sidebar).queryByRole("region", { name: "Projects sidebar" })).toBeNull();
       expect(screen.getByRole("searchbox", { name: "Search Projects" })).toBeVisible();
     }
+    // A mode switch is a navigation away from the Projects page, so the page
+    // must not keep sitting over the workspace it belongs to.
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    expect(screen.queryByRole("searchbox", { name: "Search Projects" })).toBeNull();
+    expect(document.querySelector(".projects-page-layer")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);
