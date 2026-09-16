@@ -101,12 +101,14 @@ describe("cleanupPackagedProcess", () => {
       resolveExit?.(null);
       await exit;
     });
-    const startCommand = vi.fn((): BoundedCommandHandle => ({
-      exit,
-      stdout: Promise.resolve(""),
-      stderr: Promise.resolve(""),
-      terminate,
-    }));
+    const startCommand = vi.fn(
+      (): BoundedCommandHandle => ({
+        exit,
+        stdout: Promise.resolve(""),
+        stderr: Promise.resolve(""),
+        terminate,
+      }),
+    );
     let probes = 0;
 
     await expect(
