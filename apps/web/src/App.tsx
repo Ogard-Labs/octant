@@ -1616,16 +1616,16 @@ function LaunchedShell(
     activeMode,
     activeWorkThreadId,
   ]);
-  // The context snapshot measures a conversation that keeps growing, so it has
-  // to be asked again when the subject's own turns move on. Work threads run
-  // their controller inside their workspace rather than here, so their meter
-  // still only refreshes on thread change.
+  // Chat and Work transcripts belong to pane controllers. Their host change
+  // feed includes turn updates, including the first turn of a new thread.
   const contextRevision =
     activeMode === "chat"
-      ? chatController.activeView?.lastSequence
-      : activeMode === "code"
-        ? activeCodeThreadView?.lastSequence
-        : undefined;
+      ? machineChanges.chatNavigation
+      : activeMode === "work"
+        ? machineChanges.workNavigation
+        : activeMode === "code"
+          ? activeCodeThreadView?.lastSequence
+          : undefined;
   const contextController = useContextController({
     client: contextClient,
     ...(contextRevision === undefined ? {} : { revision: Number(contextRevision) }),

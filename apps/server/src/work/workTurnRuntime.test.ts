@@ -33,6 +33,7 @@ describe("WorkTurnRuntime", () => {
   it("acquires Work project-backed authority with request projection context and streams a reply", async () => {
     const acquireInputs: unknown[] = [];
     const deltas: string[] = [];
+    const usage = vi.fn();
     const events: ProviderRuntimeEvent[] = [
       {
         instanceId: ids.provider,
@@ -48,6 +49,18 @@ describe("WorkTurnRuntime", () => {
         sequence: 2,
         correlationId: decodeCorrelationId(String(ids.project)),
         occurredAt: decodeTimestamp("2026-08-11T12:00:01.000Z"),
+        kind: "usage",
+        sessionId: ids.session as never,
+        inputTokens: 120,
+        outputTokens: 8,
+        contextTokens: 128,
+        contextWindow: 32000,
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 3,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:02.000Z"),
         kind: "completed",
         sessionId: ids.session as never,
       },
@@ -94,6 +107,7 @@ describe("WorkTurnRuntime", () => {
       driver,
       signal: new AbortController().signal,
       onDelta: (text) => deltas.push(text),
+      onUsage: usage,
     });
 
     expect(acquireInputs[0]).toMatchObject({
@@ -107,6 +121,14 @@ describe("WorkTurnRuntime", () => {
     });
     expect(JSON.stringify(acquireInputs[0])).not.toMatch(/shell|worktree|pullRequest|checkoutId/);
     expect(deltas).toEqual(["Hello from Work"]);
+    expect(usage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputTokens: 120,
+        outputTokens: 8,
+        contextTokens: 128,
+        contextWindow: 32000,
+      }),
+    );
     expect(outcome).toEqual({ kind: "completed", response: "Hello from Work" });
   });
 

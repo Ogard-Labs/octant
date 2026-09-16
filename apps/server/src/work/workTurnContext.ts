@@ -4,6 +4,8 @@ import {
   decodeContextSubjectRef,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  type ContextManifest,
+  type ProviderToolDefinition,
   type ProviderContextBlock,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -22,7 +24,11 @@ const WORK_ARTIFACT_INSTRUCTIONS =
   "You are working in an Octant Work task. When the user requests a document or artifact, use your available file tools to create it inside the bound task folder and report its real relative paths. Octant's Files tool lets the user open those files; observed Markdown and plain-text documents can also appear in Document beside the conversation. Creating a file does not prove a preview opened. Use appropriate format-specific tooling for binary documents. Never invent download URLs or host artifact ids. Use only tools actually offered to this task; these instructions grant no additional access.";
 
 export type WorkTurnContextPlan =
-  | { readonly kind: "ok"; readonly context: ReadonlyArray<ProviderContextBlock> }
+  | {
+      readonly kind: "ok";
+      readonly manifest: ContextManifest;
+      readonly context: ReadonlyArray<ProviderContextBlock>;
+    }
   | { readonly kind: "blocked"; readonly message: string };
 
 export interface WorkTurnContextContribution {
@@ -69,7 +75,12 @@ export function planWorkTurnContext(input: {
       id: input.uuid(),
       source: { kind: contribution.sourceKind, referenceId: contribution.referenceId },
       category: contribution.category,
-      label: contribution.text.slice(0, 64).trim() || contribution.category,
+      label: {
+        conversation: "Earlier conversation",
+        "current-request": "Current request",
+        "workspace-context": "Workspace context",
+        "octant-policy": "Work instructions",
+      }[contribution.category],
       eligibility: {
         providerInstanceId,
         status: "eligible",
@@ -101,6 +112,62 @@ export function planWorkTurnContext(input: {
     overrides: { pinnedEntryIds: [], excludedEntryIds: [] },
     createdAt: input.createdAt,
   });
+  return reduceWorkContext(manifest, blocksByEntryId, budget);
+}
+
+export function includeWorkToolDefinitions(input: {
+  readonly plan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
+  readonly tools: ReadonlyArray<ProviderToolDefinition>;
+  readonly uuid: () => string;
+  readonly safeInputBudget: number;
+}): WorkTurnContextPlan {
+  const blocks = new Map<string, ProviderContextBlock>();
+  let blockIndex = 0;
+  for (const entry of input.plan.manifest.entries) {
+    if (entry.state === "omitted" || entry.category === "current-request") continue;
+    const block = input.plan.context[blockIndex++];
+    if (block !== undefined) blocks.set(String(entry.id), block);
+  }
+  const toolEntries = input.tools.map((tool) => {
+    const tokens = Math.max(16, Math.ceil(JSON.stringify(tool).length / 4));
+    return decodeContextEntry({
+      id: input.uuid(),
+      source: { kind: "tool", referenceId: tool.name },
+      category: "octant-tools",
+      label: tool.name,
+      eligibility: {
+        providerInstanceId: input.plan.manifest.providerInstanceId,
+        status: "eligible",
+        reason: "selected-provider",
+      },
+      posture: "required",
+      retention: "active",
+      priority: 100,
+      originalSize: tokens,
+      includedSize: tokens,
+      tokens: { kind: "known", tokens, accuracy: "conservative-heuristic" },
+      state: "included",
+      introducedAtTurn: 1,
+      reuseCount: 0,
+      preview: { redacted: true, label: "Tool definition hidden" },
+    });
+  });
+  return reduceWorkContext(
+    decodeContextManifest({
+      ...input.plan.manifest,
+      entries: [...input.plan.manifest.entries, ...toolEntries],
+    }),
+    blocks,
+    input.safeInputBudget,
+  );
+}
+
+function reduceWorkContext(
+  manifest: ContextManifest,
+  blocksByEntryId: ReadonlyMap<string, ProviderContextBlock>,
+  budget: number,
+): WorkTurnContextPlan {
+  const entries = manifest.entries;
   const reduction = reduceContextToBudget(manifest, budget);
   if (reduction.blocked) {
     return {
@@ -112,6 +179,18 @@ export function planWorkTurnContext(input: {
   const included = new Set(reduction.includedEntryIds.map((id) => String(id)));
   return {
     kind: "ok",
+    manifest: decodeContextManifest({
+      ...manifest,
+      entries: entries.map((entry) =>
+        included.has(String(entry.id))
+          ? entry
+          : {
+              ...entry,
+              state: "omitted",
+              includedSize: 0,
+            },
+      ),
+    }),
     context: entries.flatMap((entry) => {
       if (!included.has(String(entry.id))) return [];
       // The current prompt is sent as the turn prompt, not as extra context.

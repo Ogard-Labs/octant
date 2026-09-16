@@ -291,6 +291,21 @@ describe("context compaction policy", () => {
     });
   });
 
+  it("converges on stable provider overhead instead of accumulating it each turn", () => {
+    let reserve = 0;
+    for (let turn = 0; turn < 4; turn++) {
+      reserve = reconcileContextVariance({
+        requestShape: "work-turn",
+        expectedRequestShape: "work-turn",
+        plannedInputTokens: 1_000,
+        actualInputTokens: 1_500,
+        currentVarianceReserve: reserve,
+        maxAdjustmentTokens: 250,
+      }).nextVarianceReserve;
+    }
+    expect(reserve).toBe(500);
+  });
+
   it("rejects unsafe arithmetic and cross-shape variance learning", () => {
     expect(() =>
       reconcileContextVariance({

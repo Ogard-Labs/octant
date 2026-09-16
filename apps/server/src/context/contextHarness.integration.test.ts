@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,9 @@ import {
   decodeProviderServiceLimits,
 } from "@octant/contracts";
 import { deriveCatalogEpoch, type CapabilityCatalogEntry } from "./capabilityCatalog";
+import { observeWorkContext, publishWorkContext } from "../work/workContextInspection";
+import { planWorkTurnContext } from "../work/workTurnContext";
+import { decodeWorkThreadId } from "@octant/contracts";
 import { ContextHarnessService } from "./contextHarnessService";
 import { purgeContextSubjectContent } from "../persistence/contextProjection";
 import { Journal } from "../persistence/journal";
@@ -38,6 +42,161 @@ afterEach(() => {
 });
 
 describe("ContextHarnessService integration", () => {
+  it("cancels an unavailable Work limit observation without creating a context plan", async () => {
+    const fixture = createFixture();
+    const controller = new AbortController();
+    let n = 0;
+    let release: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const plan = planWorkTurnContext({
+      threadId: decodeWorkThreadId("81000000-0000-4000-8000-000000000010"),
+      providerInstanceId,
+      modelId: "model-a",
+      createdAt: now,
+      uuid: () => `81000000-0000-4000-8000-${String(++n + 100).padStart(12, "0")}`,
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work instructions fit");
+    try {
+      const pending = observeWorkContext({
+        service: fixture.service,
+        plan,
+        displayLabel: "Work task",
+        signal: controller.signal,
+        driver: {
+          kind: "openai-compatible",
+          probe: () => Effect.die("Unused"),
+          acquire: () => Effect.die("Unused"),
+          contextFacts: {
+            observeModelLimits: () =>
+              Effect.sync(() => release?.()).pipe(Effect.zipRight(Effect.never)),
+            observeServiceLimits: () => Effect.succeed(serviceLimits()),
+          },
+        },
+      });
+      await started;
+      controller.abort();
+      await expect(pending).resolves.toBeUndefined();
+      expect(() => fixture.service.inspect(plan.manifest.subject)).toThrow("no context plan");
+    } finally {
+      controller.abort();
+      fixture.connection.close();
+    }
+  });
+
+  it("publishes an explicit Work estimate when the provider has no pre-turn context facts", async () => {
+    const fixture = createFixture();
+    let n = 0;
+    const plan = planWorkTurnContext({
+      threadId: decodeWorkThreadId("81000000-0000-4000-8000-000000000010"),
+      providerInstanceId,
+      modelId: "model-a",
+      createdAt: now,
+      uuid: () => `81000000-0000-4000-8000-${String(++n + 100).padStart(12, "0")}`,
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work instructions fit");
+    try {
+      const published = await observeWorkContext({
+        service: fixture.service,
+        plan: {
+          ...plan,
+          manifest: {
+            ...plan.manifest,
+            entries: [
+              ...plan.manifest.entries,
+              decodeContextEntry({
+                ...requiredEntry(50),
+                id: "81000000-0000-4000-8000-000000000999",
+                source: { kind: "tool", referenceId: "work-read" },
+                category: "octant-tools",
+              }),
+              decodeContextEntry({
+                ...requiredEntry(50),
+                id: "81000000-0000-4000-8000-000000000998",
+                source: { kind: "tool", referenceId: "work-read" },
+                category: "octant-tools",
+              }),
+              decodeContextEntry({
+                ...requiredEntry(50),
+                id: "81000000-0000-4000-8000-000000000997",
+                source: { kind: "tool", referenceId: "work-write" },
+                category: "octant-tools",
+                posture: "removable",
+                state: "omitted",
+                includedSize: 0,
+              }),
+            ],
+          },
+        },
+        displayLabel: "Work task",
+        signal: new AbortController().signal,
+        driver: {
+          kind: "openai-compatible",
+          probe: () => Effect.die("Unused"),
+          acquire: () => Effect.die("Unused"),
+        },
+      });
+      expect(published?.snapshot.capabilities).toMatchObject({ loadedTools: 1, availableTools: 2 });
+      expect(published?.snapshot.modelLimits.source).toBe("conservative-fallback");
+      expect(published?.snapshot.modelLimits).not.toHaveProperty("maxOutput");
+      expect(published?.snapshot.next.plan.safeInputBudget).toBe(24_000);
+      expect(published?.context).toEqual(plan.context);
+    } finally {
+      fixture.connection.close();
+    }
+  });
+
+  it("publishes the dispatched Work composition using reported model limits", () => {
+    const fixture = createFixture();
+    let n = 0;
+    const plan = planWorkTurnContext({
+      threadId: decodeWorkThreadId("81000000-0000-4000-8000-000000000010"),
+      providerInstanceId,
+      modelId: "model-a",
+      createdAt: now,
+      uuid: () => `81000000-0000-4000-8000-${String(++n + 100).padStart(12, "0")}`,
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work instructions fit");
+    const published = publishWorkContext({
+      service: fixture.service,
+      plan,
+      displayLabel: "Work task",
+      modelLimitObservations: [modelLimits()],
+      serviceLimits: serviceLimits(),
+    });
+    expect(
+      publishWorkContext({
+        service: fixture.service,
+        plan,
+        displayLabel: "Work task",
+        modelLimitObservations: [
+          decodeModelContextLimits({ ...modelLimits(), modelId: "another-model" }),
+        ],
+        serviceLimits: serviceLimits(),
+      }),
+    ).toBeUndefined();
+    expect(published?.snapshot.subject.aggregateType).toBe("work-thread");
+    expect(published?.snapshot.modelLimits.contextWindow).toBe(1000);
+    expect(published?.context).toEqual(plan.context);
+    expect(fixture.service.inspect(plan.manifest.subject).next.manifest.entries).toEqual(
+      plan.manifest.entries,
+    );
+    expect(
+      publishWorkContext({
+        service: fixture.service,
+        plan,
+        displayLabel: "Work task",
+        modelLimitObservations: [],
+        serviceLimits: serviceLimits(),
+      }),
+    ).toBeUndefined();
+    fixture.connection.close();
+  });
+
   it.each([
     { mode: "Chat", modeTokens: 48, reviewedBudget: 224 },
     { mode: "Work", modeTokens: 80, reviewedBudget: 256 },
@@ -245,8 +404,8 @@ describe("ContextHarnessService integration", () => {
     expect(reconciled.variance).toEqual({
       requestShape: "code-turn",
       varianceTokens: 40,
-      reserveAdjustmentTokens: 40,
-      nextVarianceReserve: 60,
+      reserveAdjustmentTokens: 20,
+      nextVarianceReserve: 40,
     });
     expect(reconciled.snapshot.latestSent).toEqual(planned.next);
     expect(reconciled.snapshot.latestUsage).toMatchObject({
@@ -269,6 +428,25 @@ describe("ContextHarnessService integration", () => {
         maxAdjustmentTokens: 50,
       }),
     ).toThrowError(expect.objectContaining({ category: "invalid" }));
+    const next = fixture.service.planTurn({
+      subject,
+      displayLabel: "Code Project",
+      requestShape: "code-turn",
+      modelLimitObservations: [modelLimits()],
+      serviceLimits: serviceLimits(),
+      entries: [requiredEntry(100)],
+      reserves: { response: 200, reasoning: 50, framing: 50, variance: 20, safety: 50 },
+      watchHeadroomTokens: 100,
+      capabilityCatalog: catalog([]),
+      capabilityRequest: {
+        providerInstanceId,
+        activeScope,
+        nativeToolSearch: "supported",
+        taskKeywords: [],
+        explicitSelections: [],
+      },
+    });
+    expect(next.next.plan.reserves.variance).toBe(40);
     fixture.connection.close();
   });
 
@@ -381,11 +559,11 @@ describe("ContextHarnessService integration", () => {
     directories.push(directory);
     const path = join(directory, "octant.sqlite3");
     const first = createFixture(path);
-    const planned = first.service.planTurn({
+    const nextInput: Parameters<ContextHarnessService["planTurn"]>[0] = {
       subject,
       displayLabel: "Code Project",
       requestShape: "code-turn",
-      modelLimitObservations: [modelLimits()],
+      modelLimitObservations: [{ ...modelLimits(), source: "conservative-fallback" }],
       serviceLimits: serviceLimits(),
       entries: [requiredEntry(100)],
       reserves: { response: 200, reasoning: 50, framing: 50, variance: 20, safety: 50 },
@@ -398,36 +576,50 @@ describe("ContextHarnessService integration", () => {
         taskKeywords: [],
         explicitSelections: [],
       },
-    });
+    };
+    const planned = first.service.planTurn(nextInput);
     first.service.reconcileUsage({
       subject,
       planId: planned.next.plan.id,
       requestShape: "code-turn",
-      actualInputTokens: 110,
+      actualInputTokens: 140,
       actualOutputTokens: 20,
+      contextTokens: 125,
+      contextWindow: 200_000,
       currentVarianceReserve: 20,
       maxAdjustmentTokens: 50,
     });
     first.connection.close();
 
     const restarted = createFixture(path);
-    const restored = restarted.service.restoreSubject({
-      subject,
-      displayLabel: "Code Project",
-      modelLimits: modelLimits(),
-      serviceLimits: serviceLimits(),
-      capabilities: { loadedTools: 0, availableTools: 0, loadedMcp: 0, availableMcp: 0 },
-      requestShape: "code-turn",
-      watchHeadroomTokens: 100,
-    });
+    const restored = restarted.service.inspect(subject);
     expect(restored.next.manifest.id).toBe(planned.next.manifest.id);
     expect(restored.next.plan.id).toBe(planned.next.plan.id);
     expect(restored.latestSent?.plan.id).toBe(planned.next.plan.id);
-    expect(restored.latestUsage).toMatchObject({ actualInputTokens: 110, varianceTokens: 10 });
+    expect(restored.latestUsage).toMatchObject({
+      actualInputTokens: 140,
+      varianceTokens: 40,
+      contextTokens: 125,
+      contextWindow: 200_000,
+    });
     expect(restored.sequence).toBe(3);
+    const next = restarted.service.planTurn(nextInput);
+    expect(next.next.plan.reserves.variance).toBe(40);
+    expect(next.modelLimits.contextWindow).toBe(200_000);
+    expect(next.modelLimits.source).toBe("runtime-reported");
+    expect(next.modelLimits).not.toHaveProperty("maxOutput");
+    const differentShape = restarted.service.planTurn({ ...nextInput, requestShape: "work-turn" });
+    expect(differentShape.next.plan.reserves.variance).toBe(20);
+    const differentModel = restarted.service.planTurn({
+      ...nextInput,
+      modelLimitObservations: [decodeModelContextLimits({ ...modelLimits(), modelId: "model-b" })],
+    });
+    expect(differentModel.next.plan.reserves.variance).toBe(20);
     restarted.connection.close();
   });
 });
+
+let fixtureSequence = 0;
 
 function createFixture(existingPath?: string) {
   const path =
@@ -446,7 +638,7 @@ function createFixture(existingPath?: string) {
     projections: runtime.projections,
     clock: () => now,
   });
-  let counter = 10;
+  let counter = fixtureSequence++ * 1_000 + 10;
   const service = new ContextHarnessService({
     persistence: {
       connection,

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   CapacityReservation,
+  ContextCapabilityCounts,
   ContextManifest,
   ContextManifestId,
   ContextPlan,
@@ -33,6 +34,12 @@ export const ContextPlanSnapshot = Schema.Struct({
       const planEntryIds = value.plan.entries.map((entry) => entry.entryId);
       return (
         value.plan.manifestId === value.manifest.id &&
+        (value.plan.inspection === undefined ||
+          (value.plan.inspection.modelLimits.providerInstanceId ===
+            value.manifest.providerInstanceId &&
+            value.plan.inspection.modelLimits.modelId === value.manifest.modelId &&
+            value.plan.inspection.serviceLimits.providerInstanceId ===
+              value.manifest.providerInstanceId)) &&
         planEntryIds.length === manifestEntryIds.size &&
         new Set(planEntryIds).size === planEntryIds.length &&
         planEntryIds.every((entryId) => manifestEntryIds.has(entryId))
@@ -40,21 +47,6 @@ export const ContextPlanSnapshot = Schema.Struct({
     }),
   );
 export type ContextPlanSnapshot = typeof ContextPlanSnapshot.Type;
-
-export const ContextCapabilityCounts = Schema.Struct({
-  loadedTools: NonNegativeInt,
-  availableTools: NonNegativeInt,
-  loadedMcp: NonNegativeInt,
-  availableMcp: NonNegativeInt,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (counts) =>
-        counts.loadedTools <= counts.availableTools && counts.loadedMcp <= counts.availableMcp,
-    ),
-  );
-export type ContextCapabilityCounts = typeof ContextCapabilityCounts.Type;
 
 export const ContextInspectorSnapshot = Schema.Struct({
   subject: ContextSubjectRef,
@@ -156,3 +148,5 @@ export const decodeContextInspectorSnapshot = Schema.decodeUnknownSync(ContextIn
 export const decodeContextCommand = Schema.decodeUnknownSync(ContextCommand);
 export const decodeContextCommandResult = Schema.decodeUnknownSync(ContextCommandResult);
 export const decodeContextFailure = Schema.decodeUnknownSync(ContextFailure);
+
+export { ContextCapabilityCounts } from "./context";

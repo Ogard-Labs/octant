@@ -1,3 +1,5 @@
+import type { ContextHarnessService } from "../context/contextHarnessService";
+import { observeWorkContext } from "./workContextInspection";
 import type { SelectedSkillContextResolver } from "../extensions/selectedSkillContext";
 import {
   ActorId,
@@ -56,12 +58,14 @@ import {
 } from "@octant/domain";
 import {
   planWorkTurnContext,
+  includeWorkToolDefinitions,
+  type WorkTurnContextPlan,
   WORK_TURN_SAFE_INPUT_TOKENS,
   type WorkTurnContextContribution,
 } from "./workTurnContext";
 import type { WorkTurnWrittenFiles } from "@octant/contracts/work-turns";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -275,6 +279,7 @@ export interface WorkTurnServiceDependencies {
    * prove oversized file mentions refuse; production uses the conservative
    * default until this thread's model reports a window.
    */
+  readonly contextHarness?: ContextHarnessService;
   readonly safeInputBudgetTokens?: number;
   readonly liveUpdates?: WorkTurnLiveStore;
 }
@@ -309,6 +314,7 @@ export class WorkTurnService {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
+  readonly #contextHarness: ContextHarnessService | undefined;
   readonly #safeInputBudgetTokens: number;
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #controllers = new Map<string, AbortController>();
@@ -317,6 +323,7 @@ export class WorkTurnService {
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
 
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedSkillContext = dependencies.resolveSelectedSkillContext;
     this.#persistence = dependencies.persistence;
     this.#threads = dependencies.threads;
@@ -518,6 +525,16 @@ export class WorkTurnService {
     }
     const acceptedAt = decodeTimestamp(this.#clock());
     const providerSessionId = decodeProviderSessionId(this.#uuid());
+    const harnessContext =
+      thread === undefined
+        ? []
+        : (this.#nativeHarness?.contextFor({
+            threadId: String(thread.id),
+            mode: "work",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+            projectId: thread.projectId,
+          }) ?? []);
     const planned = planWorkTurnContext({
       threadId: command.threadId,
       providerInstanceId: command.authority.providerInstanceId,
@@ -526,6 +543,28 @@ export class WorkTurnService {
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
       contributions: [
+        ...(command.extensionSelections?.some(isBrowserUseSelection) === true
+          ? [
+              {
+                text: BROWSER_SELECTION_GUIDANCE,
+                sourceKind: "instruction",
+                referenceId: "octant-browser-guidance",
+                category: "octant-policy",
+                posture: "required",
+                block: { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE },
+              } as const,
+            ]
+          : []),
+        ...harnessContext.map(
+          (block, index): WorkTurnContextContribution => ({
+            text: block.text,
+            sourceKind: "instruction",
+            referenceId: `native-harness:${index}`,
+            category: "octant-policy",
+            posture: "required",
+            block,
+          }),
+        ),
         ...skillContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
@@ -628,7 +667,7 @@ export class WorkTurnService {
       projectCanonicalRoot: project.binding.canonicalRoot,
       driver,
       attachments: attachmentInputs,
-      context: planned.context,
+      contextPlan: planned,
       signal: controller.signal,
     }).finally(() => {
       this.#settleSpendReservation(command.requestId);
@@ -762,7 +801,7 @@ export class WorkTurnService {
     readonly projectCanonicalRoot: string;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-    readonly context: ReadonlyArray<ProviderContextBlock>;
+    readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
@@ -825,11 +864,61 @@ export class WorkTurnService {
         });
         return;
       }
-      input = {
-        ...input,
-        context: [...input.context, { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE }],
-      };
     }
+    const finalPlan = includeWorkToolDefinitions({
+      plan: input.contextPlan,
+      tools: appManagedTools?.definitions ?? [],
+      uuid: this.#uuid,
+      safeInputBudget: this.#safeInputBudgetTokens,
+    });
+    if (finalPlan.kind === "blocked") {
+      observation?.finish();
+      await Effect.runPromise(
+        Effect.promise(async () => {
+          await appManagedTools?.close?.();
+        }).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+        ),
+      );
+      this.#persistUpdate(current, {
+        status: "failed",
+        failure: { category: "invalid", message: finalPlan.message },
+      });
+      return;
+    }
+    const published =
+      this.#contextHarness === undefined
+        ? undefined
+        : await observeWorkContext({
+            service: this.#contextHarness,
+            plan: finalPlan,
+            driver: input.driver,
+            displayLabel: input.thread?.title ?? "Work task",
+            signal: input.signal,
+          });
+    if (input.signal.aborted || published?.snapshot.next.plan.blocked) {
+      observation?.finish();
+      await Effect.runPromise(
+        Effect.promise(async () => {
+          await appManagedTools?.close?.();
+        }).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+        ),
+      );
+      if (!input.signal.aborted)
+        this.#persistUpdate(current, {
+          status: "failed",
+          failure: {
+            category: "invalid",
+            message:
+              "The Work request exceeds the selected model's context budget. Remove context or start a new task.",
+          },
+        });
+      return;
+    }
+    const providerContext = published?.context ?? finalPlan.context;
     const harnessScope: NativeHarnessTurnScope | undefined =
       input.thread === undefined
         ? undefined
@@ -841,8 +930,6 @@ export class WorkTurnService {
             projectId: input.thread.projectId,
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
-    const harnessContext =
-      harnessScope === undefined ? [] : (this.#nativeHarness?.contextFor(harnessScope) ?? []);
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
@@ -851,9 +938,7 @@ export class WorkTurnService {
       signal: input.signal,
       ...(appManagedTools === undefined ? {} : { appManagedTools }),
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
-      ...(harnessContext.length + input.context.length === 0
-        ? {}
-        : { context: [...harnessContext, ...input.context] }),
+      ...(providerContext.length === 0 ? {} : { context: providerContext }),
       onDelta: (response) => {
         const projected = this.#projection.lookup(input.command.requestId);
         if (
@@ -866,6 +951,42 @@ export class WorkTurnService {
         this.#liveResponses.set(String(input.command.requestId), response);
         const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
         this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
+      },
+      onUsage: (usage) => {
+        if (input.signal.aborted || published === undefined || this.#contextHarness === undefined)
+          return;
+        const projected = this.#projection.lookup(input.command.requestId);
+        if (projected?.status !== "accepted" && projected?.status !== "running") return;
+        const snapshot = published.snapshot;
+        try {
+          this.#contextHarness.reconcileUsage({
+            subject: snapshot.subject,
+            planId: snapshot.next.plan.id,
+            requestShape: "work-turn",
+            actualInputTokens: usage.inputTokens,
+            actualOutputTokens: usage.outputTokens,
+            ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+            ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+            ...(usage.reasoningTokens === undefined
+              ? {}
+              : { reasoningTokens: usage.reasoningTokens }),
+            ...(usage.cacheReadInputTokens === undefined
+              ? {}
+              : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+            ...(usage.cacheWriteInputTokens === undefined
+              ? {}
+              : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+            ...(usage.providerExecutionDurationMs === undefined
+              ? {}
+              : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
+            currentVarianceReserve: snapshot.next.plan.reserves.variance,
+            maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
+          });
+        } catch {
+          // Usage reconciliation is best-effort during a live Work turn. A
+          // stale or rejected variance must not convert the provider run into
+          // a failed outcome.
+        }
       },
       onTasks: (tasks) => {
         if (input.signal.aborted) return;

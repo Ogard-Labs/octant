@@ -65,6 +65,30 @@ describe("context RPC contracts", () => {
     ).toThrow();
   });
 
+  it("rejects saved inspection limits that belong to another model", () => {
+    const original = snapshot();
+    const inspection = {
+      displayLabel: original.displayLabel,
+      modelLimits: original.modelLimits,
+      serviceLimits: original.serviceLimits,
+      capabilities: original.capabilities,
+      requestShape: "chat-turn",
+      watchHeadroomTokens: 100,
+    };
+    const withInspection = (modelId: string) => ({
+      ...original,
+      next: {
+        ...original.next,
+        plan: {
+          ...original.next.plan,
+          inspection: { ...inspection, modelLimits: { ...inspection.modelLimits, modelId } },
+        },
+      },
+    });
+    expect(() => decodeContextInspectorSnapshot(withInspection("model-a"))).not.toThrow();
+    expect(() => decodeContextInspectorSnapshot(withInspection("another-model"))).toThrow();
+  });
+
   it("requires every planned entry to identify exactly one manifest entry", () => {
     expect(() =>
       decodeContextInspectorSnapshot({

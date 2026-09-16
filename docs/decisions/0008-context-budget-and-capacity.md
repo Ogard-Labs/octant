@@ -80,6 +80,10 @@ scheduled.
   release on cancellation or timeout. Every turn and managed child passes
   through it. Where a provider CLI hides its network requests, Octant limits
   observable concurrent turns and labels fine-grained enforcement unavailable.
+- Learned variance reserves persist with usage reconciliation and apply only to
+  the same provider instance, model, and request shape. Updates are bounded;
+  stable provider overhead converges to a stable reserve instead of being
+  added again on every turn. Explicitly requested reserve floors still apply.
 - Tool and MCP schemas load lazily by relevance; large results are stored as
   local artifacts and summarized into context.
 - The status bar exposes the focused thread's context composition, headroom,

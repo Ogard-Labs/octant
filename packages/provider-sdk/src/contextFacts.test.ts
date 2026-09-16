@@ -11,7 +11,7 @@ const modelId = decodeProviderModelId("model-a");
 const observedAt = "2026-07-18T18:30:00.000Z" as UtcTimestamp;
 
 describe("provider context facts", () => {
-  it("keeps context-only evidence incomplete instead of inventing maximum output", () => {
+  it("preserves a known context window without inventing maximum output", () => {
     const result = normalizeModelLimitEvidence({
       providerInstanceId,
       modelId,
@@ -21,11 +21,13 @@ describe("provider context facts", () => {
       observedAt,
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "incomplete",
-      missing: ["max-output"],
+    expect(result).toMatchObject({
+      status: "available",
+      limits: { contextWindow: 200_000, confidence: "high" },
     });
+    if (result.status === "available") {
+      expect(result.limits).not.toHaveProperty("maxOutput");
+    }
   });
 
   it("emits strict complete limits only when both safe bounds are known", () => {

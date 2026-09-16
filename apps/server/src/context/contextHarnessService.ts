@@ -22,6 +22,7 @@ import {
   type ContextSummary,
   type ContextSummaryId,
   type ContextPlanId,
+  type ContextPlanInspection,
   type ModelContextLimits,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -104,6 +105,8 @@ export interface ReconcileContextUsageInput {
   readonly requestShape: string;
   readonly actualInputTokens: number;
   readonly actualOutputTokens: number;
+  readonly contextTokens?: number;
+  readonly contextWindow?: number;
   readonly reasoningTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
@@ -182,7 +185,47 @@ export class ContextHarnessService {
 
   planTurn(input: PlanContextTurnInput): ContextInspectorSnapshot {
     this.#assertReady();
-    const modelLimits = resolveEffectiveModelLimits(input.modelLimitObservations);
+    let modelLimits = resolveEffectiveModelLimits(input.modelLimitObservations);
+    const previousUsage = readContextSubjectProjection(
+      this.#persistence.connection,
+      input.subject,
+    )?.latestUsage;
+    const matchingUsage =
+      previousUsage !== undefined &&
+      String(previousUsage.providerInstanceId) === String(modelLimits.providerInstanceId) &&
+      String(previousUsage.modelId) === String(modelLimits.modelId) &&
+      previousUsage.requestShape === input.requestShape;
+    const reserves =
+      matchingUsage && previousUsage.nextVarianceReserve !== undefined
+        ? {
+            ...input.reserves,
+            variance: Math.max(input.reserves.variance, previousUsage.nextVarianceReserve),
+          }
+        : input.reserves;
+    if (
+      previousUsage?.contextWindow !== undefined &&
+      String(previousUsage.providerInstanceId) === String(modelLimits.providerInstanceId) &&
+      String(previousUsage.modelId) === String(modelLimits.modelId) &&
+      previousUsage.requestShape === input.requestShape
+    ) {
+      // The emergency floor only admits a first turn. A matching runtime
+      // observation survives restart and supplies the next turn's real bound.
+      const { maxOutput, ...facts } = modelLimits;
+      modelLimits = resolveEffectiveModelLimits([
+        modelLimits,
+        {
+          ...facts,
+          ...(modelLimits.source !== "conservative-fallback" && maxOutput !== undefined
+            ? { maxOutput }
+            : {}),
+          contextWindow: previousUsage.contextWindow,
+          source: "runtime-reported",
+          confidence: "high",
+          verifiedAt: previousUsage.observedAt,
+          conflicts: [],
+        },
+      ]);
+    }
     if (
       input.serviceLimits.providerInstanceId !== modelLimits.providerInstanceId ||
       input.capabilityRequest.providerInstanceId !== modelLimits.providerInstanceId
@@ -214,9 +257,17 @@ export class ContextHarnessService {
       { pinnedEntryIds: [], excludedEntryIds: [] },
     );
     const plan = this.#plan(manifest, {
+      inspection: {
+        displayLabel: input.displayLabel,
+        modelLimits,
+        serviceLimits: input.serviceLimits,
+        capabilities: capabilityCounts(input.capabilityCatalog, selection.selected, input.entries),
+        requestShape: input.requestShape,
+        watchHeadroomTokens: input.watchHeadroomTokens,
+      },
       modelLimits,
       serviceLimits: input.serviceLimits,
-      reserves: input.reserves,
+      reserves,
       watchHeadroomTokens: input.watchHeadroomTokens,
       timestamp,
     });
@@ -237,7 +288,7 @@ export class ContextHarnessService {
       serviceLimits: input.serviceLimits,
       next: { manifest, plan },
       summaries: [],
-      capabilities: capabilityCounts(input.capabilityCatalog, selection.selected),
+      capabilities: capabilityCounts(input.capabilityCatalog, selection.selected, input.entries),
     });
     const key = subjectKey(input.subject);
     this.#snapshots.set(key, snapshot);
@@ -273,6 +324,9 @@ export class ContextHarnessService {
           ? applyContextOverrides(current.next.manifest, command.overrides)
           : current.next.manifest;
       plan = this.#plan(manifest, {
+        ...(current.next.plan.inspection === undefined
+          ? {}
+          : { inspection: current.next.plan.inspection }),
         modelLimits: current.modelLimits,
         serviceLimits: current.serviceLimits,
         reserves: current.next.plan.reserves,
@@ -347,6 +401,8 @@ export class ContextHarnessService {
       plannedInputTokens: current.next.plan.plannedInputTokens,
       actualInputTokens: input.actualInputTokens,
       actualOutputTokens: input.actualOutputTokens,
+      ...(input.contextTokens === undefined ? {} : { contextTokens: input.contextTokens }),
+      ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
       ...(input.reasoningTokens === undefined ? {} : { reasoningTokens: input.reasoningTokens }),
       ...(input.cacheReadInputTokens === undefined
         ? {}
@@ -358,6 +414,7 @@ export class ContextHarnessService {
         ? {}
         : { providerExecutionDurationMs: input.providerExecutionDurationMs }),
       varianceTokens: variance.varianceTokens,
+      nextVarianceReserve: variance.nextVarianceReserve,
       observedAt: timestamp,
     });
     const committed = this.#persistence.journal.append({
@@ -615,6 +672,9 @@ export class ContextHarnessService {
     let plan;
     try {
       plan = this.#plan(manifest, {
+        ...(current.next.plan.inspection === undefined
+          ? {}
+          : { inspection: current.next.plan.inspection }),
         modelLimits: current.modelLimits,
         serviceLimits: current.serviceLimits,
         reserves: current.next.plan.reserves,
@@ -691,7 +751,14 @@ export class ContextHarnessService {
 
   inspect(subject: ContextSubjectRef, afterSequence?: number): ContextInspectorSnapshot {
     this.#assertReady();
-    const snapshot = this.#snapshots.get(subjectKey(subject));
+    let snapshot = this.#snapshots.get(subjectKey(subject));
+    if (snapshot === undefined) {
+      const persisted = readContextSubjectProjection(this.#persistence.connection, subject);
+      const inspection = persisted?.next.plan.inspection;
+      if (inspection !== undefined) {
+        snapshot = this.restoreSubject({ subject, ...inspection });
+      }
+    }
     if (snapshot === undefined) {
       // Nothing has planned this subject's context yet — a thread before its
       // first turn has none. That is an empty answer, not a broken service, and
@@ -708,6 +775,7 @@ export class ContextHarnessService {
   #plan(
     manifest: ReturnType<typeof decodeContextManifest>,
     input: {
+      readonly inspection?: ContextPlanInspection;
       readonly modelLimits: ModelContextLimits;
       readonly serviceLimits: ProviderServiceLimits;
       readonly reserves: ContextReserveBreakdown;
@@ -723,6 +791,7 @@ export class ContextHarnessService {
     return decodeContextPlan({
       id: this.#uuid(),
       manifestId: manifest.id,
+      ...(input.inspection === undefined ? {} : { inspection: input.inspection }),
       safeInputBudget: budget.safeInputBudget,
       plannedInputTokens: reduction.plannedInputTokens,
       reserves: input.reserves,
@@ -839,14 +908,33 @@ function harnessPolicyError(error: unknown): ContextHarnessError {
 function capabilityCounts(
   catalog: CapabilityCatalog,
   selected: ReadonlyArray<CapabilityCatalog["entries"][number]>,
+  entries: ReadonlyArray<ContextEntry>,
 ): ContextCapabilityCounts {
   const isMcp = (kind: CapabilityCatalog["entries"][number]["componentKind"]) =>
     kind === "mcp-tool" || kind === "mcp-prompt" || kind === "mcp-resource";
   const isTool = (kind: CapabilityCatalog["entries"][number]["componentKind"]) =>
     kind === "octant-tool";
+  const catalogTools = catalog.entries.filter((entry) => isTool(entry.componentKind));
+  const selectedTools = selected.filter((entry) => isTool(entry.componentKind));
+  const catalogReferences = new Set(catalogTools.map((entry) => entry.source.referenceId));
+  const availableTools = new Set<string>();
+  const loadedTools = new Set<string>();
+  // Work and Chat can supply tool schemas directly in their attributed manifest.
+  for (const entry of entries) {
+    if (entry.category !== "octant-tools" || entry.source.kind !== "tool") continue;
+    if (catalogReferences.has(entry.source.referenceId)) continue;
+    availableTools.add(entry.source.referenceId);
+    if (
+      entry.eligibility.status === "eligible" &&
+      entry.state !== "omitted" &&
+      entry.state !== "reserved"
+    ) {
+      loadedTools.add(entry.source.referenceId);
+    }
+  }
   return {
-    loadedTools: selected.filter((entry) => isTool(entry.componentKind)).length,
-    availableTools: catalog.entries.filter((entry) => isTool(entry.componentKind)).length,
+    loadedTools: selectedTools.length + loadedTools.size,
+    availableTools: catalogTools.length + availableTools.size,
     loadedMcp: selected.filter((entry) => isMcp(entry.componentKind)).length,
     availableMcp: catalog.entries.filter((entry) => isMcp(entry.componentKind)).length,
   };

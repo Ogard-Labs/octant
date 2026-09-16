@@ -56,7 +56,7 @@ const confidenceOrder = ["unknown", "low", "medium", "high"] as const;
 export function resolveEffectiveModelLimits(
   observations: ReadonlyArray<ModelContextLimits>,
 ): ModelContextLimits {
-  const orderedObservations = observations.toSorted((left, right) =>
+  let orderedObservations = observations.toSorted((left, right) =>
     JSON.stringify(left).localeCompare(JSON.stringify(right)),
   );
   const first = orderedObservations[0];
@@ -76,17 +76,25 @@ export function resolveEffectiveModelLimits(
     );
   }
 
+  // Emergency budgets are estimates, not conflicting model evidence.
+  if (orderedObservations.some((observation) => observation.source !== "conservative-fallback")) {
+    orderedObservations = orderedObservations.filter(
+      (observation) => observation.source !== "conservative-fallback",
+    );
+  }
+
   const contextWindow = Math.min(
     ...orderedObservations.map((observation) => observation.contextWindow),
   );
-  const maxOutput = Math.min(...orderedObservations.map((observation) => observation.maxOutput));
   const selected =
     orderedObservations.find((observation) => observation.contextWindow === contextWindow) ?? first;
   const contextValues = unique(
     orderedObservations.map((observation) => observation.contextWindow),
   ).toSorted((left, right) => left - right);
   const outputValues = unique(
-    orderedObservations.map((observation) => observation.maxOutput),
+    orderedObservations.flatMap((observation) =>
+      observation.maxOutput === undefined ? [] : [observation.maxOutput],
+    ),
   ).toSorted((left, right) => left - right);
   const sources = unique(
     orderedObservations.map((observation) => observation.source),
@@ -149,7 +157,7 @@ export function resolveEffectiveModelLimits(
   return {
     ...selected,
     contextWindow,
-    maxOutput,
+    ...(outputValues.length === 0 ? {} : { maxOutput: Math.min(...outputValues) }),
     extendedContext,
     reasoning: orderedObservations.every(
       (observation) => observation.reasoning === selected.reasoning,
@@ -177,7 +185,7 @@ export function calculateSafeInputBudget(
   reserves: ContextReserveBreakdown,
 ): SafeInputBudgetResult {
   const contextWindow = checkedNonNegativeInteger(limits.contextWindow, "Context window");
-  if (reserves.response > limits.maxOutput) {
+  if (limits.maxOutput !== undefined && reserves.response > limits.maxOutput) {
     reject("unsafe-arithmetic", "Response reserve cannot exceed the model maximum output.");
   }
   const reserveValues = [

@@ -130,9 +130,8 @@ export function useContextController(options: UseContextControllerOptions): Cont
 
   const observedRevision = useRef(revision);
   useEffect(() => {
-    // A subject that reports no turns of its own has nothing to re-ask for:
-    // Work threads run their controller elsewhere and never pass a revision, so
-    // a mark left behind by the thread before them must not speak for them.
+    // A caller without a change revision cannot advance this reading using
+    // the revision left behind by a previously focused subject.
     if (revision === undefined || observedRevision.current === revision) return;
     // The subject effect above owns the first load and clears the snapshot on
     // its way in. A newer turn is the same subject measured again, so the last
@@ -149,10 +148,13 @@ export function useContextController(options: UseContextControllerOptions): Cont
     // render still holds the previous subject's reading. Asking the new subject
     // for the old one's sequence is how the meter ends up refused as stale.
     const measured = snapshotRef.current;
-    if (subject === undefined || measured === undefined) return;
+    if (subject === undefined) return;
+    // A completed empty reading is different from an in-flight first load:
+    // the first turn can create a plan after the host said none existed.
+    if (measured === undefined && status !== "not-planned") return;
     observedRevision.current = revision;
-    void reload(measured.sequence);
-  }, [reload, revision, snapshot, subject]);
+    void reload(measured?.sequence);
+  }, [reload, revision, snapshot, status, subject]);
 
   const execute = useCallback(
     async (command: ContextCommand) => {

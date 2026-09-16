@@ -5105,6 +5105,7 @@ export function startOctantServer(
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
+      contextHarness,
       resolveSelectedSkillContext,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),

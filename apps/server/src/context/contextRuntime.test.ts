@@ -108,8 +108,8 @@ describe("integrated context runtime", () => {
     ).toEqual({
       requestShape: "code-turn",
       varianceTokens: 40,
-      reserveAdjustmentTokens: 40,
-      nextVarianceReserve: 60,
+      reserveAdjustmentTokens: 20,
+      nextVarianceReserve: 40,
     });
     expect(
       CONTEXT_MAINTENANCE_POLICY.decideContextLengthRecovery({

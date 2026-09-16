@@ -101,15 +101,15 @@ function assertPositiveSafeInteger(value: number, label: string): void {
 export function normalizeModelLimitEvidence(
   evidence: ProviderModelLimitEvidence,
 ): ProviderModelLimitsObservation {
-  const missing: Array<ModelLimitMissingField> = [];
-  if (evidence.contextWindow === undefined) missing.push("context-window");
-  if (evidence.maxOutput === undefined) missing.push("max-output");
-  if (missing.length > 0) return { status: "unavailable", reason: "incomplete", missing };
-
-  assertPositiveSafeInteger(evidence.contextWindow!, "Context window");
-  assertPositiveSafeInteger(evidence.maxOutput!, "Maximum output");
-  if (evidence.maxOutput! > evidence.contextWindow!) {
-    throw new ProviderContextFactsRejected("Maximum output cannot exceed the context window.");
+  if (evidence.contextWindow === undefined) {
+    return { status: "unavailable", reason: "incomplete", missing: ["context-window"] };
+  }
+  assertPositiveSafeInteger(evidence.contextWindow, "Context window");
+  if (evidence.maxOutput !== undefined) {
+    assertPositiveSafeInteger(evidence.maxOutput, "Maximum output");
+    if (evidence.maxOutput > evidence.contextWindow) {
+      throw new ProviderContextFactsRejected("Maximum output cannot exceed the context window.");
+    }
   }
 
   return {
@@ -118,7 +118,7 @@ export function normalizeModelLimitEvidence(
       providerInstanceId: evidence.providerInstanceId,
       modelId: evidence.modelId,
       contextWindow: evidence.contextWindow,
-      maxOutput: evidence.maxOutput,
+      ...(evidence.maxOutput === undefined ? {} : { maxOutput: evidence.maxOutput }),
       extendedContext: evidence.extendedContext ?? { kind: "unavailable" },
       reasoning: evidence.reasoning ?? "unknown",
       compaction: evidence.compaction ?? "unknown",

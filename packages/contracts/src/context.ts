@@ -58,6 +58,7 @@ export const ContextConfidence = Schema.Literal("high", "medium", "low", "unknow
 export type ContextConfidence = typeof ContextConfidence.Type;
 
 export const ContextMetadataSource = Schema.Literal(
+  "conservative-fallback",
   "runtime-reported",
   "provider-discovery",
   "reviewed-catalog",
@@ -202,7 +203,7 @@ export const ModelContextLimits = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   contextWindow: PositiveInt,
-  maxOutput: PositiveInt,
+  maxOutput: Schema.optional(PositiveInt),
   extendedContext: ExtendedContextMode,
   reasoning: Schema.Literal("included", "separate", "unknown"),
   compaction: Schema.Literal("automatic", "manual", "none", "unknown"),
@@ -213,7 +214,11 @@ export const ModelContextLimits = Schema.Struct({
   verifiedAt: UtcTimestamp,
 })
   .annotations(strict)
-  .pipe(Schema.filter((limits) => limits.maxOutput <= limits.contextWindow));
+  .pipe(
+    Schema.filter(
+      (limits) => limits.maxOutput === undefined || limits.maxOutput <= limits.contextWindow,
+    ),
+  );
 export type ModelContextLimits = typeof ModelContextLimits.Type;
 
 export const ServiceLimitBucket = Schema.Union(
@@ -387,9 +392,35 @@ export const PlannedContextEntry = Schema.Struct({
 }).annotations(strict);
 export type PlannedContextEntry = typeof PlannedContextEntry.Type;
 
+export const ContextCapabilityCounts = Schema.Struct({
+  loadedTools: NonNegativeInt,
+  availableTools: NonNegativeInt,
+  loadedMcp: NonNegativeInt,
+  availableMcp: NonNegativeInt,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (counts) =>
+        counts.loadedTools <= counts.availableTools && counts.loadedMcp <= counts.availableMcp,
+    ),
+  );
+export type ContextCapabilityCounts = typeof ContextCapabilityCounts.Type;
+
+export const ContextPlanInspection = Schema.Struct({
+  displayLabel: Schema.NonEmptyTrimmedString,
+  modelLimits: ModelContextLimits,
+  serviceLimits: ProviderServiceLimits,
+  capabilities: ContextCapabilityCounts,
+  requestShape: Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
+  watchHeadroomTokens: NonNegativeInt,
+}).annotations(strict);
+export type ContextPlanInspection = typeof ContextPlanInspection.Type;
+
 export const ContextPlan = Schema.Struct({
   id: ContextPlanId,
   manifestId: ContextManifestId,
+  inspection: Schema.optional(ContextPlanInspection),
   safeInputBudget: NonNegativeInt,
   plannedInputTokens: NonNegativeInt,
   reserves: ContextReserveBreakdown,
@@ -437,11 +468,14 @@ export const UsageReconciliation = Schema.Struct({
   plannedInputTokens: NonNegativeInt,
   actualInputTokens: NonNegativeInt,
   actualOutputTokens: NonNegativeInt,
+  contextTokens: Schema.optional(NonNegativeInt),
+  contextWindow: Schema.optional(PositiveInt),
   reasoningTokens: Schema.optional(NonNegativeInt),
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
   providerExecutionDurationMs: Schema.optional(NonNegativeInt),
   varianceTokens: Schema.Int,
+  nextVarianceReserve: Schema.optional(NonNegativeInt),
   observedAt: UtcTimestamp,
   imageUnits: Schema.optional(ImageUsageUnits),
 })
