@@ -17,7 +17,11 @@ import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { createServer } from "node:net";
 import type { Readable } from "node:stream";
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderProcessDiagnostic,
+} from "@octant/contracts";
 import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import {
@@ -29,6 +33,7 @@ import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
 } from "../process/threadEgressPolicy";
+import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export interface OpenCodeBinaryProbe {
@@ -643,8 +648,12 @@ function runtimeForVersion(version: string): OpenCodeRuntime {
   return /^opencode2? v/u.test(version) ? "beta" : "legacy";
 }
 
-function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
+function failure(
+  category: ProviderFailure["category"],
+  message: string,
+  diagnostic?: ProviderProcessDiagnostic,
+): ProviderFailure {
+  return { category, message, ...(diagnostic === undefined ? {} : { diagnostic }) };
 }
 
 function validateBinaryPath(binaryPath: string): ProviderFailure | undefined {
@@ -1097,6 +1106,7 @@ function acquireOpenCodeServer(
       let settled = false;
       let stdout = "";
       let stderr = "";
+      const boundedStderr = makeBoundedProviderStderr();
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -1204,21 +1214,39 @@ function acquireOpenCodeServer(
         else stderr = pending;
       };
       const onStdout = (chunk: Buffer) => consumeLines("stdout", chunk);
-      const onStderr = (chunk: Buffer) => consumeLines("stderr", chunk);
+      const onStderr = (chunk: Buffer) => {
+        boundedStderr.append(chunk);
+        consumeLines("stderr", chunk);
+      };
       const onError = () => {
         safeDiagnostic(options.onDiagnostic, "OpenCode server failed to start.");
         finishFailure(failure("unavailable", "OpenCode server could not be started."));
       };
-      const onExit = () => {
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
         safeDiagnostic(options.onDiagnostic, "OpenCode server exited before readiness.");
-        finishFailure(failure("unavailable", "OpenCode server exited before becoming ready."));
+        const stderrContext = boundedStderr.context();
+        finishFailure(
+          failure("unavailable", "OpenCode server exited before becoming ready.", {
+            stage: "launch",
+            kind: signal === null ? "exited" : "signaled",
+            ...(code === null || code < 0 || code > 255 ? {} : { exitCode: code }),
+            ...(signal === null ? {} : { signal }),
+            ...(stderrContext === undefined ? {} : { stderrContext }),
+          }),
+        );
       };
       const timeout = setTimeout(() => {
         safeDiagnostic(options.onDiagnostic, "OpenCode server readiness timed out.");
+        const stderrContext = boundedStderr.context();
         finishFailure(
           failure(
             "unavailable",
             "OpenCode server did not become ready before the startup timeout.",
+            {
+              stage: "launch",
+              kind: "timed-out",
+              ...(stderrContext === undefined ? {} : { stderrContext }),
+            },
           ),
         );
       }, options.startupTimeoutMs);
@@ -1243,10 +1271,13 @@ function acquireOpenCodeServer(
       const providerFailure = Option.getOrElse(Cause.failureOption(result.cause), () =>
         failure("provider-failed", "OpenCode server could not be started."),
       );
+      // The launch diagnostic names what happened; matching the message text
+      // made every wording change a silent behaviour change.
       const lostReservedPort =
         runtime === "beta" &&
         providerFailure.category === "unavailable" &&
-        providerFailure.message === "OpenCode server exited before becoming ready.";
+        providerFailure.diagnostic?.stage === "launch" &&
+        providerFailure.diagnostic.kind === "exited";
       if (!lostReservedPort || attempt >= MAXIMUM_BETA_PORT_ATTEMPTS) {
         return yield* Effect.fail(providerFailure);
       }

@@ -877,6 +877,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     expect(failure).toEqual({
       category: "unavailable",
       message: "OpenCode server did not become ready before the startup timeout.",
+      diagnostic: { stage: "launch", kind: "timed-out" },
     });
   });
 
@@ -956,6 +957,15 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     );
     const visible = JSON.stringify({ failure, diagnostics });
     expect(failure.category).toBe("unavailable");
+    // The launch diagnostic is what explains a death that printed nothing, and
+    // the bytes the process did write arrive as the classifier's sentence
+    // rather than as themselves.
+    expect(failure.diagnostic).toEqual({
+      stage: "launch",
+      kind: "exited",
+      exitCode: 23,
+      stderrContext: "Provider process wrote redacted diagnostic output.",
+    });
     expect(visible).not.toContain("host-private-value");
     expect(visible).not.toMatch(/password=|Basic |OPENCODE_SERVER_PASSWORD/);
   });
