@@ -27,7 +27,7 @@ export interface AppBackdropProps {
 }
 
 interface ThemeInk {
-  readonly rgb: InkRgb;
+  readonly palette: ReadonlyArray<InkRgb>;
   readonly mode: "light" | "dark";
 }
 
@@ -50,8 +50,17 @@ function parseHexInk(value: string): InkRgb | null {
 function readThemeInk(): ThemeInk {
   const root = document.documentElement;
   const accent = getComputedStyle(root).getPropertyValue("--octant-accent");
+  const fallback = parseHexInk(accent) ?? FALLBACK_INK;
+  const count = Number.parseInt(root.dataset.octantPatternInkCount ?? "1", 10);
+  const palette = Array.from(
+    { length: Number.isFinite(count) ? Math.max(1, count) : 1 },
+    (_, index) =>
+      parseHexInk(
+        getComputedStyle(root).getPropertyValue(`--octant-pattern-ink-${String(index + 1)}`),
+      ),
+  ).filter((value): value is InkRgb => value !== null);
   return {
-    rgb: parseHexInk(accent) ?? FALLBACK_INK,
+    palette: palette.length === 0 ? [fallback] : palette,
     mode: root.dataset.octantThemeMode === "light" ? "light" : "dark",
   };
 }
@@ -59,17 +68,22 @@ function readThemeInk(): ThemeInk {
 function sameInk(left: ThemeInk, right: ThemeInk): boolean {
   return (
     left.mode === right.mode &&
-    left.rgb[0] === right.rgb[0] &&
-    left.rgb[1] === right.rgb[1] &&
-    left.rgb[2] === right.rgb[2]
+    left.palette.length === right.palette.length &&
+    left.palette.every((color, index) => {
+      const other = right.palette[index];
+      return (
+        other !== undefined &&
+        color.every((channel, channelIndex) => channel === other[channelIndex])
+      );
+    })
   );
 }
 
 /**
- * The accent the theme provider painted on the root, kept current as the
- * theme changes. The provider writes inline custom properties, so watching
- * the root's `style` attribute is what makes a preset switch recolour the
- * ground without a reload.
+ * The bounded pattern palette the theme provider painted on the root, kept
+ * current as the theme changes. The provider writes inline custom properties,
+ * so watching the root's `style` attribute is what makes a preset switch
+ * recolour the ground without a reload.
  */
 function useThemeInk(): ThemeInk {
   const [ink, setInk] = useState<ThemeInk>(readThemeInk);
@@ -104,7 +118,8 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
     const canvas = patternCanvas.current;
     if (!active || canvas === null || !showPattern) return;
     const handle = startAppPattern(canvas, {
-      ink: ink.rgb,
+      ink: ink.palette[0] ?? FALLBACK_INK,
+      palette: ink.palette,
       animated: resolved.animated,
       speed: resolved.patternSpeed,
       intensity: resolved.patternIntensity,
@@ -124,7 +139,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   }, [active, showPattern]);
 
   useEffect(() => {
-    pattern.current?.setInk(ink.rgb);
+    pattern.current?.setPalette(ink.palette);
   }, [ink]);
 
   useEffect(() => {

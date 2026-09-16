@@ -98,7 +98,7 @@ distilled successor of the earlier long-form design specifications.
 | [0088](0088-completed-and-snoozed-threads.md)                                | Completed and snoozed threads rest in shelves; completion archives on a timer               | Accepted           |
 | [0089](0089-base-ui-native-shadcn-style.md)                                  | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
 | [0090](0090-recipes-own-their-own-shape-and-focus.md)                        | Recipes own their shape; the app owns its focus ring                                        | Accepted           |
-| [0091](0091-the-application-ground-is-the-theme-pattern-or-a-photo.md)       | The application ground is the theme's pattern or a person's photo                           | Accepted           |
+| [0091](0091-the-application-ground-is-the-theme-pattern-or-a-photo.md)       | The application ground is the theme's pattern or a person's photo                           | Superseded by 0128 |
 | [0092](0092-the-terminal-reads-the-shell-s-own-configuration.md)             | The terminal reads the shell's own configuration                                            | Accepted           |
 | [0093](0093-app-owned-tools-use-managed-runtime-transports.md)               | App-owned tools use managed runtime transports                                              | Accepted           |
 | [0094](0094-focus-is-quiet-selection-carries-state.md)                       | Focus is quiet; selection carries state                                                     | Accepted           |
@@ -139,6 +139,7 @@ distilled successor of the earlier long-form design specifications.
 | [0125](0125-project-provider-data-policy.md) | Projects may restrict providers by residency labels | Accepted |
 | [0126](0126-seatbelt-trust-evaluation-and-launcher-symlinks.md) | Seatbelt opens trust evaluation and launcher symlink metadata | Accepted |
 | [0127](0127-a-manually-built-candidate-ring.md) | A manually built candidate ring | Accepted |
+| [0128](0128-theme-patterns-may-carry-a-bounded-palette.md) | Theme patterns may carry a bounded palette | Accepted |
 
 | [0128](0128-workspace-background-owns-covered-sidebar.md) | Workspace background owns a covered sidebar | Accepted |
 
