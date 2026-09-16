@@ -222,8 +222,11 @@ const opencodeProfile: AcpProviderProfile = {
   unauthenticatedMessage: "OpenCode 2 is not authenticated. Run opencode2 auth login, then retry.",
   process: {
     agentName: "OpenCode",
+    // 2.0.x declares both `opencode` and `opencode2` in its package and prints
+    // the bare name where older builds printed `opencode2`; the ACP handshake
+    // still identifies the agent, and that is what decides compatibility.
     versionPattern:
-      /^opencode2 v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\r?\n?$/,
+      /^opencode2? v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\r?\n?$/,
     minimumVersion: [0, 0, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     requiresChildServer: true,

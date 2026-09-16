@@ -91,7 +91,9 @@ const PROJECTED_CONFIG_LIMIT = 2 * 1024 * 1024;
 const PROJECTED_CONFIG_DEPTH_LIMIT = 8;
 const ISOLATED_OPEN_CODE_VERSION = [1, 18, 21] as const;
 const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
-const BETA_VERSION_PATTERN = /^opencode2 (v\d+\.\d+\.\d+-[0-9A-Za-z.-]+)$/;
+// 2.0.x declares both the opencode and opencode2 bins and prints the bare
+// name for --version, where the earlier beta line printed opencode2 v0.0.0-beta.
+const BETA_VERSION_PATTERN = /^opencode2? (v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$/;
 
 interface ParsedOpenCodeVersion {
@@ -638,7 +640,7 @@ function parseOpenCodeVersion(output: string): ParsedOpenCodeVersion | undefined
 }
 
 function runtimeForVersion(version: string): OpenCodeRuntime {
-  return version.startsWith("opencode2 ") ? "beta" : "legacy";
+  return /^opencode2? v/u.test(version) ? "beta" : "legacy";
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {

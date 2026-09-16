@@ -45,15 +45,17 @@ if (process.argv.slice(2).join(" ") === "--version") {
       ? "OpenCode build 1.17.19"
       : selectedMode === "probe-v2" || selectedMode === "v2-ready"
         ? "opencode2 v0.0.0-beta-18721"
-        : selectedMode === "isolation-supported"
-          ? "1.18.21"
-          : "1.17.19",
+        : selectedMode === "probe-v2-0-1" || selectedMode === "v2-0-1-ready"
+          ? "opencode v2.0.1"
+          : selectedMode === "isolation-supported"
+            ? "1.18.21"
+            : "1.17.19",
   );
   process.exit(0);
 }
 
 const selectedMode = mode();
-const v2 = selectedMode === "v2-ready";
+const v2 = selectedMode === "v2-ready" || selectedMode === "v2-0-1-ready";
 const requestedPort = Number(process.argv.at(-1));
 if (
   process.argv.slice(2, -1).join(" ") !==
