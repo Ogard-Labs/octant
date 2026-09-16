@@ -32,6 +32,7 @@ const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   copilot: "GitHub Copilot ACP",
   cline: "Cline ACP",
   qwen: "Qwen Code ACP",
+  fx: "fx ACP",
   "openai-compatible": "OpenAI-compatible HTTP",
   "anthropic-compatible": "Anthropic-compatible HTTP",
   "azure-foundry": "Azure AI Foundry",

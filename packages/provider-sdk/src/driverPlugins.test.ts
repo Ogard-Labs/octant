@@ -26,6 +26,7 @@ describe("provider-driver host runtime", () => {
     expect(runtimes.get("copilot")).toBe("acp-host-profile");
     expect(runtimes.get("cline")).toBe("acp-host-profile");
     expect(runtimes.get("qwen")).toBe("acp-host-profile");
+    expect(runtimes.get("fx")).toBe("acp-host-profile");
     expect(runtimes.get("codex")).toBe("managed-process");
     expect(runtimes.get("claude")).toBe("managed-process");
     expect(runtimes.get("opencode")).toBe("managed-process");
@@ -51,6 +52,7 @@ describe("provider-driver host runtime", () => {
       "copilot",
       "cline",
       "qwen",
+      "fx",
     ]);
   });
 

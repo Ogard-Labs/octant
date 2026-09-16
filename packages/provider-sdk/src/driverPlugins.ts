@@ -26,6 +26,7 @@ const ACP_HOST_PROFILE_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
   "copilot",
   "cline",
   "qwen",
+  "fx",
 ]);
 
 export function providerDriverHostRuntime(

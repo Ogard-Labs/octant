@@ -141,6 +141,7 @@ distilled successor of the earlier long-form design specifications.
 | [0127](0127-a-manually-built-candidate-ring.md) | A manually built candidate ring | Accepted |
 | [0128](0128-workspace-background-owns-covered-sidebar.md) | Workspace background owns a covered sidebar | Accepted |
 | [0129](0129-theme-patterns-may-carry-a-bounded-palette.md) | Theme patterns may carry a bounded palette | Accepted |
+| [0130](0130-fx-runs-in-a-managed-home.md) | fx runs in a managed home | Accepted |
 
 ## Adding an ADR
 

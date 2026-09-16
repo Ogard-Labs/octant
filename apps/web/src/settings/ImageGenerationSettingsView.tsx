@@ -195,6 +195,7 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangePiConfiguration={controller.changePiConfiguration}
       onChangeQwenConfiguration={controller.changeQwenConfiguration}
+      onChangeFxConfiguration={controller.changeFxConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
       onCompleteProviderAuthentication={controller.completeProviderAuthentication}
       onHiddenModelsChange={controller.updateHiddenModels}
@@ -248,6 +249,7 @@ function ImageProviderCreateForm(props: { readonly controller: ProviderControlle
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateQwen={controller.createQwen}
+      onCreateFx={controller.createFx}
       triggerLabel="Add image provider"
     />
   );

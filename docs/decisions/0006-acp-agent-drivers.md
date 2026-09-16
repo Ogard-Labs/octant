@@ -74,7 +74,7 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
 - Some agents cannot meet the contract (no stable resume, no separable
   authentication, tools executing unconfined). Those stay reserved and
   unselectable rather than being approximated.
-- The eleven shipped ACP providers are profiles over one driver, process,
+- The thirteen shipped ACP providers are profiles over one driver, process,
   protocol, and event-mapper module; the conformance suite runs once per
   profile. Devin ACP shipped earlier on the same stack.
 - Strong next registry candidates, each still needing a live profile probe
@@ -90,5 +90,5 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
 - 0012 Mixed-provider subagents
 - 0121 Provider-owned CLI runtimes (scoped supersession of managed-profile
   authentication only)
-- [fx ACP compatibility](../fx-acp-compatibility.md): probed; remains unselectable
-  until a managed process can exclude the interactive `~/.fx` profile.
+- [fx ACP compatibility](../fx-acp-compatibility.md): probed GO; ships as a
+  managed-home provider under 0130.

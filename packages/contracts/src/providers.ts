@@ -42,6 +42,7 @@ export const ProviderDriverKind = Schema.Literal(
   "copilot",
   "cline",
   "qwen",
+  "fx",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -319,6 +320,20 @@ export const QwenProviderConfiguration = Schema.Struct({
   authentication: QwenAuthentication,
 }).annotations(strict);
 export type QwenProviderConfiguration = typeof QwenProviderConfiguration.Type;
+
+/**
+ * fx keeps its profile under `$HOME/.fx` and exposes no profile-path variable,
+ * so Octant reaches it through an isolated managed home and authenticates it
+ * with a Vercel AI Gateway key held by the host credential broker. There is no
+ * provider-owned posture: the interactive `~/.fx` login is deliberately outside
+ * the confined process.
+ */
+export const FxProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("fx-acp"),
+  binaryPath: AbsoluteBinaryPath,
+  authentication: Schema.Literal("api-key"),
+}).annotations(strict);
+export type FxProviderConfiguration = typeof FxProviderConfiguration.Type;
 
 export const DevinProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("devin-acp"),
@@ -641,6 +656,13 @@ export const QwenProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type QwenProviderInstance = typeof QwenProviderInstance.Type;
 
+export const FxProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("fx"),
+  configuration: FxProviderConfiguration,
+}).annotations(strict);
+export type FxProviderInstance = typeof FxProviderInstance.Type;
+
 export const DevinProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("devin"),
@@ -732,6 +754,7 @@ export const ProviderInstance = Schema.Union(
   CopilotProviderInstance,
   ClineProviderInstance,
   QwenProviderInstance,
+  FxProviderInstance,
   DevinProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
@@ -828,6 +851,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     CopilotProviderInstance,
     ClineProviderInstance,
     QwenProviderInstance,
+    FxProviderInstance,
     KiloProviderInstance,
     DevinProviderInstance,
     PiProviderInstance,
@@ -1336,6 +1360,12 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: QwenProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-fx-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: FxProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-devin-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -1454,6 +1484,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-qwen-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: QwenProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-fx-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: FxProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-devin-configuration"),

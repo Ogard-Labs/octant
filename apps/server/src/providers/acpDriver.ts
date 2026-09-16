@@ -938,6 +938,8 @@ function makeConnection(
         let scope: Scope.CloseableScope | undefined;
         let managedTools: AcpManagedToolsLease | undefined;
         try {
+          const refusal = profile.refuses?.(mode, input.executionPolicy);
+          if (refusal !== undefined) throw failure("incompatible", refusal);
           if (input.tools.length > 0 && process.platform !== "darwin") {
             throw failure(
               "unsupported",
@@ -1093,7 +1095,14 @@ function makeConnection(
             : { modelOptionValues: input.modelOptionValues }),
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
-          Effect.mapError(() => failure("stale-resume", `${name} session could not be resumed.`)),
+          // A refusal outlives resume: fx still cannot serve Chat or Plan on an
+          // existing session, and reporting that as a stale cursor would hide
+          // the reason and invite a pointless retry.
+          Effect.mapError((error) =>
+            error.category === "incompatible"
+              ? error
+              : failure("stale-resume", `${name} session could not be resumed.`),
+          ),
         );
       },
       send: (input) =>

@@ -36,6 +36,7 @@ const BUNDLED_PROVIDER_DRIVERS = [
   { driverKind: "copilot", displayName: "GitHub Copilot", digestNibble: "11", uuidNibble: "12" },
   { driverKind: "cline", displayName: "Cline", digestNibble: "12", uuidNibble: "13" },
   { driverKind: "qwen", displayName: "Qwen Code", digestNibble: "13", uuidNibble: "14" },
+  { driverKind: "fx", displayName: "fx", digestNibble: "14", uuidNibble: "15" },
   {
     driverKind: "openai-compatible",
     displayName: "OpenAI-compatible HTTP",

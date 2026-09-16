@@ -14,6 +14,7 @@ import {
   type CopilotProviderConfiguration,
   type ClineProviderConfiguration,
   type QwenProviderConfiguration,
+  type FxProviderConfiguration,
   type GooseProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type KiloProviderConfiguration,
@@ -1196,6 +1197,61 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, hostBridge, install, recoverRegistryFailure],
   );
 
+  const createFx = useCallback(
+    (
+      displayName: string,
+      configuration: FxProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter a Vercel AI Gateway API key before creating this provider.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-fx-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch (error) {
+            if (created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+
   const beginProviderAuthentication = useCallback(
     async (instanceId: ProviderInstanceId): Promise<ProviderAuthenticationAttempt | undefined> => {
       if (client === undefined) return undefined;
@@ -2059,6 +2115,91 @@ export function useProviderController(options: ProviderControllerOptions) {
             await hostBridge!
               .clearProviderCredential(instanceId)
               .catch(() => void credentialCleanupRequired.current.add(instanceId));
+          }
+          return true;
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeFxConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: FxProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (client === undefined || current === undefined || instance?.driverKind !== "fx") {
+            return false;
+          }
+          const priorConfiguration = instance.configuration;
+          const mustSet = credentialValue.length > 0;
+          if (mustSet && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          // Validate the configuration server-side before rotating the Keychain credential so a
+          // rejected path or stale version leaves the prior key intact.
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-fx-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+          if (mustSet) {
+            try {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              const rolledBackCurrent = authoritative.current;
+              const rolledBackInstance =
+                rolledBackCurrent === undefined
+                  ? undefined
+                  : findProvider(rolledBackCurrent, instanceId);
+              let rollbackConfirmed = false;
+              if (
+                rolledBackCurrent !== undefined &&
+                rolledBackInstance !== undefined &&
+                rolledBackInstance.driverKind === "fx"
+              ) {
+                try {
+                  applyResult(
+                    await client.execute({
+                      kind: "change-fx-configuration",
+                      instanceId,
+                      expectedVersion: rolledBackInstance.version,
+                      configuration: priorConfiguration,
+                    }),
+                    rolledBackCurrent,
+                    install,
+                  );
+                  rollbackConfirmed = true;
+                } catch {
+                  // Best-effort rollback failed; the saved config may still
+                  // point at the new path with the old key.
+                }
+              }
+              if (mounted.current) {
+                setMessage(
+                  rollbackConfirmed
+                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
+                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
+                );
+              }
+              return false;
+            }
           }
           return true;
         }),
@@ -2951,6 +3092,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createGemini,
     createCline,
     createQwen,
+    createFx,
     createOllama,
     createOpenAiCompatible,
     createAnthropicCompatible,
@@ -2975,6 +3117,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeCopilotConfiguration,
     changeClineConfiguration,
     changeQwenConfiguration,
+    changeFxConfiguration,
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,

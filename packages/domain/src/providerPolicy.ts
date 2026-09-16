@@ -33,6 +33,8 @@ import type {
   QwenAuthentication,
   QwenProviderConfiguration,
   QwenProviderInstance,
+  FxProviderConfiguration,
+  FxProviderInstance,
   GooseProviderConfiguration,
   GooseProviderInstance,
   IdeogramImageProviderConfiguration,
@@ -402,6 +404,12 @@ export interface QwenConfigurationInput {
   readonly authentication: QwenAuthentication;
 }
 
+export interface FxConfigurationInput {
+  readonly kind: FxProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly authentication: FxProviderConfiguration["authentication"];
+}
+
 export interface DevinConfigurationInput {
   readonly kind: DevinProviderConfiguration["kind"];
   readonly binaryPath: string;
@@ -613,6 +621,14 @@ function normalizeQwenConfiguration(
     kind: "qwen-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
     authentication: configuration.authentication,
+  };
+}
+
+function normalizeFxConfiguration(configuration: FxConfigurationInput): FxProviderConfiguration {
+  return {
+    kind: "fx-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+    authentication: "api-key",
   };
 }
 
@@ -981,6 +997,47 @@ export function changeQwenConfiguration(
   return {
     ...provider,
     configuration: normalizeQwenConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateFxProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: FxConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createFxProvider(input: CreateFxProviderInput): FxProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "fx",
+    configuration: normalizeFxConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeFxConfiguration(
+  provider: FxProviderInstance,
+  configuration: FxConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): FxProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeFxConfiguration(configuration),
     version: nextVersion(provider.version),
     updatedAt,
   };

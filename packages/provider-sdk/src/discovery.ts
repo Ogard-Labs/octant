@@ -203,6 +203,15 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     isDirectEndpoint: false,
   },
   {
+    driverKind: "fx",
+    displayName: "fx",
+    executableNames: ["fx"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance: "Add a Vercel AI Gateway API key for fx, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
     driverKind: "ollama",
     displayName: "Ollama",
     executableNames: ["ollama"],

@@ -28,6 +28,7 @@ const everyDriverKind = [
   "copilot",
   "cline",
   "qwen",
+  "fx",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",

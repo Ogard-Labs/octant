@@ -23,6 +23,7 @@ import {
   type ClineProviderConfiguration,
   type QwenAuthentication,
   type QwenProviderConfiguration,
+  type FxProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type MistralVibeAuthentication,
   type MistralVibeProviderConfiguration,
@@ -71,6 +72,7 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateGemini"
   | "onCreateCline"
   | "onCreateQwen"
+  | "onCreateFx"
   | "onCreateOllama"
 >;
 
@@ -92,6 +94,7 @@ export type ProviderCreateProviderType =
   | "copilot"
   | "cline"
   | "qwen"
+  | "fx"
   | "openai-compatible"
   | "anthropic-compatible"
   | "azure-foundry"
@@ -315,6 +318,17 @@ export function ProviderCreateForm(
                     ? transientCredential(credentialInput.current)
                     : emptyTransientCredential(transientCredential(credentialInput.current)),
                 );
+              } else if (providerType === "fx") {
+                const configuration: FxProviderConfiguration = {
+                  kind: "fx-acp",
+                  binaryPath: String(data.get("binaryPath") ?? ""),
+                  authentication: "api-key",
+                };
+                operation = props.onCreateFx(
+                  String(data.get("displayName") ?? ""),
+                  configuration,
+                  transientCredential(credentialInput.current),
+                );
               } else if (providerType === "ollama") {
                 operation = props.onCreateOllama(String(data.get("displayName") ?? ""), {
                   kind: "ollama-native-http",
@@ -412,6 +426,7 @@ export function ProviderCreateForm(
                   { id: "copilot", group: "Coding agents", label: "GitHub Copilot ACP" },
                   { id: "cline", group: "Coding agents", label: "Cline ACP" },
                   { id: "qwen", group: "Coding agents", label: "Qwen Code ACP" },
+                  { id: "fx", group: "Coding agents", label: "fx ACP" },
                   {
                     id: "openai-compatible",
                     group: "Chat, voice & custom image APIs",
@@ -793,6 +808,22 @@ export function ProviderCreateForm(
                 onAuthenticationChange={setQwenAuthentication}
               />
             ) : null}
+            {providerType === "fx" ? (
+              <label>
+                <span>Vercel AI Gateway API key</span>
+                <OctantInput
+                  aria-label="Vercel AI Gateway API key"
+                  autoComplete="off"
+                  className="settings-view__text-input window-no-drag"
+                  disabled={!props.credentialManagementAvailable}
+                  name="apiKey"
+                  ref={credentialInput}
+                  required
+                  spellCheck={false}
+                  type="password"
+                />
+              </label>
+            ) : null}
             {providerType === "goose" ? (
               <p className="provider-settings__field-guidance">
                 Uses provider-owned Goose authentication. Run `goose configure` in your terminal,
@@ -858,7 +889,8 @@ export function ProviderCreateForm(
                   providerType === "gemini-native-image" ||
                   providerType === "bfl-image" ||
                   providerType === "ideogram-image") &&
-                  !props.credentialManagementAvailable)
+                  !props.credentialManagementAvailable) ||
+                (providerType === "fx" && !props.credentialManagementAvailable)
               }
               type="submit"
             >
@@ -1420,7 +1452,11 @@ export function CopilotConfigurationForm(props: {
 }
 
 function ApiKeyAcpConfigurationForm<
-  T extends GeminiProviderConfiguration | ClineProviderConfiguration | QwenProviderConfiguration,
+  T extends
+    | GeminiProviderConfiguration
+    | ClineProviderConfiguration
+    | QwenProviderConfiguration
+    | FxProviderConfiguration,
 >(props: {
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
@@ -1429,6 +1465,12 @@ function ApiKeyAcpConfigurationForm<
   readonly binaryLabel: string;
   readonly apiKeyLabel: string;
   readonly configuration: T;
+  /**
+   * Drivers whose contract carries exactly one authentication posture set this
+   * so the form draws no selector and always submits that literal. Offering a
+   * choice would build a configuration the server refuses to decode.
+   */
+  readonly fixedAuthentication?: T["authentication"];
   readonly onChange: (
     instanceId: ProviderInstance["id"],
     configuration: T,
@@ -1436,7 +1478,9 @@ function ApiKeyAcpConfigurationForm<
   ) => Promise<boolean>;
 }) {
   const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState(props.configuration.authentication);
+  const [authentication, setAuthentication] = useState<T["authentication"]>(
+    props.fixedAuthentication ?? props.configuration.authentication,
+  );
   return (
     <form
       className="provider-card__edit"
@@ -1467,19 +1511,21 @@ function ApiKeyAcpConfigurationForm<
           required
         />
       </label>
-      <label>
-        <span>Authentication</span>
-        <OctantSelectField
-          aria-label={`Authentication for ${props.instance.displayName}`}
-          className="settings-view__select"
-          onValueChange={(value) => setAuthentication(value as typeof authentication)}
-          options={[
-            { id: "provider-owned", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: props.apiKeyLabel },
-          ]}
-          value={authentication}
-        />
-      </label>
+      {props.fixedAuthentication === undefined ? (
+        <label>
+          <span>Authentication</span>
+          <OctantSelectField
+            aria-label={`Authentication for ${props.instance.displayName}`}
+            className="settings-view__select"
+            onValueChange={(value) => setAuthentication(value as typeof authentication)}
+            options={[
+              { id: "provider-owned", label: "Provider CLI login (recommended)" },
+              { id: "api-key", label: props.apiKeyLabel },
+            ]}
+            value={authentication}
+          />
+        </label>
+      ) : null}
       {authentication === "api-key" ? (
         <label>
           <span>{props.apiKeyLabel} (leave blank to preserve)</span>
@@ -1567,6 +1613,27 @@ export function QwenConfigurationForm(props: {
       credentialManagementAvailable={props.credentialManagementAvailable}
       disabled={props.disabled}
       driverLabel="Qwen Code"
+      instance={props.instance}
+      onChange={props.onChange}
+    />
+  );
+}
+
+export function FxConfigurationForm(props: {
+  readonly instance: Extract<ProviderInstance, { driverKind: "fx" }>;
+  readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
+  readonly onChange: ProviderSettingsViewProps["onChangeFxConfiguration"];
+}) {
+  return (
+    <ApiKeyAcpConfigurationForm
+      apiKeyLabel="Vercel AI Gateway API key (leave blank to preserve)"
+      binaryLabel="fx binary path"
+      configuration={props.instance.configuration}
+      credentialManagementAvailable={props.credentialManagementAvailable}
+      disabled={props.disabled}
+      driverLabel="fx"
+      fixedAuthentication="api-key"
       instance={props.instance}
       onChange={props.onChange}
     />

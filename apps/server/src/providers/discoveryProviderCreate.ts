@@ -24,6 +24,7 @@ type DiscoveryCreateCommand = Extract<
       | "create-copilot-provider"
       | "create-cline-provider"
       | "create-qwen-provider"
+      | "create-fx-provider"
       | "create-devin-provider"
       | "create-kilo-provider"
       | "create-pi-provider"
@@ -217,6 +218,22 @@ export function createProviderFromDiscoveryCandidate(
             kind: "qwen-acp",
             binaryPath: candidate.binaryPath,
             authentication: "provider-owned",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "fx":
+      return {
+        instanceId,
+        command: {
+          kind: "create-fx-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "fx-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "api-key",
           },
           enabled: options.enabled,
         },

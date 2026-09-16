@@ -10,6 +10,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
+import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
 import { AcpFailure, type AcpNewSessionResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -27,6 +28,7 @@ const kilo = acpProviderProfiles.kilo;
 const devin = acpProviderProfiles.devin;
 const vibe = acpProviderProfiles["mistral-vibe"];
 const kimi = acpProviderProfiles["kimi-code"];
+const fx = acpProviderProfiles.fx;
 const profiles = Object.values(acpProviderProfiles);
 
 class FakeClient implements AcpClientPort {
@@ -710,6 +712,27 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   ] as const)(
     "launches %s %s in the profile root and applies the profile ACP mode",
     async (productMode, executionPolicy) => {
+      const refusal = profile.refuses?.(productMode, executionPolicy);
+      if (refusal !== undefined) {
+        // A profile that refuses a mode refuses before a session process
+        // starts, so the turn fails closed instead of running read-only.
+        const { driver, starts } = fixture(profile);
+        const failure = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({
+                instanceId,
+                projectRoot,
+                mode: productMode,
+              });
+              return yield* Effect.flip(connection.start({ sessionId, modelId, executionPolicy }));
+            }),
+          ),
+        );
+        expect(failure).toMatchObject({ category: "incompatible", message: refusal });
+        expect(starts).toEqual([]);
+        return;
+      }
       const { driver, client, starts, active, registry } = fixture(profile);
       await Effect.runPromise(
         Effect.scoped(
@@ -1051,64 +1074,70 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     );
   });
 
-  it("correlates approvals and denies approvals in plan mode", async () => {
-    const { driver, client } = fixture(profile);
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          client.request(permissionRequest("permission-provider", "tool-1"));
-          yield* Effect.sleep("1 millis");
-          yield* connection.answerApproval({ sessionId, requestId: "request-1", approved: true });
-          expect(client.respondPermission).toHaveBeenCalledWith(
-            "permission-provider",
-            "allow_once",
-          );
-          yield* connection.stop(sessionId);
+  it.skipIf(profile.refuses?.("code", "plan") !== undefined)(
+    "correlates approvals and denies approvals in plan mode",
+    async () => {
+      const { driver, client } = fixture(profile);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            client.request(permissionRequest("permission-provider", "tool-1"));
+            yield* Effect.sleep("1 millis");
+            yield* connection.answerApproval({ sessionId, requestId: "request-1", approved: true });
+            expect(client.respondPermission).toHaveBeenCalledWith(
+              "permission-provider",
+              "allow_once",
+            );
+            yield* connection.stop(sessionId);
 
-          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
-          client.request(permissionRequest("permission-plan", "tool-2"));
-          yield* Effect.sleep("1 millis");
-          const failure = yield* Effect.flip(
-            connection.answerApproval({ sessionId, requestId: "request-2", approved: true }),
-          );
-          expect(failure.category).toBe("protocol");
-          expect(client.respondPermission).toHaveBeenCalledWith("permission-plan", "reject_once");
-          expect(client.respondPermission).toHaveBeenCalledTimes(2);
-          yield* connection.stop(sessionId);
-        }),
-      ),
-    );
-  });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+            client.request(permissionRequest("permission-plan", "tool-2"));
+            yield* Effect.sleep("1 millis");
+            const failure = yield* Effect.flip(
+              connection.answerApproval({ sessionId, requestId: "request-2", approved: true }),
+            );
+            expect(failure.category).toBe("protocol");
+            expect(client.respondPermission).toHaveBeenCalledWith("permission-plan", "reject_once");
+            expect(client.respondPermission).toHaveBeenCalledTimes(2);
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+    },
+  );
 
-  it("absorbs transport failure and keeps sequence contiguous for auto-rejected Plan side effects", async () => {
-    const { driver, client } = fixture(profile);
-    const rejection = Promise.reject(new Error("private transport detail"));
-    void rejection.catch(() => undefined);
-    const catchRejection = vi.spyOn(rejection, "catch");
-    client.respondPermission.mockReturnValueOnce(rejection);
+  it.skipIf(profile.refuses?.("code", "plan") !== undefined)(
+    "absorbs transport failure and keeps sequence contiguous for auto-rejected Plan side effects",
+    async () => {
+      const { driver, client } = fixture(profile);
+      const rejection = Promise.reject(new Error("private transport detail"));
+      void rejection.catch(() => undefined);
+      const catchRejection = vi.spyOn(rejection, "catch");
+      client.respondPermission.mockReturnValueOnce(rejection);
 
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
-          client.request(permissionRequest("permission-plan-failure", "tool-plan"));
-          yield* Effect.sleep("1 millis");
-          expect(catchRejection).toHaveBeenCalledOnce();
-          const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
-            Effect.promise(() => collectTerminal(runtimeEvents)),
-          );
-          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
-          const events = yield* Fiber.join(collected);
-          expect(events.map((event) => event.sequence)).toEqual([1, 2]);
-          yield* connection.stop(sessionId);
-        }),
-      ),
-    );
-  });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+            client.request(permissionRequest("permission-plan-failure", "tool-plan"));
+            yield* Effect.sleep("1 millis");
+            expect(catchRejection).toHaveBeenCalledOnce();
+            const runtimeEvents = yield* connection.subscribe;
+            const collected = yield* Effect.fork(
+              Effect.promise(() => collectTerminal(runtimeEvents)),
+            );
+            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+            const events = yield* Fiber.join(collected);
+            expect(events.map((event) => event.sequence)).toEqual([1, 2]);
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+    },
+  );
 
   it("reattaches the exact ACP session for a valid exact-root cursor", async () => {
     const { driver, client } = fixture(profile);
@@ -1198,12 +1227,51 @@ describe("ACP provider driver profile quirks", () => {
     [kimi, "code", "full-access", "yolo"],
     [kilo, "code", "full-access", "octant"],
     [kilo, "chat", "approval-gated", "octant"],
+    [fx, "code", "approval-gated", "ask"],
+    [fx, "code", "full-access", "code"],
   ] as const)(
     "maps $0.displayName %s %s only to the approved ACP mode %s",
     (profile, mode, policy, expected) => {
       expect(profile.sessionMode(mode, policy)).toBe(expected);
     },
   );
+
+  it("refuses fx where it would run with runtime tools Octant did not admit", () => {
+    // fx always advertises runtime tools, so a read-only product mode cannot
+    // be honoured; the refusal happens before a session process starts.
+    expect(fx.refuses?.("chat", "approval-gated")).toMatch(/cannot run read-only/);
+    expect(fx.refuses?.("code", "plan")).toMatch(/cannot run read-only/);
+    expect(fx.refuses?.("work", "approval-gated")).toBeUndefined();
+    expect(fx.refuses?.("code", "full-access")).toBeUndefined();
+    // fx's own `code` mode maps to `permissionMode: "auto"`, so only an
+    // explicit Full access turn may select it.
+    expect(fx.sessionMode("code", "approval-gated")).toBe("ask");
+  });
+
+  it("keeps fx in a managed home and denies its workspace instruction and extension surfaces", () => {
+    const environment = sanitizeAcpEnvironment(
+      fx,
+      { PATH: "/usr/bin", HOME: "/Users/example", AI_GATEWAY_API_KEY: "host-secret" },
+      { managedHome: "/var/empty/octant-fx-home", apiKey: "brokered-key" },
+    );
+    // fx resolves its whole profile through $HOME and exposes no profile-path
+    // variable, so the managed home is the only thing standing between it and
+    // the interactive ~/.fx profile.
+    expect(environment.HOME).toBe("/var/empty/octant-fx-home");
+    expect(environment.XDG_CONFIG_HOME).toBe("/var/empty/octant-fx-home/.config");
+    expect(environment.AI_GATEWAY_API_KEY).toBe("brokered-key");
+    expect(fx.process.hostAuthentication).toBeUndefined();
+    // `permission_mode` is a profile-owned key that a project `.fx.json`
+    // cannot raise, and the pin keeps a session that fails to select its mode
+    // on `ask` rather than fx's default `auto`.
+    expect(fx.process.guards.FX_PERMISSION_MODE).toBe("ask");
+    expect(fx.process.forbiddenRootEntries).toEqual([
+      ".fx.json",
+      ".mcp.json",
+      "AGENTS.md",
+      ".agents",
+    ]);
+  });
 
   it("leaves Mistral Vibe a selectable default agent for every mode it can request", () => {
     const guards = vibe.process.guards;

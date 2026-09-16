@@ -49,6 +49,7 @@ describe("bundled provider-driver plugins", () => {
       "copilot",
       "cline",
       "qwen",
+      "fx",
     ]);
   });
 });

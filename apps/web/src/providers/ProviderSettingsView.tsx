@@ -13,6 +13,7 @@ import type {
   CopilotProviderConfiguration,
   ClineProviderConfiguration,
   QwenProviderConfiguration,
+  FxProviderConfiguration,
   GooseProviderConfiguration,
   IdeogramImageProviderConfiguration,
   KiloProviderConfiguration,
@@ -148,6 +149,11 @@ export interface ProviderSettingsViewProps {
     configuration: QwenProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateFx: (
+    displayName: string,
+    configuration: FxProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateOllama: (
     displayName: string,
     configuration: OllamaProviderConfiguration,
@@ -230,6 +236,11 @@ export interface ProviderSettingsViewProps {
   readonly onChangeQwenConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: QwenProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeFxConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: FxProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeDevinConfiguration: (
@@ -323,6 +334,7 @@ const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "copilot",
   "cline",
   "qwen",
+  "fx",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -369,6 +381,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateGemini={props.onCreateGemini}
             onCreateCline={props.onCreateCline}
             onCreateQwen={props.onCreateQwen}
+            onCreateFx={props.onCreateFx}
             onCreateMistralVibe={props.onCreateMistralVibe}
             onCreateOllama={props.onCreateOllama}
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
@@ -410,6 +423,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
         onChangeClineConfiguration={props.onChangeClineConfiguration}
         onChangeQwenConfiguration={props.onChangeQwenConfiguration}
+        onChangeFxConfiguration={props.onChangeFxConfiguration}
         onChangeKiloConfiguration={props.onChangeKiloConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
