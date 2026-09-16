@@ -501,6 +501,14 @@ conservative fallbacks. A matching runtime window from the same provider, model,
 and request shape is retained across restart and participates in subsequent
 planning; it replaces emergency estimates while conflicting model facts retain
 the more conservative bound.
+Provider-managed Code turns also contribute their journaled token reports to the
+usage ledger. One operation contributes one request; a later report replaces its
+previous totals. A separate replay checkpoint imports existing Code reports on
+upgrade without replaying unrelated purged usage. The provider and model are
+those recorded when the turn started, including after a later handoff. These
+turns have no Octant planning estimate or variance: APIs omit those fields and
+the request-detail table labels them unavailable.
+
 Optional Project and
 thread token spend ceilings (0060) are host owner policy: the server refuses a
 provider-consuming turn at admission when remaining reserved capacity cannot

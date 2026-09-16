@@ -83,8 +83,12 @@ export function readUsageDashboard(
       quality: row.quality,
       inputTokens: row.input_tokens,
       outputTokens: row.output_tokens,
-      plannedInputTokens: row.planned_input_tokens,
-      varianceTokens: row.variance_tokens,
+      ...(row.planning_available === 0
+        ? {}
+        : {
+            plannedInputTokens: row.planned_input_tokens,
+            varianceTokens: row.variance_tokens,
+          }),
       ...(row.reasoning_tokens === null ? {} : { reasoningTokens: row.reasoning_tokens }),
       ...(row.cache_read_input_tokens === null
         ? {}

@@ -753,10 +753,10 @@ function DetailSection(props: {
                 </td>
                 <td>{row.requestShape}</td>
                 <td>{QUALITY_WORDS[row.quality]}</td>
-                <td>{row.plannedInputTokens.toLocaleString()}</td>
+                <td>{row.plannedInputTokens?.toLocaleString() ?? "Unavailable"}</td>
                 <td>{row.inputTokens.toLocaleString()}</td>
                 <td>{row.outputTokens.toLocaleString()}</td>
-                <td>{row.varianceTokens.toLocaleString()}</td>
+                <td>{row.varianceTokens?.toLocaleString() ?? "Unavailable"}</td>
                 <td>
                   {row.attribution.map((entry) => entry.category).join(", ") || "Unavailable"}
                 </td>

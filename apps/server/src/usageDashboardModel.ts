@@ -33,8 +33,8 @@ export interface UsageDashboardSourceRow {
   readonly quality: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
-  readonly plannedInputTokens: number;
-  readonly varianceTokens: number;
+  readonly plannedInputTokens?: number;
+  readonly varianceTokens?: number;
   readonly reasoningTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
@@ -342,7 +342,7 @@ function isStructurallyValid(row: UsageDashboardSourceRow): boolean {
   if (!QUALITIES.includes(row.quality as UsageQuality)) return false;
   if (!TIMESTAMP_PATTERN.test(row.observedAt)) return false;
   if (Number.isNaN(new Date(row.observedAt).getTime())) return false;
-  if (!Number.isSafeInteger(row.varianceTokens)) return false;
+  if (row.varianceTokens !== undefined && !Number.isSafeInteger(row.varianceTokens)) return false;
   const counts = [
     row.inputTokens,
     row.outputTokens,
@@ -399,8 +399,8 @@ function toDetailRow(row: UsageDashboardSourceRow): UsageDetailRow {
     quality: row.quality as UsageQuality,
     inputTokens: row.inputTokens,
     outputTokens: row.outputTokens,
-    plannedInputTokens: row.plannedInputTokens,
-    varianceTokens: row.varianceTokens,
+    ...(row.plannedInputTokens === undefined ? {} : { plannedInputTokens: row.plannedInputTokens }),
+    ...(row.varianceTokens === undefined ? {} : { varianceTokens: row.varianceTokens }),
     ...(row.reasoningTokens === undefined ? {} : { reasoningTokens: row.reasoningTokens }),
     ...(row.cacheReadInputTokens === undefined
       ? {}

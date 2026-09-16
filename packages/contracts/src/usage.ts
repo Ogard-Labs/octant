@@ -43,8 +43,8 @@ export const UsageRecord = Schema.Struct({
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
   providerExecutionDurationMs: Schema.optional(NonNegativeInt),
-  plannedInputTokens: NonNegativeInt,
-  varianceTokens: Schema.Int,
+  plannedInputTokens: Schema.optional(NonNegativeInt),
+  varianceTokens: Schema.optional(Schema.Int),
   attribution: Schema.Array(UsageAttributionEntry),
   observedAt: UtcTimestamp,
 }).annotations(strict);

@@ -1790,6 +1790,11 @@ ALTER TABLE code_runtime_projection
     name: "create_spend_ceiling_projection",
     sql: SPEND_CEILING_PROJECTION_SQL,
   },
+  {
+    version: 59,
+    name: "record_usage_planning_availability",
+    sql: "ALTER TABLE usage_record_projection ADD COLUMN planning_available INTEGER NOT NULL DEFAULT 1 CHECK(planning_available IN (0, 1));",
+  },
 ];
 
 interface AppliedMigrationRow {

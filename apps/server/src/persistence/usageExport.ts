@@ -20,8 +20,8 @@ export interface SafeUsageExportRow {
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
   readonly providerExecutionDurationMs?: number;
-  readonly plannedInputTokens: number;
-  readonly varianceTokens: number;
+  readonly plannedInputTokens?: number;
+  readonly varianceTokens?: number;
   readonly observedAt: string;
   readonly attributionCategories: string;
 }
@@ -47,8 +47,10 @@ export function toSafeExportRow(record: UsageRecord): SafeUsageExportRow {
     ...(record.providerExecutionDurationMs === undefined
       ? {}
       : { providerExecutionDurationMs: record.providerExecutionDurationMs }),
-    plannedInputTokens: record.plannedInputTokens,
-    varianceTokens: record.varianceTokens,
+    ...(record.plannedInputTokens === undefined
+      ? {}
+      : { plannedInputTokens: record.plannedInputTokens }),
+    ...(record.varianceTokens === undefined ? {} : { varianceTokens: record.varianceTokens }),
     observedAt: record.observedAt,
     attributionCategories: record.attribution.map((entry) => entry.category).join(";"),
   };

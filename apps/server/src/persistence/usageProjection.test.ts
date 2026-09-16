@@ -169,6 +169,66 @@ function appendFullUsageCycle(
 }
 
 describe("UsageProjection", () => {
+  it("includes reported Code turn usage once after later reports and replay", () => {
+    const { connection, journal } = openDatabase();
+    const events = [
+      {
+        kind: "conversation-turn-started",
+        providerInstanceId: ids.provider,
+        modelId: "code-model",
+        sessionId: ids.entry,
+        prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+      },
+      { kind: "usage", inputTokens: 10, outputTokens: 2 },
+      { kind: "usage", inputTokens: 30, outputTokens: 6 },
+      { kind: "operation-state", state: "completed" },
+    ];
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: 0,
+      events: events.map((event, index) =>
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: index + 1,
+          occurredAt: now,
+          event,
+        }),
+      ),
+    });
+    const expected = [
+      expect.objectContaining({
+        subject: { aggregateType: "code-thread", aggregateId: ids.aggregate },
+        providerInstanceId: ids.provider,
+        modelId: "code-model",
+        inputTokens: 30,
+        outputTokens: 6,
+      }),
+    ];
+    expect(readAllUsageRecords(connection)).toEqual(expected);
+    expect(readAllUsageRecords(connection)[0]?.plannedInputTokens).toBeUndefined();
+    expect(readAllUsageRecords(connection)[0]?.varianceTokens).toBeUndefined();
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readAllUsageRecords(connection)).toEqual(expected);
+    expect(readAllUsageRecords(connection)[0]?.plannedInputTokens).toBeUndefined();
+    expect(readAllUsageRecords(connection)[0]?.varianceTokens).toBeUndefined();
+
+    // An older host advanced its usage checkpoint but never projected Code.
+    // Catching up the new checkpoint must not restore purged Chat records.
+    appendFullUsageCycle(journal, { id: ids.usage2 });
+    connection.prepare("DELETE FROM usage_record_projection").run();
+    connection
+      .prepare("DELETE FROM projection_checkpoints WHERE projection_name = 'code-usage'")
+      .run();
+    catchUpProjection({ connection, journal, projection, clock: () => now });
+    expect(readAllUsageRecords(connection)).toEqual(expected);
+    catchUpProjection({ connection, journal, projection, clock: () => now });
+    expect(readAllUsageRecords(connection)).toEqual(expected);
+    connection.close();
+  });
+
   it("records image-generation units in attribution_json without a schema bump", () => {
     const { connection, journal } = openDatabase();
     journal.append({

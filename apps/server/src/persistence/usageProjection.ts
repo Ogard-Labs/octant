@@ -1,4 +1,5 @@
 import {
+  decodeCodeOperationEventFrame,
   decodeContextUsageReconciled,
   decodeUsageRecord,
   type EventEnvelope,
@@ -38,7 +39,9 @@ export class UsageProjection implements Projection {
   readonly dependencies: ReadonlyArray<string> = ["aggregate-heads", "contexts"];
 
   reset(connection: SqliteConnection): void {
-    connection.exec("DELETE FROM usage_record_projection;");
+    connection.exec(
+      "DELETE FROM usage_record_projection WHERE request_shape != 'code-provider-turn';",
+    );
   }
 
   apply(connection: SqliteConnection, event: EventEnvelope): void {
@@ -158,11 +161,79 @@ export class UsageProjection implements Projection {
         record.cacheReadInputTokens ?? null,
         record.cacheWriteInputTokens ?? null,
         record.providerExecutionDurationMs ?? null,
-        record.plannedInputTokens,
-        record.varianceTokens,
+        record.plannedInputTokens ?? 0,
+        record.varianceTokens ?? 0,
         USAGE_PROJECTION_SCHEMA_VERSION,
         JSON.stringify(record.attribution),
         record.observedAt,
+        event.globalSequence,
+        String(event.hostId),
+      );
+  }
+}
+
+/** A separate checkpoint imports saved Code reports on upgrade without
+ * replaying unrelated usage that the user may have purged. */
+export class CodeUsageProjection implements Projection {
+  readonly name = "code-usage";
+  readonly dependencies: ReadonlyArray<string> = ["aggregate-heads"];
+
+  reset(connection: SqliteConnection): void {
+    connection.exec(
+      "DELETE FROM usage_record_projection WHERE request_shape = 'code-provider-turn';",
+    );
+  }
+
+  apply(connection: SqliteConnection, event: EventEnvelope): void {
+    if (event.eventName !== "code.operation-event-recorded@1") return;
+    assertProjection(event.eventVersion === 1 && event.aggregateType === "code-operation");
+    const frame = decodeProjection(() => decodeCodeOperationEventFrame(event.payload));
+    if (frame.event.kind !== "usage") return;
+    assertProjection(String(frame.operationId) === String(event.aggregateId));
+    const start = connection
+      .prepare(`
+      SELECT payload_json FROM event_journal
+      WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
+        AND event_name = 'code.operation-event-recorded@1' AND global_sequence < ?
+        AND json_extract(payload_json, '$.event.kind') = 'conversation-turn-started'
+      ORDER BY global_sequence DESC LIMIT 1
+    `)
+      .get(String(frame.operationId), event.globalSequence) as
+      | { readonly payload_json: string }
+      | undefined;
+    if (start === undefined) return;
+    const started = decodeProjection(() =>
+      decodeCodeOperationEventFrame(JSON.parse(start.payload_json)),
+    );
+    assertProjection(started.event.kind === "conversation-turn-started");
+    assertProjection(String(started.threadId) === String(frame.threadId));
+    const usage = frame.event;
+    // Code reports replace the turn's previous totals, just as its transcript
+    // does. The operation id keeps live updates and replay on the same row.
+    connection
+      .prepare(`
+      INSERT INTO usage_record_projection (
+        reconciliation_id, subject_type, subject_id, provider_instance_id,
+        model_id, request_shape, quality, input_tokens, output_tokens,
+        planned_input_tokens, variance_tokens, schema_version,
+        attribution_json, observed_at, last_sequence, host_id, planning_available
+      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0)
+      ON CONFLICT (reconciliation_id) DO UPDATE SET
+        input_tokens = excluded.input_tokens,
+        output_tokens = excluded.output_tokens,
+        observed_at = excluded.observed_at,
+        last_sequence = excluded.last_sequence
+      WHERE excluded.last_sequence > usage_record_projection.last_sequence
+    `)
+      .run(
+        String(frame.operationId),
+        String(frame.threadId),
+        String(started.event.providerInstanceId),
+        String(started.event.modelId),
+        usage.inputTokens,
+        usage.outputTokens,
+        USAGE_PROJECTION_SCHEMA_VERSION,
+        frame.occurredAt,
         event.globalSequence,
         String(event.hostId),
       );
@@ -469,8 +540,12 @@ function decodeUsageRow(row: UsageRecordProjectionRow): UsageRecord {
     ...(row.provider_execution_duration_ms === null
       ? {}
       : { providerExecutionDurationMs: row.provider_execution_duration_ms }),
-    plannedInputTokens: row.planned_input_tokens,
-    varianceTokens: row.variance_tokens,
+    ...(row.planning_available === 0
+      ? {}
+      : {
+          plannedInputTokens: row.planned_input_tokens,
+          varianceTokens: row.variance_tokens,
+        }),
     attribution,
     observedAt: row.observed_at,
   });

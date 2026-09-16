@@ -395,6 +395,7 @@ describe("Project restart recovery", () => {
       { projection_name: "canvas", reason: "unknown-event-name" },
       { projection_name: "chat", reason: "unknown-event-name" },
       { projection_name: "code", reason: "unknown-event-name" },
+      { projection_name: "code-usage", reason: "unknown-event-name" },
       { projection_name: "contexts", reason: "unknown-event-name" },
       { projection_name: "diagnostics-exports", reason: "unknown-event-name" },
       { projection_name: "extensions", reason: "unknown-event-name" },

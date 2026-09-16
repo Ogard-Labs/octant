@@ -14,6 +14,7 @@ export interface UsageRecordProjectionRow {
   readonly cache_read_input_tokens: number | null;
   readonly cache_write_input_tokens: number | null;
   readonly provider_execution_duration_ms: number | null;
+  readonly planning_available: number;
   readonly planned_input_tokens: number;
   readonly variance_tokens: number;
   readonly schema_version: number;
