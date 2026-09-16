@@ -958,29 +958,35 @@ export class WorkTurnService {
         const projected = this.#projection.lookup(input.command.requestId);
         if (projected?.status !== "accepted" && projected?.status !== "running") return;
         const snapshot = published.snapshot;
-        this.#contextHarness.reconcileUsage({
-          subject: snapshot.subject,
-          planId: snapshot.next.plan.id,
-          requestShape: "work-turn",
-          actualInputTokens: usage.inputTokens,
-          actualOutputTokens: usage.outputTokens,
-          ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
-          ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
-          ...(usage.reasoningTokens === undefined
-            ? {}
-            : { reasoningTokens: usage.reasoningTokens }),
-          ...(usage.cacheReadInputTokens === undefined
-            ? {}
-            : { cacheReadInputTokens: usage.cacheReadInputTokens }),
-          ...(usage.cacheWriteInputTokens === undefined
-            ? {}
-            : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
-          ...(usage.providerExecutionDurationMs === undefined
-            ? {}
-            : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
-          currentVarianceReserve: snapshot.next.plan.reserves.variance,
-          maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
-        });
+        try {
+          this.#contextHarness.reconcileUsage({
+            subject: snapshot.subject,
+            planId: snapshot.next.plan.id,
+            requestShape: "work-turn",
+            actualInputTokens: usage.inputTokens,
+            actualOutputTokens: usage.outputTokens,
+            ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+            ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+            ...(usage.reasoningTokens === undefined
+              ? {}
+              : { reasoningTokens: usage.reasoningTokens }),
+            ...(usage.cacheReadInputTokens === undefined
+              ? {}
+              : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+            ...(usage.cacheWriteInputTokens === undefined
+              ? {}
+              : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+            ...(usage.providerExecutionDurationMs === undefined
+              ? {}
+              : { providerExecutionDurationMs: usage.providerExecutionDurationMs }),
+            currentVarianceReserve: snapshot.next.plan.reserves.variance,
+            maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
+          });
+        } catch {
+          // Usage reconciliation is best-effort during a live Work turn. A
+          // stale or rejected variance must not convert the provider run into
+          // a failed outcome.
+        }
       },
       onTasks: (tasks) => {
         if (input.signal.aborted) return;

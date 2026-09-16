@@ -1,5 +1,5 @@
 import { decodeContextSubjectRef, decodeProviderRuntimeEvent } from "@octant/contracts";
-import { ContextHarnessService } from "../context/contextHarnessService";
+import { ContextHarnessError, ContextHarnessService } from "../context/contextHarnessService";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -206,6 +206,83 @@ describe("WorkTurnService", () => {
         actualOutputTokens: 8,
         contextTokens: 188,
         contextWindow: 1000,
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("keeps a Work turn completed when usage reconciliation refuses the report", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      vi.spyOn(contextHarness, "reconcileUsage").mockImplementation(() => {
+        throw new ContextHarnessError("stale", "Usage must reconcile the current context plan.");
+      });
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        const usage = decodeProviderRuntimeEvent({
+          instanceId: ids.provider,
+          sessionId: input.providerSessionId,
+          sequence: 1,
+          correlationId: ids.request,
+          occurredAt: now,
+          kind: "usage",
+          inputTokens: 180,
+          outputTokens: 8,
+          contextTokens: 188,
+          contextWindow: 1000,
+        });
+        if (usage.kind !== "usage") throw new Error("Expected usage fixture");
+        input.onUsage?.(usage);
+        return { kind: "completed" as const, response: "Ready" };
+      });
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: { run },
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: decodeProviderInstanceId(ids.provider),
+                modelId: decodeProviderModelId("model-a"),
+                contextWindow: 1000,
+                maxOutput: 20,
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: now,
+              },
+            ]),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).toHaveBeenCalledOnce();
+      expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+        kind: "accepted",
+        turn: { status: "completed" },
       });
     } finally {
       connection.close();
