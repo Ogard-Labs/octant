@@ -412,7 +412,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     input.temporaryDirectory,
     ...additionalWriteRoots,
   ]) {
-    assertNotAncestorOfDeniedPath(path, "launch root");
+    for (const form of resolvedRootForms(path)) assertNotAncestorOfDeniedPath(form, "launch root");
   }
 
   const writeBoundRoot = input.writeBoundRoot !== false;
@@ -482,16 +482,21 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // temporary directory, which macOS resolves beneath `/private/var`, so the
     // broad-read escape hatch that exists for Git and provider CLIs took away
     // the one directory those runtimes always need.
-    ...uniqueAbsolutePaths([
-      ...readRoots,
-      input.boundRoot,
-      input.temporaryDirectory,
-      ...additionalWriteRoots,
-    ]).map((path) => seatbeltAllowRule("file-read*", path)),
-    ...(writeBoundRoot ? [seatbeltAllowRule("file-write*", input.boundRoot)] : []),
-    seatbeltAllowRule("file-write*", input.temporaryDirectory),
+    ...uniqueAbsolutePaths(
+      [...readRoots, input.boundRoot, input.temporaryDirectory, ...additionalWriteRoots].flatMap(
+        (path) => resolvedRootForms(path),
+      ),
+    ).map((path) => seatbeltAllowRule("file-read*", path)),
+    ...(writeBoundRoot ? resolvedRootForms(input.boundRoot) : []).map((path) =>
+      seatbeltAllowRule("file-write*", path),
+    ),
+    ...resolvedRootForms(input.temporaryDirectory).map((path) =>
+      seatbeltAllowRule("file-write*", path),
+    ),
     ...additionalDenyWritePaths.map((path) => seatbeltDenyRule("file-write*", path)),
-    ...additionalWriteRoots.map((path) => seatbeltAllowRule("file-write*", path)),
+    ...uniqueAbsolutePaths(additionalWriteRoots.flatMap((path) => resolvedRootForms(path))).map(
+      (path) => seatbeltAllowRule("file-write*", path),
+    ),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
   ];
@@ -641,4 +646,22 @@ function assertNotAncestorOfDeniedPath(path: string, label: string): void {
 
 function uniqueAbsolutePaths(paths: ReadonlyArray<string>): string[] {
   return [...new Set(paths)];
+}
+
+/**
+ * Seatbelt matches the path the kernel resolves, not the one a caller handed
+ * us. On macOS the temporary directory arrives as `/var/folders/...` while the
+ * kernel evaluates rules against `/private/var/folders/...`, so a rule naming
+ * only the link is never consulted and the directory the profile claims to
+ * grant stays unwritable. Emit both forms: the lexical path for callers that
+ * already resolve their roots, and the resolved path for the ones that do not.
+ * A root that cannot be resolved yet keeps its lexical rule only.
+ */
+function resolvedRootForms(path: string): ReadonlyArray<string> {
+  try {
+    const resolved = realpathSync(path);
+    return resolved === path ? [path] : [path, resolved];
+  } catch {
+    return [path];
+  }
 }
