@@ -86,6 +86,16 @@ describe("ChatWelcome", () => {
     );
     await user.click(screen.getByRole("button", { name: "Start chat" }));
     expect(onCreateChat).toHaveBeenCalledExactlyOnceWith("Hello");
+    onCreateChat.mockClear();
+    rerender(
+      <ChatWelcome
+        onCreateChat={onCreateChat}
+        selectedProviderInstanceId={providerId}
+        selectedModelId={modelId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+    expect(onCreateChat).toHaveBeenCalledExactlyOnceWith("Hello");
   });
 
   it("starts a conversation from the harness composer", async () => {

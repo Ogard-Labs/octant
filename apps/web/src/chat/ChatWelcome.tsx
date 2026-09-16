@@ -81,6 +81,9 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     readonly key: string;
     readonly values: ProviderModelOptionValues;
   }>({ key: modelKey, values: {} });
+  if (modelChoice.key !== modelKey) {
+    setModelChoice({ key: modelKey, values: {} });
+  }
   const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = prompt.trim();
