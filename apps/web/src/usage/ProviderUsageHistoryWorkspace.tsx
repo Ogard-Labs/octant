@@ -79,18 +79,35 @@ export function ProviderUsageHistoryWorkspace(props: {
     const read = async () => {
       try {
         for (let batch = 0; batch < 512 && !abort.signal.aborted; batch += 1) {
-          const data = await props.client.load(request, abort.signal);
+          // The first read of an opening asks for the host's last completed
+          // reading of this view, so an unchanged provider history paints at
+          // once instead of climbing through a fresh import's subtotals.
+          const data = await props.client.load(
+            batch === 0 ? { ...request, preferLastRead: true } : request,
+            abort.signal,
+          );
           if (abort.signal.aborted) return;
-          const more = data.coverage.some((source) => source.hasMore === true);
-          const paused = more && batch === 511;
-          setResult({
+          const scanning = data.coverage.some((source) => source.hasMore === true);
+          const more = scanning || data.fromLastRead === true;
+          const paused = scanning && batch === 511;
+          setResult((previous) => ({
             client: props.client,
             range,
-            data,
+            // A last reading is a total from an earlier opening; an unfinished
+            // scan of this one is not, so the earlier total stays on screen
+            // until this read completes instead of being replaced by a subtotal.
+            data:
+              previous?.client === props.client &&
+              previous.range === range &&
+              previous.data?.fromLastRead === true &&
+              data.fromLastRead !== true &&
+              scanning
+                ? previous.data
+                : data,
             busy: more && !paused,
             failed: false,
             paused,
-          });
+          }));
           if (!more || paused) return;
           await pauseImport(abort.signal);
         }
@@ -208,7 +225,9 @@ export function ProviderUsageHistoryWorkspace(props: {
             : current?.paused
               ? "Import paused. Refresh to continue reading history."
               : busy
-                ? "Reading local provider history…"
+                ? data?.fromLastRead === true
+                  ? "Reading local provider history… The last reading is shown."
+                  : "Reading local provider history…"
                 : data?.coverage.length === 0
                   ? "No supported local history source is enabled. Check Providers & Models."
                   : data?.coverage.some((source) => source.status !== "ready")

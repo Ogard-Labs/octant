@@ -76,6 +76,50 @@ describe("Local provider usage history", () => {
     expect(await screen.findByRole("heading", { name: "2.4K" })).toBeVisible();
     expect(load).toHaveBeenCalledTimes(2);
   });
+  it("opens at the host's last reading and keeps it until the fresh read completes", async () => {
+    const lastRead = { ...history(), fromLastRead: true };
+    const scanning = {
+      ...history(),
+      totals: { ...history().totals, totalTokens: 300 },
+      coverage: history().coverage.map((source) => ({
+        ...source,
+        status: "partial" as const,
+        hasMore: true,
+      })),
+    };
+    const complete = { ...history(), totals: { ...history().totals, totalTokens: 2400 } };
+    let finishScan: (value: LocalUsageHistoryResponse) => void = () => undefined;
+    const scanningRead = new Promise<LocalUsageHistoryResponse>((resolve) => {
+      finishScan = resolve;
+    });
+    let finishComplete: (value: LocalUsageHistoryResponse) => void = () => undefined;
+    const completeRead = new Promise<LocalUsageHistoryResponse>((resolve) => {
+      finishComplete = resolve;
+    });
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(lastRead)
+      .mockImplementationOnce(() => scanningRead)
+      .mockImplementationOnce(() => completeRead);
+    render(<ProviderUsageHistoryWorkspace client={{ load }} />);
+    await showTokens();
+    expect(load.mock.calls[0]?.[0]).toMatchObject({ preferLastRead: true });
+    expect(await screen.findByRole("heading", { name: "1.2K" })).toBeVisible();
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    expect(load.mock.calls[1]?.[0]).not.toHaveProperty("preferLastRead");
+    await act(async () => {
+      finishScan(scanning);
+    });
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+    // The unfinished scan's subtotal never replaces the last completed reading.
+    expect(screen.getByRole("heading", { name: "1.2K" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "300" })).toBeNull();
+    await act(async () => {
+      finishComplete(complete);
+    });
+    expect(await screen.findByRole("heading", { name: "2.4K" })).toBeVisible();
+  });
+
   it("labels a failed continuation as incomplete rather than a successful reading", async () => {
     const partial = history();
     const load = vi

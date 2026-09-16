@@ -1,4 +1,5 @@
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
+import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { createSelectedSkillContextResolver } from "./extensions/selectedSkillContext";
 import {
   createDesktopComputerUsePort,
@@ -3567,6 +3568,12 @@ export function startOctantServer(
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+      // One file, two rebuildable caches beside each other: the checkpoint the
+      // reader resumes from, and the last completed reading a surface paints
+      // while it reads again.
+      lastReadStore: createLocalUsageHistoryLastReadStore(
+        join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
+      ),
       sources: () => {
         const seen = new Set<string>();
         const sources: ProviderLocalUsageHistorySource[] = [];

@@ -88,6 +88,14 @@ text or credentials. It remains separate from Octant-attributed usage. An old
 or invalid cache is rebuilt from the recognized provider files; if the cache
 cannot be saved, Usage reports partial coverage and explains the problem.
 
+Opening Usage paints the host's last stored reading of the selected view and
+reads again behind it, so an unchanged provider history opens at its totals
+instead of repainting them while the import runs. Those totals carry the read
+time of the earlier reading and are replaced when the current read finishes.
+Normally that is the last completed reading. On a view that has never produced
+a completed reading yet, the last unfinished reading is the fallback that is
+kept, and it is replaced when a scan finishes.
+
 ## Related
 
 - [Context budgets](/advanced/context-budgets)
