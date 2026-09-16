@@ -578,13 +578,24 @@ function ProviderRow(props: ProviderRowProps) {
   const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
   const detectedButDisabled = !props.instance.enabled && detectedLocally;
   const enableBlocked = !props.instance.enabled && !canEnable;
-  // A disabled binary-backed provider the finished scan never searched for:
-  // the switch stays usable and the row says why the scan is silent.
-  const absenceUnproven =
+  // A disabled binary-backed provider the finished scan never found: the switch
+  // stays usable and the row says why the scan is silent. A driver the latest
+  // scan never reached — the usual cause is the scan running out of its time
+  // budget — was neither searched nor found, so it is described as not checked
+  // rather than as a search that came back empty.
+  const scanCoveredDriver =
+    props.discoverySnapshot?.searchedDirectories?.some(
+      (entry) => entry.driverKind === props.instance.driverKind,
+    ) === true;
+  const scanSilence =
     !props.instance.enabled &&
     canEnable &&
     !detectedLocally &&
-    providerBinaryPath(props.instance) !== undefined;
+    providerBinaryPath(props.instance) !== undefined
+      ? scanCoveredDriver
+        ? "Not found by the latest scan in the locations it searched — you can still enable it; the host checks the binary first."
+        : "The latest scan did not check this provider — you can still enable it; the host checks the binary first."
+      : undefined;
   const isCli =
     props.instance.driverKind === "codex" ||
     props.instance.driverKind === "opencode" ||
@@ -710,12 +721,9 @@ function ProviderRow(props: ProviderRowProps) {
         <span className="prov-meta oct-meta">
           {label} {runtimeLabel}
         </span>
-        {absenceUnproven ? (
-          <span className="prov-meta provider-settings__scan-note">
-            Not found by the latest scan in the locations it searched — you can still enable it; the
-            host checks the binary first.
-          </span>
-        ) : null}
+        {scanSilence === undefined ? null : (
+          <span className="prov-meta provider-settings__scan-note">{scanSilence}</span>
+        )}
       </span>
       <span className="prov-observation">
         <span className="prov-models oct-meta">
