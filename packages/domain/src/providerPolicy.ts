@@ -117,7 +117,9 @@ export function isImageProfileDriverKind(
 const PROVIDER_CLI_UPDATE_COMMANDS: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
   codex: ["update"],
   claude: ["update"],
-  opencode: ["update"],
+  // The binary's own help lists `upgrade, update`; `upgrade` is the name it
+  // documents first and the one an older install has always answered to.
+  opencode: ["upgrade"],
   devin: ["update"],
   "mistral-vibe": ["update"],
   grok: ["update"],
