@@ -4,7 +4,11 @@ import { EnvironmentFilter } from "./EnvironmentFilter";
 import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import type { SettingsDeepLink } from "@octant/contracts";
-import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
+import type {
+  ShellSettings,
+  SidebarDestinationCustomization,
+  WindowWorkspace,
+} from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
 import { PanelLeftClose, Search } from "lucide-react";
@@ -69,6 +73,8 @@ export interface ShellSidebarProps {
   readonly navigatorAvailable?: boolean;
   readonly nativeHost?: boolean;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
+  /** Writes which destinations the rail carries, from the More control. */
+  readonly onChangeSidebarDestinations?: (next: SidebarDestinationCustomization) => void;
   /** Opens the App-level thread Search overlay. */
   readonly onOpenSearch?: () => void;
   /** Absent on a window that cannot enter Zen, which keeps the row off the menu. */
@@ -159,16 +165,21 @@ export function ShellSidebar(props: ShellSidebarProps) {
     activeMode,
     customization: props.settings.sidebarDestinations,
     input: navigationInput,
-    moreEnabled: props.settings.sidebarMoreEnabled,
   });
   const secondaryActions = destinationLayout.menu.flatMap((descriptor) => {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
-  const moreActions = destinationLayout.more.flatMap((descriptor) => {
-    const action = navigationActions[descriptor.id];
-    return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
-  });
+  const moreControl =
+    props.settings.sidebarMoreEnabled && props.onChangeSidebarDestinations !== undefined ? (
+      <SidebarMore
+        customization={props.settings.sidebarDestinations}
+        onChange={props.onChangeSidebarDestinations}
+        onCustomizeSidebar={() =>
+          props.onOpenSettings({ section: "appearance", setting: "sidebar-destinations" })
+        }
+      />
+    ) : undefined;
   return (
     <aside
       aria-label="Octant sidebar"
@@ -249,21 +260,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
               ? {}
               : { counts: { inbox: props.inboxCount } })}
             input={navigationInput}
-            {...(moreActions.length === 0
-              ? {}
-              : {
-                  more: (
-                    <SidebarMore
-                      items={moreActions}
-                      onCustomizeSidebar={() =>
-                        props.onOpenSettings({
-                          section: "appearance",
-                          setting: "sidebar-destinations",
-                        })
-                      }
-                    />
-                  ),
-                })}
+            {...(moreControl === undefined ? {} : { more: moreControl })}
             projectSection={
               props.projectsDirectory === undefined ? props.projectSection : undefined
             }

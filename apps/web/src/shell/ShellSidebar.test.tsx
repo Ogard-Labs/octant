@@ -673,15 +673,16 @@ describe("ShellSidebar", () => {
     expect(screen.queryByRole("menuitem", { name: "Image generator" })).not.toBeInTheDocument();
   });
 
-  it("closes the destination rows with a More row that reveals the menu-only ones", async () => {
+  it("closes the destination rows with a More row that is the sidebar's own control", async () => {
     const user = userEvent.setup();
-    const plugins = vi.fn();
+    const onChangeSidebarDestinations = vi.fn();
     render(
       <ShellSidebar
         codeNavigation={{
-          actions: { "new-code-thread": vi.fn(), automations: vi.fn(), plugins },
+          actions: { "new-code-thread": vi.fn(), automations: vi.fn(), plugins: vi.fn() },
         }}
         onAddFolder={vi.fn()}
+        onChangeSidebarDestinations={onChangeSidebarDestinations}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
@@ -691,35 +692,48 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    const more = screen.getByRole("button", { name: "More destinations" });
+    const more = screen.getByRole("button", { name: "More" });
     const newTask = screen.getByRole("button", { name: "New task" });
     // More is the last destination row: after the rows, before the Project tree.
     expect(newTask.compareDocumentPosition(more)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     await user.click(more);
-    await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
-    expect(plugins).toHaveBeenCalledOnce();
+    // A menu-only destination is a checkbox for the rail, not a destination to open.
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Plugins" }));
+    expect(onChangeSidebarDestinations).toHaveBeenCalledWith({
+      order: [],
+      visibility: [{ id: "plugins", visibility: "shown" }],
+    });
   });
 
-  it("puts Customize sidebar behind the destination rows in the More popup", async () => {
+  it("checks the destinations the rail carries and keeps Customize sidebar behind them", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
     render(
       <ShellSidebar
         codeNavigation={{ actions: { "new-code-thread": vi.fn(), plugins: vi.fn() } }}
         onAddFolder={vi.fn()}
+        onChangeSidebarDestinations={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={onOpenSettings}
         onSelectMode={vi.fn()}
         projectSection={null}
-        settings={defaultShellSettings()}
+        settings={{
+          ...defaultShellSettings(),
+          sidebarDestinations: {
+            order: [],
+            visibility: [{ id: "image-library", visibility: "hidden" }],
+          },
+        }}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "More destinations" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Inbox" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Image generator" })).not.toBeChecked();
     const customize = await screen.findByRole("menuitem", { name: "Customize sidebar" });
-    const plugins = screen.getByRole("menuitem", { name: "Plugins" });
+    const plugins = screen.getByRole("menuitemcheckbox", { name: "Plugins" });
     expect(plugins.compareDocumentPosition(customize)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await user.click(customize);
     expect(onOpenSettings).toHaveBeenCalledWith({
@@ -728,12 +742,13 @@ describe("ShellSidebar", () => {
     });
   });
 
-  it("keeps the More row off and the destinations in the account menu when it is turned off", async () => {
+  it("keeps the More control off, and the destinations in the account menu, when the row is turned off", async () => {
     const user = userEvent.setup();
     render(
       <ShellSidebar
         codeNavigation={{ actions: { "new-code-thread": vi.fn(), plugins: vi.fn() } }}
         onAddFolder={vi.fn()}
+        onChangeSidebarDestinations={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
@@ -743,12 +758,13 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "More destinations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
   });
 
-  it("omits the More row when nothing is left to reveal", () => {
+  it("keeps the More control when the host offers nothing extra, because it still toggles the rows", async () => {
+    const user = userEvent.setup();
     render(
       <ShellSidebar
         codeNavigation={{ actions: { "new-code-thread": vi.fn() } }}
@@ -757,6 +773,7 @@ describe("ShellSidebar", () => {
         artifactLibraryAvailable={false}
         imageLibraryAvailable={false}
         onAddFolder={vi.fn()}
+        onChangeSidebarDestinations={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
@@ -772,7 +789,12 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "More destinations" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "New thread" })).toBeChecked();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Plugins" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("renders the rows in the customized order", () => {
