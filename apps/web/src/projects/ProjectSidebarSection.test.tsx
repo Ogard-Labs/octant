@@ -1770,11 +1770,27 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(details).toHaveTextContent("Planning");
     expect(details).toHaveTextContent("feature/sidebar");
     await user.unhover(row);
-    const reference = screen.getByRole("button", { name: "Open pull request #12" });
-    expect(reference).toHaveAttribute("data-state", "open");
-    await user.click(reference);
+    await user.pointer({ target: row, keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Open pull request #12" }));
     expect(onOpenPullRequest).toHaveBeenCalledWith(codeThread.pullRequests.items[0].identity);
     expect(props.onSelectThread).not.toHaveBeenCalled();
+  });
+
+  it("offers the same pin and archive row actions as Project rows", async () => {
+    const user = userEvent.setup();
+    const onPinThread = vi.fn();
+    const onArchiveThread = vi.fn();
+    const props = sidebarProps();
+    render(<ProjectSidebarSection {...props} threadActions={{ onPinThread, onArchiveThread }} />);
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    const pin = screen.getByRole("button", { name: "Pin thread" });
+    await user.click(pin);
+    expect(onPinThread).toHaveBeenCalledWith(codeThread.threadId, true);
+    expect(props.onSelectThread).not.toHaveBeenCalled();
+    const overflow = screen.getByRole("button", { name: "Thread actions" });
+    await user.click(overflow);
+    await user.click(await screen.findByRole("menuitem", { name: "Archive thread" }));
+    expect(onArchiveThread).toHaveBeenCalledWith(codeThread.threadId);
   });
 
   it("starts each view showing exactly what its rows carried before the choice existed", async () => {

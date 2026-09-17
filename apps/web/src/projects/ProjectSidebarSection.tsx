@@ -119,8 +119,10 @@ import {
   ThreadStatusMark,
   threadRowAge,
   threadRowShortAge,
+  hasInlineActions,
+  ThreadRowContextMenu,
 } from "./ProjectThreadList";
-import type { ThreadRowActions } from "./ThreadRowMenu";
+import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -1097,6 +1099,8 @@ function ActivityThreadButton(props: {
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
   const age = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
+  const hasMenu = !threadRowMenuIsEmpty(props.actions);
+  const inlineActions = hasInlineActions(props.actions);
   const row = (
     <OctantButton
       aria-current={selected ? "page" : undefined}
@@ -1162,6 +1166,19 @@ function ActivityThreadButton(props: {
       ) : null}
     </OctantButton>
   );
+  if (hasMenu) {
+    return (
+      <ThreadRowContextMenu
+        actions={props.actions}
+        className="activity-nav__row"
+        inlineActions={inlineActions}
+        {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
+        projectName={props.thread.projectName}
+        row={row}
+        thread={props.thread}
+      />
+    );
+  }
   return (
     <div className="activity-nav__row">
       <ThreadRowInfoPopup
