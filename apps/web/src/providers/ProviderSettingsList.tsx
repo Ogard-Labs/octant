@@ -852,7 +852,7 @@ function ProviderRow(props: ProviderRowProps) {
             {props.onUpdateProviderCli !== undefined &&
             supportsProviderCliUpdate(props.instance.driverKind) ? (
               <OctantButton
-                aria-label={`Update ${props.instance.displayName} CLI`}
+                aria-label={`Update CLI for ${props.instance.displayName}`}
                 disabled={disabled || !props.instance.enabled}
                 onClick={() => void props.onUpdateProviderCli?.(props.instance.id)}
                 size="sm"

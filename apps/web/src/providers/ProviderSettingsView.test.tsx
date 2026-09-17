@@ -696,7 +696,7 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    const update = screen.getByRole("button", { name: "Update Kimi local CLI" });
+    const update = screen.getByRole("button", { name: "Update CLI for Kimi local" });
     expect(update).toHaveTextContent("Update CLI");
     await user.click(
       within(screen.getByRole("article", { name: "Kimi local" })).getByRole("button", {
@@ -725,10 +725,22 @@ describe("ProviderSettingsView", () => {
 
     expect(screen.getByText("Updating")).toBeVisible();
     expect(screen.queryByText("Ready")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update Kimi local CLI" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Update CLI for Kimi local" })).toBeDisabled();
     expect(screen.getByRole("status", { name: "Provider readiness summary" })).toHaveTextContent(
       /0 ready/,
     );
+  });
+
+  it("names the CLI update once, for a provider whose own name already ends in CLI", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: cliNamedProvider() })}
+        onUpdateProviderCli={vi.fn(async () => true)}
+      />,
+    );
+
+    const update = screen.getByRole("button", { name: "Update CLI for Codex CLI" });
+    expect(update).toHaveTextContent("Update CLI");
   });
 
   it("does not offer Update CLI for providers without a verified updater", () => {
@@ -2750,6 +2762,15 @@ function provider(patch: Partial<ProviderInstance> = {}): ProviderInstance {
     createdAt: "2026-07-14T10:00:00.000Z" as never,
     updatedAt: "2026-07-14T10:00:00.000Z" as never,
     ...patch,
+  });
+}
+
+function cliNamedProvider(): ProviderInstance {
+  return decodeProviderInstance({
+    ...provider(),
+    displayName: "Codex CLI",
+    driverKind: "codex",
+    configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
   });
 }
 
