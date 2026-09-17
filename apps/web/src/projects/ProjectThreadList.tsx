@@ -414,7 +414,7 @@ export function ThreadRowInfoPopup(props: {
  * and Archive buttons when the caller provides callbacks, plus an overflow menu
  * that carries the same actions for coarse pointers or narrow viewports.
  */
-function ThreadRowActionsGutter(props: {
+export function ThreadRowActionsGutter(props: {
   readonly actions: ThreadRowActions;
   readonly thread: ChatThreadNavigationItem;
 }) {
@@ -550,7 +550,7 @@ function ThreadRowActionsGutter(props: {
  * Whether the caller has supplied any action that should be rendered as an
  * inline thread-row button. Renaming alone does not count as an inline action.
  */
-function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
+export function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
   if (actions === undefined) return false;
   return actions.onPinThread !== undefined || actions.onArchiveThread !== undefined;
 }
@@ -1080,7 +1080,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   );
 }
 
-function ThreadRowContextMenu(props: {
+export function ThreadRowContextMenu(props: {
   readonly actions: ThreadRowActions;
   readonly inlineActions: boolean;
   readonly leading?: ReactNode;
@@ -1088,10 +1088,11 @@ function ThreadRowContextMenu(props: {
   readonly projectName: string | undefined;
   readonly row: ReactElement;
   readonly thread: ChatThreadNavigationItem;
+  readonly className?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="sidebar-navigation__thread-row">
+    <div className={["sidebar-navigation__thread-row", props.className].filter(Boolean).join(" ")}>
       {props.leading}
       <OctantContextMenuRoot onOpenChange={setOpen}>
         <ThreadRowInfoPopup
