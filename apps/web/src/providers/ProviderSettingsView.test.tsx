@@ -731,9 +731,37 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it.each([
+    ["codex", codexProvider(), "Update Codex local CLI"],
+    ["claude", claudeProvider(), "Update Claude local CLI"],
+    ["opencode", provider(), "Update Existing CLI CLI"],
+  ] as const)(
+    "offers Update CLI for the verified %s updater",
+    async (_label, instance, updateButtonName) => {
+      const onUpdateProviderCli = vi.fn(async () => true);
+      renderExpanded(
+        <ProviderSettingsView
+          {...fixture({
+            instance,
+            observed: observation({ readiness: "ready", detectedVersion: "1.0.0" }),
+          })}
+          onUpdateProviderCli={onUpdateProviderCli}
+        />,
+      );
+      const update = screen.getByRole("button", { name: updateButtonName });
+      expect(update).toHaveTextContent("Update CLI");
+      const user = userEvent.setup();
+      await user.click(update);
+      expect(onUpdateProviderCli).toHaveBeenCalledWith(id);
+    },
+  );
+
   it("does not offer Update CLI for providers without a verified updater", () => {
     renderExpanded(
-      <ProviderSettingsView {...fixture()} onUpdateProviderCli={vi.fn(async () => true)} />,
+      <ProviderSettingsView
+        {...fixture({ instance: piProvider() })}
+        onUpdateProviderCli={vi.fn(async () => true)}
+      />,
     );
     expect(screen.queryByRole("button", { name: /Update .* CLI/ })).not.toBeInTheDocument();
     expect(

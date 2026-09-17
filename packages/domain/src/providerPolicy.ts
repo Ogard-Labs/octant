@@ -110,10 +110,16 @@ export function isImageProfileDriverKind(
 
 /**
  * Verified provider-owned self-update argv from official CLI docs. Gemini CLI
- * has no documented `update` subcommand (installs via npm; `/upgrade` is a
- * billing-tier action), so it stays unavailable.
+ * has no documented self-update subcommand (it installs via npm; `/upgrade`
+ * is a billing-tier action), so it stays unavailable. Codex's `codex update`
+ * is verified non-interactive against the installed CLI, Claude Code's is
+ * `claude update` (with an `upgrade` alias), and OpenCode's canonical
+ * subcommand is `opencode upgrade` (with an `update` alias).
  */
 const PROVIDER_CLI_UPDATE_COMMANDS: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
+  codex: ["update"],
+  claude: ["update"],
+  opencode: ["upgrade"],
   devin: ["update"],
   "mistral-vibe": ["update"],
   grok: ["update"],

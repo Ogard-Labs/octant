@@ -547,6 +547,9 @@ function createDualAuthCliProviderWithInvalidAuthentication(
 
 describe("provider CLI update policy", () => {
   it("keeps update command support shared by server and renderer", () => {
+    expect(providerCliUpdateArgs("codex")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("claude")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("opencode")).toEqual(["upgrade"]);
     expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
     expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
     expect(supportsProviderCliUpdate("copilot")).toBe(true);

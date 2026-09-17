@@ -15,6 +15,9 @@ function processExists(pid: number): boolean {
 
 describe("provider-owned CLI updates", () => {
   it("only advertises commands verified for the provider binary", () => {
+    expect(providerCliUpdateArgs("codex")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("claude")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("opencode")).toEqual(["upgrade"]);
     expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
     expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
     expect(providerCliUpdateArgs("mistral-vibe")).toEqual(["update"]);
@@ -22,7 +25,6 @@ describe("provider-owned CLI updates", () => {
     expect(providerCliUpdateArgs("gemini")).toBeUndefined();
     expect(providerCliUpdateArgs("cline")).toEqual(["update"]);
     expect(providerCliUpdateArgs("copilot")).toEqual(["update"]);
-    expect(providerCliUpdateArgs("opencode")).toBeUndefined();
     expect(providerCliUpdateArgs("goose")).toBeUndefined();
   });
 
