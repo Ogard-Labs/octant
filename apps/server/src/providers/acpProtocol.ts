@@ -229,7 +229,10 @@ export interface AcpLimits {
   readonly lineBytes: number;
   readonly pendingRequests: number;
   readonly queuedMessages: number;
+  /** Bounds the handshake and every request that is not a turn. */
   readonly requestTimeoutMs: number;
+  /** Bounds one turn: the agent keeps working while this request is open. */
+  readonly turnTimeoutMs: number;
   readonly stderrBytes: number;
 }
 
@@ -298,6 +301,10 @@ const DEFAULT_LIMITS: AcpLimits = {
   pendingRequests: 64,
   queuedMessages: 256,
   requestTimeoutMs: 15_000,
+  // A turn is not a request: `session/prompt` stays open until the agent
+  // finishes, so it needs its own budget. Without one, a caller that wires the
+  // request budget from a startup deadline cancels every longer reply.
+  turnTimeoutMs: 600_000,
   stderrBytes: 65_536,
 };
 
@@ -579,6 +586,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     method: string,
     params: unknown,
     decoder: (value: unknown) => A,
+    timeoutMs: number = limits.requestTimeoutMs,
   ): Promise<A> => {
     if (terminal) return Promise.reject(new AcpFailure("closed", "ACP transport closed."));
     if (pending.size >= limits.pendingRequests) {
@@ -589,7 +597,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       const timeout = setTimeout(() => {
         pending.delete(id);
         reject(new AcpFailure("timeout", "ACP request timed out."));
-      }, limits.requestTimeoutMs);
+      }, timeoutMs);
       pending.set(id, {
         decode: decoder,
         resolve: (value) => resolve(value as A),
@@ -679,6 +687,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         "session/prompt",
         { sessionId, prompt: [{ type: "text", text: prompt }] },
         decode(PromptResult),
+        limits.turnTimeoutMs,
       ),
     setConfigOption: (sessionId, configId, value) =>
       request(

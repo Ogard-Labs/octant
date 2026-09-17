@@ -388,6 +388,50 @@ describe("ACP protocol boundary", () => {
     await client.close();
   });
 
+  it("gives a working turn the turn budget rather than the request budget", async () => {
+    // A turn is not a request: the agent may still be generating long after the
+    // budget that protects a handshake has passed.
+    const { client, stdout } = transport({
+      limits: { requestTimeoutMs: 30, turnTimeoutMs: 400 },
+    });
+    const observed = client.prompt("session-1", "write a long answer");
+    const reply = setTimeout(() => {
+      stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } })}\n`,
+      );
+    }, 120);
+    try {
+      await expect(observed).resolves.toMatchObject({ stopReason: "end_turn" });
+    } finally {
+      clearTimeout(reply);
+      await client.close();
+    }
+  });
+
+  it("still cancels a turn that outlives its own turn budget", async () => {
+    const { client } = transport({ limits: { requestTimeoutMs: 30, turnTimeoutMs: 90 } });
+    const observed = failureOf(client.prompt("session-1", "never answered"));
+    const failure = await observed;
+    expect(failure).toMatchObject({ kind: "timeout", message: "ACP request timed out." });
+    await client.close();
+  });
+
+  it("keeps the request budget on the handshake", async () => {
+    // The budget that catches a provider which never starts must not grow with
+    // the turn budget.
+    vi.useFakeTimers();
+    try {
+      const { client } = transport({ limits: { requestTimeoutMs: 50, turnTimeoutMs: 5_000 } });
+      const observed = failureOf(client.initialize());
+      await vi.advanceTimersByTimeAsync(50);
+      const failure = await observed;
+      expect(failure).toMatchObject({ kind: "timeout", message: "ACP request timed out." });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("bounds stderr diagnostics without exposing their contents", async () => {
     const onStderr = vi.fn();
     const { client, stderr, stdout } = transport({
