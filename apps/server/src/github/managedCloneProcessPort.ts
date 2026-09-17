@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveManagedRepositorySegments } from "@octant/domain";
@@ -29,6 +29,13 @@ const ENVIRONMENT_ALLOWLIST = [
  * while a managed clone or verification command runs.
  */
 export interface OwnedGitContext {
+  /**
+   * The temporary root this context owns, set only by
+   * {@link createOwnedGitContext}. Closing the port that used it removes the
+   * directory: without that, every server start leaves one behind, and a host
+   * that restarts often collects hundreds of them.
+   */
+  readonly root?: string;
   readonly templateDirectory: string;
   readonly globalConfigPath: string;
   readonly hooksDirectory: string;
@@ -132,7 +139,7 @@ export function createOwnedGitContext(): OwnedGitContext {
     ].join("\n"),
     { mode: 0o600 },
   );
-  return { templateDirectory, globalConfigPath, hooksDirectory };
+  return { root, templateDirectory, globalConfigPath, hooksDirectory };
 }
 
 export function createManagedCloneSpawnPort(): ManagedCloneSpawnPort {
@@ -361,10 +368,22 @@ export class ManagedCloneProcessPort {
     });
   }
 
-  /** Server shutdown owns and terminates every active managed child tree. */
+  /**
+   * Server shutdown owns and terminates every active managed child tree, and
+   * removes the git context it was handed when that context owns a temporary
+   * root — the template, hooks and config git is pointed at have no purpose
+   * after the host stops.
+   */
   close(): void {
     for (const child of this.#activeChildren) child.killTree();
     this.#activeChildren.clear();
+    const root = this.#context.root;
+    if (root === undefined) return;
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      // Shutdown is best effort: a root something else still holds stays.
+    }
   }
 }
 

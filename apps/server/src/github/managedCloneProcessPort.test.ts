@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   ManagedCloneProcessPort,
+  createOwnedGitContext,
   managedCloneEnvironment,
   type ManagedCloneChildProcess,
   type ManagedCloneSpawnPort,
@@ -296,5 +298,20 @@ describe("managed clone git port", () => {
   it("exposes the owned hooks directory for hardened checkouts", () => {
     const port = createPort({ spawn: { spawn: () => createFakeChild().child } });
     expect(port.hooksDirectory()).toBe("/owned/hooks");
+  });
+  it("removes the owned git context when the port closes", () => {
+    const owned = createOwnedGitContext();
+    const root = owned.root;
+    if (root === undefined) throw new Error("Expected an owned root.");
+    const port = new ManagedCloneProcessPort({
+      ghExecutable: "gh",
+      gitExecutable: "git",
+      context: owned,
+    });
+    expect(existsSync(root)).toBe(true);
+
+    port.close();
+
+    expect(existsSync(root)).toBe(false);
   });
 });
