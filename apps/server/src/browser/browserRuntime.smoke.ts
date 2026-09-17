@@ -10,7 +10,7 @@ const server = Bun.serve({
     const path = new URL(request.url).pathname;
     if (path === "/dynamic") {
       return new Response(
-        `<!doctype html><title>Dynamic pending</title><p id="placeholder">pending</p><script>setTimeout(() => { const el = document.getElementById("placeholder"); el.id = "ready"; el.textContent = "ready"; document.title = "Dynamic ready"; }, 1200)</script>`,
+        `<!doctype html><title>Dynamic pending</title><p id="placeholder">pending</p><button id="reveal" onclick="setTimeout(() => { const el = document.getElementById('placeholder'); el.id = 'ready'; el.textContent = 'ready'; document.title = 'Dynamic ready'; }, 300)">Reveal</button>`,
         { headers: { "content-type": "text/html" } },
       );
     }
@@ -93,6 +93,9 @@ try {
   if (!pending.extractedText?.includes("pending")) {
     throw new Error("Dynamic fixture did not start in its placeholder state.");
   }
+  // The transition is the test's own click, so the pending reading above cannot
+  // race a timer, and the wait after the click has something real to wait for.
+  await runtime.act(first, request(first, "click", "#reveal"), controller.signal);
   await runtime.act(first, request(first, "wait", "#ready"), controller.signal);
   const settled = await runtime.act(first, request(first, "extract-text"), controller.signal);
   if (!settled.extractedText?.includes("ready") || settled.title !== "Dynamic ready") {
