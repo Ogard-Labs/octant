@@ -16,6 +16,8 @@ import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
   gitGlobalConfigReadRoots,
+  gitLinkedWorktreeMetadataRules,
+  gitShimExtraRules,
   type GitSeatbeltPortOptions,
 } from "../process/gitSeatbeltLaunch";
 
@@ -228,6 +230,7 @@ export class GitHistoryPort {
     const metadata = await gitHistoryMetadata(root);
     if (metadata === undefined) return { ok: false, text: "" };
     const binaryDirectory = dirname(this.#sandbox.gitExecutable);
+    const extraRules = [...gitShimExtraRules(), ...gitLinkedWorktreeMetadataRules(root)];
     const launch = this.#sandbox.confinement.prepare({
       executable: this.#sandbox.gitExecutable,
       args: ["-C", root, "-c", "core.quotePath=false", ...args],
@@ -244,6 +247,7 @@ export class GitHistoryPort {
         dirname(binaryDirectory),
         ...gitGlobalConfigReadRoots(),
       ],
+      ...(extraRules.length === 0 ? {} : { extraRules }),
     });
     return new Promise((resolve) => {
       execFile(

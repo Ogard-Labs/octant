@@ -42,6 +42,8 @@ describe("GitEnvironmentPort", () => {
       GIT_TERMINAL_PROMPT: "0",
       GCM_INTERACTIVE: "Never",
       GIT_OPTIONAL_LOCKS: "0",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
     });
   });
 
