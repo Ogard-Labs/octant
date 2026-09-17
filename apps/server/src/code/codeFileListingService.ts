@@ -182,6 +182,11 @@ export class CodeFileListingService {
     if (names === undefined) return false;
 
     let truncated = names.length > budget;
+    const children: Array<{
+      readonly absolute: string;
+      readonly identity: CodeDirectoryStat;
+      readonly relative: string;
+    }> = [];
     for (const name of names) {
       if (isAborted(input.signal)) return true;
       if (input.entries.length >= this.#maxEntries) return true;
@@ -210,14 +215,7 @@ export class CodeFileListingService {
         // is a repeat rather than a budget truncation.
         if (input.visited.has(resolved.canonical)) continue;
         input.visited.add(resolved.canonical);
-        const childTruncated = await this.#walk({
-          ...input,
-          absolute: resolved.canonical,
-          identity: resolved.stat,
-          relative,
-          depth: input.depth + 1,
-        });
-        truncated = truncated || childTruncated;
+        children.push({ absolute: resolved.canonical, identity: resolved.stat, relative });
         continue;
       }
       if (!resolved.stat.isFile) continue;
@@ -232,6 +230,24 @@ export class CodeFileListingService {
             ? { status: "read-only", reason: "oversized" }
             : { status: "available" },
       });
+    }
+
+    // Descend only after this directory's own entries are named. Descending
+    // immediately lets one large directory spend the whole budget before its
+    // siblings are reached: a real Xcode checkout lists `build` and its object
+    // files and never names `Foo.xcodeproj`, which is the entry the renderer
+    // keys Apple projects off.
+    for (const child of children) {
+      if (isAborted(input.signal)) return true;
+      if (input.entries.length >= this.#maxEntries) return true;
+      const childTruncated = await this.#walk({
+        ...input,
+        absolute: child.absolute,
+        identity: child.identity,
+        relative: child.relative,
+        depth: input.depth + 1,
+      });
+      truncated = truncated || childTruncated;
     }
     return truncated;
   }
