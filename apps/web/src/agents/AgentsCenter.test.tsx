@@ -268,4 +268,28 @@ describe("AgentsCenter", () => {
     expect(await screen.findByRole("list", { name: "Agent runs" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Graph" })).not.toBeInTheDocument();
   });
+
+  it("keeps the graph thread card inert when there is no thread to open", async () => {
+    const user = userEvent.setup();
+    render(<AgentsCenter client={createClient()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+
+    expect(screen.getByRole("button", { name: "Design chat thread" })).toBeDisabled();
+  });
+
+  it("opens the parent thread from the graph thread card", async () => {
+    const user = userEvent.setup();
+    const onOpenThread = vi.fn();
+    render(<AgentsCenter client={createClient()} onOpenThread={onOpenThread} />);
+
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    await user.click(screen.getByRole("button", { name: "Design chat thread" }));
+
+    expect(onOpenThread).toHaveBeenCalledWith({
+      mode: "chat",
+      threadId: String(summary.parentThreadId),
+      title: summary.parentThreadTitle,
+    });
+  });
 });
