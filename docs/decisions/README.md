@@ -143,6 +143,7 @@ distilled successor of the earlier long-form design specifications.
 | [0129](0129-theme-patterns-may-carry-a-bounded-palette.md) | Theme patterns may carry a bounded palette | Accepted |
 | [0130](0130-fx-runs-in-a-managed-home.md) | fx runs in a managed home | Accepted |
 | [0131](0131-usage-opens-at-its-last-completed-reading.md) | Usage opens at its last completed reading | Accepted |
+| [0132](0132-provider-runtimes-reach-provider-endpoints.md) | Provider runtimes reach provider endpoints on Chat and Work turns | Accepted |
 
 ## Adding an ADR
 

@@ -951,7 +951,9 @@ mechanisms are:
   after those denials. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
   Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
-  Linux) fails closed.
+  Linux) fails closed. Provider runtimes that make their own API call resolve
+  provider-endpoints-only on Chat and Work turns, a scoped exception to 0009
+  recorded in [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md).
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent
