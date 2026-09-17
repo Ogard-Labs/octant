@@ -1,6 +1,9 @@
+import type { SidebarDestinationCustomization } from "@octant/contracts/shell";
 import { Ellipsis, PanelLeft } from "lucide-react";
 import {
+  OctantMenuCheckboxItem,
   OctantMenuGroup,
+  OctantMenuGroupLabel,
   OctantMenuItem,
   OctantMenuPopup,
   OctantMenuPortal,
@@ -9,45 +12,50 @@ import {
   OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
-import { secondaryIcons, type SidebarSecondaryAction } from "./SidebarProfile";
+import {
+  setSidebarDestinationShown,
+  sidebarDestinationOrder,
+  sidebarDestinationVisibility,
+} from "./navigationModel";
 
 export interface SidebarMoreProps {
-  /** The destinations waiting under More, in the sidebar's destination order. */
-  readonly items: ReadonlyArray<SidebarSecondaryAction>;
+  readonly customization: SidebarDestinationCustomization;
+  readonly onChange: (next: SidebarDestinationCustomization) => void;
   readonly onCustomizeSidebar: () => void;
 }
 
 /**
- * The last destination row: an ellipsis that opens the destinations the
- * sidebar does not list, in a popup beside the rail instead of the account
- * menu they wait in when the More row is off.
+ * The sidebar's own control. It carries no destinations: each row is one
+ * element the rail can show, checked while it is in the rail, and the popup
+ * closes with the path to ordering and the menu-only placement in Settings.
  */
 export function SidebarMore(props: SidebarMoreProps) {
   return (
     <OctantMenuRoot>
-      <OctantMenuTrigger
-        aria-label="More destinations"
-        className="sidebar-item window-no-drag justify-start"
-      >
+      <OctantMenuTrigger aria-label="More" className="sidebar-item window-no-drag justify-start">
         <Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
         <span className="sidebar-label">More</span>
       </OctantMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner align="start" side="right">
-          <OctantMenuPopup
-            aria-label="More destinations"
-            className="w-[min(248px,calc(100vw-24px))]"
-          >
-            <OctantMenuGroup aria-label="Destinations">
-              {props.items.map((item) => {
-                const Icon = secondaryIcons[item.id];
-                return (
-                  <OctantMenuItem key={item.id} onClick={item.onSelect}>
-                    <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
-                    <span>{item.label}</span>
-                  </OctantMenuItem>
-                );
-              })}
+          <OctantMenuPopup aria-label="More" className="w-[min(248px,calc(100vw-24px))]">
+            <OctantMenuGroup aria-label="Sidebar elements">
+              <OctantMenuGroupLabel>Sidebar elements</OctantMenuGroupLabel>
+              {sidebarDestinationOrder(props.customization).map((destination) => (
+                <OctantMenuCheckboxItem
+                  checked={
+                    sidebarDestinationVisibility(props.customization, destination.id) === "shown"
+                  }
+                  key={destination.id}
+                  onCheckedChange={(checked) =>
+                    props.onChange(
+                      setSidebarDestinationShown(props.customization, destination.id, checked),
+                    )
+                  }
+                >
+                  {destination.label}
+                </OctantMenuCheckboxItem>
+              ))}
             </OctantMenuGroup>
             <OctantMenuSeparator />
             <OctantMenuGroup aria-label="Sidebar">

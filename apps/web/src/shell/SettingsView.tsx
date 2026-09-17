@@ -1081,7 +1081,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
           {isAvailable("sidebar-more") ? (
             <SettingRow
-              description="Reveal the menu-only destinations and Customize sidebar under a More row at the end of the sidebar navigation. Off keeps them in the account menu."
+              description="Show the sidebar element checkboxes under a More row at the end of the navigation. Off leaves them to Settings."
               focused={focusedSetting === settingId("sidebar-more")}
               label="More row in the sidebar"
               scope="app"

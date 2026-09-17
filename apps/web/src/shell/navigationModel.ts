@@ -375,6 +375,25 @@ export function setSidebarDestinationVisibility(
 }
 
 /**
+ * The sidebar control a person uses to put a destination in the rail or take
+ * it out. Unchecking is not the same as Don't show: a workspace destination
+ * returns to the account menu it came from, and a primary destination, which
+ * has no menu to return to, is hidden.
+ */
+export function setSidebarDestinationShown(
+  customization: SidebarDestinationCustomization,
+  id: SidebarDestinationId,
+  shown: boolean,
+): SidebarDestinationCustomization {
+  if (shown) return setSidebarDestinationVisibility(customization, id, "shown");
+  return setSidebarDestinationVisibility(
+    customization,
+    id,
+    defaultPlacement(id) === "menu" ? "menu" : "hidden",
+  );
+}
+
+/**
  * Swaps a destination past its neighbour in the effective order and persists
  * the whole order, so the move stays put even as destinations gain defaults.
  */
@@ -414,15 +433,11 @@ function trimCanonicalSuffix(order: ReadonlyArray<SidebarDestinationId>): Sideba
 
 export interface SidebarDestinationLayout {
   readonly rows: ReadonlyArray<SidebarNavigationDescriptorId>;
-  readonly menu: ReadonlyArray<
-    SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }
-  >;
   /**
-   * The same workspace destinations when the sidebar's More row carries them
-   * instead of the account menu. Exactly one of `menu` and `more` holds them:
-   * a destination has one home, so nothing renders twice.
+   * The workspace destinations the rail does not carry, for the account menu.
+   * A destination has one home, so a promoted one renders as a row instead.
    */
-  readonly more: ReadonlyArray<
+  readonly menu: ReadonlyArray<
     SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }
   >;
 }
@@ -482,23 +497,22 @@ function menuDestinationRowId(id: SidebarDestinationId): SidebarAppMenuDescripto
 
 /**
  * Resolves the person's customization against what this host can offer right
- * now: a hidden destination is gone from rows, menu, and More alike, a
+ * now: a hidden destination is gone from the rows and the menu alike, a
  * promoted one renders as a row only where the host serves it, and an
  * unavailable destination stays absent no matter what was requested.
  *
- * Where the menu-only destinations wait is the More row setting: beside the
- * rail under a More row, or in the account menu as they did before it shipped.
+ * The rail carries only the destinations a person promoted; the rest wait in
+ * the account menu. The sidebar's More row is the control that promotes and
+ * demotes them, so it never lists them as destinations of its own.
  */
 export function layoutSidebarDestinations({
   activeMode,
   input,
   customization,
-  moreEnabled,
 }: {
   readonly activeMode: OctantMode;
   readonly input: SidebarNavigationInput;
   readonly customization: SidebarDestinationCustomization;
-  readonly moreEnabled: boolean;
 }): SidebarDestinationLayout {
   const availableRows = new Set(buildSidebarNavigation(input).map((row) => row.id));
   const availableMenu = new Map(
@@ -506,8 +520,6 @@ export function layoutSidebarDestinations({
   );
   const rows: SidebarNavigationDescriptorId[] = [];
   const menu: Array<SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }> = [];
-  const more: Array<SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }> = [];
-  const menuDestinations = moreEnabled ? more : menu;
   for (const destination of sidebarDestinationOrder(customization)) {
     const visibility = sidebarDestinationVisibility(customization, destination.id);
     if (visibility === "hidden") continue;
@@ -515,7 +527,7 @@ export function layoutSidebarDestinations({
     if (menuId !== undefined) {
       const descriptor = availableMenu.get(menuId);
       if (descriptor !== undefined) {
-        if (visibility === "menu") menuDestinations.push(descriptor);
+        if (visibility === "menu") menu.push(descriptor);
         else rows.push(descriptor.id);
       }
       continue;
@@ -523,5 +535,5 @@ export function layoutSidebarDestinations({
     const rowId = destinationRowId(destination.id, activeMode);
     if (availableRows.has(rowId)) rows.push(rowId);
   }
-  return { rows, menu, more };
+  return { rows, menu };
 }
