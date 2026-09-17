@@ -98,6 +98,7 @@ export class UsageProjection implements Projection {
       varianceTokens: reconciliation.varianceTokens,
       observedAt: reconciliation.observedAt,
       now: event.occurredAt,
+      ...(reconciliation.providerReported === false ? { providerReported: false } : {}),
     });
 
     const record = decodeUsageRecord({

@@ -113,6 +113,7 @@ export interface ReconcileContextUsageInput {
   readonly providerExecutionDurationMs?: number;
   readonly currentVarianceReserve: number;
   readonly maxAdjustmentTokens: number;
+  readonly providerReported?: boolean;
 }
 
 export interface RestoreContextSubjectInput {
@@ -413,6 +414,7 @@ export class ContextHarnessService {
       ...(input.providerExecutionDurationMs === undefined
         ? {}
         : { providerExecutionDurationMs: input.providerExecutionDurationMs }),
+      ...(input.providerReported === false ? { providerReported: false } : {}),
       varianceTokens: variance.varianceTokens,
       nextVarianceReserve: variance.nextVarianceReserve,
       observedAt: timestamp,

@@ -941,6 +941,7 @@ export class WorkTurnService {
             projectId: input.thread.projectId,
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
+    let usageReported = false;
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
@@ -973,6 +974,7 @@ export class WorkTurnService {
         if (projected?.status !== "accepted" && projected?.status !== "running") return;
         const snapshot = published.snapshot;
         try {
+          usageReported = true;
           this.#contextHarness.reconcileUsage({
             subject: snapshot.subject,
             planId: snapshot.next.plan.id,
@@ -1046,6 +1048,28 @@ export class WorkTurnService {
       wroteFiles,
       this.#liveTasks.get(String(input.command.requestId)),
     );
+    if (
+      outcome.kind === "completed" &&
+      !usageReported &&
+      published !== undefined &&
+      this.#contextHarness !== undefined
+    ) {
+      const snapshot = published.snapshot;
+      try {
+        this.#contextHarness.reconcileUsage({
+          subject: snapshot.subject,
+          planId: snapshot.next.plan.id,
+          requestShape: "work-turn",
+          actualInputTokens: 0,
+          actualOutputTokens: 0,
+          providerReported: false,
+          currentVarianceReserve: snapshot.next.plan.reserves.variance,
+          maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
+        });
+      } catch {
+        // Usage reconciliation is best-effort after a completed Work turn.
+      }
+    }
     if (outcome.kind === "completed" && wroteFiles !== undefined) {
       await this.#backfillStatus(input.projectCanonicalRoot, input.thread, wroteFiles);
     }

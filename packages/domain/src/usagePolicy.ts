@@ -13,11 +13,20 @@ export interface UsageClassificationInput {
   readonly observedAt: string;
   readonly now: string;
   readonly staleThresholdMs?: number;
+  /**
+   * False when the provider completed a request without token facts. A
+   * ledger row still exists so the unknown case is countable; it is not a
+   * measured zero.
+   */
+  readonly providerReported?: boolean;
 }
 
 const DEFAULT_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 export function classifyUsageQuality(input: UsageClassificationInput): UsageQuality {
+  if (input.providerReported === false) {
+    return "unavailable";
+  }
   if (!input.hasReconciliation) {
     return input.hasManifest || input.hasPlan ? "estimated" : "unavailable";
   }

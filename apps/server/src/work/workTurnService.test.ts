@@ -293,6 +293,72 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("records a completed Work turn with no provider usage as unreported", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const reconcile = vi.spyOn(contextHarness, "reconcileUsage");
+      const run = vi.fn(async () => ({ kind: "completed" as const, response: "Ready" }));
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: { run },
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: decodeProviderInstanceId(ids.provider),
+                modelId: decodeProviderModelId("model-a"),
+                contextWindow: 1000,
+                maxOutput: 20,
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: now,
+              },
+            ]),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).toHaveBeenCalledOnce();
+      expect(reconcile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actualInputTokens: 0,
+          actualOutputTokens: 0,
+          providerReported: false,
+        }),
+      );
+      expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+        kind: "accepted",
+        turn: { status: "completed" },
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
   it.each([false, true])(
     "refuses oversized tools even when cleanup fails: %s",
     async (cleanupFails) => {
