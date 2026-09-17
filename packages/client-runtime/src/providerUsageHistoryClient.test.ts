@@ -98,4 +98,37 @@ describe("LocalUsageHistoryClient", () => {
     });
     await expect(client.load(request)).rejects.toBeInstanceOf(LocalUsageHistoryClientFailure);
   });
+
+  it("accepts a stored reading of the same view even though its instants are older", async () => {
+    // A preferLastRead answer is the last completed read of this view: same
+    // window length and time zone, earlier instants. Rejecting it made Usage
+    // open on "History could not be read" for every view that had one.
+    const stored = response({
+      from: "2026-08-02T00:00:00.000Z",
+      to: "2026-08-31T23:59:59.999Z",
+      fromLastRead: true,
+    });
+    const fetch = vi.fn(async () => Response.json(stored));
+    const client = createLocalUsageHistoryClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+    await expect(client.load(request)).resolves.toMatchObject({ fromLastRead: true });
+  });
+
+  it("rejects a stored reading whose window is a different length", async () => {
+    const stored = response({
+      from: "2026-09-01T00:00:00.000Z",
+      to: "2026-09-15T00:00:00.000Z",
+      fromLastRead: true,
+    });
+    const fetch = vi.fn(async () => Response.json(stored));
+    const client = createLocalUsageHistoryClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+    await expect(client.load(request)).rejects.toBeInstanceOf(LocalUsageHistoryClientFailure);
+  });
 });
