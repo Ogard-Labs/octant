@@ -211,12 +211,17 @@ export function parseNotarizationSubmission(output: string): NotarizationSubmiss
 }
 
 /**
- * Sign every nested payload, then the bundle, then notarize and staple.
+ * Sign every nested payload, then the bundle, then notarize, staple and
+ * re-archive.
  *
  * The order is the point: `codesign` seals a bundle including whatever is
  * inside it, so a nested binary signed afterwards invalidates the outer seal.
  * Verification runs against the finished bundle rather than being assumed from
- * exit codes.
+ * exit codes. The archive the notary service is given is built before the
+ * staple, because the ticket does not exist yet; the archive that ships is
+ * built after it, because a ticket stapled into the bundle after the archive
+ * was written is not in the archive, and the app inside it would have to reach
+ * Apple before it could launch.
  */
 export async function signAndNotarizeDesktop(input: {
   readonly repositoryRoot: string;
@@ -263,4 +268,5 @@ export async function signAndNotarizeDesktop(input: {
     );
   }
   await input.run(createStapleArgv(input.appPath));
+  await input.run(createArchiveArgv({ appPath: input.appPath, archivePath: input.archivePath }));
 }
