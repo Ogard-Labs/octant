@@ -78,6 +78,8 @@ export interface AppendAgentRunStatusChangedInput {
   readonly resultText?: string;
   /** The run this status change belongs to; owns the stored reply text. */
   readonly run?: AgentRun;
+  /** Provider-reported token counts; journaled with completion. */
+  readonly usage?: AgentRun["usage"];
 }
 
 export interface AppendAgentRunResultAcknowledgedInput {
@@ -225,6 +227,7 @@ export class AgentRunEventStore {
         version: input.version,
         ...(input.recoveryReason === undefined ? {} : { recoveryReason: input.recoveryReason }),
         ...(input.result === undefined ? {} : { result: input.result }),
+        ...(input.usage === undefined ? {} : { usage: input.usage }),
       });
       if (payload.version !== expectedVersion + 1) {
         throw new Error("status version must be one greater than expected head");

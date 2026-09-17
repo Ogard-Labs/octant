@@ -392,6 +392,55 @@ describe("agentRunClient", () => {
     expect(results[0]?.kind).toBe("run-updated");
   });
 
+  it("saves the parent thread forest as a Canvas through the snapshot route", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toContain("/api/agent-runs/canvas-snapshot");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ parentThreadId });
+      return new Response(
+        JSON.stringify({
+          kind: "accepted",
+          canvasId: "11111111-1111-4111-8111-111111111111",
+          versionId: "22222222-2222-4222-8222-222222222222",
+          title: "Design chat agent graph",
+          originThreadId: parentThreadId,
+          mode: "chat",
+          projectId: "77777777-7777-4777-8777-777777777777",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    const result = await client.snapshotCanvas(parentThreadId as never);
+    expect(result).toMatchObject({
+      kind: "accepted",
+      title: "Design chat agent graph",
+      mode: "chat",
+    });
+  });
+
+  it("returns a denied canvas snapshot without throwing", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({ kind: "denied", message: "This thread has no agent runs to save." }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    await expect(client.snapshotCanvas(parentThreadId as never)).resolves.toEqual({
+      kind: "denied",
+      message: "This thread has no agent runs to save.",
+    });
+  });
+
   it("rejects non-loopback base URLs", () => {
     expect(() =>
       createAgentRunClient({

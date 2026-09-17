@@ -336,6 +336,7 @@ import {
 } from "./agentRun/agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
+import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
 import {
   createAgentRunChildWorktreePort,
@@ -1875,6 +1876,10 @@ export function startOctantServer(
       approvals: { isCurrent: () => true },
       processes: agentRunProcessSupervisor,
     });
+    let snapshotCanvasImpl: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]> = () => ({
+      kind: "denied",
+      message: "Canvas is unavailable on this host.",
+    });
     const agentRunRouteDependencies: AgentRunRouteDependencies = {
       windowAuthorityStore,
       // A child's model comes from its role's slot when one is configured;
@@ -2065,6 +2070,7 @@ export function startOctantServer(
         },
       },
       uuid: randomUUID,
+      snapshotCanvas: (input) => snapshotCanvasImpl(input),
     };
     const agentRunRoutes = createAgentRunRouteHandler(agentRunRouteDependencies);
     /**
@@ -6767,6 +6773,34 @@ export function startOctantServer(
       },
       { authorize: authorizeCanvas },
     );
+    snapshotCanvasImpl = (input) =>
+      createAgentRunForestCanvasSnapshot({
+        mode: input.mode,
+        parentThreadId: String(input.parentThreadId),
+        title: input.title,
+        blocks: input.blocks,
+        uuid: randomUUID,
+        resolveWorkspace: resolveCanvasWorkspace,
+        readProject: (projectId) => {
+          try {
+            const project = persistence.readProject(decodeProjectId(projectId));
+            if (project === undefined) return undefined;
+            return { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+          } catch {
+            return undefined;
+          }
+        },
+        readChatProjectId: (threadId) => {
+          try {
+            const thread = persistence.readChatThread(decodeChatThreadId(threadId));
+            return thread?.projectId === undefined ? undefined : String(thread.projectId);
+          } catch {
+            return undefined;
+          }
+        },
+        createCanvas: (request, context, project, blocks) =>
+          canvasService.create(request, context, project, blocks),
+      });
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,

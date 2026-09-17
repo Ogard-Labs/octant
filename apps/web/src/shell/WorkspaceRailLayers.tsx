@@ -18,6 +18,7 @@ import type { ImageGenerationClient } from "@octant/client-runtime/image-generat
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { ImageLibraryView } from "../image/ImageLibraryView";
 import { lazy, Suspense, type ReactNode } from "react";
+import type { AgentsCenterProps } from "../agents/AgentsCenter";
 import type { AgentsCenterThreadTarget } from "../agents/agentsCenterModel";
 import type {
   AutomationEditorCatalog,
@@ -147,6 +148,7 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenAgentsThread: (
     target: AgentsCenterThreadTarget & { readonly title: string },
   ) => void;
+  readonly onOpenAgentsCanvas?: AgentsCenterProps["onOpenCanvas"];
   /** The Inbox is mode-independent: what waits on the user spans every mode. */
   readonly inboxOpen: boolean;
   readonly onCloseInbox: () => void;
@@ -364,6 +366,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               narrow={props.isNarrow}
               onClose={props.onCloseAgentsCenter}
               onOpenThread={props.onOpenAgentsThread}
+              {...(props.onOpenAgentsCanvas === undefined
+                ? {}
+                : { onOpenCanvas: props.onOpenAgentsCanvas })}
               projectNames={props.projectNames}
               {...(props.providerLabels === undefined
                 ? {}

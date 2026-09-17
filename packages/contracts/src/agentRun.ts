@@ -108,6 +108,13 @@ export const AgentRunUsageQuality = Schema.Literal(
 );
 export type AgentRunUsageQuality = typeof AgentRunUsageQuality.Type;
 
+/** Token counts a provider actually reported for this run. Absent when unknown. */
+export const AgentRunTokenUsage = Schema.Struct({
+  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type AgentRunTokenUsage = typeof AgentRunTokenUsage.Type;
+
 export const AgentRunAuthority = Schema.Struct({
   filesystem: Schema.Boolean,
   shell: Schema.Boolean,
@@ -324,6 +331,8 @@ export const AgentRun = Schema.Struct({
   resultAcknowledgement: AgentRunResultAcknowledgement,
   /** Present only once the run completed with a persisted reply. */
   result: Schema.optional(AgentRunResult),
+  /** Present only when a provider reported token usage for this run. */
+  usage: Schema.optional(AgentRunTokenUsage),
   recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
@@ -379,6 +388,7 @@ export const AgentRunCommand = Schema.Union(
     result: AgentRunResult,
     /** Stored under `result.reference`; never journaled with the completion. */
     resultText: AgentRunResultText,
+    usage: Schema.optional(AgentRunTokenUsage),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("fail-agent-run"),
@@ -454,6 +464,8 @@ export const AgentRunStatusChanged = Schema.Struct({
    * to the AgentRun content store by that same transaction.
    */
   result: Schema.optional(AgentRunResult),
+  /** Provider-reported token counts; present only on honest completions. */
+  usage: Schema.optional(AgentRunTokenUsage),
 }).annotations(strict);
 export type AgentRunStatusChanged = typeof AgentRunStatusChanged.Type;
 
@@ -510,6 +522,8 @@ export const AgentRunCenterSummary = Schema.Struct({
   route: AgentRunCenterRoute,
   resultAcknowledgement: AgentRunResultAcknowledgement,
   recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  normalizedReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  usage: Schema.optional(AgentRunTokenUsage),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,

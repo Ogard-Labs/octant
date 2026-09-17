@@ -73,6 +73,7 @@ function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
     steer: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
     retry: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
     resume: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
+    snapshotCanvas: vi.fn(),
     ...overrides,
   };
 }

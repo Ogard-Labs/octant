@@ -226,7 +226,12 @@ export class AgentRunPersistenceService {
         // append as the completion, so a rejected append leaves no Completed
         // run claiming a result nobody has.
         ...(command.kind === "complete-agent-run"
-          ? { result: command.result, resultText: command.resultText, run: next }
+          ? {
+              result: command.result,
+              resultText: command.resultText,
+              run: next,
+              ...(next.usage === undefined ? {} : { usage: next.usage }),
+            }
           : {}),
       });
     } catch (error) {
@@ -241,6 +246,7 @@ export class AgentRunPersistenceService {
       updatedAt: next.updatedAt,
       ...(next.recoveryReason === undefined ? {} : { recoveryReason: next.recoveryReason }),
       ...(next.result === undefined ? {} : { result: next.result }),
+      ...(next.usage === undefined ? {} : { usage: next.usage }),
       resultAcknowledgement: next.resultAcknowledgement,
     });
     return { kind: "run-updated", run: next };
@@ -368,6 +374,7 @@ export class AgentRunPersistenceService {
         updatedAt: envelope.occurredAt as UtcTimestamp,
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),
         ...(payload.result === undefined ? {} : { result: payload.result }),
+        ...(payload.usage === undefined ? {} : { usage: payload.usage }),
         ...(resultAcknowledgement === undefined ? {} : { resultAcknowledgement }),
       });
       return;

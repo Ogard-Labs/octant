@@ -472,6 +472,8 @@ export function applyAgentRunLifecycleTransition(
      * beside the run, never on it: the run keeps only the reply's identity.
      */
     readonly resultText?: string;
+    /** Provider-reported token counts for this completion; omit when unknown. */
+    readonly usage?: AgentRun["usage"];
   },
 ): AgentRun {
   assertExpectedVersion(run, options.expectedVersion);
@@ -499,14 +501,16 @@ export function applyAgentRunLifecycleTransition(
   }
 
   const version = nextVersion(run.version);
+  const { usage: _priorUsage, ...rest } = run;
   return {
-    ...run,
+    ...rest,
     lifecycleStatus: toStatus,
     // A recovery reason describes the current blocked or terminal state. Once
     // a capacity waiter starts again, retaining "capacity saturated" would
     // incorrectly report that the active child is still blocked.
     recoveryReason: options.recoveryReason,
     ...(toStatus === "completed" && options.result !== undefined ? { result: options.result } : {}),
+    ...(toStatus === "completed" && options.usage !== undefined ? { usage: options.usage } : {}),
     resultAcknowledgement:
       toStatus === "completed"
         ? {
@@ -610,6 +614,7 @@ export function evaluateAgentRunCommand(
         expectedVersion: command.expectedVersion,
         result: command.result,
         resultText: command.resultText,
+        ...(command.usage === undefined ? {} : { usage: command.usage }),
       });
     case "fail-agent-run":
       return applyAgentRunLifecycleTransition(current, "failed", now, {

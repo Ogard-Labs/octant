@@ -94,6 +94,7 @@ export interface AgentRunStatusApplyInput {
   readonly recoveryReason?: string;
   readonly result?: AgentRunResult;
   readonly resultAcknowledgement?: AgentRunResultAcknowledgement;
+  readonly usage?: AgentRun["usage"];
 }
 
 export interface AgentRunResultAckApplyInput {
@@ -164,6 +165,7 @@ export class AgentRunProjection implements Projection {
         ...(payload.recoveryReason === undefined ? {} : { recoveryReason: payload.recoveryReason }),
         ...(payload.result === undefined ? {} : { result: payload.result }),
         ...(resultAcknowledgement === undefined ? {} : { resultAcknowledgement }),
+        ...(payload.usage === undefined ? {} : { usage: payload.usage }),
       });
       return;
     }
@@ -194,7 +196,11 @@ export class AgentRunProjection implements Projection {
     if (existing.lifecycleStatus !== input.fromStatus && existing.version + 1 === input.version) {
       // Allow only if versions still advance; otherwise ignore inconsistent out-of-order.
     }
-    const { recoveryReason: _previousRecoveryReason, ...runWithoutRecoveryReason } = existing;
+    const {
+      recoveryReason: _previousRecoveryReason,
+      usage: _previousUsage,
+      ...runWithoutRecoveryReason
+    } = existing;
     const next = decodeAgentRun({
       ...runWithoutRecoveryReason,
       lifecycleStatus: input.toStatus,
@@ -204,6 +210,7 @@ export class AgentRunProjection implements Projection {
       // A completion's reply is part of that event; a later event without one
       // must not erase the reply the run already recorded.
       ...(input.result === undefined ? {} : { result: input.result }),
+      ...(input.usage === undefined ? {} : { usage: input.usage }),
       resultAcknowledgement: input.resultAcknowledgement ?? existing.resultAcknowledgement,
     });
     this.#index(next);

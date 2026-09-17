@@ -8,6 +8,7 @@
     "./agent-run-control-policy": "./src/agentRunControlPolicy.ts",
     "./agent-run-conversation-policy": "./src/agentRunConversationPolicy.ts",
     "./agent-run-workspace-policy": "./src/agentRunWorkspacePolicy.ts",
+    "./agent-run-forest": "./src/agentRunForest.ts",
     "./automation-policy": "./src/automationPolicy.ts",
     "./linked-thread-policy": "./src/linkedThreadPolicy.ts",
     ".": "./src/index.ts",

@@ -26,6 +26,15 @@ button. Opening the list from the header chrome uses that same hierarchy, not
 a second surface. Rows carry a "native read-only" marker when the child runs
 inside the provider's own runtime.
 
+**Agents** on the workspace rail is the same hierarchy across Chat, Work, and
+Code. On a wide window it can switch between **List** and **Graph**. Graph
+places each parent thread above the child runs it launched, and a child under
+the run named by `parentRunId` when that parent is on the same page. It is a
+layout of the current query, not a swarm board and not a live Canvas. Cards
+show role, model, recency, and IN/OUT only when the provider reported token
+usage; estimated or missing usage is never shown as zero. Graph can **Save as Canvas**, which writes a versioned diagram document of that parent thread's forest — not a live board. Narrow layouts stay
+on List.
+
 This page documents the designed behavior so you know where the product is
 going. Where a control is not yet available, the page says so explicitly.
 

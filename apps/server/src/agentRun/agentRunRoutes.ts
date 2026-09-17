@@ -3,6 +3,8 @@ import {
   decodeAgentRunControlRequest,
   decodeAgentRunCenterQuery,
   decodeAgentRunId,
+  decodeAgentRunCanvasSnapshotRequest,
+  decodeAgentRunCanvasSnapshotResult,
   decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
@@ -15,7 +17,9 @@ import {
   type AgentRunConversationResponse,
   type AgentRunConversationStreamFrame,
   type AgentRun,
+  type AgentRunCanvasSnapshotResult,
   type AgentRunAuthority,
+  type CanvasBlock,
   type AgentRunCenterSummary,
   type AgentRunControlRequest,
   type AgentRunCreationRequest,
@@ -39,7 +43,12 @@ import {
   type AgentRunNativeCapabilityEvidence,
 } from "@octant/domain/agent-run-control-policy";
 import { resolveAgentRunConversationDisclosure } from "@octant/domain/agent-run-conversation-policy";
-import { effectiveAgentRunExecutionTarget } from "@octant/domain";
+import {
+  agentRunForestCanvasTitle,
+  buildAgentRunForest,
+  buildAgentRunForestCanvasBlocks,
+  effectiveAgentRunExecutionTarget,
+} from "@octant/domain";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -150,6 +159,16 @@ export interface AgentRunRouteDependencies {
     readonly parentThreadTitle: string;
     readonly childThreadId?: CodeThreadId;
   };
+  /**
+   * Persist the parent thread's AgentRun forest as a Canvas document. Absent
+   * means this host cannot snapshot graphs, so the route fails closed.
+   */
+  readonly snapshotCanvas?: (input: {
+    readonly parentThreadId: AgentRunParentThreadId;
+    readonly mode: OctantMode;
+    readonly title: string;
+    readonly blocks: ReadonlyArray<CanvasBlock>;
+  }) => AgentRunCanvasSnapshotResult | Promise<AgentRunCanvasSnapshotResult>;
   readonly uuid: () => string;
   readonly now?: () => number;
 }
@@ -216,6 +235,10 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/center") {
       return handleCenter(dependencies, authenticatedWindowId, url, origin);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/canvas-snapshot") {
+      return handleCanvasSnapshot(dependencies, authenticatedWindowId, request, origin);
     }
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/parent-summary") {
@@ -739,6 +762,84 @@ function conversationStreamResponse(
   });
 }
 
+async function handleCanvasSnapshot(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  request: Request,
+  origin: string | null,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return failure("AgentRun canvas snapshot body is invalid.", 400, origin);
+  }
+  let parentThreadId: AgentRunParentThreadId;
+  try {
+    parentThreadId = decodeAgentRunCanvasSnapshotRequest(body).parentThreadId;
+  } catch {
+    return failure("parentThreadId is invalid.", 400, origin);
+  }
+  if (
+    !(await dependencies.authorizeParentThread({
+      parentThreadId,
+      windowId,
+    }))
+  ) {
+    return failure("AgentRun canvas snapshot is not authorized for this thread.", 403, origin);
+  }
+
+  const candidates = dependencies.persistence.listCenterCandidates({
+    status: "all",
+    mode: "all",
+    parentThreadId,
+  });
+  const items = candidates.map((candidate) =>
+    serializeCenterSummary(candidate, dependencies.resolveCenterContext),
+  );
+  const forest = buildAgentRunForest(items);
+  const thread = forest.threads[0];
+  if (thread === undefined || items.length === 0) {
+    return json(
+      decodeAgentRunCanvasSnapshotResult({
+        kind: "denied",
+        message: "This thread has no agent runs to save.",
+      }),
+      200,
+      origin,
+    );
+  }
+  const blocks = buildAgentRunForestCanvasBlocks({ threads: [thread] });
+  if (blocks.length === 0) {
+    return json(
+      decodeAgentRunCanvasSnapshotResult({
+        kind: "denied",
+        message: "This thread has no agent runs to save.",
+      }),
+      200,
+      origin,
+    );
+  }
+  const snapshotCanvas = dependencies.snapshotCanvas;
+  if (snapshotCanvas === undefined) {
+    return json(
+      decodeAgentRunCanvasSnapshotResult({
+        kind: "denied",
+        message: "Canvas is unavailable on this host.",
+      }),
+      200,
+      origin,
+    );
+  }
+  const result = await snapshotCanvas({
+    parentThreadId,
+    mode: thread.mode,
+    title: agentRunForestCanvasTitle(thread.title),
+    blocks,
+  });
+  return json(decodeAgentRunCanvasSnapshotResult(result), 200, origin);
+}
+
 async function handleCenter(
   dependencies: AgentRunRouteDependencies,
   windowId: string,
@@ -883,6 +984,10 @@ function serializeCenterSummary(
     route,
     resultAcknowledgement: run.resultAcknowledgement,
     ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+    ...(run.routingReceipt.normalizedReasoning === undefined
+      ? {}
+      : { normalizedReasoning: run.routingReceipt.normalizedReasoning }),
+    ...(run.usage === undefined ? {} : { usage: run.usage }),
     version: run.version,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
