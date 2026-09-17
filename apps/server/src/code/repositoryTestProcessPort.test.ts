@@ -177,6 +177,41 @@ describe("RepositoryTestProcessPort", () => {
     expect(linuxSpawn).not.toHaveBeenCalled();
   });
 
+  it("lets a confined child read the exact host paths its caller names", async () => {
+    const child = fakeChild(98);
+    const spawn = vi.fn(() => child);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const port = new RepositoryTestProcessPort({
+      platform: "darwin",
+      sandboxPath: fake.sandboxPath,
+      temporaryDirectory: fake.temporaryDirectory,
+      seatbeltHomeDirectory: fake.root,
+      seatbeltUsersDirectory: fake.root,
+      spawn,
+      networkEgress: "none",
+      literalReadPaths: ["/private/var/select/developer_dir"],
+    });
+    const execution = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    const firstCall = spawn.mock.calls[0] as unknown as [string, string[], unknown?];
+    const profile = String(firstCall[1][1]);
+    const denial = profile.indexOf('(deny file-read* (subpath "/private"))');
+    const allowance = profile.indexOf(
+      '(allow file-read* (literal "/private/var/select/developer_dir"))',
+    );
+    // The allowance has to follow the denial: that narrow rule is what lets a
+    // tool read host link state without opening the rest of /private.
+    expect(denial).toBeGreaterThanOrEqual(0);
+    expect(allowance).toBeGreaterThan(denial);
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
   it("writes and removes a test-runner receipt around a clean exit", async () => {
     const receiptDirectory = temporaryDirectory();
     const child = fakeChild(4321);

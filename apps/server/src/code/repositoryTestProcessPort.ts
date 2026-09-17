@@ -15,6 +15,7 @@ import {
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
+  seatbeltAllowLiteralReadRule,
   type SeatbeltConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
@@ -53,6 +54,13 @@ interface RepositoryTestProcessPortOptions {
   readonly networkEgress?: OsNetworkEgress;
   readonly seatbeltHomeDirectory?: string;
   readonly seatbeltUsersDirectory?: string;
+  /**
+   * Exact host paths a confined child must read even though they sit beneath a
+   * denied ancestor. The Apple toolchain is the caller: `xcode-select` reads
+   * the developer-directory links under `/private/var`, and without them every
+   * Apple command reports "Xcode is unavailable on this host".
+   */
+  readonly literalReadPaths?: ReadonlyArray<string>;
 }
 
 export interface RepositoryTestProcessInput {
@@ -94,6 +102,7 @@ export class RepositoryTestProcessPort {
   readonly #confinement: SeatbeltConfinementPort;
   readonly #temporaryDirectory: string;
   readonly #networkEgress: OsNetworkEgress;
+  readonly #literalReadPaths: ReadonlyArray<string>;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
     this.#platform = options.platform ?? process.platform;
@@ -115,6 +124,7 @@ export class RepositoryTestProcessPort {
       process.env.TEMP ??
       "/tmp";
     this.#networkEgress = options.networkEgress ?? "allow";
+    this.#literalReadPaths = options.literalReadPaths ?? [];
     this.#confinement =
       options.confinement ??
       makeSeatbeltConfinementLive({
@@ -157,6 +167,9 @@ export class RepositoryTestProcessPort {
         networkEgress: this.#networkEgress,
         allowFileReadStar: true,
         readRoots: [input.cwd, this.#temporaryDirectory, binaryDirectory, dirname(binaryDirectory)],
+        ...(this.#literalReadPaths.length === 0
+          ? {}
+          : { extraRules: this.#literalReadPaths.map(seatbeltAllowLiteralReadRule) }),
       });
     } catch (error) {
       if (error instanceof SeatbeltConfinementError) return unavailable(false);

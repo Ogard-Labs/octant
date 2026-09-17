@@ -11,6 +11,7 @@ import {
 import { AppleRuntimeStore } from "../apps/server/src/apple/appleRuntimeStore";
 import {
   AppleToolchainService,
+  APPLE_TOOLCHAIN_HOST_READ_PATHS,
   type AppleExecutionContext,
 } from "../apps/server/src/apple/appleToolchainService";
 import { RepositoryTestProcessPort } from "../apps/server/src/code/repositoryTestProcessPort";
@@ -18,7 +19,11 @@ import { RepositoryTestProcessPort } from "../apps/server/src/code/repositoryTes
 const repositoryRoot = await realpath(process.cwd());
 const stateRoot = await mkdtemp(join(tmpdir(), "octant-apple-smoke-"));
 const store = new AppleRuntimeStore(stateRoot);
-const processPort = new RepositoryTestProcessPort();
+const processPort = new RepositoryTestProcessPort({
+  // The same host reads the app grants its Apple toolchain port, so this smoke
+  // exercises the confinement the product actually runs under.
+  literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
+});
 const authority: ToolActionAuthority = {
   hostId: LOCAL_TOOL_HOST_ID,
   mode: "code",
