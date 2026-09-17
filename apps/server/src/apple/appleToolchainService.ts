@@ -29,6 +29,17 @@ import {
   type AppleExecutionScope,
 } from "@octant/domain";
 
+/**
+ * Host link state `xcode-select` reads to answer where the developer directory
+ * is. macOS resolves both beneath `/private`, which the confinement profile
+ * denies in full, so a confined Apple command needs these two exact reads or it
+ * reports "Xcode is unavailable on this host" on a machine with Xcode installed.
+ */
+export const APPLE_TOOLCHAIN_HOST_READ_PATHS = [
+  "/private/var/select/developer_dir",
+  "/private/var/db/xcode_select_link",
+] as const;
+
 export interface AppleProcessResult {
   readonly termination: "exited" | "cancelled" | "timed-out" | "unavailable";
   readonly exitCode: number | null;

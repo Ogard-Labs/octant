@@ -620,6 +620,7 @@ import {
   AppleToolchainService,
   type AppleExecutionContext,
   type AppleRuntimeReceipt,
+  APPLE_TOOLCHAIN_HOST_READ_PATHS,
 } from "./apple/appleToolchainService";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
@@ -4176,6 +4177,7 @@ export function startOctantServer(
     const appleRuntimeStore = new AppleRuntimeStore(join(providerDataDirectory, "apple-runtime"));
     const appleProcess = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "apple-runtime", "test-receipts"),
+      literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
     const appleToolchainService = new AppleToolchainService({

@@ -172,6 +172,16 @@ export function seatbeltAllowRule(operation: "file-read*" | "file-write*", path:
   return `(allow ${operation} (subpath "${escapeSeatbeltPath(path)}"))`;
 }
 
+/**
+ * One exact path, for host state a tool must read but that lives beneath a
+ * denied ancestor. `xcode-select` resolves the developer directory through
+ * `/private/var/select/developer_dir`, and the profile denies `/private`, so a
+ * subject path allowance is the narrowest way to let it answer.
+ */
+export function seatbeltAllowLiteralReadRule(path: string): string {
+  return `(allow file-read* (literal "${escapeSeatbeltPath(path)}"))`;
+}
+
 export function seatbeltDenyRule(operation: "file-read*" | "file-write*", path: string): string {
   return `(deny ${operation} (subpath "${escapeSeatbeltPath(path)}"))`;
 }
