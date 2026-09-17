@@ -136,6 +136,7 @@ describe("shared Seatbelt profile builder", () => {
     expect(profile).toContain("(allow process-exec)");
     expect(profile).toContain("(allow process-fork)");
     expect(profile).toContain("(allow signal (target self))");
+    expect(profile).toContain("(allow signal (target children))");
     expect(profile).toContain("(allow sysctl-read)");
     expect(profile).not.toContain("(allow network*)");
     expect(profile).toContain(seatbeltAllowRule("file-write*", boundRoot));

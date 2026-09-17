@@ -452,6 +452,15 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
       : uniqueAbsolutePaths(input.execAllowPaths ?? []).map(seatbeltExecRule)),
     ...(allowProcessFork ? ["(allow process-fork)"] : []),
     "(allow signal (target self))",
+    // A confined process may start children (process-fork above) and must be
+    // able to end them: a pool that kills its own workers SIGTERMs them on the
+    // way out, and with that refused the kill's close event re-enters the
+    // teardown until the stack overflows. Observed as `bun run fmt:check`
+    // exiting 1 through the confined port after its output said the check had
+    // passed, with `RangeError: Maximum call stack size exceeded` repeating out
+    // of tinypool's `WorkerInfo.destroy`. `target children` covers the
+    // descendants this process started and nothing else.
+    "(allow signal (target children))",
     "(allow sysctl-read)",
     ...(input.networkEgress === "allow" ? ["(allow network*)"] : []),
     // TLS clients that verify through Security.framework — Rust's
