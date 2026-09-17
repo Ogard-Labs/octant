@@ -182,6 +182,15 @@ export function seatbeltAllowLiteralReadRule(path: string): string {
   return `(allow file-read* (literal "${escapeSeatbeltPath(path)}"))`;
 }
 
+/**
+ * Metadata for one directory, for a tool that canonicalises a path whose
+ * ancestors sit beneath a denied subtree. It grants stat and nothing else:
+ * neither the directory's listing nor the files inside become readable.
+ */
+export function seatbeltAllowLiteralMetadataRule(path: string): string {
+  return `(allow file-read-metadata (literal "${escapeSeatbeltPath(path)}"))`;
+}
+
 export function seatbeltDenyRule(operation: "file-read*" | "file-write*", path: string): string {
   return `(deny ${operation} (subpath "${escapeSeatbeltPath(path)}"))`;
 }

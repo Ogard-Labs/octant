@@ -75,6 +75,11 @@ describe("git Seatbelt launch", () => {
       const rules = gitLinkedWorktreeMetadataRules(worktree);
       expect(rules.some((rule) => rule.includes(gitdir))).toBe(true);
       expect(rules.some((rule) => rule.includes(common))).toBe(true);
+      // Git canonicalises the out-of-root metadata by walking its
+      // components, so every ancestor needs metadata of its own — and only
+      // metadata: the worktree root's contents stay unreadable.
+      expect(rules).toContain(`(allow file-read-metadata (literal "${root}"))`);
+      expect(rules).not.toContain(`(allow file-read* (subpath "${root}"))`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
