@@ -16,6 +16,7 @@ import {
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunId,
+  decodeAgentRunCanvasSnapshotResult,
   type AgentRunRoutingReceipt,
   type MultiModelPoolCandidate,
 } from "@octant/contracts";
@@ -162,6 +163,7 @@ function createHandler(
     };
     readonly parentMode?: "chat" | "work" | "code";
     readonly workspace?: AgentRunRouteDependencies["workspace"];
+    readonly snapshotCanvas?: AgentRunRouteDependencies["snapshotCanvas"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -292,6 +294,7 @@ function createHandler(
       ? {}
       : { parentContext: options.parentContext as never }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+    ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
     uuid: (() => {
       let n = 0;
       return () => {
@@ -907,6 +910,117 @@ describe("agentRunRoutes", () => {
     // existence.
     expect(response?.status).toBe(403);
     expect(authorizeParentThread).not.toHaveBeenCalled();
+  });
+
+  it("refuses a canvas snapshot when the window may not see the thread", async () => {
+    const authorizeParentThread = vi.fn(() => false);
+    const snapshotCanvas = vi.fn();
+    const { handler, persistence, token } = createHandler({
+      authorizeParentThread,
+      snapshotCanvas,
+    });
+    persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/canvas-snapshot", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(response?.status).toBe(403);
+    expect(snapshotCanvas).not.toHaveBeenCalled();
+    expect(authorizeParentThread).toHaveBeenCalledWith({
+      parentThreadId: ids.thread,
+      windowId: String(windowId),
+    });
+  });
+
+  it("denies a canvas snapshot when the parent thread has no runs", async () => {
+    const snapshotCanvas = vi.fn();
+    const { handler, token } = createHandler({ snapshotCanvas });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/canvas-snapshot", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual({
+      kind: "denied",
+      message: "This thread has no agent runs to save.",
+    });
+    expect(snapshotCanvas).not.toHaveBeenCalled();
+  });
+
+  it("snapshots the parent thread forest as a Canvas diagram", async () => {
+    const snapshotCanvas = vi.fn(async () =>
+      decodeAgentRunCanvasSnapshotResult({
+        kind: "accepted",
+        canvasId: "11111111-1111-4111-8111-111111111111",
+        versionId: "22222222-2222-4222-8222-222222222222",
+        title: "Thread cccccccc agent graph",
+        originThreadId: ids.thread,
+        mode: "chat",
+        projectId: "77777777-7777-4777-8777-777777777777",
+      }),
+    );
+    const { handler, persistence, token } = createHandler({ snapshotCanvas });
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/canvas-snapshot", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual({
+      kind: "accepted",
+      canvasId: "11111111-1111-4111-8111-111111111111",
+      versionId: "22222222-2222-4222-8222-222222222222",
+      title: "Thread cccccccc agent graph",
+      originThreadId: ids.thread,
+      mode: "chat",
+      projectId: "77777777-7777-4777-8777-777777777777",
+    });
+    expect(snapshotCanvas).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentThreadId: ids.thread,
+        mode: "chat",
+        title: expect.stringContaining("agent graph"),
+        blocks: [expect.objectContaining({ kind: "diagram" })],
+      }),
+    );
   });
 
   it("rejects unauthenticated parent-summary queries", async () => {

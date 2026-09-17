@@ -37,6 +37,7 @@ function environmentClient(
     steer: unusedClientMethod,
     retry: unusedClientMethod,
     resume: unusedClientMethod,
+    snapshotCanvas: unusedClientMethod,
   };
 }
 

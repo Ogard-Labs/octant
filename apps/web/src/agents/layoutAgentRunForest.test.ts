@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentRunForest } from "./buildAgentRunForest";
+import { buildAgentRunForest } from "@octant/domain";
 import { forestRun } from "./agentRunForest.fixture";
 import {
   AGENT_RUN_GRAPH_MARGIN,

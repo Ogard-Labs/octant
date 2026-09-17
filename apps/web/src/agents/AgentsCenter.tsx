@@ -1,9 +1,18 @@
-import type { AgentRunCenterSummary } from "@octant/contracts";
-import { isAgentRunActiveStatus } from "@octant/domain";
-import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type {
+  AgentRunCenterSummary,
+  AgentRunParentThreadId,
+  CanvasId,
+  OctantMode,
+  ProjectId,
+} from "@octant/contracts";
+import { buildAgentRunForest, isAgentRunActiveStatus } from "@octant/domain";
+import {
+  AgentRunClientFailure,
+  type AgentRunClient,
+} from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { ShellState } from "../shell/ShellState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
@@ -35,6 +44,12 @@ export interface AgentsCenterProps {
   /** The host's agent-messaging bounds facts, when this host admits messaging. */
   readonly messagingClient?: AgentMessageClient;
   readonly onOpenThread?: (target: AgentsCenterThreadTarget & { readonly title: string }) => void;
+  readonly onOpenCanvas?: (tab: {
+    readonly mode: OctantMode;
+    readonly title: string;
+    readonly canvasId: CanvasId;
+    readonly projectId: ProjectId;
+  }) => void;
   readonly onClose?: () => void;
   readonly narrow?: boolean;
   readonly projectNames?: ReadonlyMap<string, string>;
@@ -70,6 +85,41 @@ export function AgentsCenter(props: AgentsCenterProps) {
   const hideListForNarrow = props.narrow === true && detailOpen;
   const [view, setView] = useState<(typeof VIEW_FILTERS)[number]["value"]>("list");
   const showGraph = props.narrow !== true && view === "graph";
+  const [savingCanvas, setSavingCanvas] = useState(false);
+
+  const saveGraphAsCanvas = useCallback(async () => {
+    const parentThreadId = resolveSnapshotParentThreadId(
+      controller.visibleItems,
+      controller.selectedId,
+    );
+    if (parentThreadId === undefined) {
+      controller.setNotice("Select a run first.");
+      return;
+    }
+    setSavingCanvas(true);
+    try {
+      const result = await props.client.snapshotCanvas(parentThreadId);
+      if (result.kind === "denied") {
+        controller.setNotice(result.message);
+        return;
+      }
+      controller.setNotice("Saved the graph as a Canvas.");
+      props.onOpenCanvas?.({
+        mode: result.mode,
+        title: result.title,
+        canvasId: result.canvasId,
+        projectId: result.projectId,
+      });
+    } catch (error) {
+      controller.setNotice(
+        error instanceof AgentRunClientFailure
+          ? error.message
+          : "The host could not save this graph as a Canvas.",
+      );
+    } finally {
+      setSavingCanvas(false);
+    }
+  }, [controller, props]);
 
   return (
     <Surface ariaLabel="Agents" className="agents-center">
@@ -100,7 +150,11 @@ export function AgentsCenter(props: AgentsCenterProps) {
           <div className="agents-center__list-pane">
             <AgentsCenterToolbar
               controller={controller}
+              savingCanvas={savingCanvas}
               {...(props.narrow === true ? {} : { onViewChange: setView, view })}
+              {...(showGraph && controller.visibleItems.length > 0
+                ? { onSaveCanvas: () => void saveGraphAsCanvas() }
+                : {})}
             />
             {showGraph &&
             controller.list.status !== "loading" &&
@@ -156,6 +210,8 @@ function AgentsCenterToolbar(props: {
   readonly controller: AgentsCenterController;
   readonly view?: (typeof VIEW_FILTERS)[number]["value"];
   readonly onViewChange?: (view: (typeof VIEW_FILTERS)[number]["value"]) => void;
+  readonly onSaveCanvas?: () => void;
+  readonly savingCanvas?: boolean;
 }) {
   const { controller } = props;
   return (
@@ -210,6 +266,16 @@ function AgentsCenterToolbar(props: {
       </OctantToggleGroup>
       {props.view === undefined || props.onViewChange === undefined ? null : (
         <AgentsCenterViewToggle onViewChange={props.onViewChange} view={props.view} />
+      )}
+      {props.onSaveCanvas === undefined ? null : (
+        <OctantButton
+          disabled={props.savingCanvas === true}
+          onClick={props.onSaveCanvas}
+          type="button"
+          variant="ghost"
+        >
+          Save as Canvas
+        </OctantButton>
       )}
     </div>
   );
@@ -603,4 +669,15 @@ function AgentsCenterDetail(props: {
       </dl>
     </section>
   );
+}
+
+function resolveSnapshotParentThreadId(
+  items: ReadonlyArray<AgentRunCenterSummary>,
+  selectedId: string | undefined,
+): AgentRunParentThreadId | undefined {
+  const selected = items.find((item) => String(item.runId) === selectedId);
+  if (selected !== undefined) return selected.parentThreadId;
+  const forest = buildAgentRunForest(items);
+  if (forest.threads.length !== 1) return undefined;
+  return forest.threads[0]?.roots[0]?.summary.parentThreadId;
 }

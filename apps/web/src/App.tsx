@@ -5518,6 +5518,10 @@ function LaunchedShell(
                   }
                   void controller.openWorkThread(decodeWorkThreadId(target.threadId), target.title);
                 }}
+                onOpenAgentsCanvas={(tab) => {
+                  setAgentsCenterOpen(false);
+                  void controller.openCanvas(tab);
+                }}
               />
               <AgentProfileNamesProvider profiles={agentProfiles}>
                 <ComposerContextMeterProvider

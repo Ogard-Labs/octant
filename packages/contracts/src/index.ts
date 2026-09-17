@@ -106,6 +106,7 @@ export * from "./providerUsageHistory";
 export * from "./imageGeneration";
 export * from "./agentProfile";
 export * from "./agentRun";
+export * from "./agentRunCanvas";
 export * from "./agentRunSettings";
 export * from "./agentRunCreationRequest";
 export * from "./automation";

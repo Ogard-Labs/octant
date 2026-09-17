@@ -1,9 +1,5 @@
 import type { AgentRunCenterSummary } from "@octant/contracts";
-import type {
-  AgentRunForest,
-  AgentRunForestRun,
-  AgentRunForestThread,
-} from "./buildAgentRunForest";
+import type { AgentRunForest, AgentRunForestRun, AgentRunForestThread } from "@octant/domain";
 
 export const AGENT_RUN_GRAPH_RUN_CARD_WIDTH = 260;
 export const AGENT_RUN_GRAPH_RUN_CARD_HEIGHT = 152;
@@ -18,7 +14,7 @@ export type AgentRunGraphBox =
   | {
       readonly kind: "thread";
       readonly id: string;
-      readonly thread: AgentRunForestThread;
+      readonly thread: AgentRunForestThread<AgentRunCenterSummary>;
       readonly x: number;
       readonly y: number;
       readonly width: number;
@@ -62,7 +58,9 @@ export function runGraphId(runId: string): string {
  * Place the forest top-down: each parent thread above the runs it launched,
  * children under the run that launched them. Empty pages have no boxes.
  */
-export function layoutAgentRunForest(forest: AgentRunForest): AgentRunGraphLayout {
+export function layoutAgentRunForest(
+  forest: AgentRunForest<AgentRunCenterSummary>,
+): AgentRunGraphLayout {
   if (forest.threads.length === 0) {
     return { width: 0, height: 0, boxes: [], edges: [] };
   }
@@ -89,7 +87,7 @@ export function layoutAgentRunForest(forest: AgentRunForest): AgentRunGraphLayou
 }
 
 function placeThread(
-  thread: AgentRunForestThread,
+  thread: AgentRunForestThread<AgentRunCenterSummary>,
   left: number,
   top: number,
 ): {
@@ -140,7 +138,7 @@ function placeThread(
 }
 
 function placeRun(
-  node: AgentRunForestRun,
+  node: AgentRunForestRun<AgentRunCenterSummary>,
   left: number,
   top: number,
 ): {
@@ -183,7 +181,7 @@ function placeRun(
   return { boxes, edges, box, width: contentWidth, bottom };
 }
 
-function subtreeRowWidth(nodes: ReadonlyArray<AgentRunForestRun>): number {
+function subtreeRowWidth(nodes: ReadonlyArray<AgentRunForestRun<AgentRunCenterSummary>>): number {
   if (nodes.length === 0) return 0;
   let width = 0;
   for (const [index, node] of nodes.entries()) {

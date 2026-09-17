@@ -3,6 +3,8 @@ import {
   decodeAgentRunControlPreviewRequest,
   decodeAgentRunControlPreviewResult,
   decodeAgentRunControlRequest,
+  decodeAgentRunCanvasSnapshotRequest,
+  decodeAgentRunCanvasSnapshotResult,
   decodeAgentRunCenterResponse,
   decodeAgentRunConversationResponse,
   decodeAgentRunConversationStreamFrame,
@@ -15,6 +17,7 @@ import {
   decodeAgentRunWorkspaceConfirmationResult,
   decodeAgentRunWorkspacePreparationRequest,
   decodeAgentRunWorkspacePreparationResult,
+  type AgentRunCanvasSnapshotResult,
   type AgentRunCenterQuery,
   type AgentRunCenterResponse,
   type AgentRunConversationResponse,
@@ -137,6 +140,8 @@ export interface AgentRunClient {
     signal: AbortSignal,
   ): AsyncGenerator<AgentRunConversationStreamFrame>;
   parentSummary(parentThreadId: AgentRunParentThreadId): Promise<AgentRunParentSummaryResponse>;
+  /** Persist the parent thread's AgentRun forest as a Canvas document. */
+  snapshotCanvas(parentThreadId: AgentRunParentThreadId): Promise<AgentRunCanvasSnapshotResult>;
   acknowledge(input: {
     readonly runId: AgentRunId;
     readonly expectedVersion: number;
@@ -230,6 +235,31 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         afterSequence ?? 0,
         signal,
       );
+    },
+    async snapshotCanvas(parentThreadId) {
+      let validated;
+      try {
+        validated = decodeAgentRunCanvasSnapshotRequest({ parentThreadId });
+      } catch {
+        throw new AgentRunClientFailure("invalid", "AgentRun canvas snapshot request is invalid.");
+      }
+      const body = await requestJson(
+        options.fetch,
+        new URL("/api/agent-runs/canvas-snapshot", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+      );
+      try {
+        return decodeAgentRunCanvasSnapshotResult(body);
+      } catch {
+        throw new AgentRunClientFailure(
+          "unavailable",
+          "AgentRun canvas snapshot response is malformed.",
+        );
+      }
     },
     async parentSummary(parentThreadId) {
       const validated = decodeAgentRunParentThreadId(parentThreadId);

@@ -1,5 +1,5 @@
 import type { AgentRunCenterSummary } from "@octant/contracts";
-import { buildAgentRunForest } from "./buildAgentRunForest";
+import { buildAgentRunForest } from "@octant/domain";
 import {
   agentRunLifecycleLabel,
   agentRunModeLabel,

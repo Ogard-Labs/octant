@@ -1,24 +1,38 @@
-import type { AgentRunCenterSummary, OctantMode, ProjectId } from "@octant/contracts";
+import type { OctantMode, ProjectId } from "@octant/contracts";
+import { AGENT_RUN_MAX_DEPTH } from "./agentRunPolicy";
 
 /** Run levels under a parent thread. A grandchild is allowed; a great-grandchild is not. */
-export const AGENT_RUN_GRAPH_MAX_DEPTH = 2;
+export const AGENT_RUN_GRAPH_MAX_DEPTH = AGENT_RUN_MAX_DEPTH;
 
-export interface AgentRunForestRun {
-  readonly summary: AgentRunCenterSummary;
-  readonly depth: number;
-  readonly children: ReadonlyArray<AgentRunForestRun>;
+/** The fields the forest needs to place a run. Callers may pass a richer summary. */
+export interface AgentRunForestMember {
+  readonly runId: string;
+  readonly parentThreadId: string;
+  readonly parentThreadTitle: string;
+  readonly parentRunId?: string | undefined;
+  readonly mode: OctantMode;
+  readonly projectId?: ProjectId | undefined;
+  readonly role: string;
+  readonly task: string;
+  readonly createdAt: string;
 }
 
-export interface AgentRunForestThread {
+export interface AgentRunForestRun<T extends AgentRunForestMember = AgentRunForestMember> {
+  readonly summary: T;
+  readonly depth: number;
+  readonly children: ReadonlyArray<AgentRunForestRun<T>>;
+}
+
+export interface AgentRunForestThread<T extends AgentRunForestMember = AgentRunForestMember> {
   readonly parentThreadId: string;
   readonly title: string;
   readonly mode: OctantMode;
-  readonly projectId?: ProjectId;
-  readonly roots: ReadonlyArray<AgentRunForestRun>;
+  readonly projectId?: ProjectId | undefined;
+  readonly roots: ReadonlyArray<AgentRunForestRun<T>>;
 }
 
-export interface AgentRunForest {
-  readonly threads: ReadonlyArray<AgentRunForestThread>;
+export interface AgentRunForest<T extends AgentRunForestMember = AgentRunForestMember> {
+  readonly threads: ReadonlyArray<AgentRunForestThread<T>>;
 }
 
 /**
@@ -28,8 +42,10 @@ export interface AgentRunForest {
  * the same page. Missing parents, cycles, and a third run level stay visible
  * as thread-level roots instead of disappearing or looping.
  */
-export function buildAgentRunForest(items: ReadonlyArray<AgentRunCenterSummary>): AgentRunForest {
-  const groups = new Map<string, AgentRunCenterSummary[]>();
+export function buildAgentRunForest<T extends AgentRunForestMember>(
+  items: ReadonlyArray<T>,
+): AgentRunForest<T> {
+  const groups = new Map<string, T[]>();
   const threadOrder: string[] = [];
   for (const item of items) {
     const threadId = String(item.parentThreadId);
@@ -42,7 +58,7 @@ export function buildAgentRunForest(items: ReadonlyArray<AgentRunCenterSummary>)
     }
   }
 
-  const threads: AgentRunForestThread[] = [];
+  const threads: Array<AgentRunForestThread<T>> = [];
   for (const threadId of threadOrder) {
     const members = groups.get(threadId);
     const first = members?.[0];
@@ -58,9 +74,9 @@ export function buildAgentRunForest(items: ReadonlyArray<AgentRunCenterSummary>)
   return { threads };
 }
 
-function buildThreadRoots(
-  members: ReadonlyArray<AgentRunCenterSummary>,
-): ReadonlyArray<AgentRunForestRun> {
+function buildThreadRoots<T extends AgentRunForestMember>(
+  members: ReadonlyArray<T>,
+): ReadonlyArray<AgentRunForestRun<T>> {
   const byId = new Map(members.map((item) => [String(item.runId), item]));
   const parentOf = new Map<string, string>();
   for (const item of members) {
@@ -72,10 +88,9 @@ function buildThreadRoots(
     parentOf.set(childId, parentRunId);
   }
   stripCyclicEdges(parentOf);
-
   stripEdgesBeyondDepth(parentOf);
 
-  const childrenOf = new Map<string, AgentRunCenterSummary[]>();
+  const childrenOf = new Map<string, T[]>();
   for (const item of members) {
     const parentId = parentOf.get(String(item.runId));
     if (parentId === undefined) continue;
@@ -84,12 +99,12 @@ function buildThreadRoots(
     else siblings.push(item);
   }
 
-  const compare = (a: AgentRunCenterSummary, b: AgentRunCenterSummary): number => {
+  const compare = (a: T, b: T): number => {
     if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
     return String(a.runId).localeCompare(String(b.runId));
   };
 
-  const toNode = (item: AgentRunCenterSummary, depth: number): AgentRunForestRun => {
+  const toNode = (item: T, depth: number): AgentRunForestRun<T> => {
     const childSummaries = [...(childrenOf.get(String(item.runId)) ?? [])].sort(compare);
     return {
       summary: item,

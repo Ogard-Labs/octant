@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { decodeAgentRunCenterSummary } from "@octant/contracts";
+import { decodeAgentRunCanvasSnapshotResult, decodeAgentRunCenterSummary } from "@octant/contracts";
 import { AgentsCenter } from "./AgentsCenter";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 
@@ -45,6 +45,7 @@ function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
     center: vi.fn(async () => ({ items: [summary] })),
     conversation: vi.fn(),
     parentSummary: vi.fn(),
+    snapshotCanvas: vi.fn(),
     acknowledge: vi.fn(),
     prepareWorkspace: vi.fn(),
     confirmWorkspace: vi.fn(),
@@ -263,6 +264,91 @@ describe("AgentsCenter", () => {
     expect(screen.getByRole("region", { name: "Agent run details" })).toHaveTextContent(
       "Design chat",
     );
+  });
+
+  it("saves the graph as a Canvas for the only parent thread", async () => {
+    const user = userEvent.setup();
+    const snapshotCanvas = vi.fn(async () =>
+      decodeAgentRunCanvasSnapshotResult({
+        kind: "accepted",
+        canvasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        versionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        title: "Design chat agent graph",
+        originThreadId: summary.parentThreadId,
+        mode: "chat",
+        projectId: "77777777-7777-4777-8777-777777777777",
+      }),
+    );
+    const onOpenCanvas = vi.fn();
+    render(<AgentsCenter client={createClient({ snapshotCanvas })} onOpenCanvas={onOpenCanvas} />);
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    await user.click(screen.getByRole("button", { name: "Save as Canvas" }));
+    expect(snapshotCanvas).toHaveBeenCalledWith(summary.parentThreadId);
+    expect(await screen.findByText("Saved the graph as a Canvas.")).toBeVisible();
+    expect(onOpenCanvas).toHaveBeenCalledWith({
+      mode: "chat",
+      title: "Design chat agent graph",
+      canvasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      projectId: "77777777-7777-4777-8777-777777777777",
+    });
+  });
+
+  it("asks the user to select a run when the graph has more than one parent thread", async () => {
+    const user = userEvent.setup();
+    const other = decodeAgentRunCenterSummary({
+      ...summary,
+      runId: "21111111-1111-4111-8111-111111111111",
+      parentThreadId: "55555555-5555-4555-8555-555555555555",
+      parentThreadTitle: "Implement auth",
+      task: "Code work",
+    });
+    const snapshotCanvas = vi.fn();
+    render(
+      <AgentsCenter
+        client={createClient({
+          center: vi.fn(async () => ({ items: [summary, other] })),
+          snapshotCanvas,
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    await user.click(screen.getByRole("button", { name: "Save as Canvas" }));
+    expect(snapshotCanvas).not.toHaveBeenCalled();
+    expect(await screen.findByText("Select a run first.")).toBeVisible();
+  });
+
+  it("saves the selected run parent thread when the graph has several trees", async () => {
+    const user = userEvent.setup();
+    const other = decodeAgentRunCenterSummary({
+      ...summary,
+      runId: "21111111-1111-4111-8111-111111111111",
+      parentThreadId: "55555555-5555-4555-8555-555555555555",
+      parentThreadTitle: "Implement auth",
+      task: "Code work",
+    });
+    const snapshotCanvas = vi.fn(async () =>
+      decodeAgentRunCanvasSnapshotResult({
+        kind: "accepted",
+        canvasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        versionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        title: "Implement auth agent graph",
+        originThreadId: other.parentThreadId,
+        mode: "chat",
+        projectId: "77777777-7777-4777-8777-777777777777",
+      }),
+    );
+    render(
+      <AgentsCenter
+        client={createClient({
+          center: vi.fn(async () => ({ items: [summary, other] })),
+          snapshotCanvas,
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    await user.click(screen.getByRole("button", { name: "Code work" }));
+    await user.click(screen.getByRole("button", { name: "Save as Canvas" }));
+    expect(snapshotCanvas).toHaveBeenCalledWith(other.parentThreadId);
   });
 
   it("keeps List only when Agents Center is narrow", async () => {
