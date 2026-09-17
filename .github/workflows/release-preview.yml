@@ -159,6 +159,14 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: bun run package:desktop
 
+      # The candidate that could not start imported @modelcontextprotocol/sdk
+      # from a checkout the installed app does not have. Stage outside the
+      # repository and require the packaged server to become storage-ready
+      # before a tag is published.
+      - name: Refuse to publish if the packaged server cannot start
+        if: matrix.apple_signing
+        run: bun scripts/assert-packaged-server-starts.ts
+
       - name: Publish the release archive
         id: release
         env:
