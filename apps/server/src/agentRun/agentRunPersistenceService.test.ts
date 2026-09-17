@@ -472,10 +472,12 @@ describe("AgentRunPersistenceService", () => {
         truncated: false,
       },
       resultText: "The fallback is safe.",
+      usage: { inputTokens: 1200, outputTokens: 300 },
     });
     expect(completed.kind).toBe("run-updated");
     if (completed.kind !== "run-updated") return;
     expect(completed.run.resultAcknowledgement.followUpReason).toBe("unacknowledged-child-result");
+    expect(completed.run.usage).toEqual({ inputTokens: 1200, outputTokens: 300 });
 
     // rebuild into a fresh projection from journal
     const rebuiltProjection = new AgentRunProjection();
@@ -503,6 +505,7 @@ describe("AgentRunPersistenceService", () => {
     expect(rebuiltService.resultText(accepted.run.id)).toBe("The fallback is safe.");
     expect(rebuilt?.routingReceipt.usageQuality).toBe("provider-reported");
     expect(rebuilt?.authority.network).toBe(true);
+    expect(rebuilt?.usage).toEqual({ inputTokens: 1200, outputTokens: 300 });
   });
 
   it("refuses an over-limit admitted selection and admits nothing", () => {

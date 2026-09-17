@@ -573,6 +573,7 @@ export class AgentRunOrchestrationService {
         truncated: reply.truncated,
       },
       resultText: reply.text,
+      ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
     });
   }
 

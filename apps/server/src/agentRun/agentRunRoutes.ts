@@ -883,6 +883,10 @@ function serializeCenterSummary(
     route,
     resultAcknowledgement: run.resultAcknowledgement,
     ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+    ...(run.routingReceipt.normalizedReasoning === undefined
+      ? {}
+      : { normalizedReasoning: run.routingReceipt.normalizedReasoning }),
+    ...(run.usage === undefined ? {} : { usage: run.usage }),
     version: run.version,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,

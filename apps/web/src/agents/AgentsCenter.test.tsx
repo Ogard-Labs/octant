@@ -260,12 +260,45 @@ describe("AgentsCenter", () => {
     await user.click(await screen.findByRole("button", { name: "Graph" }));
     await user.click(screen.getByRole("button", { name: summary.task }));
     expect(screen.getByRole("region", { name: "Agent run details" })).toBeVisible();
-    expect(screen.getByText("Parent thread")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent run details" })).toHaveTextContent(
+      "Design chat",
+    );
   });
 
   it("keeps List only when Agents Center is narrow", async () => {
     render(<AgentsCenter client={createClient()} narrow />);
     expect(await screen.findByRole("list", { name: "Agent runs" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Graph" })).not.toBeInTheDocument();
+  });
+
+  it("graphs a grandchild under the run that launched it", async () => {
+    const user = userEvent.setup();
+    const child = decodeAgentRunCenterSummary({
+      ...summary,
+      runId: "21111111-1111-4111-8111-111111111111",
+      parentRunId: String(summary.runId),
+      task: "Review findings",
+      role: "review",
+      createdAt: "2026-08-01T10:02:00.000Z",
+    });
+    const grandchild = decodeAgentRunCenterSummary({
+      ...summary,
+      runId: "31111111-1111-4111-8111-111111111111",
+      parentRunId: String(child.runId),
+      task: "Tighten the review",
+      createdAt: "2026-08-01T10:03:00.000Z",
+    });
+    render(
+      <AgentsCenter
+        client={createClient({
+          center: vi.fn(async () => ({ items: [summary, child, grandchild] })),
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    expect(screen.getByRole("button", { name: "Design chat thread" })).toBeVisible();
+    expect(screen.getByRole("button", { name: summary.task })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review findings" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Tighten the review" })).toBeVisible();
   });
 });

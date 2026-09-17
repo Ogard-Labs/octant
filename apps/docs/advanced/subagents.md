@@ -30,8 +30,10 @@ inside the provider's own runtime.
 Code. On a wide window it can switch between **List** and **Graph**. Graph
 places each parent thread above the child runs it launched, and a child under
 the run named by `parentRunId` when that parent is on the same page. It is a
-layout of the current query, not a swarm board and not a live Canvas. Narrow
-layouts stay on List.
+layout of the current query, not a swarm board and not a live Canvas. Cards
+show role, model, recency, and IN/OUT only when the provider reported token
+usage; estimated or missing usage is never shown as zero. Narrow layouts stay
+on List.
 
 This page documents the designed behavior so you know where the product is
 going. Where a control is not yet available, the page says so explicitly.

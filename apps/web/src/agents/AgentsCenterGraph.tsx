@@ -7,6 +7,7 @@ import {
   type AgentsCenterThreadTarget,
 } from "./agentsCenterModel";
 import { layoutAgentRunForest, type AgentRunGraphBox } from "./layoutAgentRunForest";
+import { agentRunGraphUsageLine, formatAgentRunRecency } from "./agentRunGraphFacts";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export function AgentsCenterGraph(props: {
@@ -82,7 +83,7 @@ function GraphCard(props: {
           type="button"
           variant="ghost"
         >
-          <span className="agents-center-graph__eyebrow">Thread</span>
+          <span className="agents-center-graph__eyebrow">Parent thread</span>
           <span className="agents-center-graph__title">{box.thread.title}</span>
           <span className="agents-center-graph__meta">{agentRunModeLabel(box.thread.mode)}</span>
         </OctantButton>
@@ -94,6 +95,8 @@ function GraphCard(props: {
   const provider =
     props.providerLabels.get(String(box.summary.route.requestedProviderInstanceId)) ??
     box.summary.route.requestedModelId;
+  const usageLine = agentRunGraphUsageLine(box.summary);
+  const recency = formatAgentRunRecency(box.summary.updatedAt, Date.now());
   return (
     <div
       className="agents-center-graph__card"
@@ -118,8 +121,17 @@ function GraphCard(props: {
         </span>
         <span className="agents-center-graph__title">{box.summary.task}</span>
         <span className="agents-center-graph__meta">
-          {box.summary.role} · {agentRunRouteLabel(box.summary)}
+          {box.summary.role}
+          {box.summary.normalizedReasoning === undefined
+            ? ""
+            : ` · ${box.summary.normalizedReasoning}`}
+          {" · "}
+          {agentRunRouteLabel(box.summary)}
         </span>
+        {usageLine === undefined ? null : (
+          <span className="agents-center-graph__usage">{usageLine}</span>
+        )}
+        <span className="agents-center-graph__meta">{recency}</span>
       </OctantButton>
     </div>
   );

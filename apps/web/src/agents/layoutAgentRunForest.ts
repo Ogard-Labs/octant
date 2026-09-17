@@ -6,7 +6,7 @@ import type {
 } from "./buildAgentRunForest";
 
 export const AGENT_RUN_GRAPH_RUN_CARD_WIDTH = 260;
-export const AGENT_RUN_GRAPH_RUN_CARD_HEIGHT = 128;
+export const AGENT_RUN_GRAPH_RUN_CARD_HEIGHT = 152;
 export const AGENT_RUN_GRAPH_THREAD_CARD_WIDTH = 260;
 export const AGENT_RUN_GRAPH_THREAD_CARD_HEIGHT = 72;
 export const AGENT_RUN_GRAPH_HORIZONTAL_GAP = 28;
