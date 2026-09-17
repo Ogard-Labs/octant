@@ -23,10 +23,15 @@ const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly rela
 
 const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
   { name: "Local provider usage history", relative: "local-usage-cache.sqlite3" },
-  { name: "Chat scratch", relative: "scratch" },
+  // The host roots its chat stores at <dataDirectory>/chat, so a relative
+  // "scratch" here would name a directory nothing writes to.
+  { name: "Chat scratch", relative: "chat/scratch" },
   { name: "Chat attachments", relative: "threads" },
   { name: "Work attachments", relative: "work-threads" },
   { name: "Installed extensions", relative: "extensions" },
+  // The desktop app installs the computer-use driver here, and the host keeps
+  // its runtime receipts under it, so a person inspecting the store sees it.
+  { name: "Computer use driver", relative: "computer-use" },
 ];
 
 const RELATED_RETENTION = {
