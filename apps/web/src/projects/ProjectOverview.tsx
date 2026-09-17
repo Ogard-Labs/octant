@@ -12,6 +12,7 @@ import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
+import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
 
 export interface ProjectOverviewProps {
   readonly allowRootRelink?: boolean;
@@ -38,6 +39,7 @@ export interface ProjectOverviewProps {
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
+  readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
 }
 
 export function ProjectOverview(props: ProjectOverviewProps) {
@@ -310,6 +312,18 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               />
             </ProjectOverviewInspector>
           ) : null}
+          {props.spendCeilingClient === undefined ? null : (
+            <ProjectOverviewInspector
+              key={`${String(props.project.id)}-ceiling`}
+              label="Spend ceiling"
+              summary="Optional Project token budget for this calendar month"
+            >
+              <ProjectSpendCeilingSection
+                client={props.spendCeilingClient}
+                projectId={String(props.project.id)}
+              />
+            </ProjectOverviewInspector>
+          )}
           {props.canvasInventory === undefined ? null : (
             <ProjectOverviewInspector
               key={`${String(props.project.id)}-canvases`}
