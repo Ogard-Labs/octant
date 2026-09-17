@@ -1486,6 +1486,9 @@ function renderNonCodeTab(
       <ProjectOverview
         {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         memoryProjects={props.projects}
+        {...(props.spendCeilingClient === undefined
+          ? {}
+          : { spendCeilingClient: props.spendCeilingClient })}
         {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
         {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
           ? {}
