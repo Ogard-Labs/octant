@@ -187,19 +187,26 @@ different update service does not lower the bar an update has to clear.
 
 ### Release rings
 
-Octant publishes two streams, and you pick one in
+Octant publishes three streams, and you pick one in
 **Settings → General → Updates**:
 
 - **Stable** — the released build. This is where a normal install stays.
 - **Preview** — a nightly build of whatever has been merged. Newer, less
   settled, and a separate download.
+- **Candidate** — a one-off build produced by hand from a chosen ref, signed
+  and notarized exactly as a nightly is. It has no schedule and no followers:
+  its feed changes only when someone runs that build, so a branch can be
+  update-tested through the real feed path — signature, hash and wrong-ring
+  refusals included — without offering that branch to everyone on the nightly
+  ring.
 
-A preview version reads like `0.2.0-preview.20260828.4`, and it sorts _below_
-the `0.2.0` it leads to. That is what makes the handover work without any
-special case: a preview install moves onto stable the day stable catches up,
-and Octant never offers you an older version than the one you are running. So
-switching from preview back to stable leaves you where you are until the next
-stable release passes you.
+A preview version reads like `0.2.0-preview.20260828.4` and a candidate like
+`0.2.0-candidate.20260828.12`. Each sorts _below_ the `0.2.0` it leads to.
+That is what makes the handover work without any special case: a preview
+install moves onto stable the day stable catches up, and Octant never offers
+you an older version than the one you are running. So switching from preview
+back to stable leaves you where you are until the next stable release passes
+you.
 
 Each ring is its own signed feed, and the ring is inside the signature. A
 preview release published at the stable address is refused, not installed.
