@@ -3,6 +3,7 @@ import {
   clampChildThreadEgressPolicy,
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
+  resolveProviderRuntimeEgressPolicy,
   type ThreadEgressPolicy,
 } from "./threadEgressPolicy";
 
@@ -35,6 +36,64 @@ describe("thread egress policy", () => {
         executionPolicy: "approval-gated",
       }),
     ).toBe("provider-endpoints-only");
+  });
+
+  it("gives Chat and Work provider runtimes the endpoints Code already has", () => {
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "chat",
+        executionPolicy: "approval-gated",
+      }),
+    ).toBe("provider-endpoints-only");
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "work",
+        executionPolicy: "approval-gated",
+      }),
+    ).toBe("provider-endpoints-only");
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "code",
+        executionPolicy: "auto-accept-edits",
+      }),
+    ).toBe("provider-endpoints-only");
+  });
+
+  it("keeps Plan none and Full access unrestricted on a provider runtime", () => {
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "work",
+        executionPolicy: "plan",
+      }),
+    ).toBe("none");
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "chat",
+        executionPolicy: "full-access",
+      }),
+    ).toBe("unrestricted");
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        explicitNetworkApproval: true,
+      }),
+    ).toBe("unrestricted");
+  });
+
+  it("leaves the thread defaults unchanged for tools", () => {
+    expect(
+      resolveDefaultThreadEgressPolicy({
+        mode: "chat",
+        executionPolicy: "approval-gated",
+      }),
+    ).toBe("none");
+    expect(
+      resolveDefaultThreadEgressPolicy({
+        mode: "work",
+        executionPolicy: "approval-gated",
+      }),
+    ).toBe("none");
   });
 
   it("resolves Full access and explicit network approval to unrestricted", () => {

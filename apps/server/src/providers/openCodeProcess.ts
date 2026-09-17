@@ -31,7 +31,7 @@ import {
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
-  resolveDefaultThreadEgressPolicy,
+  resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -861,7 +861,7 @@ function prepareOpenCodeLaunch(
         };
       }
       const networkEgress = materializeOsNetworkEgress(
-        resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+        resolveProviderRuntimeEgressPolicy({ mode, executionPolicy }),
       );
       const launch = confinement.prepare({
         executable: input.binaryPath,
@@ -878,8 +878,8 @@ function prepareOpenCodeLaunch(
         allowFileReadStar: true,
         // The agent is a loopback HTTP server: the confinement has to let it
         // listen on the port this launch reserved, not only reach the bridge.
-        // Without the bind it exits before readiness in every mode whose
-        // egress policy is not "allow", which is chat, work, and Plan.
+        // Without the bind it exits before readiness in Plan, whose runtime
+        // egress stays none; Chat and Work now materialize as allow (0132).
         extraRules: [
           `(allow network-bind (local ip "localhost:${port}"))`,
           `(allow network-inbound (local ip "localhost:${port}"))`,

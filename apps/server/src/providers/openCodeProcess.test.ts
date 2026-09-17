@@ -627,8 +627,8 @@ describe("OpenCodeProcessPort", () => {
 
   // The agent is a loopback HTTP server, so the confinement has to let it
   // listen on the port this launch reserved. Without the bind it exits before
-  // readiness in every mode whose egress policy is not "allow" - which is how
-  // a probe and a Work turn failed while a Code turn started.
+  // readiness when OS egress is none. Chat and Work turns now allow the
+  // provider endpoints; Plan still needs the bind.
   it("lets the confined server listen on the port it reserved", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;

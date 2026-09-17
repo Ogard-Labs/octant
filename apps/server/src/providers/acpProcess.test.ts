@@ -1268,7 +1268,7 @@ describe("ACP probe confinement", () => {
     expect(profileText).not.toContain("(allow process-fork)");
   });
 
-  it("keeps an ordinary Chat launch at no network egress", async () => {
+  it("lets an ordinary Chat launch reach provider endpoints without process exec", async () => {
     const target = fixture(kilo);
     const managedHome = join(target.canonicalRoot, "managed-home");
     const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
@@ -1293,10 +1293,12 @@ describe("ACP probe confinement", () => {
         ),
       }),
     );
-    // The probe exception must not widen a thread launch: the same mode and
-    // policy without `purpose: "probe"` still gets no network at all.
+    // Chat turns need the provider's own endpoints (0132). Process exec and
+    // bound-root writes stay denied; only the runtime's network changes.
     const profileText = seatbeltProfile(launch);
-    expect(profileText).not.toContain("(allow network*)");
+    expect(profileText).toContain("(allow network*)");
+    expect(profileText).not.toContain("(allow process-exec)\n");
+    expect(profileText).not.toContain("(allow process-fork)");
   });
 });
 
@@ -1432,7 +1434,7 @@ describe("Kimi Code provider-owned profile", () => {
     }
   });
 
-  it("allows only the owned ACP tool bridge port without opening generic network egress", async () => {
+  it("allows the owned ACP tool bridge port and provider endpoints on a Work turn", async () => {
     const target = fixture(kimi);
     const root = target.canonicalRoot;
     const launch = await Effect.runPromise(
@@ -1448,7 +1450,7 @@ describe("Kimi Code provider-owned profile", () => {
       }),
     );
     expect(launch.args[1]).toContain('(allow network-outbound (remote ip "localhost:43123"))');
-    expect(launch.args[1]).not.toContain("(allow network*)");
+    expect(launch.args[1]).toContain("(allow network*)");
     const invalid = await failureOf(
       confinement(target).prepare({
         profile: kimi,

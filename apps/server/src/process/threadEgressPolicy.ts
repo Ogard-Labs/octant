@@ -12,6 +12,10 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
  * - Work / Plan / Chat → `none`
  * - Code approval-gated / auto-accept-edits → `provider-endpoints-only`
  * - Full access / explicit network approval → `unrestricted`
+ *
+ * Provider-owned runtimes that make their own API call are a scoped
+ * exception (0132): Chat and Work turns resolve `provider-endpoints-only`
+ * through `resolveProviderRuntimeEgressPolicy`. Tools keep these defaults.
  */
 
 export type ThreadEgressPolicy = "none" | "provider-endpoints-only" | "unrestricted";
@@ -77,6 +81,25 @@ export function materializeOsNetworkEgress(policy: ThreadEgressPolicy): OsNetwor
  * exception named and in the same module as the thread defaults.
  */
 export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
+  return "provider-endpoints-only";
+}
+
+/**
+ * The egress a provider runtime may have when it carries a turn.
+ *
+ * ACP, Pi, and OpenCode call their own control plane. The thread defaults in
+ * 0009 would launch those agents with OS `none` on Chat and Work, so the
+ * turn never starts. This named policy is the scoped exception (0132): the
+ * runtime reaches provider endpoints, tools still follow the thread defaults,
+ * and Plan stays `none`.
+ */
+export function resolveProviderRuntimeEgressPolicy(
+  input: ResolveDefaultThreadEgressPolicyInput,
+): ThreadEgressPolicy {
+  if (input.explicitNetworkApproval === true || input.executionPolicy === "full-access") {
+    return "unrestricted";
+  }
+  if (input.executionPolicy === "plan") return "none";
   return "provider-endpoints-only";
 }
 

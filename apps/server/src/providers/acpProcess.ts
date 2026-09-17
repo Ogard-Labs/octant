@@ -28,7 +28,7 @@ import {
 import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
-  resolveDefaultThreadEgressPolicy,
+  resolveProviderRuntimeEgressPolicy,
   resolveProbeEgressPolicy,
 } from "../process/threadEgressPolicy";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
@@ -440,7 +440,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         const networkEgress = materializeOsNetworkEgress(
           input.purpose === "probe"
             ? resolveProbeEgressPolicy()
-            : resolveDefaultThreadEgressPolicy({
+            : resolveProviderRuntimeEgressPolicy({
                 mode: input.mode,
                 executionPolicy: input.executionPolicy,
               }),

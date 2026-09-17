@@ -205,7 +205,7 @@ describe("Pi process boundary", () => {
     expect(noEgressLaunch.args[1]).toContain(
       '(allow network-outbound (remote ip "localhost:43211"))',
     );
-    expect(noEgressLaunch.args[1]).not.toContain("(allow network*)");
+    expect(noEgressLaunch.args[1]).toContain("(allow network*)");
   });
 
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
