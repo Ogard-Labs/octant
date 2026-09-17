@@ -240,4 +240,32 @@ describe("AgentsCenter", () => {
     );
     expect(await screen.findByText("Agents are unavailable")).toBeInTheDocument();
   });
+
+  it("offers Graph next to List and shows the parent thread above the run", async () => {
+    const user = userEvent.setup();
+    render(<AgentsCenter client={createClient()} />);
+    expect(await screen.findByRole("list", { name: "Agent runs" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Graph" }));
+
+    expect(screen.queryByRole("list", { name: "Agent runs" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent run graph" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Design chat thread" })).toBeVisible();
+    expect(screen.getByRole("button", { name: summary.task })).toBeVisible();
+  });
+
+  it("selecting a graph card opens the same detail pane as the list", async () => {
+    const user = userEvent.setup();
+    render(<AgentsCenter client={createClient()} />);
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    await user.click(screen.getByRole("button", { name: summary.task }));
+    expect(screen.getByRole("region", { name: "Agent run details" })).toBeVisible();
+    expect(screen.getByText("Parent thread")).toBeInTheDocument();
+  });
+
+  it("keeps List only when Agents Center is narrow", async () => {
+    render(<AgentsCenter client={createClient()} narrow />);
+    expect(await screen.findByRole("list", { name: "Agent runs" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Graph" })).not.toBeInTheDocument();
+  });
 });

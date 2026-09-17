@@ -28,6 +28,7 @@ import {
   useAgentsCenterController,
   type AgentsCenterController,
 } from "./useAgentsCenterController";
+import { AgentsCenterGraph } from "./AgentsCenterGraph";
 
 export interface AgentsCenterProps {
   readonly client: AgentRunClient;
@@ -53,6 +54,11 @@ const MODE_FILTERS = [
   { value: "code", label: "Code" },
 ] as const;
 
+const VIEW_FILTERS = [
+  { value: "list", label: "List" },
+  { value: "graph", label: "Graph" },
+] as const;
+
 export function AgentsCenter(props: AgentsCenterProps) {
   const controller = useAgentsCenterController({ client: props.client });
   const controls = useAgentRunControlCommands(props.client, controller.retryList);
@@ -62,6 +68,8 @@ export function AgentsCenter(props: AgentsCenterProps) {
   );
   const detailOpen = controller.selectedId !== undefined;
   const hideListForNarrow = props.narrow === true && detailOpen;
+  const [view, setView] = useState<(typeof VIEW_FILTERS)[number]["value"]>("list");
+  const showGraph = props.narrow !== true && view === "graph";
 
   return (
     <Surface ariaLabel="Agents" className="agents-center">
@@ -90,15 +98,34 @@ export function AgentsCenter(props: AgentsCenterProps) {
       >
         {hideListForNarrow ? null : (
           <div className="agents-center__list-pane">
-            <AgentsCenterToolbar controller={controller} />
-            <AgentsCenterListBody
+            <AgentsCenterToolbar
               controller={controller}
-              controls={controls}
-              onOpenThread={props.onOpenThread}
-              projectNames={props.projectNames ?? new Map()}
-              providerLabels={props.providerLabels ?? new Map()}
-              onSelect={(runId) => controller.select(runId)}
+              {...(props.narrow === true ? {} : { onViewChange: setView, view })}
             />
+            {showGraph &&
+            controller.list.status !== "loading" &&
+            controller.list.status !== "unavailable" &&
+            controller.visibleItems.length > 0 ? (
+              <AgentsCenterGraph
+                items={controller.visibleItems}
+                onSelect={(runId) => controller.select(runId)}
+                providerLabels={props.providerLabels ?? new Map()}
+                refreshing={controller.list.status === "refreshing"}
+                {...(controller.selectedId === undefined
+                  ? {}
+                  : { selectedId: controller.selectedId })}
+                {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+              />
+            ) : (
+              <AgentsCenterListBody
+                controller={controller}
+                controls={controls}
+                onOpenThread={props.onOpenThread}
+                projectNames={props.projectNames ?? new Map()}
+                providerLabels={props.providerLabels ?? new Map()}
+                onSelect={(runId) => controller.select(runId)}
+              />
+            )}
           </div>
         )}
 
@@ -125,7 +152,11 @@ export function AgentsCenter(props: AgentsCenterProps) {
   );
 }
 
-function AgentsCenterToolbar(props: { readonly controller: AgentsCenterController }) {
+function AgentsCenterToolbar(props: {
+  readonly controller: AgentsCenterController;
+  readonly view?: (typeof VIEW_FILTERS)[number]["value"];
+  readonly onViewChange?: (view: (typeof VIEW_FILTERS)[number]["value"]) => void;
+}) {
   const { controller } = props;
   return (
     <div aria-label="Agents Center controls" className="surface-toolbar" role="group">
@@ -177,7 +208,37 @@ function AgentsCenterToolbar(props: { readonly controller: AgentsCenterControlle
           </OctantToggleGroupItem>
         ))}
       </OctantToggleGroup>
+      {props.view === undefined || props.onViewChange === undefined ? null : (
+        <AgentsCenterViewToggle onViewChange={props.onViewChange} view={props.view} />
+      )}
     </div>
+  );
+}
+
+function AgentsCenterViewToggle(props: {
+  readonly view: (typeof VIEW_FILTERS)[number]["value"];
+  readonly onViewChange: (view: (typeof VIEW_FILTERS)[number]["value"]) => void;
+}) {
+  return (
+    <OctantToggleGroup<(typeof VIEW_FILTERS)[number]["value"]>
+      aria-label="View"
+      className="agents-center__filters segmented"
+      onValueChange={(value) => {
+        const selected = value[0];
+        if (selected !== undefined) props.onViewChange(selected);
+      }}
+      value={[props.view]}
+    >
+      {VIEW_FILTERS.map((filter) => (
+        <OctantToggleGroupItem
+          className="agents-center__filter segment"
+          key={filter.value}
+          value={filter.value}
+        >
+          {filter.label}
+        </OctantToggleGroupItem>
+      ))}
+    </OctantToggleGroup>
   );
 }
 
