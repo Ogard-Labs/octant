@@ -35,6 +35,16 @@ describe("composeHostDataMap", () => {
       name: "Local provider usage history",
       location: { kind: "known", path: `${dataDirectory}/local-usage-cache.sqlite3` },
     });
+    // The host roots its chat stores at <dataDirectory>/chat, so a map that
+    // names <dataDirectory>/scratch points at a directory nothing writes.
+    expect(decoded.host.caches).toContainEqual({
+      name: "Chat scratch",
+      location: { kind: "known", path: `${dataDirectory}/chat/scratch` },
+    });
+    expect(decoded.host.caches).toContainEqual({
+      name: "Computer use driver",
+      location: { kind: "known", path: `${dataDirectory}/computer-use` },
+    });
     expect(decoded.host.credentials).toEqual({
       kind: "known",
       backend: "keychain",
