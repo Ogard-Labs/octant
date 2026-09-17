@@ -63,11 +63,20 @@ export function createLocalUsageHistoryClient(
           throw new LocalUsageHistoryClientFailure(response.status, failureMessage(body));
         try {
           const decoded = decodeLocalUsageHistoryResponse(body);
-          if (
-            String(decoded.from) !== String(validated.from) ||
-            String(decoded.to) !== String(validated.to) ||
-            decoded.timeZone !== validated.timeZone
-          )
+          // A preferLastRead answer is the last completed reading of this view,
+          // so its instants are that reading's rather than the ones just asked
+          // for. The view is the window's length and the time zone - the same
+          // key the host stores readings under - so compare those, and let the
+          // caller read again when it wants the current instants.
+          const sameView =
+            decoded.timeZone === validated.timeZone &&
+            Date.parse(decoded.to) - Date.parse(decoded.from) ===
+              Date.parse(validated.to) - Date.parse(validated.from);
+          const exactRange =
+            String(decoded.from) === String(validated.from) &&
+            String(decoded.to) === String(validated.to);
+          if (decoded.timeZone !== validated.timeZone) throw new Error("range-mismatch");
+          if (decoded.fromLastRead === true ? !sameView : !exactRange)
             throw new Error("range-mismatch");
           return decoded;
         } catch {
