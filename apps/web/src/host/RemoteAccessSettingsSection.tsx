@@ -126,6 +126,10 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   }, [refreshListener, refreshInventory]);
 
   const status = listener.kind === "ready" ? listener.status : undefined;
+  // With the listener off the host has no remote gateway to answer a device
+  // inventory, so its refusal is the prerequisite this page already states
+  // rather than a failure to report.
+  const listenerNotEnabled = status !== undefined && status.enabled !== true;
   const draftPort = Number.parseInt(draft.port, 10);
   const draftOrigin =
     draft.hostname.trim() === "" || !Number.isSafeInteger(draftPort)
@@ -655,7 +659,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
               </OctantButton>
             </div>
           )}
-          {inventoryMessage === undefined ? null : (
+          {inventoryMessage === undefined || listenerNotEnabled ? null : (
             <SettingsState kind="error">{inventoryMessage}</SettingsState>
           )}
         </div>
