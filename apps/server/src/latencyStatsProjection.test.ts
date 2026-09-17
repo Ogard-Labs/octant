@@ -86,6 +86,13 @@ describe("observedRpcLatency", () => {
     expect(observedRpcLatency("/api/usage/export")).toBe("rpc-toolchain");
     expect(observedRpcLatency("/api/extensions/import-local")).toBe("rpc-toolchain");
     expect(observedRpcLatency("/api/extensions/import-local-receipts")).toBe("rpc");
+    // A thread's event replay holds its request open until it has collected
+    // frames or the caller gives up, so its duration is a subscription's
+    // lifetime rather than the time a response took to produce.
+    expect(observedRpcLatency("/api/code/threads/thread-id/events")).toBeUndefined();
+    expect(
+      observedRpcLatency("/api/code/threads/thread-id/operations/operation-id/events"),
+    ).toBeUndefined();
     expect(observedRpcLatency("/health")).toBeUndefined();
     expect(observedRpcLatency("/assets/app.js")).toBeUndefined();
   });
