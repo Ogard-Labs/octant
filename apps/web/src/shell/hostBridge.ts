@@ -25,6 +25,23 @@ export interface CodeCheckoutOpenRequest {
   readonly threadId: string;
   readonly applicationId: OpenInApplicationId;
 }
+/**
+ * The palette a window's own theme resolved to, reported so the
+ * desktop-owned approval view can draw the app the person is looking at
+ * instead of the operating system's light or dark preference alone.
+ */
+export interface ApprovalSurfacePalette {
+  readonly mode: "light" | "dark";
+  readonly surface: string;
+  readonly text: string;
+  readonly muted: string;
+  readonly border: string;
+  readonly control: string;
+  readonly controlHover: string;
+  readonly accent: string;
+  readonly accentForeground: string;
+}
+
 export type CodeDeepLink =
   | Readonly<{ kind: "project"; projectId: string }>
   | Readonly<{ kind: "thread"; threadId: string }>
@@ -384,6 +401,8 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
   ) => Promise<void>;
   /** Cancels any pending native approval owned by this window. */
   readonly cancelCodeOperationApproval?: () => Promise<void>;
+  /** Reports the resolved theme an approval view should draw. */
+  readonly setApprovalSurfacePalette?: (palette: ApprovalSurfacePalette) => Promise<void> | void;
   readonly projectWindowCapability: string;
   readonly subscribeProjectWindowCapability?: (
     listener: (capability: string) => void,

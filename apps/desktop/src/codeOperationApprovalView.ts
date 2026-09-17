@@ -28,6 +28,89 @@ export type CodeOperationApprovalAnchor =
       readonly bounds: CodeOperationApprovalBounds;
     };
 
+/**
+ * The palette a window's resolved theme is showing, as that window's renderer
+ * reports it. The approval document stays desktop-owned: this is read as data
+ * — eight hex colors and the mode — and anything else falls back to the
+ * system palette the view has always drawn.
+ */
+export interface CodeOperationApprovalPalette {
+  readonly mode: "light" | "dark";
+  readonly surface: string;
+  readonly text: string;
+  readonly muted: string;
+  readonly border: string;
+  readonly control: string;
+  readonly controlHover: string;
+  readonly accent: string;
+  readonly accentForeground: string;
+}
+
+const APPROVAL_PALETTE_COLOR_KEYS = [
+  "accent",
+  "accentForeground",
+  "border",
+  "control",
+  "controlHover",
+  "muted",
+  "surface",
+  "text",
+] as const;
+const APPROVAL_PALETTE_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+function paletteColor(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && APPROVAL_PALETTE_COLOR_PATTERN.test(value)
+    ? value
+    : undefined;
+}
+
+export function decodeCodeOperationApprovalPalette(
+  value: unknown,
+): CodeOperationApprovalPalette | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).sort().join("\0") !==
+    ["mode", ...APPROVAL_PALETTE_COLOR_KEYS].sort().join("\0")
+  ) {
+    return undefined;
+  }
+  const mode = record.mode === "light" ? "light" : record.mode === "dark" ? "dark" : undefined;
+  if (mode === undefined) return undefined;
+  const accent = paletteColor(record, "accent");
+  const accentForeground = paletteColor(record, "accentForeground");
+  const border = paletteColor(record, "border");
+  const control = paletteColor(record, "control");
+  const controlHover = paletteColor(record, "controlHover");
+  const muted = paletteColor(record, "muted");
+  const surface = paletteColor(record, "surface");
+  const text = paletteColor(record, "text");
+  if (
+    accent === undefined ||
+    accentForeground === undefined ||
+    border === undefined ||
+    control === undefined ||
+    controlHover === undefined ||
+    muted === undefined ||
+    surface === undefined ||
+    text === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    mode,
+    accent,
+    accentForeground,
+    border,
+    control,
+    controlHover,
+    muted,
+    surface,
+    text,
+  };
+}
+
 export interface CodeOperationApprovalViewPort {
   readonly webContents: {
     readonly id: number;
@@ -50,6 +133,11 @@ export interface CodeOperationApprovalViewHost<TWindow> {
   ) => CodeOperationApprovalBounds | undefined;
   /** Safe owner-window fallback for dock actions whose composer is unmounted. */
   readonly fallbackBounds?: (window: TWindow) => CodeOperationApprovalBounds | undefined;
+  /**
+   * The resolved palette the owning window's theme is showing, if it has
+   * reported one. Absent, the view draws the system palette it always has.
+   */
+  readonly approvalPalette?: (windowId: string) => CodeOperationApprovalPalette | undefined;
   readonly isWindowDestroyed: (window: TWindow) => boolean;
 }
 
@@ -297,7 +385,8 @@ export function createCodeOperationApprovalViewController<TWindow>(
       view.setBounds(bounds);
       view.setVisible(true);
       await view.webContents.loadURL(
-        "data:text/html;charset=utf-8," + encodeURIComponent(approvalViewHtml()),
+        "data:text/html;charset=utf-8," +
+          encodeURIComponent(approvalViewHtml(options.host.approvalPalette?.(pending.windowId))),
       );
       if (pending.finished) return;
       view.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.challenge, challenge);
@@ -509,10 +598,21 @@ export function createCodeOperationApprovalViewController<TWindow>(
   });
 }
 
-export function approvalViewHtml(): string {
+function approvalPaletteCss(palette: CodeOperationApprovalPalette | undefined): string {
+  // The window draws the system palette until the owning window reports the
+  // theme it resolved; a reported palette is absolute, so no media query.
+  if (palette === undefined) {
+    return (
+      ":root{color-scheme:light dark;--approval-bg:#fdfdfc;--approval-fg:#1b1b1b;--approval-muted:#4f4f4f;--approval-border:#e0e0de;--approval-control:#f0f0ef;--approval-hover:#e8e8e6;--approval-primary:#1b1b1b;--approval-primary-fg:#ffffff}\n" +
+      "@media(prefers-color-scheme:dark){:root{--approval-bg:#232323;--approval-fg:#f0f0f0;--approval-muted:#a9a9a9;--approval-border:#303030;--approval-control:#2b2b2b;--approval-hover:#333333;--approval-primary:#f0f0f0;--approval-primary-fg:#1b1b1b}}"
+    );
+  }
+  return `:root{color-scheme:${palette.mode};--approval-bg:${palette.surface};--approval-fg:${palette.text};--approval-muted:${palette.muted};--approval-border:${palette.border};--approval-control:${palette.control};--approval-hover:${palette.controlHover};--approval-primary:${palette.accent};--approval-primary-fg:${palette.accentForeground}}`;
+}
+
+export function approvalViewHtml(palette?: CodeOperationApprovalPalette): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><title>Code approval</title><style>
-:root{color-scheme:light dark;--approval-bg:#fdfdfc;--approval-fg:#1b1b1b;--approval-muted:#4f4f4f;--approval-border:#e0e0de;--approval-control:#f0f0ef;--approval-hover:#e8e8e6;--approval-primary:#1b1b1b;--approval-primary-fg:#ffffff}
-@media(prefers-color-scheme:dark){:root{--approval-bg:#232323;--approval-fg:#f0f0f0;--approval-muted:#a9a9a9;--approval-border:#303030;--approval-control:#2b2b2b;--approval-hover:#333333;--approval-primary:#f0f0f0;--approval-primary-fg:#1b1b1b}}
+${approvalPaletteCss(palette)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:transparent}
 body{color:var(--approval-fg);font:13px/1.45 'Inter Variable',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
