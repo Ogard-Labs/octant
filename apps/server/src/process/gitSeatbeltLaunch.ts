@@ -7,6 +7,7 @@ import {
   SeatbeltConfinementError,
   type ConfinedProcessLaunch,
   type SeatbeltConfinementPort,
+  seatbeltAllowRule,
 } from "./seatbeltProfile";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
@@ -111,6 +112,49 @@ export function gitGlobalConfigReadRoots(
 
 const MAX_GIT_CONFIG_INCLUDE_DEPTH = 4;
 
+/** Exact files the macOS git shim reads through xcode-select. Last-match extraRules. */
+export const MACOS_GIT_SHIM_READ_PATHS = [
+  "/private/var/select/developer_dir",
+  "/private/var/db/xcode_select_link",
+] as const;
+
+export function gitShimExtraRules(
+  platform: NodeJS.Platform = process.platform,
+): ReadonlyArray<string> {
+  if (platform !== "darwin") return [];
+  return MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`);
+}
+
+/**
+ * A linked worktree's .git file points at the main repository's
+ * .git/worktrees/<name>, outside the bound root. Allow that metadata and its
+ * commondir so git can see it is a repository, without opening the parent
+ * working tree.
+ */
+export function gitLinkedWorktreeMetadataRules(checkoutRoot: string): ReadonlyArray<string> {
+  let gitdir: string | undefined;
+  try {
+    const text = readFileSync(join(checkoutRoot, ".git"), "utf8");
+    const match = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+    const raw = match?.[1];
+    if (raw === undefined || raw === "") return [];
+    gitdir = isAbsolute(raw) ? raw : join(checkoutRoot, raw);
+  } catch {
+    return [];
+  }
+  const roots = [gitdir];
+  try {
+    const common = readFileSync(join(gitdir, "commondir"), "utf8").trim();
+    if (common !== "") roots.push(isAbsolute(common) ? common : join(gitdir, common));
+  } catch {
+    // Ordinary repositories have no commondir file.
+  }
+  return roots.flatMap((path) => [
+    seatbeltAllowRule("file-read*", path),
+    seatbeltAllowRule("file-write*", path),
+  ]);
+}
+
 function readConfigFile(path: string): string | undefined {
   try {
     return readFileSync(path, "utf8");
@@ -185,6 +229,10 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
     );
   }
   const binaryDirectory = dirname(options.gitExecutable);
+  const extraRules = [
+    ...gitShimExtraRules(),
+    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot),
+  ];
   return options.confinement.prepare({
     executable: options.gitExecutable,
     args: options.args,
@@ -199,5 +247,6 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
       dirname(binaryDirectory),
       ...gitGlobalConfigReadRoots(),
     ],
+    ...(extraRules.length === 0 ? {} : { extraRules }),
   });
 }

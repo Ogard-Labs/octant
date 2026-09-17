@@ -91,6 +91,12 @@ export function createGitCommandEnvironment(inherited: NodeJS.ProcessEnv): NodeJ
     GIT_TERMINAL_PROMPT: "0",
     GCM_INTERACTIVE: "Never",
     GIT_OPTIONAL_LOCKS: "0",
+    // Git treats a permission error on the user's global config as fatal.
+    // The sandbox hides that file on purpose; pointing global config at
+    // /dev/null lets the command run from the checkout's own config instead
+    // of widening home reads.
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
   };
   for (const name of GIT_ENVIRONMENT_ALLOWLIST) {
     const value = inherited[name];

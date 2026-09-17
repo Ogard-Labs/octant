@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   gitGlobalConfigReadRoots,
+  gitLinkedWorktreeMetadataRules,
+  gitShimExtraRules,
+  MACOS_GIT_SHIM_READ_PATHS,
   prepareGitSeatbeltLaunch,
   resolveGitExecutable,
 } from "./gitSeatbeltLaunch";
@@ -27,6 +33,51 @@ describe("git Seatbelt launch", () => {
     for (const root of gitGlobalConfigReadRoots()) expect(roots).toContain(root);
     expect(roots).toContain("/repo");
     expect(roots).toContain("/opt/toolchain/usr/bin");
+  });
+
+  it("appends the xcode-select shim literals after the rest of the profile", () => {
+    expect(gitShimExtraRules("darwin")).toEqual(
+      MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`),
+    );
+    expect(gitShimExtraRules("linux")).toEqual([]);
+    if (process.platform !== "darwin") return;
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: "/usr/bin/sandbox-exec", args: [] };
+      },
+    };
+    prepareGitSeatbeltLaunch({
+      confinement,
+      gitExecutable: "/opt/toolchain/usr/bin/git",
+      checkoutRoot: "/repo",
+      args: ["status"],
+      temporaryDirectory: "/tmp",
+      networkEgress: "allow",
+    });
+    for (const path of MACOS_GIT_SHIM_READ_PATHS) {
+      expect(captured?.extraRules).toContain(`(allow file-read* (literal "${path}"))`);
+    }
+  });
+
+  it("allows a linked worktree's gitdir and commondir outside the bound root", () => {
+    expect(gitLinkedWorktreeMetadataRules("/does-not-exist")).toEqual([]);
+    const root = mkdtempSync(join(tmpdir(), "octant-git-worktree-"));
+    try {
+      const worktree = join(root, "worktree");
+      const gitdir = join(root, "main.git", "worktrees", "feature");
+      const common = join(root, "main.git");
+      mkdirSync(worktree);
+      mkdirSync(gitdir, { recursive: true });
+      writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(gitdir, "commondir"), `${common}\n`);
+      const rules = gitLinkedWorktreeMetadataRules(worktree);
+      expect(rules.some((rule) => rule.includes(gitdir))).toBe(true);
+      expect(rules.some((rule) => rule.includes(common))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("derives global config roots from the home and XDG config directories", () => {
