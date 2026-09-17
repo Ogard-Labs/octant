@@ -220,6 +220,7 @@ describe("desktop preload bridge", () => {
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "setAppUpdateRing",
+      "setApprovalSurfacePalette",
       "setAttentionBadge",
       "setAutomaticAppUpdateChecks",
       "setProviderCredential",

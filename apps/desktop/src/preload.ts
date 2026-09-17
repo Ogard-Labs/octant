@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
+import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 
 export const HOST_BRIDGE_KEY = "octantHost";
 
@@ -26,6 +27,7 @@ export const IPC_CHANNELS = {
   appUpdateRing: "octant:app-update:ring",
   appUpdateWhatsNew: "octant:app-update:whats-new",
   appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
+  approvalSurfacePalette: "octant:window:approval-surface-palette",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
@@ -432,6 +434,8 @@ export interface OctantHostBridge {
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: SidebarMaterialPreference) => Promise<void>;
   readonly setSidebarVibrancyMode: (mode: SidebarVibrancyMode) => Promise<void>;
+  /** Reports the window's resolved theme palette for its approval view. */
+  readonly setApprovalSurfacePalette: (palette: CodeOperationApprovalPalette) => Promise<void>;
   readonly subscribeResolvedMaterial: (
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
@@ -784,6 +788,11 @@ export function createHostBridge(
         return Promise.reject(new TypeError("Invalid sidebar vibrancy mode."));
       }
       return invoke(IPC_CHANNELS.sidebarVibrancyMode, mode);
+    },
+    setApprovalSurfacePalette: (palette: CodeOperationApprovalPalette) => {
+      // A palette carries no authority, and the main process decodes it
+      // authoritatively before any approval document is built with it.
+      return invoke(IPC_CHANNELS.approvalSurfacePalette, palette);
     },
     subscribeResolvedMaterial: (listener: (material: ResolvedSidebarMaterial) => void) => {
       const receive: MaterialListener = (_event, material) => {

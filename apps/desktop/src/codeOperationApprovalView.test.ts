@@ -8,8 +8,10 @@ import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
   approvalViewHtml,
   createCodeOperationApprovalViewController,
+  decodeCodeOperationApprovalPalette,
   type CodeOperationApprovalAnchor,
   type CodeOperationApprovalBounds,
+  type CodeOperationApprovalPalette,
   type CodeOperationApprovalViewPort,
 } from "./codeOperationApprovalView";
 
@@ -55,10 +57,13 @@ function anchor(): Extract<CodeOperationApprovalAnchor, { readonly kind: "thread
 
 function makeFixture() {
   const sent: Array<[string, unknown]> = [];
+  const loaded: string[] = [];
   const view: CodeOperationApprovalViewPort = {
     webContents: {
       id: 41,
-      loadURL: vi.fn(async () => undefined),
+      loadURL: vi.fn(async (url: string) => {
+        loaded.push(url);
+      }),
       send: vi.fn((channel: string, value: unknown) => sent.push([channel, value])),
       close: vi.fn(),
       isDestroyed: vi.fn(() => false),
@@ -72,6 +77,7 @@ function makeFixture() {
     detach: vi.fn(),
     boundsForAnchor: vi.fn((_window: object, value: CodeOperationApprovalAnchor) => value.bounds),
     fallbackBounds: vi.fn<() => CodeOperationApprovalBounds | undefined>(() => undefined),
+    approvalPalette: vi.fn<() => CodeOperationApprovalPalette | undefined>(() => undefined),
     isWindowDestroyed: vi.fn(() => false),
   };
   const prepare = vi.fn(async () => challenge);
@@ -86,7 +92,7 @@ function makeFixture() {
     anchorWaitMs: 25,
     expiryMs: 100,
   });
-  return { cancel, controller, confirm, host, prepare, sent, view, window: {} };
+  return { cancel, controller, confirm, host, loaded, prepare, sent, view, window: {} };
 }
 
 describe("Code operation approval view controller", () => {
@@ -569,5 +575,74 @@ describe("Code operation approval view controller", () => {
     await expect(result).resolves.toBeUndefined();
     expect(fixture.confirm).not.toHaveBeenCalled();
     expect(fixture.view.webContents.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Code operation approval palette", () => {
+  const palette: CodeOperationApprovalPalette = {
+    mode: "dark",
+    surface: "#112233",
+    text: "#f0f0f0",
+    muted: "#a9a9a9",
+    border: "#303030",
+    control: "#2b2b2b",
+    controlHover: "#333333",
+    accent: "#f0f0f0",
+    accentForeground: "#171717",
+  };
+
+  it("draws the palette its owning window resolved instead of the system's", () => {
+    const html = approvalViewHtml(palette);
+    expect(html).toContain("--approval-bg:#112233");
+    expect(html).toContain("--approval-primary-fg:#171717");
+    expect(html).toContain("color-scheme:dark");
+    expect(html).not.toContain("prefers-color-scheme");
+  });
+
+  it("keeps the system palette when the owning window reported none", () => {
+    const html = approvalViewHtml();
+    expect(html).toContain("prefers-color-scheme:dark");
+    expect(html).toContain("--approval-bg:#fdfdfc");
+  });
+
+  it("loads the approval document in the palette its owning window reported", async () => {
+    const fixture = makeFixture();
+    fixture.host.approvalPalette.mockReturnValue(palette);
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    void fixture.controller.request({
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const document = decodeURIComponent(fixture.loaded[0] ?? "");
+    expect(document).toContain("--approval-bg:#112233");
+    expect(document).not.toContain("prefers-color-scheme");
+  });
+
+  it("reads only a complete palette of hex colors", () => {
+    expect(decodeCodeOperationApprovalPalette(palette)).toEqual(palette);
+    expect(decodeCodeOperationApprovalPalette({ ...palette, extra: "#ffffff" })).toBeUndefined();
+    expect(decodeCodeOperationApprovalPalette({ ...palette, mode: "system" })).toBeUndefined();
+    expect(
+      decodeCodeOperationApprovalPalette({ ...palette, surface: "rgb(1, 2, 3)" }),
+    ).toBeUndefined();
+    expect(
+      decodeCodeOperationApprovalPalette({
+        mode: "dark",
+        accent: "#f0f0f0",
+        accentForeground: "#171717",
+        border: "#303030",
+        control: "#2b2b2b",
+        controlHover: "#333333",
+        muted: "#a9a9a9",
+        surface: "#112233",
+      }),
+    ).toBeUndefined();
   });
 });

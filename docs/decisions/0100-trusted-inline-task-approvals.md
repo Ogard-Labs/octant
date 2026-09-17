@@ -24,9 +24,12 @@ that renderer can request a desktop challenge but cannot confirm it itself.
   sender, challenge, per-view token, owning window/capability, and requesting
   thread or draft Project. Receipt issuance remains on the existing desktop
   challenge/confirmation routes, with server-side context and effect checks.
-- The ordinary renderer may report bounded composer geometry or cancel. It
-  receives neither confirmation authority nor a general approval endpoint.
-  Background requests cannot appear over an unrelated task's composer.
+- The ordinary renderer may report bounded composer geometry, the palette its
+  own theme resolved, or cancel. The palette is presentation data like the
+  geometry: a mode and eight hex colours, decoded by main and discarded whole
+  if any of them is not one. It receives neither confirmation authority nor a
+  general approval endpoint. Background requests cannot appear over an
+  unrelated task's composer.
 - Cancel is the default. Enter never grants authority. Expiry, cancellation,
   owner teardown, missing valid anchor, and late or duplicate decisions fail
   closed. No hidden or stale view can issue a receipt.

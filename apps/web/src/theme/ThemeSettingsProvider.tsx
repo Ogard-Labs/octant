@@ -6,6 +6,8 @@ import {
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import { getThemePreset, MAX_THEME_PATTERN_INKS } from "@octant/theme";
 import { useLayoutEffect, type ReactNode } from "react";
+import { getInjectedHostBridge } from "../shell/hostBridge";
+import { approvalSurfacePalette } from "./approvalSurfacePalette";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   sidebar: ["sidebar-opaque"],
@@ -77,6 +79,13 @@ export function ThemeSettingsProvider(props: {
     root.dataset.octantReducedMotion = String(accessible.reducedMotion);
     root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
     root.style.colorScheme = resolved.mode;
+    // The desktop owns the approval document; a window only reports the
+    // palette it resolved, and only when it has the ordinary host bridge.
+    const palette = approvalSurfacePalette(resolved);
+    const reportPalette = getInjectedHostBridge()?.setApprovalSurfacePalette;
+    if (palette !== undefined && reportPalette !== undefined) {
+      void Promise.resolve(reportPalette(palette)).catch(() => undefined);
+    }
     return () => {
       for (const role of Object.keys(resolved.tokens)) {
         root.style.removeProperty(`--octant-${role}`);

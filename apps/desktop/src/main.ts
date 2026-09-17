@@ -87,8 +87,10 @@ import {
 import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
   createCodeOperationApprovalViewController,
+  decodeCodeOperationApprovalPalette,
   type CodeOperationApprovalAnchor,
   type CodeOperationApprovalBounds,
+  type CodeOperationApprovalPalette,
 } from "./codeOperationApprovalView";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
 import {
@@ -217,6 +219,7 @@ const IPC_CHANNELS = {
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
   sidebarMaterialPreference: "octant:window:sidebar-material-preference",
   sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
+  approvalSurfacePalette: "octant:window:approval-surface-palette",
   privateListenerStatus: "octant:private-listener:status",
   privateListenerEnable: "octant:private-listener:enable",
   privateListenerDisable: "octant:private-listener:disable",
@@ -1018,6 +1021,10 @@ const desktopWindows = createDesktopWindowContextRegistry<BrowserWindow, Desktop
 let codeOperationApprovalViews:
   | ReturnType<typeof createCodeOperationApprovalViewController<BrowserWindow>>
   | undefined;
+// The resolved palette each open window reported for its own theme. The
+// approval document belongs to the desktop, so this only ever holds values a
+// decoder accepted; a window that reported none keeps the system palette.
+const approvalPalettesByWindow = new Map<string, CodeOperationApprovalPalette>();
 
 function codeApprovalBoundsForAnchor(
   window: BrowserWindow,
@@ -1071,6 +1078,7 @@ function installCodeOperationApprovalViews(): void {
       ),
       boundsForAnchor: codeApprovalBoundsForAnchor,
       fallbackBounds: codeApprovalFallbackBounds,
+      approvalPalette: (windowId) => approvalPalettesByWindow.get(windowId),
       isWindowDestroyed: (window) => window.isDestroyed(),
     },
     prepare: ({ request, windowCapability }) => {
@@ -1890,6 +1898,7 @@ async function createWindow(): Promise<void> {
       });
       window.once("closed", () => {
         codeOperationApprovalViews?.closeWindow(state.windowId);
+        approvalPalettesByWindow.delete(state.windowId);
         void browserSurfaceHost?.closeOwnerContexts(state.windowId).catch(() => undefined);
         unregisterTrustedRendererRequestContext(window);
         desktopWindows.remove(window);
@@ -2094,6 +2103,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         });
         window.once("closed", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
+          approvalPalettesByWindow.delete(windowId);
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
           unregisterTrustedRendererRequestContext(window);
           desktopWindows.remove(window);
@@ -2839,6 +2849,14 @@ function installIpcHandlers(): void {
       throw new Error("Octant rejected an invalid sidebar vibrancy mode.");
     }
     context.presentationController.update({ sidebarVibrancyMode: mode });
+  });
+  ipcMain.handle(IPC_CHANNELS.approvalSurfacePalette, (event, palette: unknown) => {
+    const context = ownedWindowContext(event);
+    const decoded = decodeCodeOperationApprovalPalette(palette);
+    // An unreadable palette must not block an approval: the view keeps
+    // drawing the system palette it falls back to.
+    if (decoded === undefined) return;
+    approvalPalettesByWindow.set(context.windowId, decoded);
   });
 }
 

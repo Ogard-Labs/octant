@@ -1,6 +1,6 @@
 import { decodeThemePresetId, DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ThemeSettingsProvider } from "./ThemeSettingsProvider";
 
 describe("ThemeSettingsProvider", () => {
@@ -90,5 +90,29 @@ describe("ThemeSettingsProvider", () => {
     result.unmount();
     expect(root.dataset.octantPatternInkCount).toBeUndefined();
     expect(root.style.getPropertyValue("--octant-pattern-ink-6")).toBe("");
+  });
+
+  it("reports the resolved palette to the desktop that owns the approval view", () => {
+    const setApprovalSurfacePalette = vi.fn();
+    const host = window as unknown as { octantHost?: unknown };
+    host.octantHost = {
+      setProviderCredential: vi.fn(),
+      providerCredentialStatus: vi.fn(),
+      clearProviderCredential: vi.fn(),
+      setApprovalSurfacePalette,
+    };
+    try {
+      const result = render(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(setApprovalSurfacePalette).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "dark", surface: "#232323" }),
+      );
+      result.unmount();
+    } finally {
+      delete host.octantHost;
+    }
   });
 });
