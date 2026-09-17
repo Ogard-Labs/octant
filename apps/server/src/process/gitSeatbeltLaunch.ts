@@ -8,6 +8,7 @@ import {
   type ConfinedProcessLaunch,
   type SeatbeltConfinementPort,
   seatbeltAllowRule,
+  seatbeltAllowLiteralMetadataRule,
 } from "./seatbeltProfile";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
@@ -152,7 +153,28 @@ export function gitLinkedWorktreeMetadataRules(checkoutRoot: string): ReadonlyAr
   return roots.flatMap((path) => [
     seatbeltAllowRule("file-read*", path),
     seatbeltAllowRule("file-write*", path),
+    ...ancestorMetadataRules(path),
   ]);
+}
+
+/**
+ * Metadata for every ancestor directory of an out-of-root metadata path.
+ *
+ * Git canonicalises these paths component by component, and the rules above
+ * allow each path as a subtree — which says nothing about the directories
+ * above it. Under the profile's `/private` and home denies the walk stops at
+ * the first ancestor it cannot stat (`fatal: Invalid path '/private':
+ * Operation not permitted`) and the confined command never reaches the
+ * repository.
+ */
+function ancestorMetadataRules(path: string): ReadonlyArray<string> {
+  const rules: string[] = [];
+  let directory = dirname(path);
+  while (directory !== "/" && directory !== dirname(directory)) {
+    rules.push(seatbeltAllowLiteralMetadataRule(directory));
+    directory = dirname(directory);
+  }
+  return rules;
 }
 
 function readConfigFile(path: string): string | undefined {

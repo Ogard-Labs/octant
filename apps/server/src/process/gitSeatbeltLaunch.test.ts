@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,7 +10,7 @@ import {
   prepareGitSeatbeltLaunch,
   resolveGitExecutable,
 } from "./gitSeatbeltLaunch";
-import type { SeatbeltConfinementPort } from "./seatbeltProfile";
+import { makeSeatbeltConfinementLive, type SeatbeltConfinementPort } from "./seatbeltProfile";
 
 describe("git Seatbelt launch", () => {
   it("lets confined git read the user's global config alongside the checkout", () => {
@@ -75,6 +75,51 @@ describe("git Seatbelt launch", () => {
       const rules = gitLinkedWorktreeMetadataRules(worktree);
       expect(rules.some((rule) => rule.includes(gitdir))).toBe(true);
       expect(rules.some((rule) => rule.includes(common))).toBe(true);
+      // Git canonicalises the out-of-root metadata by walking its
+      // components, so every ancestor needs metadata of its own — and only
+      // metadata: the worktree root's contents stay unreadable.
+      expect(rules).toContain(`(allow file-read-metadata (literal "${root}"))`);
+      expect(rules).not.toContain(`(allow file-read* (subpath "${root}"))`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("carries the worktree's ancestors into the final Darwin profile", () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-git-worktree-profile-"));
+    try {
+      const worktree = join(root, "worktree");
+      const gitdir = join(root, "main.git", "worktrees", "feature");
+      const sandboxPath = join(root, "sandbox-exec");
+      mkdirSync(worktree);
+      mkdirSync(gitdir, { recursive: true });
+      mkdirSync(join(root, "tmp"));
+      writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(gitdir, "commondir"), `${join(root, "main.git")}\n`);
+      writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+      chmodSync(sandboxPath, 0o700);
+
+      // The rules have to survive composition into the profile the process is
+      // actually launched with, not only the helper that builds them: a
+      // regression that drops extraRules would still pass the helper's own
+      // assertions while confined git dies on its first path.
+      const launch = prepareGitSeatbeltLaunch({
+        confinement: makeSeatbeltConfinementLive({
+          platform: "darwin",
+          sandboxPath,
+          homeDirectory: root,
+          usersDirectory: root,
+        }),
+        gitExecutable: "/opt/toolchain/usr/bin/git",
+        checkoutRoot: worktree,
+        args: ["-C", worktree, "status", "--short"],
+        temporaryDirectory: join(root, "tmp"),
+        networkEgress: "none",
+      });
+
+      const profile = launch.args[1] ?? "";
+      expect(profile).toContain(`(allow file-read-metadata (literal "${root}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${root}"))`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
