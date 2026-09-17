@@ -549,6 +549,9 @@ describe("provider CLI update policy", () => {
   it("keeps update command support shared by server and renderer", () => {
     expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
     expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
+    expect(providerCliUpdateArgs("codex")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("claude")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("opencode")).toEqual(["update"]);
     expect(supportsProviderCliUpdate("copilot")).toBe(true);
     expect(supportsProviderCliUpdate("gemini")).toBe(false);
     expect(supportsProviderCliUpdate("goose")).toBe(false);

@@ -109,11 +109,15 @@ export function isImageProfileDriverKind(
 }
 
 /**
- * Verified provider-owned self-update argv from official CLI docs. Gemini CLI
- * has no documented `update` subcommand (installs via npm; `/upgrade` is a
- * billing-tier action), so it stays unavailable.
+ * Verified provider-owned self-update argv from the official CLI docs and the
+ * binaries' own help output. Gemini CLI has no documented update subcommand
+ * (installs via npm; /upgrade is a billing-tier action), so it stays
+ * unavailable.
  */
 const PROVIDER_CLI_UPDATE_COMMANDS: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
+  codex: ["update"],
+  claude: ["update"],
+  opencode: ["update"],
   devin: ["update"],
   "mistral-vibe": ["update"],
   grok: ["update"],

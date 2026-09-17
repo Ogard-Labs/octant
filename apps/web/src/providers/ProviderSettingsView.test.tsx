@@ -733,7 +733,10 @@ describe("ProviderSettingsView", () => {
 
   it("does not offer Update CLI for providers without a verified updater", () => {
     renderExpanded(
-      <ProviderSettingsView {...fixture()} onUpdateProviderCli={vi.fn(async () => true)} />,
+      <ProviderSettingsView
+        {...fixture({ instance: piProvider() })}
+        onUpdateProviderCli={vi.fn(async () => true)}
+      />,
     );
     expect(screen.queryByRole("button", { name: /Update .* CLI/ })).not.toBeInTheDocument();
     expect(

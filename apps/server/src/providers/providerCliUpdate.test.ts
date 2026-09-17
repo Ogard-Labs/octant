@@ -19,10 +19,12 @@ describe("provider-owned CLI updates", () => {
     expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
     expect(providerCliUpdateArgs("mistral-vibe")).toEqual(["update"]);
     expect(providerCliUpdateArgs("grok")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("codex")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("claude")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("opencode")).toEqual(["update"]);
     expect(providerCliUpdateArgs("gemini")).toBeUndefined();
     expect(providerCliUpdateArgs("cline")).toEqual(["update"]);
     expect(providerCliUpdateArgs("copilot")).toEqual(["update"]);
-    expect(providerCliUpdateArgs("opencode")).toBeUndefined();
     expect(providerCliUpdateArgs("goose")).toBeUndefined();
   });
 
