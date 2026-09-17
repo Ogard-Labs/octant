@@ -150,6 +150,25 @@ describe("update verification", () => {
     expect(port.calls.setFeedURL).toHaveLength(0);
   });
 
+  it("drops the previous check's message when a later check answers without one", async () => {
+    // "No release is available in this channel." describes one check. Left in
+    // place it is read beside a later "Up to date" - or beside a later
+    // failure's own sentence - as if both were current.
+    const { updates, fetchImpl } = service({ document: { schemaVersion: 1, status: "empty" } });
+    await updates.check();
+    expect(updates.state().message).toBe("No release is available in this channel.");
+
+    vi.mocked(fetchImpl).mockResolvedValueOnce(
+      new Response(JSON.stringify(signedFeed({ version: "0.1.0" })), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await updates.check();
+    expect(updates.state().status).toBe("up-to-date");
+    expect(updates.state().message).toBeUndefined();
+  });
+
   it("does not treat a release disguised as an empty channel as an empty response", async () => {
     const { updates } = service({ document: { schemaVersion: 1, status: "empty", release } });
     expect(await updates.check()).toMatchObject({ status: "refused", refusal: "malformed" });

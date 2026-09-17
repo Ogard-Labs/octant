@@ -132,7 +132,11 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
    * answer — the state should not remember an offer that has been withdrawn.
    */
   const publishWithoutOffer = (next: Partial<AppUpdateState>): AppUpdateState => {
-    const { available: _withdrawn, ...rest } = state;
+    // The release a previous check verified, the sentence it published and its
+    // refusal all describe *that* check. Keeping any of them lets a later
+    // answer carry a withdrawn offer, or read "Up to date" beside "No release
+    // is available in this channel." - which is what happened.
+    const { available: _withdrawn, message: _stale, refusal: _previous, ...rest } = state;
     state = { ...rest, ...next, currentVersion: options.app.version, automaticChecks, ring };
     options.onState?.(state);
     return state;
