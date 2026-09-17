@@ -32,14 +32,15 @@ only** where the destination offers that placement, or **Don't show**, and use
 the chevrons to move it up or down. **Reset sidebar destinations** restores the
 untouched placement and order.
 
-**More row in the sidebar** (on by default) ends the sidebar's navigation with
-a More row above the Project and thread lists. The row is the sidebar's own
-control rather than a destination: its popup carries one checkbox per element,
-checked while the rail shows it. Unchecking a workspace destination sends it
-back to the account menu; unchecking a primary one hides it. **Customize
-sidebar** opens the full editor for ordering and for **Menu only** placement.
-Turning the row off leaves those controls to Settings, and the destinations
-wait in the account menu either way. A **Don't show** destination appears
+**More row in the sidebar** (on by default) puts that control at the end of the
+sidebar's navigation, above the Project and thread lists. The row is the
+sidebar's own control rather than a destination: its popup carries one checkbox
+per element, checked while the rail shows it. Unchecking a workspace destination
+sends it back to the account menu; unchecking a primary one hides it.
+**Customize sidebar** opens the full editor for ordering and for **Menu only**
+placement. Turning the row off leaves those controls to Settings. A destination
+set to **Always show** stays in the rail either way, and one set to **Menu only**
+waits in the account menu either way. A **Don't show** destination appears
 nowhere.
 
 Availability still follows the active mode and the host's capabilities: a
