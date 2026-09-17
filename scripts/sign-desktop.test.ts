@@ -205,6 +205,21 @@ describe("signAndNotarizeDesktop", () => {
     expect(stapleIndex).toBeGreaterThan(notarizeIndex);
   });
 
+  it("re-creates the published archive after the ticket is stapled", async () => {
+    // The ticket lives inside the bundle, so an archive created before the
+    // staple ships an app that has to reach Apple before it can launch.
+    const argv = await record();
+    const stapleIndex = argv.findIndex((command) => command.includes("stapler"));
+    const archiveIndexes = argv
+      .map((command, index) => ({ command, index }))
+      .filter((entry) => entry.command[0] === "/usr/bin/ditto")
+      .map((entry) => entry.index);
+
+    expect(stapleIndex).toBeGreaterThanOrEqual(0);
+    expect(archiveIndexes).toHaveLength(2);
+    expect(archiveIndexes[archiveIndexes.length - 1]).toBeGreaterThan(stapleIndex);
+  });
+
   it("prints Apple's issue log and refuses to staple a rejected submission", async () => {
     const argv: string[][] = [];
 
