@@ -523,16 +523,26 @@ export class ChatTurnRunner {
           yield* connection
             .stop(input.attempt.providerSessionId)
             .pipe(Effect.catchAll(() => Effect.void));
-          if (terminalOutcome === "completed" && actualInputTokens + actualOutputTokens > 0) {
-            spendCeiling?.settle({
-              reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
-              observedTokens: actualInputTokens + actualOutputTokens,
-            });
-            capacityScheduler.recordTerminal({
-              reservationId: input.reservationId,
-              outcome: "completed",
-              actualTokens: actualInputTokens + actualOutputTokens,
-            });
+          if (terminalOutcome === "completed") {
+            if (sawUsage) {
+              spendCeiling?.settle({
+                reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
+                observedTokens: actualInputTokens + actualOutputTokens,
+              });
+              capacityScheduler.recordTerminal({
+                reservationId: input.reservationId,
+                outcome: "completed",
+                actualTokens: actualInputTokens + actualOutputTokens,
+              });
+            } else {
+              spendCeiling?.settle({
+                reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
+              });
+              capacityScheduler.recordTerminal({
+                reservationId: input.reservationId,
+                outcome: "completed",
+              });
+            }
             try {
               contextHarness.reconcileUsage({
                 subject: input.contextSubject,
@@ -548,6 +558,7 @@ export class ChatTurnRunner {
                 ...(providerExecutionDurationMs === undefined
                   ? {}
                   : { providerExecutionDurationMs }),
+                ...(sawUsage ? {} : { providerReported: false }),
                 currentVarianceReserve: input.varianceReserve,
                 maxAdjustmentTokens: input.varianceReserve,
               });

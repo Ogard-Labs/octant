@@ -478,6 +478,12 @@ export const UsageReconciliation = Schema.Struct({
   nextVarianceReserve: Schema.optional(NonNegativeInt),
   observedAt: UtcTimestamp,
   imageUnits: Schema.optional(ImageUsageUnits),
+  /**
+   * Absent or true means the provider reported token facts. False means the
+   * request completed without them: the ledger still has a row, classified
+   * unavailable, so "requests without reported usage" can count it.
+   */
+  providerReported: Schema.optional(Schema.Boolean),
 })
   .annotations(strict)
   .pipe(

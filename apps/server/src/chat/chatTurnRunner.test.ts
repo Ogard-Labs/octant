@@ -1709,6 +1709,82 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
   });
 
+  it("records a completed Chat turn with no provider usage as unreported", async () => {
+    const harness = makeHarness();
+    const updates: ChatAttempt[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Ready" } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: harness,
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "f".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(harness.reconcileUsage).toHaveBeenCalledOnce();
+    expect(harness.reconcileUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actualInputTokens: 0,
+        actualOutputTokens: 0,
+        providerReported: false,
+      }),
+    );
+    expect(updates.at(-1)?.outcome).toBe("completed");
+  });
+
   it("checkpoints bounded response chunks and citation identity before completion", async () => {
     const updates: ChatAttempt[] = [];
     const persistedChunks: string[] = [];

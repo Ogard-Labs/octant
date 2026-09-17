@@ -229,6 +229,22 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("keeps a completed request without provider usage as unavailable, not zero", () => {
+    const { connection, journal } = openDatabase();
+    appendFullUsageCycle(journal, {
+      actualInputTokens: 0,
+      actualOutputTokens: 0,
+      plannedInputTokens: 50,
+      varianceTokens: -50,
+      providerReported: false,
+    });
+    const record = readUsageRecord(connection, ids.usage);
+    expect(record?.quality).toBe("unavailable");
+    expect(record?.inputTokens).toBe(0);
+    expect(record?.outputTokens).toBe(0);
+    connection.close();
+  });
+
   it("records image-generation units in attribution_json without a schema bump", () => {
     const { connection, journal } = openDatabase();
     journal.append({

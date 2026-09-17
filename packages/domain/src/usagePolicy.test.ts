@@ -18,6 +18,20 @@ describe("classifyUsageQuality", () => {
     ).toBe("unavailable");
   });
 
+  it("returns unavailable when the provider completed a request without usage facts", () => {
+    expect(
+      classifyUsageQuality({
+        hasReconciliation: true,
+        hasManifest: true,
+        hasPlan: true,
+        varianceTokens: 0,
+        observedAt: timestamp,
+        now: timestamp,
+        providerReported: false,
+      }),
+    ).toBe("unavailable");
+  });
+
   it("returns estimated when manifest exists but no reconciliation", () => {
     expect(
       classifyUsageQuality({
