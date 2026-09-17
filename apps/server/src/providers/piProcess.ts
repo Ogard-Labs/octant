@@ -27,7 +27,7 @@ import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
-  resolveDefaultThreadEgressPolicy,
+  resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
 import type { PiManagedToolBridgeConfig } from "./piManagedTools";
 
@@ -520,7 +520,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         const configuredBinaryDirectory = dirname(input.binaryPath);
         const packageRoot = packageRootAbove(dirname(resolvedBinaryPath));
         const networkEgress = materializeOsNetworkEgress(
-          resolveDefaultThreadEgressPolicy({
+          resolveProviderRuntimeEgressPolicy({
             mode: input.mode,
             executionPolicy: input.executionPolicy,
           }),
