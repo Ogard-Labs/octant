@@ -156,5 +156,6 @@ try {
     }),
   );
 } finally {
-  await runtime.shutdown?.();
+  await runtime.closeAll();
+  server.stop(true);
 }
