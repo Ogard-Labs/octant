@@ -79,6 +79,7 @@ function GraphCard(props: {
         <OctantButton
           aria-label={`${box.thread.title} thread`}
           className="agents-center-graph__hit"
+          disabled={props.onOpenThread === undefined}
           onClick={open}
           type="button"
           variant="ghost"
