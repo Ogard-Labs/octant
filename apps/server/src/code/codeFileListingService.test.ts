@@ -241,6 +241,39 @@ describe("CodeFileListingService", () => {
     expect(result.listing.truncated).toBe(true);
   });
 
+  it("lists a directory's own entries before descending into any of them", async () => {
+    // The shape a real Xcode checkout has: a build-output directory that comes
+    // first in name order and is large enough to spend the whole budget on its
+    // own. Its siblings must still be listed, or a person browsing the checkout
+    // sees a build directory and nothing else.
+    const objectFiles = Array.from(
+      { length: 40 },
+      (_, index) => `out${String(index).padStart(3, "0")}.o`,
+    );
+    const nodes: Record<string, FakeNode> = {
+      "/repo": { kind: "dir", children: ["build", "LinkRouter", "LinkRouter.xcodeproj"] },
+      "/repo/build": { kind: "dir", children: objectFiles },
+      "/repo/LinkRouter": { kind: "dir", children: ["main.swift"] },
+      "/repo/LinkRouter/main.swift": { kind: "file", size: 1 },
+      "/repo/LinkRouter.xcodeproj": { kind: "dir", children: ["project.pbxproj"] },
+      "/repo/LinkRouter.xcodeproj/project.pbxproj": { kind: "file", size: 1 },
+    };
+    for (const name of objectFiles) nodes[`/repo/build/${name}`] = { kind: "file", size: 1 };
+
+    const result = await service(fakePort(nodes), { maxEntries: 10 }).list({
+      threadId,
+      checkoutId,
+      rootPath,
+    });
+
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") return;
+    const paths = result.listing.entries.map((entry) => entry.path);
+    expect(paths).toContain("LinkRouter.xcodeproj");
+    expect(paths).toContain("LinkRouter");
+    expect(result.listing.truncated).toBe(true);
+  });
+
   it("refuses a directory swapped for an escaping symlink before enumeration", async () => {
     const nodes: Record<string, FakeNode> = {
       "/repo": { kind: "dir", children: ["README.md", "src"] },
