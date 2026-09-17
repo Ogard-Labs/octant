@@ -36,6 +36,21 @@
   -webkit-user-select: text;
 }
 
+.settings-view__content-inner :is(summary, label, button) {
+  /* A panel's own controls are chrome the same way the navigation is: a drag
+     across a disclosure title, a segmented control or a field label must not
+     select words. Values, prose and fields are none of these elements, so
+     they stay selectable. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.settings-view__content-inner
+  :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .shell--material-translucent .settings-view {
   background: transparent;
 }
