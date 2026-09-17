@@ -559,7 +559,7 @@ describe("SettingsView", () => {
     expect(control).toHaveAttribute("aria-checked", "true");
     expect(control).toHaveAttribute("aria-describedby", "sidebar-more-description");
     expect(document.getElementById("sidebar-more-description")).toHaveTextContent(
-      "Reveal the menu-only destinations and Customize sidebar",
+      "Show the sidebar element checkboxes under a More row",
     );
     await user.click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
