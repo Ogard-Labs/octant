@@ -116,6 +116,38 @@ function bridge(
 }
 
 describe("RemoteAccessSettingsSection", () => {
+  it("states the listener prerequisite instead of a device-control failure while the listener is off", async () => {
+    // The host has no remote gateway to answer a device inventory until the
+    // listener exists, so its refusal here is the prerequisite the page
+    // already states, not a failure to report.
+    const host = bridge(off, {
+      getRemoteDeviceInventory: vi.fn(async () => {
+        throw new Error("Octant could not apply the local device controls.");
+      }),
+    });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(
+      await screen.findByText(/Enable the remote listener before pairing a device/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/could not apply the local device controls/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still reports a device-control failure while the listener is on", async () => {
+    const host = bridge(listening, {
+      getRemoteDeviceInventory: vi.fn(async () => {
+        throw new Error("Octant could not apply the local device controls.");
+      }),
+    });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(
+      await screen.findByText(/could not apply the local device controls/i),
+    ).toBeInTheDocument();
+  });
+
   it("asks for confirmation naming address, origin, and reach before enabling, and cancel changes nothing", async () => {
     const user = userEvent.setup();
     const host = bridge(off);

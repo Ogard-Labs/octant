@@ -484,10 +484,8 @@ export function createHostBridge(
     try {
       return await ipc.invoke(channel, ...args);
     } catch (error) {
-      if (error instanceof Error && isAllowlistedRemoteDeviceFailure(error.message)) {
-        throw new Error(error.message);
-      }
-      throw new Error("Octant could not apply the local device controls.");
+      const known = error instanceof Error ? knownRemoteDeviceFailure(error.message) : undefined;
+      throw new Error(known ?? "Octant could not apply the local device controls.");
     }
   };
   const frozenInitialProjectTarget: ProjectWindowTarget | undefined =
@@ -1185,22 +1183,34 @@ function isUtcTimestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
-function isAllowlistedRemoteDeviceFailure(message: string): boolean {
-  return [
-    "Octant local device controls are unavailable.",
-    "Octant rejected an invalid local device request.",
-    "Octant rejected the local device request.",
-    "Octant could not find that device or pairing request.",
-    "Octant could not apply the device change because state changed.",
-    "Octant could not apply the local device change.",
-    "Octant could not apply the local device controls.",
-    "The secure host-identity operation failed.",
-    "The host-identity request is invalid.",
-    "No host-identity key is available.",
-    "The secure host-identity store is unavailable. Remote identity remains recovery-only while local desktop stays usable.",
-    "Octant could not update the host identity.",
-  ].includes(message);
+/**
+ * The sentence this bridge may surface, when the main process reported one it
+ * authored. Electron wraps a handler's rejection as
+ * `Error invoking remote method '<channel>': Error: <message>`, so the known
+ * sentence arrives at the end rather than as the whole string - and the
+ * wrapper is stripped, because the wrapped text is not what a person should
+ * have to read.
+ */
+function knownRemoteDeviceFailure(message: string): string | undefined {
+  return REMOTE_DEVICE_FAILURE_MESSAGES.find(
+    (known) => message === known || message.endsWith(`: ${known}`),
+  );
 }
+
+const REMOTE_DEVICE_FAILURE_MESSAGES: ReadonlyArray<string> = [
+  "Octant local device controls are unavailable.",
+  "Octant rejected an invalid local device request.",
+  "Octant rejected the local device request.",
+  "Octant could not find that device or pairing request.",
+  "Octant could not apply the device change because state changed.",
+  "Octant could not apply the local device change.",
+  "Octant could not apply the local device controls.",
+  "The secure host-identity operation failed.",
+  "The host-identity request is invalid.",
+  "No host-identity key is available.",
+  "The secure host-identity store is unavailable. Remote identity remains recovery-only while local desktop stays usable.",
+  "Octant could not update the host identity.",
+];
 
 function validateProviderInstanceId(providerInstanceId: string): void {
   if (

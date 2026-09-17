@@ -20,6 +20,42 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it("surfaces an allowlisted remote-device failure without the wrapper, and refuses anything else", async () => {
+    const known = "Octant local device controls are unavailable.";
+    const wrapped = new Error(
+      `Error invoking remote method '${IPC_CHANNELS.remoteDeviceInventory}': Error: ${known}`,
+    );
+    const wrappedIpc: IpcRendererPort = {
+      invoke: vi.fn(async () => {
+        throw wrapped;
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const surfaced = await createHostBridge(wrappedIpc, projectWindowCapability)
+      .getRemoteDeviceInventory()
+      .then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+    expect(surfaced).toBe(known);
+
+    const unknownIpc: IpcRendererPort = {
+      invoke: vi.fn(async () => {
+        throw new Error("Error invoking remote method 'x': Error: something else entirely");
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const refused = await createHostBridge(unknownIpc, projectWindowCapability)
+      .getRemoteDeviceInventory()
+      .then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+    expect(refused).toBe("Octant could not apply the local device controls.");
+  });
+
   it.each(["live update", "unsubscribe"] as const)(
     "ignores a late update snapshot after %s",
     async (action) => {
