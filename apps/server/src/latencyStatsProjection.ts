@@ -130,6 +130,17 @@ export function observedRpcLatency(pathname: string): ObservedLatency | undefine
   // HTTP response. Measuring that duration as host RPC mixes model time into
   // Request handling and fires the 15s slow-request warning on ordinary turns.
   if (pathname === "/api/chat/commands") return undefined;
+  // A thread's event replay buffers that thread's subscription and answers only
+  // once it has collected enough frames or the caller aborts, so its duration
+  // is how long the subscription was held. Measuring it counted an idle thread
+  // as a slow request - 50s and 282s warnings for ordinary use - and inflated
+  // the host's own slow count.
+  if (
+    /^\/api\/code\/threads\/[^/]+\/events$/.test(pathname) ||
+    /^\/api\/code\/threads\/[^/]+\/operations\/[^/]+\/events$/.test(pathname)
+  ) {
+    return undefined;
+  }
   if (
     pathname === "/api/chat/navigation" ||
     pathname === "/api/work/navigation" ||
