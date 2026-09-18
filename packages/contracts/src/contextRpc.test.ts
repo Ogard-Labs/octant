@@ -5,6 +5,7 @@ import {
   decodeContextFailure,
   decodeContextInspectorRequest,
   decodeContextInspectorSnapshot,
+  decodeContextInspectorResult,
 } from "./contextRpc";
 
 const subject = {
@@ -18,6 +19,26 @@ const entryId = "50000000-0000-4000-8000-000000000001";
 const timestamp = "2026-07-18T20:00:00.000Z";
 
 describe("context RPC contracts", () => {
+  it("decodes an unplanned inspect as a successful typed result, not a failed snapshot", () => {
+    expect(
+      decodeContextInspectorResult({
+        kind: "not-planned",
+        subject,
+      }),
+    ).toEqual({ kind: "not-planned", subject });
+    expect(() =>
+      decodeContextInspectorResult({
+        kind: "not-planned",
+        subject,
+        next: snapshot().next,
+      }),
+    ).toThrow();
+    expect(decodeContextInspectorResult(snapshot())).toMatchObject({
+      kind: "snapshot",
+      snapshot: { sequence: snapshot().sequence },
+    });
+  });
+
   it("strictly decodes replay-aware inspector requests and rejects invented thread fields", () => {
     expect(decodeContextInspectorRequest({ subject, afterSequence: 41 })).toEqual({
       subject,

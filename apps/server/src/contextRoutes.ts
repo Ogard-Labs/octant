@@ -80,11 +80,18 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
     try {
       if (isInspect) {
         const input = decodeContextInspectorRequest(decoded.value);
-        return response(
-          dependencies.service.inspect(input.subject, input.afterSequence),
-          200,
-          origin,
-        );
+        try {
+          return response(
+            dependencies.service.inspect(input.subject, input.afterSequence),
+            200,
+            origin,
+          );
+        } catch (error) {
+          if (error instanceof ContextHarnessError && error.category === "not-planned") {
+            return response({ kind: "not-planned", subject: input.subject }, 200, origin);
+          }
+          throw error;
+        }
       }
       const command = decodeContextCommand(decoded.value);
       return response(dependencies.service.execute(command), 200, origin);

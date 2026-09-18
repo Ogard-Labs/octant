@@ -2291,11 +2291,14 @@ describe("startOctantServer", () => {
           );
           // The boundary is registered and authenticated; this subject simply
           // has no plan, which is an empty answer rather than a failed service.
-          expect(response.status).toBe(404);
+          expect(response.status).toBe(200);
           const body = yield* Effect.promise(() => response.json());
           expect(body).toEqual({
-            category: "not-planned",
-            message: "This thread has no context plan yet.",
+            kind: "not-planned",
+            subject: {
+              aggregateType: "project",
+              aggregateId: "00000000-0000-4000-8000-000000000471",
+            },
           });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),

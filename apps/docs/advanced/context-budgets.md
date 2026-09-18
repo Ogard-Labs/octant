@@ -82,7 +82,8 @@ has no plan yet is checked again when its turns advance; reopening the app is
 not required to pick up its first plan.
 Opening the popover does not make a further provider or network call.
 Inspect context opens the composition list so you can pin, exclude, or
-rebuild the next-turn plan. Switching the active pane closes a popover or
+rebuild the next-turn plan. A thread that has not been planned yet is an
+empty answer, not a failed connection. Switching the active pane closes a popover or
 inspector that belonged to the previous thread and retargets every value.
 
 The Usage destination and Settings also show provider-reported capacity.
