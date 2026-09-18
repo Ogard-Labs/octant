@@ -1625,7 +1625,11 @@ export function useCodeController(options: CodeControllerOptions) {
           return false;
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
-          failFirstTurn("The provider turn could not be started.");
+          // A refused start that names its reason is worth more than the
+          // generic sentence: the host refused this turn for a specific cause.
+          const refusal =
+            started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          failFirstTurn(refusal ?? "The provider turn could not be started.");
           return false;
         }
         activeTurnOperations.current.set(String(input.threadId), {
@@ -2053,7 +2057,9 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
           setTurnStatus("failed");
-          setTurnError("The provider turn could not be started.");
+          const refusal =
+            started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          setTurnError(refusal ?? "The provider turn could not be started.");
           restoreFailedPrompt();
           return false;
         }

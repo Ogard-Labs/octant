@@ -14,6 +14,7 @@ import {
   type CodeEvidenceReference,
   type CodeEvidenceContentId,
   type CodeFailure,
+  type CodeOperationFailure,
   type CodeOperationEvent,
   type CodeOperationEventFrame,
   type CodeOperationCommand,
@@ -584,6 +585,7 @@ export interface CodeOperationTurnPort {
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
+    readonly failure?: CodeOperationFailure;
   }>;
   readonly answerInput: (input: {
     readonly thread: CodeThread;
@@ -606,6 +608,7 @@ export interface CodeOperationTurnPort {
 type CodeOperationTurnResult = {
   readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   readonly evidence?: string;
+  readonly failure?: CodeOperationFailure;
 };
 
 /**
@@ -2661,6 +2664,7 @@ export class CodeOperationService {
       ...(turn.evidence === undefined
         ? {}
         : { evidence: this.#options.evidence.put(turn.evidence) }),
+      ...(turn.failure === undefined ? {} : { failure: turn.failure }),
     });
   }
 
