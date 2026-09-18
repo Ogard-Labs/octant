@@ -321,7 +321,9 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
         return browserTool(options, parseBrowserInput(inputJson), signal);
       }
       const postureFailure = currentAuthorityFailure(options);
-      if (postureFailure !== undefined) return failure(postureFailure);
+      if (postureFailure !== undefined) {
+        return failure(postureFailure, postureRefusal(postureFailure));
+      }
       if (name === CODE_TERMINAL_TOOL_NAME) {
         return terminalTool(options, parseTerminalInput(inputJson), signal);
       }
@@ -495,13 +497,17 @@ async function waitForTerminalCommand(
     const authorityFailure = currentAuthorityFailure(options);
     if (signal?.aborted || authorityFailure !== undefined) {
       await interruptTerminalCommand(options, scope, marker);
-      return failure(signal?.aborted ? "tool-interrupted" : authorityFailure!);
+      return signal?.aborted
+        ? failure("tool-interrupted")
+        : failure(authorityFailure!, postureRefusal(authorityFailure!));
     }
     await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
     const postWaitAuthorityFailure = currentAuthorityFailure(options);
     if (signal?.aborted || postWaitAuthorityFailure !== undefined) {
       await interruptTerminalCommand(options, scope, marker);
-      return failure(signal?.aborted ? "tool-interrupted" : postWaitAuthorityFailure!);
+      return signal?.aborted
+        ? failure("tool-interrupted")
+        : failure(postWaitAuthorityFailure!, postureRefusal(postWaitAuthorityFailure!));
     }
     const snapshot = await options.terminal.read(options.windowId, scope);
     const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value;
@@ -1426,6 +1432,17 @@ function allowedOrigin(value: string): string | undefined {
 
 function failure(error: string, message?: string) {
   return { result: { error, ...(message === undefined ? {} : { message }) }, isError: true };
+}
+
+/**
+ * The sentence a posture refusal carries, so the agent never has to relay a
+ * bare slug: every other refusal in this file names its cause or its remedy,
+ * and a person reading the tool result deserves the same.
+ */
+function postureRefusal(error: string) {
+  return error === "full-access-required"
+    ? "This tool needs Full access for the thread. Raise the thread's access, then try again."
+    : "Plan mode is read-only; this tool cannot run.";
 }
 
 function defaultWait(milliseconds: number): Promise<void> {

@@ -340,7 +340,14 @@ describe("Code app-managed tools", () => {
       inputJson: JSON.stringify({ operation: "run", command: "long-command" }),
     });
 
-    expect(result).toEqual({ result: { error: "full-access-required" }, isError: true });
+    expect(result).toEqual({
+      result: {
+        error: "full-access-required",
+        message:
+          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+      },
+      isError: true,
+    });
     expect(interrupt).toHaveBeenCalledOnce();
     expect(executeOperation).toHaveBeenCalledOnce();
   });
@@ -953,7 +960,14 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
       }),
-    ).resolves.toEqual({ result: { error: "full-access-required" }, isError: true });
+    ).resolves.toEqual({
+      result: {
+        error: "full-access-required",
+        message:
+          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+      },
+      isError: true,
+    });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
@@ -973,7 +987,14 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
       }),
-    ).resolves.toEqual({ result: { error: "full-access-required" }, isError: true });
+    ).resolves.toEqual({
+      result: {
+        error: "full-access-required",
+        message:
+          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+      },
+      isError: true,
+    });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
