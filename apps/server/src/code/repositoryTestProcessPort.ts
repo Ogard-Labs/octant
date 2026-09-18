@@ -61,6 +61,11 @@ interface RepositoryTestProcessPortOptions {
    * Apple command reports "Xcode is unavailable on this host".
    */
   readonly literalReadPaths?: ReadonlyArray<string>;
+  /**
+   * Whether confined commands may drive the iOS Simulator. Only the Apple
+   * toolchain port turns this on; the repository-test runner does not need it.
+   */
+  readonly allowSimulatorControl?: boolean;
 }
 
 export interface RepositoryTestProcessInput {
@@ -103,6 +108,7 @@ export class RepositoryTestProcessPort {
   readonly #temporaryDirectory: string;
   readonly #networkEgress: OsNetworkEgress;
   readonly #literalReadPaths: ReadonlyArray<string>;
+  readonly #allowSimulatorControl: boolean;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
     this.#platform = options.platform ?? process.platform;
@@ -125,6 +131,7 @@ export class RepositoryTestProcessPort {
       "/tmp";
     this.#networkEgress = options.networkEgress ?? "allow";
     this.#literalReadPaths = options.literalReadPaths ?? [];
+    this.#allowSimulatorControl = options.allowSimulatorControl === true;
     this.#confinement =
       options.confinement ??
       makeSeatbeltConfinementLive({
@@ -166,6 +173,7 @@ export class RepositoryTestProcessPort {
         temporaryDirectory: this.#temporaryDirectory,
         networkEgress: this.#networkEgress,
         allowFileReadStar: true,
+        allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [input.cwd, this.#temporaryDirectory, binaryDirectory, dirname(binaryDirectory)],
         ...(this.#literalReadPaths.length === 0
           ? {}
