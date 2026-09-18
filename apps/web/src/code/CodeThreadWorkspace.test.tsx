@@ -236,6 +236,31 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("The provider refused the turn.");
   });
 
+  it("carries a refused start's warning in a status mark and tint, not a coloured edge stripe", () => {
+    const { container } = render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "failed",
+          turnError:
+            "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
+          turnErrorInTranscript: false,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("This provider cannot carry Octant's Browser tool.");
+    // The mark says warning without reading the colour: an icon sits with the
+    // sentence, and the sentence keeps the secondary body role the recipe owns.
+    expect(alert.querySelector("svg.lucide-circle-alert")).not.toBeNull();
+    // A tinted ground plus hairline is the system's warning language; the
+    // saturated stripe on the left edge made this read as a generic AI chat
+    // warning box instead of one of the thread's own notices.
+    expect(alert.className).not.toMatch(/callout-warn/);
+    expect(container.querySelector(".code-thread-workspace__callout")).not.toBeNull();
+  });
+
   it("keeps the retry control off an ordinary turn error", () => {
     render(
       <CodeThreadWorkspace

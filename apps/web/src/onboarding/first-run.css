@@ -318,7 +318,7 @@ button.first-run__fact-action {
 
 /* `.callout` carries the card; these place it in the wizard grid, stack its
    children (one holds a paragraph and a button), and map the markup's
-   data-tone onto the callout's semantic edge. */
+   data-tone onto the callout's tinted ground. */
 .first-run__notice {
   grid-area: notice;
   flex-direction: column;
@@ -330,7 +330,10 @@ button.first-run__fact-action {
 }
 
 .first-run__notice[data-tone="attention"] {
-  border-left-color: var(--oct-warn-fg);
+  /* Attention is the wizard's actionable warning: the system's warning
+     language is a tinted ground with a tinted hairline, not an edge. */
+  background: var(--oct-warn-soft);
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
 }
 
 /* `.callout` carries the box; this only stacks the sentence over the action
