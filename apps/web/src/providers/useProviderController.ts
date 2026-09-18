@@ -3306,6 +3306,7 @@ function redactedProbeFailureMessage(error: unknown): string {
         ? {
             category: error.category,
             message: error.message,
+            ...(error.reason === undefined ? {} : { reason: error.reason }),
             ...(error.diagnostic === undefined ? {} : { diagnostic: error.diagnostic }),
           }
         : error,
@@ -3317,6 +3318,10 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (failure.diagnostic?.stage === "update" && diagnostic !== undefined) {
     return `Provider CLI update failed: ${diagnostic}`;
   }
+  if (failure.reason === "runtime-incompatible") return "Provider runtime is incompatible.";
+  if (failure.reason === "authentication-required") return "Provider authentication is required.";
+  if (failure.reason === "runtime-unavailable") return "Provider runtime is unavailable.";
+  if (failure.reason === "no-usable-model") return "No usable model is available.";
   if (failure.category === "unauthenticated") return "Provider authentication is required.";
   if (failure.category === "invalid-configuration") return "Provider configuration is invalid.";
   if (failure.category === "unsupported") return "Provider operation is unsupported.";

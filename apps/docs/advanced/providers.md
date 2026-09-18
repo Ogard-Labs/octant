@@ -273,7 +273,10 @@ level or Default before sending.
 Readiness states are `ready`, `unavailable`, `unauthenticated`,
 `incompatible`, `degraded`, and `checking`. Capabilities are `supported`,
 `unsupported`, or `unavailable`. Providers report capabilities honestly in
-every mode and fail closed when a capability is unsupported.
+every mode and fail closed when a capability is unsupported. When a
+connection check refuses, Settings names an Octant-authored reason and the
+next action instead of a generic incompatibility sentence. Detected versions
+stay visible when the probe read them. Raw provider output never appears here.
 
 ## Next steps
 

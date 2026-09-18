@@ -114,7 +114,14 @@ describe("official OpenCode client routing", () => {
       "/tmp/project",
     );
 
-    await expect(client.providers()).rejects.toMatchObject({ category: "incompatible" });
+    await expect(client.providers()).rejects.toMatchObject({
+      category: "incompatible",
+      reason: "runtime-incompatible",
+      diagnostic: { detectedVersion: "v0.0.0-beta-18721" },
+    });
+    expect(JSON.stringify(await client.providers().catch((error) => error))).not.toContain(
+      "private",
+    );
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

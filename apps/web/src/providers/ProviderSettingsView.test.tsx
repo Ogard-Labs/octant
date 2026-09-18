@@ -1893,6 +1893,31 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByText(guidance)).toBeVisible();
   });
 
+  it("names a typed OpenCode probe refusal and the next supported runtime", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          observed: observation({
+            readiness: "incompatible",
+            processState: "stopped",
+            detectedVersion: "v0.0.0-beta-18721",
+            models: [],
+            reason: "runtime-incompatible",
+          }),
+        })}
+      />,
+    );
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    const details = within(card).getByLabelText("Incompatibility details");
+    expect(within(card).getByText(/Use a supported OpenCode 1.x runtime/i)).toBeVisible();
+    expect(
+      within(details).getByText(
+        "Host check: This OpenCode runtime is discovery-only and cannot carry Octant's session permission rules yet.",
+      ),
+    ).toBeVisible();
+    expect(within(details).getByText("Version: v0.0.0-beta-18721")).toBeVisible();
+  });
+
   it("surfaces active-session removal denial and the current-session permission default", () => {
     render(
       <ProviderSettingsView
