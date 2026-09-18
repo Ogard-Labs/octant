@@ -118,6 +118,33 @@ describe("official OpenCode client routing", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("names Octant's own reason and the detected version when the 2.x runtime cannot list providers", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode2 v2.0.1",
+        url: new URL("http://127.0.0.1:41724/"),
+      },
+      "/tmp/project",
+    );
+
+    await expect(client.providers()).rejects.toMatchObject({
+      category: "incompatible",
+      diagnostic: {
+        stage: "model-discovery",
+        kind: "version-mismatch",
+        detectedVersion: "v2.0.1",
+        stderrContext:
+          "Provider runtime is discovery-only; its API cannot carry Octant's session permission rules yet.",
+      },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("refuses beta session creation when the API cannot carry Octant permission rules", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

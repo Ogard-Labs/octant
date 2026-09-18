@@ -1178,6 +1178,7 @@ export const ProviderProcessDiagnostic = Schema.Struct({
       "Provider network connection failed.",
       "Provider process wrote redacted diagnostic output.",
       "Provider reported an incompatible installed version.",
+      "Provider runtime is discovery-only; its API cannot carry Octant's session permission rules yet.",
       "Provider refused the ACP request because its configuration was invalid.",
       "Provider refused the ACP request for the managed workspace.",
       "Provider refused the ACP request because no usable model was available.",

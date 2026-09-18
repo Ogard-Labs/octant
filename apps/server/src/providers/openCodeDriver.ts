@@ -159,8 +159,12 @@ function openCodeChatCapabilities(
   };
 }
 
-function fail(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
+function fail(
+  category: ProviderFailure["category"],
+  message: string,
+  diagnostic?: ProviderFailure["diagnostic"],
+): ProviderFailure {
+  return { category, message, ...(diagnostic === undefined ? {} : { diagnostic }) };
 }
 
 function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> {
@@ -176,6 +180,38 @@ const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_INCOMPATIBILITY_MESSAGE =
   "OpenCode 2 preview is discovery-only: its API cannot carry Octant's session permission rules yet.";
 const MCP_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * The safe client-facing facts of a 2.x refusal.
+ *
+ * `BETA_INCOMPATIBILITY_MESSAGE` cannot cross the boundary by itself — a
+ * free-form driver message may quote provider output — so the typed diagnostic
+ * carries the one sentence the contract already publishes for this shape. The
+ * version is carried too: without it the row reads "Version: Unavailable" even
+ * though the probe that selected the runtime answered `--version`.
+ */
+function betaRefusal(version: string | undefined): NonNullable<ProviderFailure["diagnostic"]> {
+  const detectedVersion = diagnosticVersionToken(version);
+  return {
+    stage: "model-discovery",
+    kind: "version-mismatch",
+    stderrContext:
+      "Provider runtime is discovery-only; its API cannot carry Octant's session permission rules yet.",
+    ...(detectedVersion === undefined ? {} : { detectedVersion }),
+  };
+}
+
+/**
+ * A diagnostic version is one token; the probe reports the whole `--version`
+ * line, so the runtime's name is dropped rather than a value the contract
+ * refuses.
+ */
+function diagnosticVersionToken(version: string | undefined): string | undefined {
+  const match =
+    version === undefined ? null : /([A-Za-z0-9][A-Za-z0-9._+-]*)$/u.exec(version.trim());
+  const token = match?.[1];
+  return token === undefined || token.length > 64 ? undefined : token;
+}
 
 function betaRequestOptions() {
   return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
@@ -239,7 +275,8 @@ export function makeOfficialOpenCodeClient(
           }
         : resultData(await client.global.health({ throwOnError: true })),
     providers: async () => {
-      if (beta) throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      if (beta)
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       return resultData(await client.provider.list({}, { throwOnError: true }));
     },
     subscribe: async (signal) =>
