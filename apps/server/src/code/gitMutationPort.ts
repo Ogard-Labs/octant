@@ -59,7 +59,7 @@ export type GitMutationResult =
         | "unconfirmed-target"
         | "ignored-path-collision";
     }
-  | { readonly status: "failed" };
+  | { readonly status: "failed"; readonly detail?: string };
 
 const liveDependencies: GitMutationDependencies = {
   execFile: (file, args, environment, signal) =>
@@ -174,7 +174,7 @@ export class GitMutationPort {
       undefined,
       input.executionPolicy,
     );
-    if (symbolic.exitCode !== 0) return { status: "failed" };
+    if (symbolic.exitCode !== 0) return failedMutation(symbolic.stderr);
     // `--cached` never touches the file on disk, and `--force` only waives
     // Git's warning about discarding staged content, which is what unstaging
     // asks for when the content was never committed.
@@ -228,7 +228,7 @@ export class GitMutationPort {
       undefined,
       input.executionPolicy,
     );
-    if (result.exitCode !== 0) return { status: "failed" };
+    if (result.exitCode !== 0) return failedMutation(result.stderr);
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
@@ -238,7 +238,7 @@ export class GitMutationPort {
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
       ? { status: "applied", oid }
-      : { status: "failed" };
+      : failedMutation(head.stderr);
   }
 
   async push(
@@ -303,7 +303,7 @@ export class GitMutationPort {
         undefined,
         input.executionPolicy,
       );
-      return { status: "failed" };
+      return failedMutation(result.stderr);
     }
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
@@ -314,7 +314,7 @@ export class GitMutationPort {
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
       ? { status: "applied", oid }
-      : { status: "failed" };
+      : failedMutation(head.stderr);
   }
 
   async revertCommit(
@@ -331,7 +331,7 @@ export class GitMutationPort {
       undefined,
       input.executionPolicy,
     );
-    if (result.exitCode !== 0) return { status: "failed" };
+    if (result.exitCode !== 0) return failedMutation(result.stderr);
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
@@ -341,7 +341,7 @@ export class GitMutationPort {
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
       ? { status: "applied", oid }
-      : { status: "failed" };
+      : failedMutation(head.stderr);
   }
 
   /**
@@ -569,14 +569,14 @@ export class GitMutationPort {
         undefined,
         input.executionPolicy,
       );
-      if (index.exitCode !== 0) return { status: "failed" };
+      if (index.exitCode !== 0) return failedMutation(index.stderr);
       const worktree = await this.#run(
         ["-C", input.checkoutRoot, "read-tree", "-u", "--reset", input.snapshot.worktree],
         signal,
         environment,
         input.executionPolicy,
       );
-      return worktree.exitCode === 0 ? { status: "applied" } : { status: "failed" };
+      return worktree.exitCode === 0 ? { status: "applied" } : failedMutation(worktree.stderr);
     } finally {
       await this.#discardScratchIndex(scratch);
     }
@@ -761,7 +761,7 @@ export class GitMutationPort {
       undefined,
       executionPolicy,
     );
-    return result.exitCode === 0 ? { status: "applied" } : { status: "failed" };
+    return result.exitCode === 0 ? { status: "applied" } : failedMutation(result.stderr);
   }
 
   async #run(
@@ -891,6 +891,19 @@ function validBranchName(value: string): boolean {
 
 function isObjectId(value: string): boolean {
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+}
+
+/**
+ * Git's stderr is the only legible account of why a mutation stopped: the
+ * identity it could not find, the index it could not lock, the object it could
+ * not read. Keep it bounded so a pathological command cannot turn the failure
+ * into a memory or journal problem of its own.
+ */
+function failedMutation(stderr: string): GitMutationResult {
+  const detail = stderr.trim();
+  return detail === ""
+    ? { status: "failed" }
+    : { status: "failed", detail: detail.slice(0, 2_048) };
 }
 
 function validPaths(paths: readonly string[]): boolean {

@@ -277,6 +277,47 @@ describe("GitMutationPort", () => {
     });
   });
 
+  it("carries Git's own words when a commit has no identity to use", async () => {
+    const repository = createEmptyRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "draft");
+    git(repository, "add", "--", "README.md");
+    // The confined launch reproduces this by hiding the global config; a
+    // probe says the checkout is usable while the commit itself has no
+    // identity to put in it.
+    const identityMissing: GitMutationDependencies = {
+      execFile: async (file, args) =>
+        args.includes("commit")
+          ? {
+              exitCode: 128,
+              stdout: "",
+              stderr: [
+                "*** Please tell me who you are.",
+                "fatal: unable to auto-detect email address (got 'unknown@octant.test')",
+              ].join("\n"),
+            }
+          : {
+              exitCode: 0,
+              stdout: join(repository, ".git", "index.lock"),
+              stderr: "",
+            },
+      pathExists: async () => false,
+      copyFile: async () => undefined,
+      removeFile: async () => undefined,
+    };
+    const port = new GitMutationPort(identityMissing, confinedOptions());
+
+    const result = await port.commit({
+      checkoutRoot: repository,
+      message: "Exact message",
+      stagedSummary: [{ path: "README.md", index: "A", worktree: " " }],
+    });
+
+    expect(result).toEqual({
+      status: "failed",
+      detail: expect.stringMatching(/unable to auto-detect email address|tell me who you are/i),
+    });
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");

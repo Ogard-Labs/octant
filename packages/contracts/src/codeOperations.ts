@@ -803,6 +803,12 @@ const GitMutationResult = Schema.Struct({
     "merge-run",
   ),
   state: Schema.Literal("completed", "rejected", "failed"),
+  /**
+   * Git's own words for a failed mutation, so a missing identity or an unusable
+   * index is reported as itself rather than as something to refresh. Absent
+   * when the command produced no usable stderr.
+   */
+  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(2_048))),
   headOid: Schema.optional(GitObjectId),
   /**
    * The state this mutation replaced, recorded before it ran. Present on a

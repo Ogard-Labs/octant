@@ -467,7 +467,8 @@ export interface CodeOperationGitPort {
 type GitMutationOutcome =
   | { readonly status: "applied"; readonly oid?: string }
   | { readonly status: "rejected"; readonly reason?: string }
-  | { readonly status: "unavailable" | "failed" };
+  | { readonly status: "unavailable" }
+  | { readonly status: "failed"; readonly detail?: string };
 
 export interface CodeOperationPullRequestPort {
   readonly ensure: (
@@ -2228,6 +2229,12 @@ export class CodeOperationService {
           : result.status === "rejected"
             ? "rejected"
             : "failed",
+      // Git's own words for why it stopped, when it gave any. This is what
+      // turns a missing identity from "refresh and retry" into the sentence
+      // the person can actually act on.
+      ...(result.status === "failed" && result.detail !== undefined
+        ? { detail: result.detail }
+        : {}),
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
       // A failed restore may have moved files before it stopped, so its undo
       // point travels with it too; only a rejection is certainly untouched.
