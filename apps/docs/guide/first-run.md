@@ -83,7 +83,7 @@ unless you explicitly remember Full access.
 
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub
-capability, Agents without child runs — stay absent rather than advertised.
+capability — stay absent rather than advertised. Agents is available on an existing thread even before the first child exists.
 
 ## Provider and access settings
 

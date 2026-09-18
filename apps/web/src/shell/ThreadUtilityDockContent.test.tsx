@@ -99,6 +99,71 @@ describe("thread utility dock content", () => {
     expect(screen.queryByLabelText("Provider instance ID")).not.toBeInTheDocument();
   });
 
+  it("opens Agents on a zero-child thread and shows the Off refusal without a create form", async () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        agentRunClient={
+          {
+            parentSummary: vi.fn(async () => ({
+              parentThreadId: threadId,
+              entries: [],
+            })),
+            preview: vi.fn(async () => ({
+              status: "ready",
+              facts: {
+                mode: "code",
+                allowedRoles: ["implementation"],
+                providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                modelId: "gpt-4o",
+                workspaceKind: "code-worktree",
+                authority: {
+                  filesystem: true,
+                  shell: true,
+                  git: true,
+                  network: true,
+                  tools: true,
+                  subagents: true,
+                  executionPolicy: "approval-gated",
+                  permissionPersistence: "current-session",
+                },
+                executionKind: "octant-managed",
+                attemptedExecutionKind: "provider-native",
+                nativeFallbackReason: "nativeChildAgents-claimed-unsupported",
+                capabilityDegradations: ["native-child-agents-unavailable"],
+                creationPosture: "off",
+              },
+            })),
+            acknowledge: vi.fn(),
+            requestRun: vi.fn(),
+            cancel: vi.fn(),
+            steer: vi.fn(),
+            retry: vi.fn(),
+            resume: vi.fn(),
+            prepareWorkspace: vi.fn(),
+            confirmWorkspace: vi.fn(),
+          } as never
+        }
+        agentRunSettingsClient={
+          {
+            current: vi.fn(async () => ({
+              creationPosture: "off",
+              version: 1,
+              updatedAt: "2026-07-14T10:00:00.000Z",
+            })),
+            update: vi.fn(),
+          } as never
+        }
+        surface="agents"
+      />,
+    );
+    expect(await screen.findAllByText(/posture is Off/i, {}, { timeout: 10_000 })).not.toHaveLength(
+      0,
+    );
+    expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
+  });
+
   it("opens iOS Simulator through the real Apple workbench surface", async () => {
     render(<ThreadUtilityDockContent {...props()} />);
     expect(await screen.findByText("apple-workbench:App/App.xcodeproj")).toBeVisible();

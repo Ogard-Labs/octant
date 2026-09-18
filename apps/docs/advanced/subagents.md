@@ -15,8 +15,7 @@ orchestration service, process supervision, and packaged child smoke — is on
 `main`. **Settings → Agents** is available and holds one control: the
 server-authoritative child-creation posture (Off, Ask, Automatic). Role cards,
 mixed-vendor routing per role, and a child-creation form remain planned; the
-**Add agent** action in a Code thread opens the Agents dock tool rather than a
-creation form. What you can use today is compact child-run status on a live
+**Add agent** action in a Chat, Work, or Code thread opens the Agents dock tool. The dock is also available on an existing thread before the first child exists. Off posture still opens Agents and shows a visible refusal instead of a create form. What you can use today is compact child-run status on a live
 parent thread in Chat, Work, or Code — how many children are working, waiting,
 or blocked, with a stop control that cancels only that thread's children — and
 the read-only
