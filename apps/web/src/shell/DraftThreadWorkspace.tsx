@@ -1,5 +1,9 @@
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useComposerTip } from "../composer/useComposerTip";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+} from "../composer/useComposerSlashCommands";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
@@ -826,7 +830,18 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     scopeKey: "chat-draft",
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const tip = useComposerTip({ scopeKey: "chat-draft", computer: computer.available });
+  // A Chat draft is a first-message composer like Work's and Code's, so it
+  // offers the same host command list rather than only the @Computer mention.
+  const slash = useComposerSlashCommands({
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+  });
+  const tip = useComposerTip({
+    scopeKey: "chat-draft",
+    computer: computer.available,
+    commands: slash.commandIds,
+  });
   useEffect(() => {
     if (props.pendingMessage === undefined) return;
     setPrompt(props.pendingMessage);
@@ -890,6 +905,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   ]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slash.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -927,20 +943,38 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           </div>
           <ThreadComposer
             chips={<ComputerUseMention controller={computer} surface="chips" />}
-            typeahead={<ComputerUseMention controller={computer} surface="typeahead" />}
+            typeahead={
+              slash.open ? (
+                <ComposerSlashTypeahead controller={slash} />
+              ) : (
+                <ComputerUseMention controller={computer} surface="typeahead" />
+              )
+            }
             input={
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open}
-                aria-controls={computer.open ? computer.listId : undefined}
-                aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
+                aria-expanded={computer.open || slash.open}
+                aria-controls={
+                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
+                }
+                aria-activedescendant={
+                  computer.open
+                    ? `${computer.listId}-computer`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
+                }
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
+                  slash.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
+                onClick={(event) => {
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder={tip}
