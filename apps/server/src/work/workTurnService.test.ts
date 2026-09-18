@@ -627,6 +627,33 @@ describe("WorkTurnService", () => {
     expect(fixture.acquireInputs).toHaveLength(0);
   });
 
+  it("settles the live stream when a refusal ends the turn before the provider runs", async () => {
+    const fixture = serviceFixture();
+    // A reader attached the way the view attaches: from the start of the thread,
+    // before the refusal is written.
+    const controller = new AbortController();
+    const frames: string[] = [];
+    const reader = (async () => {
+      for await (const frame of fixture.service.subscribe(
+        ids.window,
+        ids.thread,
+        0,
+        controller.signal,
+      )) {
+        frames.push(frame.kind);
+      }
+    })();
+
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [browserUseSelection("settle-refusal")],
+    });
+    await fixture.waitForIdle();
+    await vi.waitFor(() => expect(frames).toContain("turn-settled"));
+    controller.abort();
+    await reader;
+  });
+
   it("counts Browser instructions before accepting a Work turn at its input limit", async () => {
     const plain = serviceFixture({ safeInputBudgetTokens: 200 });
     await expect(plain.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject({
