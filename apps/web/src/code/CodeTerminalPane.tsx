@@ -51,7 +51,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const [notice, setNotice] = useState<string>();
   const readSelection = useRef<(() => string) | undefined>(undefined);
   const operationQueue = useRef(Promise.resolve());
-  const pendingWrite = useRef("");
+  const pendingWrite = useRef<{ terminalId: CodeTerminalId; data: string } | undefined>(undefined);
   const queuedWrites = useRef(0);
   const coalesceScheduled = useRef(false);
   const wakeReplay = useRef<(() => void) | undefined>(undefined);
@@ -164,13 +164,17 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     result.terminalId,
   ]);
 
-  const execute = async (kind: "write" | "resize", value: string | readonly [number, number]) => {
+  const execute = async (
+    terminalId: CodeTerminalId,
+    kind: "write" | "resize",
+    value: string | readonly [number, number],
+  ) => {
     if (!interactive) return;
     try {
       const operationId = props.createOperationId();
       const base = {
         operationId,
-        terminalId: result.terminalId,
+        terminalId,
         ...props.scope,
       } as const;
       const command =
@@ -194,20 +198,21 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   };
 
   const enqueueOperation = (
+    terminalId: CodeTerminalId,
     kind: "write" | "resize",
     value: string | readonly [number, number],
   ) => {
     if (kind === "write") queuedWrites.current += 1;
     const run = async () => {
       try {
-        await execute(kind, value);
+        await execute(terminalId, kind, value);
       } finally {
         if (kind === "write") {
           queuedWrites.current -= 1;
           const buffered = pendingWrite.current;
-          if (queuedWrites.current === 0 && buffered !== "") {
-            pendingWrite.current = "";
-            enqueueOperation("write", buffered);
+          if (queuedWrites.current === 0 && buffered !== undefined && buffered.data !== "") {
+            pendingWrite.current = undefined;
+            enqueueOperation(buffered.terminalId, "write", buffered.data);
           }
         }
       }
@@ -217,9 +222,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
 
   const flushPendingWrite = () => {
     const buffered = pendingWrite.current;
-    if (buffered === "") return;
-    pendingWrite.current = "";
-    enqueueOperation("write", buffered);
+    if (buffered === undefined || buffered.data === "") return;
+    pendingWrite.current = undefined;
+    enqueueOperation(buffered.terminalId, "write", buffered.data);
   };
 
   const scheduleCoalesceFlush = () => {
@@ -234,18 +239,29 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
 
   const enqueueWrite = (data: string) => {
     if (data === "") return;
+    const terminalId = props.result.terminalId;
     if (isCoalescableTerminalWrite(data)) {
-      pendingWrite.current += data;
+      const buffered = pendingWrite.current;
+      if (buffered !== undefined && String(buffered.terminalId) !== String(terminalId)) {
+        flushPendingWrite();
+      }
+      pendingWrite.current = {
+        terminalId,
+        data:
+          buffered !== undefined && String(buffered.terminalId) === String(terminalId)
+            ? buffered.data + data
+            : data,
+      };
       scheduleCoalesceFlush();
       return;
     }
     flushPendingWrite();
-    enqueueOperation("write", data);
+    enqueueOperation(terminalId, "write", data);
   };
 
   const enqueueResize = (columns: number, rows: number) => {
     flushPendingWrite();
-    enqueueOperation("resize", [columns, rows]);
+    enqueueOperation(props.result.terminalId, "resize", [columns, rows]);
   };
 
   const control = async (action: "restart" | "stop") => {

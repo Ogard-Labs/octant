@@ -290,6 +290,59 @@ describe("CodeTerminalPane", () => {
     expect(terminalWriteData(client).join("")).toBe(typed);
   });
 
+  it("keeps buffered input bound to the terminal that received it", async () => {
+    const client = codeClient({ evidence: "ready" });
+    let resolveFirst: ((value: typeof terminalResult) => void) | undefined;
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(
+        () =>
+          new Promise<typeof terminalResult>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue(terminalResult);
+    const runtime = xtermRuntime();
+    const { rerender } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    runtime.options?.onData("a");
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
+    rerender(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime.loadRuntime}
+        result={{ ...terminalResult, terminalId: "80000000-0000-4000-8000-000000000002" as never }}
+        scope={scope}
+      />,
+    );
+    runtime.options?.onData("b");
+    runtime.options?.onData("c");
+    resolveFirst?.(terminalResult);
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(2));
+    expect(client.executeOperation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ kind: "write-terminal", data: "a", terminalId: ids.terminal }),
+    );
+    expect(client.executeOperation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        kind: "write-terminal",
+        data: "bc",
+        terminalId: "80000000-0000-4000-8000-000000000002",
+      }),
+    );
+  });
+
   it("turns a disconnected input command into an actionable pane error", async () => {
     const client = codeClient({ evidence: "ready" });
     (client.executeOperation as ReturnType<typeof vi.fn>).mockRejectedValue(
