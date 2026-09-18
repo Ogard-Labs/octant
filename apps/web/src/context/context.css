@@ -54,6 +54,17 @@
   color: var(--octant-text-primary);
 }
 
+/* A provider usage limit is at warning or exhausted. The dot is the only
+   at-a-glance alert left in the composer row now that the status line lives
+   in the meter's panel; exhausted takes the red the line used to wear. */
+.composer-context-meter__alert {
+  fill: var(--octant-warning-text);
+}
+
+.composer-context-meter[data-limit-alert="exhausted"] .composer-context-meter__alert {
+  fill: var(--octant-destructive);
+}
+
 /* Position/anchoring now comes from OctantPopover's floating positioner
    (side="top" align="end"); only width, padding, and color remain this
    surface's own. */

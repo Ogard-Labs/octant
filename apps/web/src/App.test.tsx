@@ -823,11 +823,9 @@ describe("App", () => {
 
       const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
       await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
-      await user.click(
-        within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
-          name: "High",
-        }),
-      );
+      const level = screen.getByRole("slider", { name: "Effort level" });
+      await user.click(level);
+      await user.keyboard("{End}");
       await user.keyboard("{Escape}");
       await user.type(
         within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
@@ -1610,11 +1608,9 @@ describe("App", () => {
 
     const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    await user.click(
-      within(screen.getByRole("group", { name: "Effort level" })).getByRole("button", {
-        name: "High",
-      }),
-    );
+    const level = screen.getByRole("slider", { name: "Effort level" });
+    await user.click(level);
+    await user.keyboard("{End}");
     await user.keyboard("{Escape}");
     await user.type(prompt, "Keep this overview draft");
     await user.click(screen.getByRole("button", { name: "Start task" }));

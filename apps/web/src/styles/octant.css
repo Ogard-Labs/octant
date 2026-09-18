@@ -4552,15 +4552,6 @@ input.switch:checked::after {
   min-width: 0;
   color: var(--oct-danger-fg);
 }
-.composer-status__trailing {
-  display: inline-flex;
-  min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 10px;
-  margin-inline-start: auto;
-  white-space: nowrap;
-}
 /* an attachment, a mentioned file, a scoped folder */
 .chip {
   display: inline-flex;

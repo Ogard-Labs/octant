@@ -75,7 +75,6 @@ import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
@@ -1745,24 +1744,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
-            {/* Limits sit at the far end of the same line, and only once one is
-                worth acting on; the context meter's panel keeps the account of
-                what a turn spent. */}
-            {props.controller.threadUsage.limits.some((limit) => limit.status !== "allowed") ? (
-              <span className="composer-status__trailing">
-                {props.controller.threadUsage.limits
-                  .filter((limit) => limit.status !== "allowed")
-                  .map((limit) => (
-                    <span
-                      className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-                      key={limit.window}
-                      title={providerLimitLabel(limit)}
-                    >
-                      {providerLimitLabel(limit)}
-                    </span>
-                  ))}
-              </span>
-            ) : null}
           </div>
         }
       />
@@ -1848,24 +1829,6 @@ function forkTitle(sourceTitle: string): string {
   return title.length > MAX_CODE_THREAD_TITLE_LENGTH
     ? `${title.slice(0, MAX_CODE_THREAD_TITLE_LENGTH - 7).trimEnd()} (fork)`
     : title;
-}
-
-function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][number]): string {
-  const share =
-    limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
-  const resets =
-    limit.resetsAt === undefined
-      ? undefined
-      : `resets ${new Date(limit.resetsAt).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`;
-  const state =
-    limit.status === "exhausted" ? "spent" : limit.status === "warning" ? "low" : undefined;
-  const parts = [providerLimitWindowLabel(limit.window), state, share, resets].filter(
-    (part): part is string => part !== undefined,
-  );
-  return parts.join(" · ");
 }
 
 function waitingTurnLabel(requests: CodeController["providerRequests"]): string {

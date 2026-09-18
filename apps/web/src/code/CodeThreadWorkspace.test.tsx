@@ -583,7 +583,9 @@ describe("CodeThreadWorkspace", () => {
     // shown once it is worth acting on; a healthy one stays in the panel so
     // the strip does not list every window a provider has.
     expect(screen.queryByText(/12\.4k in/)).not.toBeInTheDocument();
-    expect(screen.getByText(/5-hour limit · low · 87% used/)).toBeVisible();
+    // The limit no longer spells itself out under the composer; the context
+    // meter's ring carries the alert and its panel carries the figures.
+    expect(screen.queryByText(/5-hour limit/)).not.toBeInTheDocument();
     expect(screen.queryByText(/7-day limit/)).not.toBeInTheDocument();
   });
 
@@ -1068,7 +1070,9 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    await user.click(screen.getByRole("button", { name: "High" }));
+    const levels = screen.getByRole("slider", { name: "Effort level" });
+    await user.click(levels);
+    await user.keyboard("{End}");
     expect(execute).toHaveBeenCalledWith({
       kind: "change-code-thread-provider",
       threadId,
@@ -1092,7 +1096,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Default" }));
+    await user.keyboard("{Home}");
     expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} }));
   });
 
