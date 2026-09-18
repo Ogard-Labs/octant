@@ -163,6 +163,34 @@ describe("ComputerUseRuntime", () => {
     expect(runtime.list(ownerWindowId)).toEqual([]);
   });
 
+  it("names the host's own refusal in the evidence when an approved action is refused", async () => {
+    const { recorded, runtime } = fixture({
+      execute: async () => ({ refused: "window-owned" }),
+    });
+    const waiting = await runtime.start({
+      ownerWindowId,
+      threadId,
+      requestedBy,
+      request,
+      policy,
+    });
+
+    const failed = await runtime.decide({
+      ownerWindowId,
+      threadId,
+      authority,
+      sessionId: request.sessionId,
+      actionId: request.actionId,
+      approvalId: waiting.pendingApproval!.approvalId,
+      decision: "approved",
+    });
+
+    expect(failed.state).toBe("failed");
+    expect(recorded.map(({ event }) => event.detail)).toContain(
+      "The host refused the computer-use action: window-owned.",
+    );
+  });
+
   it("rejects expired, mismatched, denied, and cross-client approvals without executing", async () => {
     const { adapter, advance, runtime } = fixture();
     const waiting = await runtime.start({ ownerWindowId, threadId, requestedBy, request, policy });

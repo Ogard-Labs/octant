@@ -306,7 +306,13 @@ export function createComputerUseRuntime(_options: {
       );
       if ("refused" in action) {
         session.state = "failed";
-        await append(session, "session-failed", "The host refused the computer-use action.");
+        // The adapter knows which guard refused the action; dropping it here left
+        // every caller with "denied, expired, or interrupted" and nothing to act on.
+        await append(
+          session,
+          "session-failed",
+          `The host refused the computer-use action: ${action.refused}.`,
+        );
         await cleanup(session);
         return view(session);
       }
