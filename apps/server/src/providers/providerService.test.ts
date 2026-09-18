@@ -2912,6 +2912,44 @@ describe("ProviderService", () => {
     });
   });
 
+  it("preserves a typed probe refusal reason and detected version without forwarding driver text", async () => {
+    const fixture = serviceFixture({ instances: [provider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: () => ({
+        kind: "opencode",
+        probe: () =>
+          Effect.fail({
+            category: "incompatible",
+            message: "private provider diagnostic",
+            reason: "runtime-incompatible",
+            diagnostic: {
+              stage: "model-discovery",
+              kind: "version-mismatch",
+              detectedVersion: "v0.0.0-beta-18721",
+            },
+          }),
+        acquire: () => Effect.die("unused"),
+      }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "incompatible", reason: "runtime-incompatible" },
+    });
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "incompatible",
+      reason: "runtime-incompatible",
+      detectedVersion: "v0.0.0-beta-18721",
+      message: "Provider runtime is incompatible.",
+    });
+    expect(JSON.stringify(fixture.runtime.observedState(instanceId))).not.toContain(
+      "private provider diagnostic",
+    );
+  });
+
   it("updates a provider-owned CLI directly and probes after releasing the instance lock", async () => {
     const fixture = serviceFixture({
       instances: [

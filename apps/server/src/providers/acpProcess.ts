@@ -125,8 +125,20 @@ const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 
-function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
+function failure(
+  category: ProviderFailure["category"],
+  message: string,
+  extras?: {
+    readonly reason?: ProviderFailure["reason"];
+    readonly diagnostic?: ProviderFailure["diagnostic"];
+  },
+): ProviderFailure {
+  return {
+    category,
+    message,
+    ...(extras?.reason === undefined ? {} : { reason: extras.reason }),
+    ...(extras?.diagnostic === undefined ? {} : { diagnostic: extras.diagnostic }),
+  };
 }
 
 function canonicalExistingDirectory(
@@ -674,7 +686,11 @@ function probeNpmPackageVersion(
   }
   if (!parsed.supported) {
     const minimum = profile.process.minimumVersion.join(".");
-    return Effect.fail(failure("incompatible", `${name} ${minimum} or later is required.`));
+    return Effect.fail(
+      failure("incompatible", `${name} ${minimum} or later is required.`, {
+        reason: "runtime-incompatible",
+      }),
+    );
   }
   return Effect.succeed({ binaryPath, version: parsed.version });
 }
@@ -754,14 +770,26 @@ export function probeAcpBinary(
       if (remaining > 0) output = Buffer.concat([output, bytes.subarray(0, remaining)]);
     };
     const onError = () =>
-      finish(Effect.fail(failure("unavailable", `${name} binary could not be started.`)));
+      finish(
+        Effect.fail(
+          failure("unavailable", `${name} binary could not be started.`, {
+            reason: "runtime-unavailable",
+          }),
+        ),
+      );
     const onClose = (code: number | null) => {
       if (overflow) {
         finish(Effect.fail(failure("protocol", `${name} version output exceeded the limit.`)));
         return;
       }
       if (code !== 0) {
-        finish(Effect.fail(failure("unavailable", `${name} version probe did not succeed.`)));
+        finish(
+          Effect.fail(
+            failure("unavailable", `${name} version probe did not succeed.`, {
+              reason: "runtime-unavailable",
+            }),
+          ),
+        );
         return;
       }
       const parsed = parseVersion(profile, output.toString("utf8").trimEnd());
@@ -773,13 +801,26 @@ export function probeAcpBinary(
       }
       if (!parsed.supported) {
         const minimum = profile.process.minimumVersion.join(".");
-        finish(Effect.fail(failure("incompatible", `${name} ${minimum} or later is required.`)));
+        finish(
+          Effect.fail(
+            failure("incompatible", `${name} ${minimum} or later is required.`, {
+              reason: "runtime-incompatible",
+            }),
+          ),
+        );
         return;
       }
       finish(Effect.succeed({ binaryPath, version: parsed.version }));
     };
     const timeout = setTimeout(
-      () => finish(Effect.fail(failure("unavailable", `${name} version probe timed out.`))),
+      () =>
+        finish(
+          Effect.fail(
+            failure("unavailable", `${name} version probe timed out.`, {
+              reason: "runtime-unavailable",
+            }),
+          ),
+        ),
       timeoutMs,
     );
     child.stdout.on("data", onOutput);

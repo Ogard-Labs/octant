@@ -4,6 +4,7 @@ import type {
   OpenAiCompatibleProtocol,
   ProviderInstance,
   ProviderObservedState,
+  ProviderRefusalReason,
 } from "@octant/contracts";
 
 export const capabilityLabels: ReadonlyArray<
@@ -127,6 +128,51 @@ export function driverLabel(
   return "OpenAI-compatible";
 }
 
+export function providerRefusalCopy(
+  reason: ProviderRefusalReason,
+  instance: ProviderInstance,
+): { readonly reason: string; readonly nextStep: string } {
+  const label = driverLabel(instance.driverKind);
+  if (reason === "runtime-incompatible") {
+    if (instance.driverKind === "opencode") {
+      return {
+        reason:
+          "This OpenCode runtime is discovery-only and cannot carry Octant's session permission rules yet.",
+        nextStep: "Use a supported OpenCode 1.x runtime, then check the connection again.",
+      };
+    }
+    return {
+      reason: `The installed ${label} runtime is incompatible.`,
+      nextStep: `Review the installed and supported ${label} versions, then check the connection again.`,
+    };
+  }
+  if (reason === "authentication-required") {
+    return {
+      reason: `${label} authentication is required.`,
+      nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
+    };
+  }
+  if (reason === "runtime-unavailable") {
+    return {
+      reason: `The ${label} runtime could not be started.`,
+      nextStep: `Verify the binary path and that ${label} can start, then check the connection again.`,
+    };
+  }
+  return {
+    reason: `${label} did not report a usable model.`,
+    nextStep: `Authenticate or configure a usable ${label} model, then check the connection again.`,
+  };
+}
+
+export function providerRefusalGuidance(
+  instance: ProviderInstance,
+  observed: ProviderObservedState | undefined,
+): { readonly reason: string; readonly nextStep: string } | undefined {
+  return observed?.reason === undefined
+    ? undefined
+    : providerRefusalCopy(observed.reason, instance);
+}
+
 export function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1).replaceAll("-", " ");
 }
@@ -169,7 +215,10 @@ export function incompatibleReadinessFacts(
   return [
     {
       label: "Host check",
-      value: observed?.message ?? "No host incompatibility detail was recorded.",
+      value:
+        providerRefusalGuidance(instance, observed)?.reason ??
+        observed?.message ??
+        "No host incompatibility detail was recorded.",
     },
     ...(binaryPath === undefined ? [] : [{ label: "Binary", value: binaryPath }]),
     { label: "Version", value: observed?.detectedVersion ?? "Unavailable" },

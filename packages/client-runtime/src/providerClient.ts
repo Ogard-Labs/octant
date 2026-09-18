@@ -26,12 +26,14 @@ export interface ProviderClient {
 
 export class ProviderClientFailure extends Error {
   readonly category: ProviderFailure["category"];
+  readonly reason?: ProviderFailure["reason"];
   readonly diagnostic?: ProviderFailure["diagnostic"];
 
   constructor(failure: ProviderFailure) {
     super(failure.message);
     this.name = "ProviderClientFailure";
     this.category = failure.category;
+    if (failure.reason !== undefined) this.reason = failure.reason;
     if (failure.diagnostic !== undefined) this.diagnostic = failure.diagnostic;
   }
 }

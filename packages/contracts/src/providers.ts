@@ -1188,6 +1188,18 @@ export const ProviderProcessDiagnostic = Schema.Struct({
 }).annotations(strict);
 export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
 
+/**
+ * Octant-authored probe refusal. The client maps this closed set to copy and
+ * next-step guidance. Free-form driver or provider text is not representable.
+ */
+export const ProviderRefusalReason = Schema.Literal(
+  "runtime-incompatible",
+  "authentication-required",
+  "runtime-unavailable",
+  "no-usable-model",
+);
+export type ProviderRefusalReason = typeof ProviderRefusalReason.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -1204,6 +1216,7 @@ export const ProviderObservedState = Schema.Struct({
   // for other deployments in the same profile.
   verifiedToolModelIds: Schema.optional(Schema.Array(ProviderModelId)),
   message: Schema.optional(Schema.NonEmptyTrimmedString),
+  reason: Schema.optional(ProviderRefusalReason),
   diagnostic: Schema.optional(ProviderProcessDiagnostic),
   lastSuccessfulProbeAt: Schema.optional(UtcTimestamp),
   observedAt: UtcTimestamp,
@@ -1652,6 +1665,7 @@ export type ProviderFailureCategory = typeof ProviderFailureCategory.Type;
 export const ProviderFailure = Schema.Struct({
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
+  reason: Schema.optional(ProviderRefusalReason),
   diagnostic: Schema.optional(ProviderProcessDiagnostic),
   retryAfterMs: Schema.optional(
     Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(3_600_000)),

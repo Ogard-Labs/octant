@@ -200,8 +200,20 @@ function negotiatedAppManagedTools(
     : "unsupported";
 }
 
-function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
+function failure(
+  category: ProviderFailure["category"],
+  message: string,
+  extras?: {
+    readonly reason?: ProviderFailure["reason"];
+    readonly diagnostic?: ProviderFailure["diagnostic"];
+  },
+): ProviderFailure {
+  return {
+    category,
+    message,
+    ...(extras?.reason === undefined ? {} : { reason: extras.reason }),
+    ...(extras?.diagnostic === undefined ? {} : { diagnostic: extras.diagnostic }),
+  };
 }
 
 function providerFailure(
@@ -218,7 +230,11 @@ function providerFailure(
   } catch {
     if (error instanceof AcpFailure) {
       if (error.message.toLowerCase().includes("authentication")) {
-        return failure("unauthenticated", profile.unauthenticatedMessage);
+        return failure(
+          "unauthenticated",
+          profile.unauthenticatedMessage,
+          processContext === undefined ? undefined : { reason: "authentication-required" },
+        );
       }
       if (error.kind === "protocol") return failure("protocol", `${name} ACP protocol failed.`);
       if (error.kind === "timeout") return failure("unavailable", `${name} ACP request timed out.`);
@@ -235,7 +251,14 @@ function providerFailure(
                   ? "Provider could not reach its remote service."
                   : "Provider refused the ACP request without a classified reason.";
         return {
-          ...failure("provider-failed", `${name} request failed.`),
+          ...failure("provider-failed", `${name} request failed.`, {
+            reason:
+              error.remoteReason === "model"
+                ? "no-usable-model"
+                : error.remoteReason === "configuration"
+                  ? "runtime-incompatible"
+                  : undefined,
+          }),
           diagnostic: {
             stage: processContext.stage,
             kind: "protocol-failed",
@@ -532,7 +555,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       }
       if (!isReviewedCommandInventory(reviewed, commands)) {
         return yield* Effect.fail(
-          failure("incompatible", `${name} advertised an unreviewed command inventory.`),
+          failure("incompatible", `${name} advertised an unreviewed command inventory.`, {
+            reason: "runtime-incompatible",
+          }),
         );
       }
       return scratch;
@@ -579,7 +604,12 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const { connection, client } = yield* managedHomeClient;
-        if (profile.authenticateOnProbe) yield* request(() => client.authenticate());
+        if (profile.authenticateOnProbe) {
+          yield* request(() => client.authenticate(), {
+            stage: "authentication",
+            detectedVersion: connection.version,
+          });
+        }
         const scratch =
           profile.reviewedCommands === undefined
             ? yield* request(() => client.newSession(connection.root), {
