@@ -213,6 +213,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         }
       } catch (error) {
         if (!active || controller.signal.aborted) return;
+        // A refusal is a state, not a reason to ask harder. Without this the
+        // loop re-asks a refused context at the base interval and the renderer
+        // logs an HTTP error for every attempt; a snapshot that changes still
+        // resets the counter and returns to the base interval.
+        unchangedPolls.current += 1;
+        nextDelay = browserRefreshDelay(unchangedPolls.current);
         applyFailure(error, setStatus, setMessage);
       } finally {
         if (active && !controller.signal.aborted) {

@@ -628,6 +628,30 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
 
+  it("backs off instead of re-asking every half second while the context refuses", async () => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockRejectedValue(new Error("Browser context is stale."));
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000014" as any,
+          mode: "work",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(1), { timeout: 1_500 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+    });
+    // 0 s, 0.5 s, 1.5 s in a backed-off loop; a fixed interval would already be at six.
+    expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
   it("preserves a failed start message across background inspection polling", async () => {
     const browser = client();
     vi.mocked(browser.create).mockRejectedValueOnce(
