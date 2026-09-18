@@ -159,8 +159,20 @@ function openCodeChatCapabilities(
   };
 }
 
-function fail(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
+function fail(
+  category: ProviderFailure["category"],
+  message: string,
+  extras?: {
+    readonly reason?: ProviderFailure["reason"];
+    readonly diagnostic?: ProviderFailure["diagnostic"];
+  },
+): ProviderFailure {
+  return {
+    category,
+    message,
+    ...(extras?.reason === undefined ? {} : { reason: extras.reason }),
+    ...(extras?.diagnostic === undefined ? {} : { diagnostic: extras.diagnostic }),
+  };
 }
 
 function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> {
@@ -176,6 +188,42 @@ const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_INCOMPATIBILITY_MESSAGE =
   "OpenCode 2 preview is discovery-only: its API cannot carry Octant's session permission rules yet.";
 const MCP_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * The safe client-facing facts of a 2.x refusal.
+ *
+ * BETA_INCOMPATIBILITY_MESSAGE cannot cross the boundary by itself — a
+ * free-form driver message may quote provider output — so the typed reason
+ * is what the client maps. The version is carried too: without it the row
+ * reads "Version: Unavailable" even though the probe that selected the
+ * runtime answered --version.
+ */
+function betaRefusal(version: string | undefined): {
+  readonly reason: "runtime-incompatible";
+  readonly diagnostic: NonNullable<ProviderFailure["diagnostic"]>;
+} {
+  const detectedVersion = diagnosticVersionToken(version);
+  return {
+    reason: "runtime-incompatible",
+    diagnostic: {
+      stage: "model-discovery",
+      kind: "version-mismatch",
+      ...(detectedVersion === undefined ? {} : { detectedVersion }),
+    },
+  };
+}
+
+/**
+ * A diagnostic version is one token; the probe reports the whole --version
+ * line, so the runtime's name is dropped rather than a value the contract
+ * refuses.
+ */
+function diagnosticVersionToken(version: string | undefined): string | undefined {
+  const match =
+    version === undefined ? null : /([A-Za-z0-9][A-Za-z0-9._+-]*)$/u.exec(version.trim());
+  const token = match?.[1];
+  return token === undefined || token.length > 64 ? undefined : token;
+}
 
 function betaRequestOptions() {
   return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
@@ -239,30 +287,31 @@ export function makeOfficialOpenCodeClient(
           }
         : resultData(await client.global.health({ throwOnError: true })),
     providers: async () => {
-      if (beta) throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      if (beta)
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       return resultData(await client.provider.list({}, { throwOnError: true }));
     },
     subscribe: async (signal) =>
       beta
         ? (() => {
-            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
           })()
         : (await client.event.subscribe({}, { throwOnError: true, signal })).stream,
     createSession: async ({ permission }) =>
       beta
         ? (() => {
-            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
           })()
         : resultData(await client.session.create({ permission }, { throwOnError: true })),
     getSession: async (sessionId) =>
       beta
         ? (() => {
-            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
           })()
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       }
       await client.session.update(
         { sessionID: sessionId, permission },
@@ -279,7 +328,7 @@ export function makeOfficialOpenCodeClient(
     },
     addMcpServer: async ({ name, url }) => {
       if (beta) {
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       }
       await client.mcp.add(
         {
@@ -292,7 +341,7 @@ export function makeOfficialOpenCodeClient(
     },
     disconnectMcpServer: async (name) => {
       if (beta) {
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       }
       await client.mcp.disconnect(
         { name, directory: projectRoot },
@@ -301,7 +350,7 @@ export function makeOfficialOpenCodeClient(
     },
     abort: async (sessionId) => {
       if (beta) {
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       }
       await client.session.abort(
         { sessionID: sessionId },
@@ -310,13 +359,13 @@ export function makeOfficialOpenCodeClient(
     },
     replyPermission: async (requestId, reply) => {
       if (beta) {
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       }
       await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
     replyQuestion: async (requestId, answers) => {
       if (beta) {
-        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE, betaRefusal(server.version));
       }
       await client.question.reply(
         { requestID: requestId, answers: answers.map((answer) => [answer]) },
@@ -1475,7 +1524,9 @@ export function providerFailure(error: unknown): ProviderFailure {
     }
   }
   if (typeof error === "object" && error !== null && "status" in error && error.status === 401) {
-    return fail("unauthenticated", "OpenCode provider authentication is required.");
+    return fail("unauthenticated", "OpenCode provider authentication is required.", {
+      reason: "authentication-required",
+    });
   }
   return fail("provider-failed", "OpenCode request failed.");
 }

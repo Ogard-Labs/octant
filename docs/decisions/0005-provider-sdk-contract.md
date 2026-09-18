@@ -70,6 +70,9 @@ the product would quietly depend on one vendor's features.
   contract requires stays reserved but unselectable.
 - Routine diagnostics exclude prompts, responses, credentials, account
   identity, tool arguments and results, repository contents, and raw frames.
+  OpenCode and ACP readiness probes may attach a closed Octant-authored
+  refusal reason so Settings can name the next action without forwarding
+  provider-originated text.
 
 ## Consequences
 

@@ -1409,8 +1409,9 @@ export class ProviderService implements ProviderServiceApi {
       models: [],
       capabilities: unavailableCapabilities,
       // Free-form driver messages can quote provider output. Only the typed
-      // diagnostic and its contract-validated safe context cross to clients.
-      message: diagnostic?.stderrContext ?? probeFailureMessage(readiness),
+      // refusal reason and its contract-validated diagnostic cross to clients.
+      message: diagnostic?.stderrContext ?? probeFailureMessage(readiness, failure?.reason),
+      ...(failure?.reason === undefined ? {} : { reason: failure.reason }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
       observedAt: decodeTimestamp(this.#clock()),
     });
@@ -1871,7 +1872,12 @@ function probeFailureReadiness(
 
 function probeFailureMessage(
   readiness: Exclude<ProviderObservedState["readiness"], "ready" | "checking">,
+  reason?: ProviderObservedState["reason"],
 ): string {
+  if (reason === "runtime-incompatible") return "Provider runtime is incompatible.";
+  if (reason === "authentication-required") return "Provider authentication is required.";
+  if (reason === "runtime-unavailable") return "Provider runtime is unavailable.";
+  if (reason === "no-usable-model") return "No usable model is available.";
   if (readiness === "unauthenticated") return "Provider authentication is required.";
   if (readiness === "unavailable") return "Provider runtime is unavailable.";
   if (readiness === "incompatible") return "Provider configuration is incompatible.";

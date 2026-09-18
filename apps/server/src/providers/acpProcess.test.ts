@@ -225,6 +225,7 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     const old = fixture(profile, "version-old");
     await expect(failureOf(probeAcpBinary(profile, old.binaryPath))).resolves.toEqual({
       category: "incompatible",
+      reason: "runtime-incompatible",
       message: `${profile.displayName} ${profile.process.minimumVersion.join(".")} or later is required.`,
     });
     const malformed = fixture(profile, "version-malformed");

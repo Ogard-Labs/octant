@@ -503,7 +503,7 @@ Refusal fails creation visibly. No Linear write-back path exists.
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. New context plans retain
+composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
 model and service limit provenance and inspection metadata in the journal-backed
 plan projection. Inspection restores those saved facts after a host restart
 without querying the provider; saved observation timestamps remain unchanged.
@@ -700,7 +700,10 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 
 - **Driver interface.** A `ProviderDriver` exposes `probe` (readiness and
   capability report without side effects), `acquire` (a `ProviderConnection`
-  for a workspace), and tool verification. A connection offers `subscribe` — a
+  for a workspace), and tool verification. OpenCode and ACP probe refusals
+  carry a closed Octant-authored `reason` plus bounded process diagnostics;
+  free-form driver or provider text does not cross to clients, and Settings
+  maps the reason to copy and next-step guidance. A connection offers `subscribe` — a
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,

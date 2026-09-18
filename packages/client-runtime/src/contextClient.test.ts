@@ -89,6 +89,19 @@ describe("ContextClient", () => {
     expect(failure.message).not.toContain("secret");
   });
 
+  it("treats a successful not-planned inspect as an empty answer, not a protocol failure", async () => {
+    const client = createContextClient({
+      baseUrl: "http://localhost",
+      windowCapability: capability,
+      fetch: async () =>
+        Response.json({ kind: "not-planned", subject: request.subject }, { status: 200 }),
+    });
+    await expect(client.inspect(request)).rejects.toMatchObject({
+      category: "not-planned",
+      message: "This thread has no context plan yet.",
+    });
+  });
+
   it("strictly decodes successes and closed server failures", async () => {
     const malformed = createContextClient({
       baseUrl: "http://localhost",

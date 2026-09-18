@@ -45,6 +45,7 @@ import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCr
 import {
   capabilityLabels,
   driverLabel,
+  providerRefusalGuidance,
   formatProbeTimestamp,
   incompatibleReadinessFacts,
   protocolLabel,
@@ -1709,11 +1710,22 @@ function guidance(
   const driverKind = instance.driverKind;
   const label = driverLabel(driverKind);
   const message = observed?.message;
-  if (readiness === "unauthenticated")
-    return <p className="provider-card__guidance">{authenticationGuidance(instance)}</p>;
+  if (readiness === "unauthenticated") {
+    const refusal = providerRefusalGuidance(instance, observed);
+    return (
+      <>
+        {refusal === undefined ? null : <p className="provider-card__guidance">{refusal.reason}</p>}
+        <p className="provider-card__guidance">
+          {refusal?.nextStep ?? authenticationGuidance(instance)}
+        </p>
+      </>
+    );
+  }
   if (readiness === "incompatible") {
+    const refusal = providerRefusalGuidance(instance, observed);
     const nextAction =
-      driverKind === "openai-compatible" ||
+      refusal?.nextStep ??
+      (driverKind === "openai-compatible" ||
       driverKind === "anthropic-compatible" ||
       driverKind === "azure-foundry"
         ? "The endpoint returned an incompatible protocol response. Review its API compatibility."
@@ -1723,9 +1735,10 @@ function guidance(
             ? "The Kimi Code runtime or its provider-owned profile is incompatible. Review the connection detail and supported version before retrying."
             : observed?.diagnostic?.kind === "version-mismatch"
               ? `The installed ${label} version is incompatible. Review the installed and supported versions before retrying.`
-              : `The ${label} runtime is incompatible. Review the connection details before retrying.`;
+              : `The ${label} runtime is incompatible. Review the connection details before retrying.`);
     return (
       <>
+        {refusal === undefined ? null : <p className="provider-card__guidance">{refusal.reason}</p>}
         <p className="provider-card__guidance">{nextAction}</p>
         <div
           aria-label="Incompatibility details"
@@ -1757,7 +1770,16 @@ function guidance(
   // send the user chasing a problem that does not exist.
   if (readiness === "unavailable" && driverKind === "oh-my-pi" && message !== undefined)
     return <p className="provider-card__guidance">{message}</p>;
-  if (readiness === "unavailable")
+  if (readiness === "unavailable") {
+    const refusal = providerRefusalGuidance(instance, observed);
+    if (refusal !== undefined) {
+      return (
+        <>
+          <p className="provider-card__guidance">{refusal.reason}</p>
+          <p className="provider-card__guidance">{refusal.nextStep}</p>
+        </>
+      );
+    }
     return (
       <p className="provider-card__guidance">
         {driverKind === "openai-compatible" ||
@@ -1769,6 +1791,7 @@ function guidance(
             : `Verify the binary path and that ${label} can start, then retry.`}
       </p>
     );
+  }
   return message === undefined ? null : <p className="provider-card__guidance">{message}</p>;
 }
 

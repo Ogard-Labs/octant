@@ -321,6 +321,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     );
     expect(failure).toEqual({
       category: "unauthenticated",
+      reason: "authentication-required",
       message: profile.unauthenticatedMessage,
     });
     expect(failure.message).toContain(profile.displayName);
@@ -1305,6 +1306,7 @@ describe("ACP provider driver profile quirks", () => {
     );
     expect(failure).toEqual({
       category: "incompatible",
+      reason: "runtime-incompatible",
       message: "Kimi Code advertised an unreviewed command inventory.",
     });
   });

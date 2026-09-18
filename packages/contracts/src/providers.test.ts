@@ -2414,4 +2414,30 @@ describe("provider runtime contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("decodes a closed Octant-authored probe refusal reason without accepting free-form driver text", () => {
+    expect(
+      decodeProviderFailure({
+        category: "incompatible",
+        message: "private provider diagnostic",
+        reason: "runtime-incompatible",
+        diagnostic: {
+          stage: "model-discovery",
+          kind: "version-mismatch",
+          detectedVersion: "0.0.0-beta-18721",
+        },
+      }),
+    ).toMatchObject({
+      category: "incompatible",
+      reason: "runtime-incompatible",
+      diagnostic: { detectedVersion: "0.0.0-beta-18721" },
+    });
+    expect(() =>
+      decodeProviderFailure({
+        category: "incompatible",
+        message: "private provider diagnostic",
+        reason: "OpenCode 2 preview is discovery-only",
+      }),
+    ).toThrow();
+  });
 });
