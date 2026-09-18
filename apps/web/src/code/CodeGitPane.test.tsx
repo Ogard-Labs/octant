@@ -335,6 +335,33 @@ describe("CodeGitPane", () => {
     );
   });
 
+  it("names the profile setting when a commit has no identity to use", async () => {
+    const client = codeClient();
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValue({
+      kind: "git-mutation-state",
+      operationId: ids.operation,
+      gitOperationId: ids.git,
+      mutation: "commit",
+      state: "rejected",
+      reason: "identity-missing",
+    });
+    render(
+      <CodeGitPane
+        client={client}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        observation={gitObservation}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 file" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Stage needs an identity.*Settings.*Your profile/i,
+    );
+  });
+
   it("exposes a pull-request review entry point when navigation is available", () => {
     const onReviewPullRequest = vi.fn();
     const { rerender } = render(

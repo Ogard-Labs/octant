@@ -318,6 +318,72 @@ describe("GitMutationPort", () => {
     });
   });
 
+  it("fills a missing commit identity from the host profile", async () => {
+    // A checkout whose identity lives only in the user's global config is the
+    // common case OCT-263 records: confinement hides that file, so the host
+    // profile is the only identity left to commit under.
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "README.md"), "host identity fallback");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, {
+      ...confinedOptions(),
+      commitIdentity: () => ({ name: "Ada Lovelace", email: "ada@octant.test" }),
+    });
+
+    const result = await port.commit({
+      checkoutRoot: repository,
+      message: "Host identity fallback",
+      stagedSummary: [{ path: "README.md", index: "A", worktree: " " }],
+    });
+
+    expect(result).toMatchObject({ status: "applied" });
+    expect(gitOutput(repository, "log", "-1", "--format=%an <%ae>").trim()).toBe(
+      "Ada Lovelace <ada@octant.test>",
+    );
+  });
+
+  it("lets the checkout's own identity win over the host profile", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "local identity");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, {
+      ...confinedOptions(),
+      commitIdentity: () => ({ name: "Host Profile", email: "host@octant.test" }),
+    });
+
+    const result = await port.commit({
+      checkoutRoot: repository,
+      message: "Local identity",
+      stagedSummary: [{ path: "README.md", index: "A", worktree: " " }],
+    });
+
+    expect(result).toMatchObject({ status: "applied" });
+    expect(gitOutput(repository, "log", "-1", "--format=%an <%ae>").trim()).toBe(
+      "Octant Test <test@octant.local>",
+    );
+  });
+
+  it("refuses a commit with no identity anywhere and says identity-missing", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "README.md"), "no identity");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    const result = await port.commit({
+      checkoutRoot: repository,
+      message: "No identity",
+      stagedSummary: [{ path: "README.md", index: "A", worktree: " " }],
+    });
+
+    expect(result).toEqual({ status: "rejected", reason: "identity-missing" });
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");

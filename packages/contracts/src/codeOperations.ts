@@ -804,6 +804,25 @@ const GitMutationResult = Schema.Struct({
   ),
   state: Schema.Literal("completed", "rejected", "failed"),
   /**
+   * Why a refused mutation was refused, so the pane can say what to do next
+   * rather than pointing at the checkout. `identity-missing` names the one
+   * refusal whose remedy is not a refresh.
+   */
+  reason: Schema.optional(
+    Schema.Literal(
+      "index-locked",
+      "invalid-paths",
+      "invalid-message",
+      "invalid-commit",
+      "empty-staged-summary",
+      "invalid-remote",
+      "invalid-refspec",
+      "unconfirmed-target",
+      "ignored-path-collision",
+      "identity-missing",
+    ),
+  ),
+  /**
    * Git's own words for a failed mutation, so a missing identity or an unusable
    * index is reported as itself rather than as something to refresh. Absent
    * when the command produced no usable stderr.

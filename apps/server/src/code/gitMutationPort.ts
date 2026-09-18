@@ -18,6 +18,19 @@ interface CommandResult {
   readonly stderr: string;
 }
 
+/**
+ * The person the host records as its user, offered to confined commits whose
+ * checkout has no identity of its own. Both fields must be present for the
+ * fallback to be usable; a profile with only a name is not an identity.
+ */
+export interface CommitIdentity {
+  readonly name: string;
+  readonly email: string;
+}
+
+/** Reads the host's recorded commit identity when a commit needs a fallback. */
+export type CommitIdentityResolver = () => CommitIdentity | undefined;
+
 export interface GitMutationDependencies {
   readonly execFile: (
     file: string,
@@ -57,7 +70,8 @@ export type GitMutationResult =
         | "invalid-remote"
         | "invalid-refspec"
         | "unconfirmed-target"
-        | "ignored-path-collision";
+        | "ignored-path-collision"
+        | "identity-missing";
     }
   | { readonly status: "failed"; readonly detail?: string };
 
@@ -103,15 +117,18 @@ export class GitMutationPort {
   readonly #dependencies: GitMutationDependencies;
   readonly #commandTimeoutMs: number;
   readonly #confinement: ReturnType<typeof createGitSeatbeltConfinement>;
+  readonly #commitIdentity: CommitIdentityResolver | undefined;
 
   constructor(
     dependencies: GitMutationDependencies = liveDependencies,
     options: {
       readonly commandTimeoutMs?: number;
+      readonly commitIdentity?: CommitIdentityResolver;
     } & GitSeatbeltPortOptions = {},
   ) {
     this.#dependencies = dependencies;
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 15_000;
+    this.#commitIdentity = options.commitIdentity;
     // A shared port serves every thread. Plan confinement is applied per
     // mutation from that thread's executionPolicy, not at construction.
     this.#confinement = createGitSeatbeltConfinement(options);
@@ -222,8 +239,24 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const identity = await this.#effectiveCommitIdentity(
+      input.checkoutRoot,
+      signal,
+      input.executionPolicy,
+    );
+    if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
+    // The host profile fills only the fields the checkout could not supply;
+    // a checkout that names its own author keeps that author, because per-
+    // field -c overlays cannot lose to config already resolved by git.
     const result = await this.#run(
-      ["-C", input.checkoutRoot, "commit", "--message", input.message],
+      [
+        "-C",
+        input.checkoutRoot,
+        ...identity.config.flatMap((entry) => ["-c", entry] as const),
+        "commit",
+        "--message",
+        input.message,
+      ],
       signal,
       undefined,
       input.executionPolicy,
@@ -747,6 +780,48 @@ export class GitMutationPort {
     } catch {
       return "failed";
     }
+  }
+
+  /**
+   * The identity a confined commit will actually carry, resolved before the
+   * commit runs. The checkout's own config is asked first; the host profile
+   * fills only the fields it left unset; and a commit that would still have
+   * no name or address is refused rather than attributed to the placeholder
+   * git invents from the OS account and hostname. Git's own auto-detection
+   * writes "unknown@host.local" into history with only a warning, which is
+   * the wrong-identity failure this prevents.
+   */
+  async #effectiveCommitIdentity(
+    checkoutRoot: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<{ readonly config: readonly string[] } | undefined> {
+    const [nameProbe, emailProbe] = await Promise.all([
+      this.#run(
+        ["-C", checkoutRoot, "config", "--get", "user.name"],
+        signal,
+        undefined,
+        executionPolicy,
+      ),
+      this.#run(
+        ["-C", checkoutRoot, "config", "--get", "user.email"],
+        signal,
+        undefined,
+        executionPolicy,
+      ),
+    ]);
+    const configuredName = nameProbe.exitCode === 0 ? nameProbe.stdout.trim() : undefined;
+    const configuredEmail = emailProbe.exitCode === 0 ? emailProbe.stdout.trim() : undefined;
+    const hostIdentity = this.#commitIdentity?.();
+    const name = configuredName ?? hostIdentity?.name;
+    const email = configuredEmail ?? hostIdentity?.email;
+    if (name === undefined || name === "" || email === undefined || email === "") {
+      return undefined;
+    }
+    const config: string[] = [];
+    if (configuredName === undefined) config.push(`user.name=${name}`);
+    if (configuredEmail === undefined) config.push(`user.email=${email}`);
+    return { config };
   }
 
   async #apply(

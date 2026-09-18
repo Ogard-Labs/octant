@@ -99,9 +99,11 @@ export function CodeGitPane(props: CodeGitPaneProps) {
         setLastResult(`${label} completed.`);
       else if (result.kind === "git-mutation-state")
         setFailure(
-          result.state === "failed" && result.detail !== undefined
-            ? `${label} failed. ${result.detail}`
-            : `${label} ${result.state}. Refresh checkout state before retrying.`,
+          result.state === "rejected" && result.reason === "identity-missing"
+            ? `${label} needs an identity: set your name and email in Settings → Your profile, or add user.name and user.email to the checkout.`
+            : result.state === "failed" && result.detail !== undefined
+              ? `${label} failed. ${result.detail}`
+              : `${label} ${result.state}. Refresh checkout state before retrying.`,
         );
       else setLastResult(`${label} requested. Waiting for authoritative checkout refresh.`);
     } catch {

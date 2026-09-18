@@ -3770,7 +3770,19 @@ export function startOctantServer(
         temporaryDirectory: scaffoldWorkDirectory,
       });
       const rootProbePath = decodeCodeRelativePath("package.json");
+      // A confined commit cannot read the user's global gitconfig, so the
+      // host's own profile is the identity a checkout without local config
+      // falls back to. Read it per call: the profile is editable while the
+      // server runs, and a restart is too high a price for a name.
+      const gitMutationPort = new GitMutationPort(undefined, {
+        commitIdentity: () => {
+          const profile = persistence.readShellSettings()?.settings.userProfile;
+          if (profile?.displayName === undefined || profile?.email === undefined) return undefined;
+          return { name: profile.displayName, email: profile.email };
+        },
+      });
       codeOperationRuntime = createCodeOperationRuntime({
+        gitMutationPort,
         resolveSelectedSkillContext,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(

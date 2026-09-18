@@ -466,7 +466,20 @@ export interface CodeOperationGitPort {
 
 type GitMutationOutcome =
   | { readonly status: "applied"; readonly oid?: string }
-  | { readonly status: "rejected"; readonly reason?: string }
+  | {
+      readonly status: "rejected";
+      readonly reason?:
+        | "index-locked"
+        | "invalid-paths"
+        | "invalid-message"
+        | "invalid-commit"
+        | "empty-staged-summary"
+        | "invalid-remote"
+        | "invalid-refspec"
+        | "unconfirmed-target"
+        | "ignored-path-collision"
+        | "identity-missing";
+    }
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string };
 
@@ -2234,6 +2247,9 @@ export class CodeOperationService {
       // the person can actually act on.
       ...(result.status === "failed" && result.detail !== undefined
         ? { detail: result.detail }
+        : {}),
+      ...(result.status === "rejected" && result.reason !== undefined
+        ? { reason: result.reason }
         : {}),
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
       // A failed restore may have moved files before it stopped, so its undo
