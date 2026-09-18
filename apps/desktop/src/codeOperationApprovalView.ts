@@ -611,7 +611,7 @@ function approvalPaletteCss(palette: CodeOperationApprovalPalette | undefined): 
 }
 
 export function approvalViewHtml(palette?: CodeOperationApprovalPalette): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><title>Code approval</title><style>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><title>Code approval</title><style>
 ${approvalPaletteCss(palette)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:transparent}
