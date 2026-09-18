@@ -323,8 +323,23 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const identity = await this.#effectiveCommitIdentity(
+      input.checkoutRoot,
+      signal,
+      input.executionPolicy,
+    );
+    if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
     const result = await this.#run(
-      ["-C", input.checkoutRoot, "merge", "--no-ff", "--no-edit", "--end-of-options", input.branch],
+      [
+        "-C",
+        input.checkoutRoot,
+        ...identity.config.flatMap((entry) => ["-c", entry] as const),
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        "--end-of-options",
+        input.branch,
+      ],
       signal,
       undefined,
       input.executionPolicy,
@@ -358,8 +373,22 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const identity = await this.#effectiveCommitIdentity(
+      input.checkoutRoot,
+      signal,
+      input.executionPolicy,
+    );
+    if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
     const result = await this.#run(
-      ["-C", input.checkoutRoot, "revert", "--no-edit", "--", input.oid],
+      [
+        "-C",
+        input.checkoutRoot,
+        ...identity.config.flatMap((entry) => ["-c", entry] as const),
+        "revert",
+        "--no-edit",
+        "--",
+        input.oid,
+      ],
       signal,
       undefined,
       input.executionPolicy,

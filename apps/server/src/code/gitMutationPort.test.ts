@@ -384,6 +384,73 @@ describe("GitMutationPort", () => {
     expect(result).toEqual({ status: "rejected", reason: "identity-missing" });
   });
 
+  it("gives a merge the host identity when the checkout has none", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "--local", "user.name", "Checkout Author");
+    git(repository, "config", "--local", "user.email", "author@octant.test");
+    writeFileSync(join(repository, "README.md"), "initial");
+    git(repository, "add", "--", "README.md");
+    git(repository, "commit", "-m", "initial");
+    git(repository, "checkout", "-b", "feature");
+    writeFileSync(join(repository, "feature.txt"), "feature");
+    git(repository, "add", "--", "feature.txt");
+    git(repository, "commit", "-m", "feature");
+    git(repository, "checkout", "main");
+    // The checkout identity is removed after history exists so only the host
+    // profile can name the author of the merge commit itself.
+    git(repository, "config", "--local", "--unset", "user.name");
+    git(repository, "config", "--local", "--unset", "user.email");
+    const port = new GitMutationPort(undefined, {
+      ...confinedOptions(),
+      commitIdentity: () => ({ name: "Ada Lovelace", email: "ada@octant.test" }),
+    });
+
+    const result = await port.mergeBranch({
+      checkoutRoot: repository,
+      branch: "feature",
+    });
+
+    expect(result).toMatchObject({ status: "applied" });
+    expect(gitOutput(repository, "log", "-1", "--format=%an <%ae>").trim()).toBe(
+      "Ada Lovelace <ada@octant.test>",
+    );
+  });
+
+  it("gives a revert the host identity when the checkout has none", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "--local", "user.name", "Checkout Author");
+    git(repository, "config", "--local", "user.email", "author@octant.test");
+    writeFileSync(join(repository, "README.md"), "initial");
+    git(repository, "add", "--", "README.md");
+    git(repository, "commit", "-m", "initial");
+    writeFileSync(join(repository, "doomed.txt"), "doomed");
+    git(repository, "add", "--", "doomed.txt");
+    git(repository, "commit", "-m", "add doomed");
+    const target = gitOutput(repository, "rev-parse", "HEAD").trim();
+    git(repository, "config", "--local", "--unset", "user.name");
+    git(repository, "config", "--local", "--unset", "user.email");
+    const port = new GitMutationPort(undefined, {
+      ...confinedOptions(),
+      commitIdentity: () => ({ name: "Ada Lovelace", email: "ada@octant.test" }),
+    });
+
+    const result = await port.revertCommit({
+      checkoutRoot: repository,
+      oid: target,
+    });
+
+    expect(result).toMatchObject({ status: "applied" });
+    expect(gitOutput(repository, "log", "-1", "--format=%an <%ae>").trim()).toBe(
+      "Ada Lovelace <ada@octant.test>",
+    );
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");
