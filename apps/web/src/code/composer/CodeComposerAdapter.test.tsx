@@ -94,7 +94,11 @@ describe("CodeComposerAdapter", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    await user.click(screen.getByRole("button", { name: "High" }));
+    const effort = screen.getByRole("slider", { name: "Effort level" });
+    await user.click(effort);
+    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowRight}");
+    expect(effort).toHaveAttribute("aria-valuetext", "High");
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
