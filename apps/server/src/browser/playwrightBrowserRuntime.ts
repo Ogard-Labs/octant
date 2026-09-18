@@ -250,6 +250,16 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       owned.page = await context.newPage();
       this.#collectDiagnostics(owned, owned.page);
       context.on("page", (candidate) => {
+        // Listen before adopting or closing: a popup can log an error or fail
+        // a request while it is briefly open, and closing it discards the
+        // listeners that would have recorded that. This is the one place a
+        // later page passes through, which is what makes the diagnostics
+        // answer cover the popup too instead of only the first page.
+        //
+        // A context can report the page this runtime already adopted, so the
+        // collection is guarded: attaching twice would count every entry
+        // twice and make the bounded arrays evict real evidence.
+        if (candidate !== owned.page) this.#collectDiagnostics(owned, candidate);
         if (owned.page === undefined) {
           owned.page = candidate;
           return;
