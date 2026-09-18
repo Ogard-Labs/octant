@@ -24,9 +24,10 @@ import {
  * Platforms that publish a signed desktop update feed today.
  *
  * Linux desktop builds (unpackaged or AppImage) must fail closed: an updater on
- * an unsigned artifact is an unauthenticated code-delivery channel. Release
- * workflows may scaffold a `<ring>/linux-x64.json` feed path, but the in-app
- * channel stays off until a maintainer-published signed feed exists.
+ * an unsigned artifact is an unauthenticated code-delivery channel. The signed
+ * `<ring>/linux-x64.json` feeds exist now, and the channel is still off,
+ * because replacing a running AppImage is a path Octant has not built — a
+ * signed feed is necessary, not sufficient.
  */
 export function supportsSignedDesktopUpdateChannel(platform: string): boolean {
   return platform === "darwin";
