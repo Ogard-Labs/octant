@@ -107,6 +107,10 @@ describe("Code operation approval view controller", () => {
     expect(html).not.toContain("https://");
   });
 
+  it("declares the language the approval surface is written in", () => {
+    expect(approvalViewHtml()).toContain('<html lang="en">');
+  });
+
   it("accepts a decision only from the exact approval WebContentsView", async () => {
     const fixture = makeFixture();
     fixture.controller.updateAnchor({
