@@ -6863,6 +6863,10 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   flex: 0 0 auto;
   align-items: center;
   margin: 12px auto 0;
+  /* The workspace notices are warnings: the recipe is tone-neutral, so the
+     warning's tinted ground and hairline live here with the placement. */
+  background: var(--oct-warn-soft);
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
 }
 
 .code-thread-workspace__callout > p {

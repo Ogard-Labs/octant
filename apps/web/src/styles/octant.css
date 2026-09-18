@@ -828,10 +828,10 @@ h4 {
 /* ─── callout ───────────────────────────────────────────────────────── */
 .callout {
   display: flex;
+  align-items: flex-start;
   gap: var(--oct-space-4);
   padding: var(--oct-space-5);
   border: 1px solid var(--oct-border);
-  border-left-width: 2px;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   color: var(--oct-fg-2);
@@ -840,23 +840,46 @@ h4 {
 .callout p {
   margin: 0;
 }
+/* A leading status mark sits with the sentence; the half-line offset keeps
+   it on the first line's optical axis for multi-line text. Most callouts
+   warn, so the mark borrows the warning text role unless the tone says
+   otherwise - hue alone must never be the only signal (DESIGN.md colour
+   roles pair each status surface with its text role). */
+.callout svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--oct-warn-fg);
+}
 .callout-title {
   font-family: var(--oct-font-display);
   font-weight: var(--oct-weight-display);
   color: var(--oct-fg);
   margin-bottom: 2px;
 }
+/* A tone is a tinted ground with a tinted hairline - the same language as
+   the approval and severity surfaces - never a saturated edge stripe,
+   which made a thread notice read as a generic chat-app warning box. */
 .callout-accent {
-  border-left-color: var(--oct-accent-fg);
+  background: var(--oct-accent-soft);
+  border-color: color-mix(in oklab, var(--oct-accent-fg) 30%, transparent);
 }
 .callout-ok {
-  border-left-color: var(--oct-success-fg);
+  background: var(--oct-success-soft);
+  border-color: color-mix(in oklab, var(--oct-success-fg) 30%, transparent);
+}
+.callout-ok svg {
+  color: var(--oct-success-fg);
 }
 .callout-warn {
-  border-left-color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
 }
 .callout-danger {
-  border-left-color: var(--oct-danger-fg);
+  background: var(--oct-danger-soft);
+  border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
+}
+.callout-danger svg {
+  color: var(--oct-danger-fg);
 }
 
 /* ─── thread column ─────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CirclePause, X } from "lucide-react";
+import { CircleAlert, CirclePause, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -993,10 +993,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       )}
 
       {props.controller.errorMessage === undefined ? null : (
-        <div
-          className="callout callout-warn thread-column code-thread-workspace__callout"
-          role="alert"
-        >
+        <div className="callout thread-column code-thread-workspace__callout" role="alert">
+          <CircleAlert aria-hidden="true" size={16} />
           <p>{props.controller.errorMessage}</p>
         </div>
       )}
@@ -1019,10 +1017,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         // notice above it said the same thing louder. The callout stays for a
         // history the host cannot read, where the retry offer lives, and for a
         // send the host refused before any turn existed to carry the reason.
-        <div
-          className="callout callout-warn thread-column code-thread-workspace__callout"
-          role="alert"
-        >
+        <div className="callout thread-column code-thread-workspace__callout" role="alert">
+          <CircleAlert aria-hidden="true" size={16} />
           <p>{props.controller.turnError}</p>
           {/* An unreachable history is worth another ask, and the offer sits
               with the notice rather than leaving a dead end. The composer
@@ -1041,10 +1037,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       )}
 
       {thread.lifecycle === "waiting" || thread.lifecycle === "interrupted" ? (
-        <div
-          className="callout callout-warn thread-column code-thread-workspace__callout"
-          role="alert"
-        >
+        <div className="callout thread-column code-thread-workspace__callout" role="alert">
+          <CircleAlert aria-hidden="true" size={16} />
           <p>
             {thread.lifecycle === "waiting"
               ? "This thread is waiting for authoritative recovery or user input."
