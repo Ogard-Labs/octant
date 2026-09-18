@@ -2656,7 +2656,7 @@ describe("App", () => {
     expect(within(dock).queryByRole("button", { name: "Thread tools" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("button", { name: "Plan" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("button", { name: "Delivery" })).not.toBeInTheDocument();
-    expect(within(dock).queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+    expect(within(dock).getByRole("button", { name: "Agents" })).toBeVisible();
   });
 
   it("offers Plan only when the thread has a current plan artifact", async () => {
