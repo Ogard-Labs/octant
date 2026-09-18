@@ -421,6 +421,22 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const [providerRequests, setProviderRequests] = useState<ReadonlyArray<CodeProviderRequest>>([]);
 
+  /**
+   * Put a refusal this controller did not perform in front of the person.
+   *
+   * A thread created from a draft starts its first turn on the window's create
+   * controller, so the refusal has to be handed to the controller that renders
+   * the open thread. It lands exactly where a refused steered send lands: the
+   * turn callout above the composer.
+   */
+  const showTurnRefusal = useCallback(
+    (message: string) => {
+      setTurnStatus("failed");
+      setTurnError(message);
+    },
+    [setTurnError],
+  );
+
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
@@ -556,6 +572,16 @@ export function useCodeController(options: CodeControllerOptions) {
   const lastExecuteError = useRef<
     { category: CodeFailure["category"]; message: string } | undefined
   >(undefined);
+
+  /**
+   * The sentence the host refused the most recent first-turn start with.
+   *
+   * The composer shows it, but a thread created from a draft starts its turn on
+   * the window's create controller while the open thread renders from its own
+   * controller — so the create flow reads this to hand the reason to the thread
+   * the person is actually looking at.
+   */
+  const lastStartRefusal = useRef<string | undefined>(undefined);
 
   // Drafts are kept per thread so moving between threads never loses what was
   // typed and never carries one thread's prompt into another's composer. A
@@ -1601,11 +1627,13 @@ export function useCodeController(options: CodeControllerOptions) {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
       firstTurnFailures.current.delete(String(input.threadId));
+      lastStartRefusal.current = undefined;
       clearFailure();
       setTurnError(undefined);
       setTurnStatus("sending");
       const failFirstTurn = (message: string) => {
         firstTurnFailures.current.set(String(input.threadId), { prompt, message });
+        lastStartRefusal.current = message;
         activeTurnOperations.current.delete(String(input.threadId));
         setTurnStatus("failed");
         setTurnError(message);
@@ -2325,6 +2353,7 @@ export function useCodeController(options: CodeControllerOptions) {
     followUps,
     forkThread,
     lastExecuteError,
+    lastStartRefusal,
     editorDrafts,
     execute,
     markFollowUp,
@@ -2360,6 +2389,7 @@ export function useCodeController(options: CodeControllerOptions) {
     sendFollowUp,
     setPendingDraft,
     setPendingDraftCaret,
+    showTurnRefusal,
     writePendingDraftFor,
     startThreadTurn,
     status,

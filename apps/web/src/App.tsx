@@ -4229,10 +4229,17 @@ function LaunchedShell(
         ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
       });
       if (!firstTurnStarted) {
-        setDraftError("The thread was created, but its first provider turn could not be started.");
+        const refusal = codeController.lastStartRefusal.current;
+        setDraftError(
+          refusal ?? "The thread was created, but its first provider turn could not be started.",
+        );
         // The thread is already open on a different controller than the one
         // that started the turn, so restore the prompt onto that transcript.
-        codeThreadControllers.get(created.thread.id)?.setPendingDraft(input.prompt);
+        const threadController = codeThreadControllers.get(created.thread.id);
+        threadController?.setPendingDraft(input.prompt);
+        // The reason has to reach the controller that renders the open thread,
+        // or the transcript sits empty in front of a refusal nothing explains.
+        if (refusal !== undefined) threadController?.showTurnRefusal(refusal);
         return false;
       }
       // The window-level create controller owns the command, while the open
@@ -4474,9 +4481,13 @@ function LaunchedShell(
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
         });
         if (!firstTurnStarted) {
+          const refusal = codeController.lastStartRefusal.current;
           setDraftError(
-            "The thread was created, but its first provider turn could not be started.",
+            refusal ?? "The thread was created, but its first provider turn could not be started.",
           );
+          if (refusal !== undefined) {
+            codeThreadControllers.get(created.thread.id)?.showTurnRefusal(refusal);
+          }
         }
         await controller.openCodeThread(
           created.thread.id,
