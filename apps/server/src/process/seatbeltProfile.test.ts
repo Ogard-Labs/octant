@@ -19,6 +19,7 @@ import {
   makeSeatbeltConfinementLive,
   privateHomeDenyReadRules,
   requireSandboxExec,
+  seatbeltAllowLiteralMetadataRule,
   seatbeltAllowRule,
   seatbeltExecRule,
   seatbeltDenyRule,
@@ -703,7 +704,64 @@ describe("host home deny helper defaults", () => {
   it("uses the process home when callers do not override directories", () => {
     const allowed = realpathSync(homedir());
     const rules = privateHomeDenyReadRules({ allowedPaths: [allowed] });
-    expect(rules.every((rule) => rule.startsWith("(deny file-read*"))).toBe(true);
+    // Every denied path is also re-allowed for metadata, and only for
+    // metadata. The deny must come first so the pair reads as "this stays
+    // unreadable, except that it may be stat'ed".
+    expect(rules.every((rule) => rule.startsWith("(deny file-read*"))).toBe(false);
+    const denied = rules.filter((rule) => rule.startsWith("(deny file-read*"));
+    const metadata = rules.filter((rule) => rule.startsWith("(allow file-read-metadata"));
+    expect(denied.length).toBeGreaterThan(0);
+    expect(metadata).toHaveLength(denied.length);
+    // Each metadata rule re-allows a path that was denied, never a new one.
+    const deniedPaths = new Set(
+      denied.map((rule) => rule.slice(rule.indexOf('"') + 1, rule.lastIndexOf('"'))),
+    );
+    for (const rule of metadata) {
+      expect(deniedPaths.has(rule.slice(rule.indexOf('"') + 1, rule.lastIndexOf('"')))).toBe(true);
+    }
+    // The deny precedes its metadata re-allow; Seatbelt resolves by last
+    // matching rule, so the reverse order would make the deny useless.
+    for (const rule of metadata) {
+      const path = rule.slice(rule.indexOf('"') + 1, rule.lastIndexOf('"'));
+      const denyIndex = rules.findIndex((candidate) => candidate.includes(`subpath "${path}"`));
+      expect(denyIndex).toBeLessThan(rules.indexOf(rule));
+    }
+  });
+
+  it("lets a denied home path be stat'ed while its contents stay unreadable", () => {
+    // OpenCode 2 realpaths other tools' home directories while listing
+    // providers and treats a refusal as fatal, so the profile re-allows
+    // metadata. This proves the narrow half of that: the path resolves, and
+    // reading it still does not.
+    const root = temporaryRoot();
+    // The walk starts at the users directory and descends into the home, so
+    // the home must sit inside it.
+    const users = join(root, "Users");
+    const home = join(users, "someone");
+    const secret = join(home, ".claude");
+    mkdirSync(secret, { recursive: true });
+    writeFileSync(join(secret, "settings.json"), "octant-secret");
+    const allowed = join(home, "project");
+    mkdirSync(allowed);
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: allowed,
+      temporaryDirectory: root,
+      networkEgress: "none",
+      privateHomeAllowPaths: [allowed, root],
+      homeDirectory: home,
+      usersDirectory: users,
+    });
+
+    // The re-allow is metadata only, so the emitted pair is the whole
+    // contract: a broad read deny, then a literal metadata allow for the same
+    // path. Contents stay unreadable because no file-read* allow covers them.
+    expect(profile).toContain(seatbeltDenyRule("file-read*", secret));
+    expect(profile).toContain(seatbeltAllowLiteralMetadataRule(secret));
+    expect(profile).not.toContain(seatbeltAllowRule("file-read*", secret));
+    // Last match wins, so the metadata allow has to come after the deny.
+    expect(profile.indexOf(seatbeltDenyRule("file-read*", secret))).toBeLessThan(
+      profile.indexOf(seatbeltAllowLiteralMetadataRule(secret)),
+    );
   });
 
   it("keeps a link that resolves through an allowed directory readable", () => {

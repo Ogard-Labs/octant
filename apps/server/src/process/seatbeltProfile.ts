@@ -375,6 +375,7 @@ export function privateHomeDenyReadRules(
     ),
   ];
   const rules: string[] = [];
+  const denied: string[] = [];
   const visit = (directory: string) => {
     const descendants = allowed.filter(
       (path) => path === directory || path.startsWith(`${directory}${sep}`),
@@ -397,6 +398,7 @@ export function privateHomeDenyReadRules(
         // path grants link metadata only.
         if (!symlinkReachesAllowed(child, allowed)) {
           rules.push(seatbeltDenyRule("file-read*", child));
+          denied.push(child);
         }
       } else if (entry.isDirectory()) visit(child);
       if (rules.length > MAX_PRIVATE_DENY_RULES) {
@@ -408,7 +410,26 @@ export function privateHomeDenyReadRules(
     }
   };
   visit(users);
-  return rules;
+  // A runtime that canonicalises a path only needs to stat it. OpenCode 2
+  // resolves the home directories of the other coding tools it bundles
+  // (~/.claude and the same shape for the rest) while listing its providers,
+  // and it treats a refused realpath as fatal: the provider and model
+  // endpoints answer 500 and the provider never becomes available.
+  //
+  // These rules are emitted after every deny above, and Seatbelt resolves by
+  // last matching rule, so each re-allows exactly one denied path for
+  // metadata. Contents stay denied: reading a file, or listing a directory,
+  // is still refused, and only the fact that the path exists and what kind of
+  // thing it is becomes visible. A symlink is unaffected either way — the
+  // kernel reads its target text under file-read*, which stays denied.
+  //
+  // Measured on macOS 27 against a real confined OpenCode 2.0.1: without
+  // this, `fs.realpathSync` on ~/.claude fails with EPERM and the CLI's log
+  // records "FileSystem.realPath (/Users/henrik/.claude)" as the cause of the
+  // 500. With it, realpath and lstat succeed and a directory listing is still
+  // refused. Removing the rule from an otherwise identical profile restores
+  // the failure, so the rule is load-bearing rather than incidental.
+  return [...rules, ...denied.map(seatbeltAllowLiteralMetadataRule)];
 }
 
 export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): string {
