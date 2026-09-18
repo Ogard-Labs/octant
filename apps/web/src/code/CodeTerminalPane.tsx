@@ -51,6 +51,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const [notice, setNotice] = useState<string>();
   const readSelection = useRef<(() => string) | undefined>(undefined);
   const operationQueue = useRef(Promise.resolve());
+  const pendingWrite = useRef("");
+  const queuedWrites = useRef(0);
+  const coalesceScheduled = useRef(false);
   const wakeReplay = useRef<(() => void) | undefined>(undefined);
   const interactive = props.executionPolicy !== "plan" && result.state === "running";
   const replayReady = loadedReplayKey === replayKey;
@@ -190,11 +193,59 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     }
   };
 
-  const enqueue = (kind: "write" | "resize", value: string | readonly [number, number]) => {
-    operationQueue.current = operationQueue.current.then(
-      () => execute(kind, value),
-      () => execute(kind, value),
-    );
+  const enqueueOperation = (
+    kind: "write" | "resize",
+    value: string | readonly [number, number],
+  ) => {
+    if (kind === "write") queuedWrites.current += 1;
+    const run = async () => {
+      try {
+        await execute(kind, value);
+      } finally {
+        if (kind === "write") {
+          queuedWrites.current -= 1;
+          const buffered = pendingWrite.current;
+          if (queuedWrites.current === 0 && buffered !== "") {
+            pendingWrite.current = "";
+            enqueueOperation("write", buffered);
+          }
+        }
+      }
+    };
+    operationQueue.current = operationQueue.current.then(run, run);
+  };
+
+  const flushPendingWrite = () => {
+    const buffered = pendingWrite.current;
+    if (buffered === "") return;
+    pendingWrite.current = "";
+    enqueueOperation("write", buffered);
+  };
+
+  const scheduleCoalesceFlush = () => {
+    if (coalesceScheduled.current || queuedWrites.current > 0) return;
+    coalesceScheduled.current = true;
+    queueMicrotask(() => {
+      coalesceScheduled.current = false;
+      if (queuedWrites.current > 0) return;
+      flushPendingWrite();
+    });
+  };
+
+  const enqueueWrite = (data: string) => {
+    if (data === "") return;
+    if (isCoalescableTerminalWrite(data)) {
+      pendingWrite.current += data;
+      scheduleCoalesceFlush();
+      return;
+    }
+    flushPendingWrite();
+    enqueueOperation("write", data);
+  };
+
+  const enqueueResize = (columns: number, rows: number) => {
+    flushPendingWrite();
+    enqueueOperation("resize", [columns, rows]);
   };
 
   const control = async (action: "restart" | "stop") => {
@@ -300,8 +351,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           ariaLabel="Repository terminal"
           interactive={interactive}
           {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
-          onData={(data) => enqueue("write", data)}
-          onResize={(columns, rows) => enqueue("resize", [columns, rows])}
+          onData={(data) => enqueueWrite(data)}
+          onResize={(columns, rows) => enqueueResize(columns, rows)}
           onSelectionReader={(read) => {
             readSelection.current = read;
           }}
@@ -361,4 +412,12 @@ function terminalState(result: TerminalResult): string {
 
 function terminalReplayKey(result: TerminalResult): string {
   return `${result.operationId}:${result.terminalId}:${result.transcript?.contentId ?? "empty"}`;
+}
+
+function isCoalescableTerminalWrite(data: string): boolean {
+  // A paste, IME commit, or escape sequence arrives as one onData payload.
+  // Only single printable keystrokes may share a write with their neighbors.
+  if (data.length !== 1) return false;
+  const code = data.charCodeAt(0);
+  return code >= 0x20 && code !== 0x7f && (code < 0x80 || code > 0x9f);
 }

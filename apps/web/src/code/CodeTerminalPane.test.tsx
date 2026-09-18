@@ -149,7 +149,30 @@ describe("CodeTerminalPane", () => {
     expect(runtime.loadRuntime).toHaveBeenCalledOnce();
   });
 
-  it("serializes terminal input chunks before sending the next chunk", async () => {
+  it("coalesces adjacent printable keystrokes into one terminal write", async () => {
+    const client = codeClient({ evidence: "ready" });
+    const runtime = xtermRuntime();
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    runtime.options?.onData("p");
+    runtime.options?.onData("w");
+    runtime.options?.onData("d");
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
+    expect(client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "write-terminal", data: "pwd" }),
+    );
+  });
+
+  it("keeps printable keystrokes that arrive during an in-flight write as one follow-up write", async () => {
     const client = codeClient({ evidence: "ready" });
     let resolveFirst: ((value: typeof terminalResult) => void) | undefined;
     (client.executeOperation as ReturnType<typeof vi.fn>)
@@ -172,19 +195,99 @@ describe("CodeTerminalPane", () => {
       />,
     );
     await waitFor(() => expect(runtime.options).toBeDefined());
-    runtime.options?.onData("p");
-    runtime.options?.onData("w");
+    runtime.options?.onData("a");
     await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
+    runtime.options?.onData("b");
+    runtime.options?.onData("c");
+    runtime.options?.onData("d");
+    expect(client.executeOperation).toHaveBeenCalledOnce();
     resolveFirst?.(terminalResult);
     await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(2));
     expect(client.executeOperation).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ kind: "write-terminal", data: "p" }),
+      expect.objectContaining({ kind: "write-terminal", data: "a" }),
     );
     expect(client.executeOperation).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ kind: "write-terminal", data: "w" }),
+      expect.objectContaining({ kind: "write-terminal", data: "bcd" }),
     );
+  });
+
+  it("does not merge a newline, paste, or control key into a printable burst", async () => {
+    const client = codeClient({ evidence: "ready" });
+    const runtime = xtermRuntime();
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    runtime.options?.onData("e");
+    runtime.options?.onData("c");
+    runtime.options?.onData("h");
+    runtime.options?.onData("o");
+    runtime.options?.onData("\r");
+    runtime.options?.onData("y");
+    runtime.options?.onData("pasted");
+    runtime.options?.onData("z");
+    runtime.options?.onData("\u0003");
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(6));
+    expect(terminalWriteData(client)).toEqual(["echo", "\r", "y", "pasted", "z", "\u0003"]);
+  });
+
+  it("flushes coalesced keystrokes before a resize", async () => {
+    const client = codeClient({ evidence: "ready" });
+    const runtime = xtermRuntime();
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    runtime.options?.onData("l");
+    runtime.options?.onData("s");
+    runtime.options?.onResize(120, 40);
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(2));
+    expect(client.executeOperation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ kind: "write-terminal", data: "ls" }),
+    );
+    expect(client.executeOperation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ kind: "resize-terminal", columns: 120, rows: 40 }),
+    );
+  });
+
+  it("preserves a hundred printable characters without loss, reordering, or duplication", async () => {
+    const client = codeClient({ evidence: "ready" });
+    const runtime = xtermRuntime();
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    const typed = Array.from({ length: 100 }, (_, index) =>
+      "abcdefghijklmnopqrstuvwxyz".charAt(index % 26),
+    ).join("");
+    for (const key of typed) runtime.options?.onData(key);
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
+    expect(terminalWriteData(client).join("")).toBe(typed);
   });
 
   it("turns a disconnected input command into an actionable pane error", async () => {
@@ -560,6 +663,13 @@ describe("CodeTerminalPane", () => {
     expect(client.executeOperation).not.toHaveBeenCalled();
   });
 });
+
+function terminalWriteData(client: ReturnType<typeof codeClient>): readonly string[] {
+  return (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.flatMap((call) => {
+    const command = call[0] as { readonly kind?: string; readonly data?: string };
+    return command.kind === "write-terminal" && command.data !== undefined ? [command.data] : [];
+  });
+}
 
 function xtermRuntime(selection = "") {
   let options: Parameters<XtermAdapterRuntime["mount"]>[1] | undefined;
