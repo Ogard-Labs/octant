@@ -99,6 +99,18 @@ export const ContextInspectorSnapshot = Schema.Struct({
   );
 export type ContextInspectorSnapshot = typeof ContextInspectorSnapshot.Type;
 
+export const ContextInspectorResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: ContextInspectorSnapshot,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("not-planned"),
+    subject: ContextSubjectRef,
+  }).annotations(strict),
+);
+export type ContextInspectorResult = typeof ContextInspectorResult.Type;
+
 export const ContextCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("update-context-overrides"),
@@ -145,6 +157,20 @@ export const decodeContextInspectorRequest = Schema.decodeUnknownSync(ContextIns
 export const decodeContextPlanSnapshot = Schema.decodeUnknownSync(ContextPlanSnapshot);
 export const decodeContextCapabilityCounts = Schema.decodeUnknownSync(ContextCapabilityCounts);
 export const decodeContextInspectorSnapshot = Schema.decodeUnknownSync(ContextInspectorSnapshot);
+export function decodeContextInspectorResult(input: unknown): ContextInspectorResult {
+  if (
+    typeof input === "object" &&
+    input !== null &&
+    "kind" in input &&
+    (input as { kind?: unknown }).kind === "not-planned"
+  ) {
+    return Schema.decodeUnknownSync(ContextInspectorResult)(input);
+  }
+  if (typeof input === "object" && input !== null && "kind" in input) {
+    return Schema.decodeUnknownSync(ContextInspectorResult)(input);
+  }
+  return { kind: "snapshot", snapshot: decodeContextInspectorSnapshot(input) };
+}
 export const decodeContextCommand = Schema.decodeUnknownSync(ContextCommand);
 export const decodeContextCommandResult = Schema.decodeUnknownSync(ContextCommandResult);
 export const decodeContextFailure = Schema.decodeUnknownSync(ContextFailure);

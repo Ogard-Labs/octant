@@ -3,7 +3,7 @@ import {
   decodeContextCommandResult,
   decodeContextFailure,
   decodeContextInspectorRequest,
-  decodeContextInspectorSnapshot,
+  decodeContextInspectorResult,
   type ContextCommand,
   type ContextCommandResult,
   type ContextFailure,
@@ -61,14 +61,21 @@ export function createContextClient(options: ContextClientOptions): ContextClien
       } catch {
         throw protocol("Context request is invalid.");
       }
-      const snapshot = await post(
+      const result = await post(
         resolved,
         "/api/context/inspect",
         request,
         signal,
-        decodeContextInspectorSnapshot,
+        decodeContextInspectorResult,
         headers,
       );
+      if (result.kind === "not-planned") {
+        if (!sameSubject(result.subject, request.subject)) {
+          throw protocol("Context service returned an invalid response.");
+        }
+        throw new ContextClientFailure("not-planned", "This thread has no context plan yet.");
+      }
+      const snapshot = result.snapshot;
       if (
         !sameSubject(snapshot.subject, request.subject) ||
         (request.afterSequence !== undefined && snapshot.sequence < request.afterSequence)

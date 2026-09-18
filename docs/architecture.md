@@ -503,7 +503,7 @@ Refusal fails creation visibly. No Linear write-back path exists.
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. New context plans retain
+composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
 model and service limit provenance and inspection metadata in the journal-backed
 plan projection. Inspection restores those saved facts after a host restart
 without querying the provider; saved observation timestamps remain unchanged.

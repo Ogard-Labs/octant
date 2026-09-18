@@ -109,10 +109,10 @@ describe("context routes", () => {
 
     const response = await notPlanned(request("/api/context/inspect", { subject }));
 
-    expect(response?.status).toBe(404);
+    expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toEqual({
-      category: "not-planned",
-      message: "This thread has no context plan yet.",
+      kind: "not-planned",
+      subject,
     });
   });
 });
