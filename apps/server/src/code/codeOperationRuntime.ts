@@ -1341,9 +1341,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // launch()/stream evidence may still own the in-memory controller.
       return turnState(existing.state);
     }
-    const failStart = () => {
+    /**
+     * A refused start the person can act on carries its reason; the generic
+     * state is for races they cannot (a start that lost its pending command, a
+     * root that moved, a turn already active).
+     */
+    const failStart = (reason?: string) => {
       this.settleSpendReservation(key);
-      return turnState("failed");
+      return turnState(
+        "failed",
+        reason === undefined ? undefined : { category: "failed", message: reason },
+      );
     };
     const command = this.#pending.get(key);
     const root = this.#roots.get(key);
@@ -1365,7 +1373,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         (this.#options.browserAutomation === undefined ||
           this.#options.supportsAppManagedTools?.(input.thread) !== true))
     ) {
-      return failStart();
+      return failStart(
+        "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
+      );
     }
     if (
       command.computerUseSelection !== undefined &&
@@ -1376,7 +1386,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           selection: command.computerUseSelection,
         }) === undefined)
     )
-      return failStart();
+      return failStart(
+        "This provider cannot carry Octant's Computer tool. Check the provider's connection in Settings, then retry without the Computer selection.",
+      );
     const secrets: string[] = [];
     for (const credential of root.credentialReferences) {
       const value = await this.#options.credentialResolver.resolve(credential.reference);
@@ -2154,8 +2166,14 @@ function sanitizeProviderEvent(
   return sanitize(event) as ProviderRuntimeEvent;
 }
 
-function turnState(state: ActiveTurn["state"]): { state: ActiveTurn["state"] } {
-  return { state };
+function turnState(
+  state: ActiveTurn["state"],
+  failure?: { readonly category: "failed"; readonly message: string },
+): {
+  state: ActiveTurn["state"];
+  failure?: { readonly category: "failed"; readonly message: string };
+} {
+  return failure === undefined ? { state } : { state, failure };
 }
 
 function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperationPullRequestPort {

@@ -1800,6 +1800,37 @@ describe("useCodeController", () => {
     expect(result.current.turnError).toBe("Provider is offline.");
   });
 
+  it("shows the host's own reason when a refused turn start names one", async () => {
+    const refusal =
+      "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.";
+    const client = fakeClient({
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId: "70000000-0000-4000-8000-000000000025",
+        state: "failed",
+        failure: { category: "failed", message: refusal },
+      })) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    await waitFor(() => expect(result.current.conversation).toEqual([]));
+
+    let started = true;
+    await act(async () => {
+      started = await result.current.startThreadTurn({
+        threadId: ids.thread,
+        checkoutId: ids.checkout as never,
+        prompt: "Read this page",
+      });
+    });
+
+    expect(started).toBe(false);
+    expect(result.current.pendingDraft).toBe("Read this page");
+    expect(result.current.turnError).toBe(refusal);
+  });
+
   it("restores a persisted waiting turn and its operation when the thread reopens", async () => {
     const promptId = "60000000-0000-4000-8000-000000000053";
     const operationId = "70000000-0000-4000-8000-000000000053";

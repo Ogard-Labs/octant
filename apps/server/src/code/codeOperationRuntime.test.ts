@@ -1907,6 +1907,8 @@ describe("managed Code creation approval", () => {
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
+  /** Whether the thread's provider can carry app-managed tools (default true). */
+  supportsAppManagedTools?: boolean;
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
@@ -2008,7 +2010,10 @@ function runtimeFixture(options: {
     resolveProviderDriver: async () => options.provider,
     ...(options.browserAutomation === undefined
       ? {}
-      : { browserAutomation: options.browserAutomation, supportsAppManagedTools: () => true }),
+      : {
+          browserAutomation: options.browserAutomation,
+          supportsAppManagedTools: () => options.supportsAppManagedTools ?? true,
+        }),
     credentialResolver: { resolve: async () => options.credential },
     resolvePullRequestTarget: async () =>
       options.pullRequestTarget === true
@@ -2213,3 +2218,57 @@ function providerEvent(
     ...value,
   } as ProviderRuntimeEvent;
 }
+it("names why a turn whose provider cannot carry an app-managed tool was refused", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const provider = providerConnection(queue);
+  const authority = decodeToolActionAuthority({
+    hostId: "90000000-0000-4000-8000-000000000010",
+    mode: "code",
+    projectId: thread().projectId,
+    rootId: "90000000-0000-4000-8000-000000000009",
+    worktreeId: checkoutId,
+    providerInstanceId: thread().providerInstanceId,
+    extension: { kind: "core" },
+  });
+  const browserSnapshot = decodeBrowserAutomationSnapshot({
+    status: "ready",
+    threadId,
+    evidence: [],
+  });
+  const fixture = runtimeFixture({
+    provider: providerDriver(provider),
+    supportsAppManagedTools: false,
+    browserAutomation: {
+      resolveAuthority: () => authority,
+      inspectThread: () => browserSnapshot,
+      create: async () => browserSnapshot,
+      act: async () => browserSnapshot,
+      releaseThread: async () => browserSnapshot,
+    },
+  });
+  try {
+    // A refusal the person can act on: without the sentence, the composer
+    // could only say "The provider turn could not be started."
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(76),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+        extensionSelections: [browserUseSelection("code-browser-refusal")],
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "failed",
+      failure: {
+        category: "failed",
+        message:
+          "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
+      },
+    });
+  } finally {
+    fixture.close();
+  }
+});
