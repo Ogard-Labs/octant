@@ -40,6 +40,8 @@ export interface DockToolCapabilities {
   readonly hasAppleSimulator: boolean;
   readonly hasChildRuns: boolean | "unknown";
   readonly addAgentInvoked: boolean;
+  /** An existing Chat, Work, or Code thread, including one with zero children. */
+  readonly hasExistingThread: boolean;
 }
 
 /**
@@ -56,7 +58,11 @@ export function isDockToolLaunchable(
   if (surface === "document") return capabilities.hasWrittenDocument;
   if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
   if (surface === "agents") {
-    return capabilities.hasChildRuns === true || capabilities.addAgentInvoked;
+    return (
+      capabilities.hasExistingThread ||
+      capabilities.hasChildRuns === true ||
+      capabilities.addAgentInvoked
+    );
   }
   return true;
 }
@@ -71,7 +77,11 @@ export function isDockToolStillOpenable(
   if (surface === "document") return capabilities.hasWrittenDocument;
   if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
   if (surface === "agents") {
-    return capabilities.hasChildRuns !== false || capabilities.addAgentInvoked;
+    return (
+      capabilities.hasExistingThread ||
+      capabilities.hasChildRuns !== false ||
+      capabilities.addAgentInvoked
+    );
   }
   return true;
 }

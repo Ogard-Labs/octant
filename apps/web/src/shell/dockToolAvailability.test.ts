@@ -45,6 +45,7 @@ describe("which live tools the dock may offer", () => {
       hasWrittenDocument: false,
       hasChildRuns: "unknown" as const,
       addAgentInvoked: false,
+      hasExistingThread: false,
     };
     expect(isDockToolLaunchable("plan", unknown)).toBe(false);
     expect(isDockToolLaunchable("delivery", unknown)).toBe(false);
@@ -73,6 +74,7 @@ describe("which live tools the dock may offer", () => {
       hasWrittenDocument: false,
       hasChildRuns: false,
       addAgentInvoked: false,
+      hasExistingThread: false,
     } as const;
     expect(isDockToolLaunchable("ios-simulator", capabilities)).toBe(false);
     expect(
@@ -80,7 +82,7 @@ describe("which live tools the dock may offer", () => {
     ).toBe(true);
   });
 
-  it("hides Agents until children exist or Add agent is invoked", () => {
+  it("offers Agents for an existing thread even before the first child exists", () => {
     const empty = {
       hasPlanArtifact: false,
       hasDelivery: false,
@@ -89,13 +91,23 @@ describe("which live tools the dock may offer", () => {
       hasWrittenDocument: false,
       hasChildRuns: false,
       addAgentInvoked: false,
+      hasExistingThread: true,
     } as const;
-    expect(isDockToolLaunchable("agents", empty)).toBe(false);
-    expect(isDockToolStillOpenable("agents", empty)).toBe(false);
+    expect(isDockToolLaunchable("agents", empty)).toBe(true);
+    expect(isDockToolStillOpenable("agents", empty)).toBe(true);
     expect(isDockToolLaunchable("agents", { ...empty, hasChildRuns: true })).toBe(true);
-    expect(isDockToolLaunchable("agents", { ...empty, addAgentInvoked: true })).toBe(true);
-    expect(isDockToolStillOpenable("agents", { ...empty, hasChildRuns: "unknown" as const })).toBe(
-      true,
-    );
+    expect(
+      isDockToolLaunchable("agents", { ...empty, hasExistingThread: false, addAgentInvoked: true }),
+    ).toBe(true);
+    expect(
+      isDockToolLaunchable("agents", { ...empty, hasExistingThread: false, hasChildRuns: false }),
+    ).toBe(false);
+    expect(
+      isDockToolStillOpenable("agents", {
+        ...empty,
+        hasExistingThread: false,
+        hasChildRuns: "unknown" as const,
+      }),
+    ).toBe(true);
   });
 });

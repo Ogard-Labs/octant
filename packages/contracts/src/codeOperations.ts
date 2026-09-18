@@ -967,6 +967,12 @@ const ProviderTurnResult = Schema.Struct({
   operationId: CodeOperationId,
   state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
   evidence: Schema.optional(CodeEvidenceReference),
+  /**
+   * Why a turn was refused or failed, when the host can name it. A start that
+   * is refused before the provider is reached carries the host's own sentence
+   * here; without it the client can only say the turn could not be started.
+   */
+  failure: Schema.optional(CodeOperationFailure),
 }).annotations(strict);
 const OperationAccepted = Schema.Struct({
   kind: Schema.Literal("operation-accepted"),

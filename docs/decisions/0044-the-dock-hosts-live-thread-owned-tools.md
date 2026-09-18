@@ -69,9 +69,11 @@ or Project-wide surfaces.
 - **Publish is Delivery, and conditional.** Delivery appears only when the
   server reports an enabled target or an actionable delivery plan (0026). An
   unconfigured empty panel is absent.
-- **Agents is conditional.** Compact child-run status stays in the thread
-  header (0012). Agents opens as a dock tool when children exist or the user
-  invokes Add agent.
+- **Agents is thread-owned.** Compact child-run status stays in the thread
+  header (0012). Agents opens as a dock tool for an existing Chat, Work, or
+  Code thread, including one with zero children. Creation posture remains
+  server-authoritative: Automatic creates, Ask approves, and Off shows a
+  visible refusal.
 - **Review is the diff destination.** Local checkout changes and merge-back
   run review open in Review beside the main thread. Pull-request detail remains
   a later Review destination. The full-window Code diff surface is gone.
