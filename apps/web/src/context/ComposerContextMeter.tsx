@@ -76,6 +76,18 @@ export function ComposerContextMeter() {
   const percent =
     windowModel === undefined ? (reported?.percent ?? limit?.percent ?? 0) : windowModel.percent;
   const usedArc = (Math.max(0, Math.min(100, percent)) / 100) * METER_CIRCUMFERENCE;
+  const limitAlert =
+    snapshot?.serviceLimits.quota === "exhausted"
+      ? "exhausted"
+      : fallback === undefined
+        ? undefined
+        : limitAlertState(fallback);
+  const limitAlertText =
+    limitAlert === undefined
+      ? ""
+      : limitAlert === "exhausted"
+        ? " A provider limit is exhausted."
+        : " A provider limit is running low.";
   const label = meterLabel({
     open,
     status: scope.status,
@@ -84,6 +96,7 @@ export function ComposerContextMeter() {
     ...(snapshot === undefined ? {} : { snapshotLabel: snapshot.displayLabel }),
     ...(health === undefined ? {} : { healthLabel: `Next turn: ${contextHealthLabel(health)}` }),
   });
+  const triggerLabel = label + limitAlertText;
 
   // The panel shows one of three things, and a screen reader that is told the
   // dialog is named for a heading it does not contain has been told the wrong
@@ -98,7 +111,11 @@ export function ComposerContextMeter() {
       : "Context window";
 
   return (
-    <div className="composer-context-meter" data-health={health}>
+    <div
+      className="composer-context-meter"
+      data-health={health}
+      {...(limitAlert === undefined ? {} : { "data-limit-alert": limitAlert })}
+    >
       <OctantPopover
         align="end"
         className="context-window-popover composer-context-meter__popover window-no-drag"
@@ -130,10 +147,13 @@ export function ComposerContextMeter() {
                 transform={`rotate(-90 ${String(METER_SIZE / 2)} ${String(METER_SIZE / 2)})`}
               />
             ) : null}
+            {limitAlert === undefined ? null : (
+              <circle className="composer-context-meter__alert" cx="13.5" cy="4.5" r="3" />
+            )}
           </svg>
         }
         triggerClassName="composer-context-meter__button"
-        triggerLabel={label}
+        triggerLabel={triggerLabel}
         triggerVariant="ghost-icon"
       >
         {windowModel === undefined || snapshot === undefined ? (
@@ -163,6 +183,7 @@ export function ComposerContextMeter() {
             ? {}
             : { healthLabel: `Next turn: ${contextHealthLabel(health)}` }),
         })}
+        {limitAlertText}
       </span>
       {inspecting && snapshot !== undefined ? (
         <OctantDialog
@@ -224,6 +245,22 @@ function bindingLimit(
     }
   }
   return binding;
+}
+
+/**
+ * The worst account window the provider reported. The ring's dot is the only
+ * at-a-glance warning left in the composer once the status line moved in,
+ * so "exhausted" must win over "warning" and "allowed" draws nothing.
+ */
+function limitAlertState(
+  fallback: ComposerContextUsageFallback,
+): "exhausted" | "warning" | undefined {
+  let state: "exhausted" | "warning" | undefined;
+  for (const limit of fallback.limits) {
+    if (limit.status === "exhausted") return "exhausted";
+    if (limit.status === "warning") state = "warning";
+  }
+  return state;
 }
 
 function providerUsageLabel(fallback: ComposerContextUsageFallback): string {

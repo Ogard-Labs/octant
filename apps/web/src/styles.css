@@ -6385,28 +6385,93 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 /* The chosen model's effort/reasoning level, one tap from the list. The
-   segmented recipe paints the buttons; this rule only places the row. */
+   declared levels are the slider's stops and the knob snaps to a stop; the
+   reading above it names the level the knob sits on. */
 .composer-model-picker__level {
-  display: flex;
-  flex-wrap: wrap;
   grid-column: 1 / -1;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-2);
-  padding: 5px 8px;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 8px;
   border-top: 1px solid var(--octant-border);
 }
 
+.composer-model-picker__level-reading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  width: 100%;
+}
+
 .composer-model-picker__level-label {
+  flex: 0 0 auto;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
 
-.composer-model-picker__level-group {
-  flex: 1 1 260px;
-  min-width: 0;
-  flex-wrap: wrap;
+.composer-model-picker__level-value {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--octant-accent-text);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-model-picker__level-slider {
+  position: relative;
+  width: 100%;
+  height: 18px;
+  cursor: pointer;
+}
+
+.composer-model-picker__level-slider:focus-visible .composer-model-picker__level-knob {
+  box-shadow: 0 0 0 3px var(--octant-focus-ring);
+}
+
+.composer-model-picker__level-fill {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: 0;
+  height: 4px;
+  translate: 0 -50%;
+  background: var(--octant-accent);
+  border-radius: var(--octant-radius-pill);
+}
+
+.composer-model-picker__level-knob {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  translate: -50% -50%;
+  background: var(--octant-text-primary);
+  border-radius: var(--octant-radius-pill);
+  box-shadow: var(--octant-shadow-xs);
+  transition: inset-inline-start var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-model-picker__level-knob {
+    transition: none;
+  }
+}
+
+.composer-model-picker__level-stop {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  translate: -50% -50%;
+  background: var(--octant-text-primary);
+  opacity: 0.35;
+  border-radius: 50%;
+}
+
+.composer-model-picker__level-stop--on {
+  opacity: 0.8;
 }
 
 .code-branch-selector__search {
@@ -7231,19 +7296,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .code-thread-workspace__hint {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__limit {
-  font-size: var(--oct-text-xs);
-  color: var(--oct-fg-2);
-}
-
-.code-thread-workspace__limit--warning {
-  color: var(--oct-warn-fg);
-}
-
-.code-thread-workspace__limit--exhausted {
-  color: var(--oct-danger-fg);
 }
 
 .parallel-runs {

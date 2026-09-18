@@ -443,4 +443,110 @@ describe("ComposerContextMeter", () => {
       document.querySelector(".context-window-popover__limit-meter")?.getAttribute("data-tone"),
     ).toBe("warn");
   });
+
+  it("marks the ring with a red dot when a provider limit runs low or is spent", () => {
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          limits: [
+            {
+              window: "five_hour",
+              status: "exhausted",
+              utilization: 1,
+              resetsAt: "2026-08-24T01:00:00.000Z" as never,
+            },
+          ],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    // The status line that used to spell the limit out moved into the meter's
+    // panel, so the at-a-glance warning is a dot on the ring itself.
+    const alert = document.querySelector(".composer-context-meter__alert");
+    expect(alert).not.toBeNull();
+    expect(
+      document.querySelector(".composer-context-meter")?.getAttribute("data-limit-alert"),
+    ).toBe("exhausted");
+    expect(
+      screen.getByRole("button", { name: /A provider limit is exhausted\.?$/i }),
+    ).toBeVisible();
+  });
+
+  it("turns the ring's dot from warning red to exhausted red as a limit spends out", () => {
+    const { rerender } = render(
+      <ComposerContextMeterProvider
+        fallback={{
+          limits: [{ window: "seven_day", status: "warning", utilization: 0.87 }],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    expect(
+      document.querySelector(".composer-context-meter")?.getAttribute("data-limit-alert"),
+    ).toBe("warning");
+    screen.getByRole("button", { name: /A provider limit is running low\.?$/i });
+
+    rerender(
+      <ComposerContextMeterProvider
+        fallback={{
+          limits: [{ window: "seven_day", status: "exhausted", utilization: 1 }],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    expect(
+      document.querySelector(".composer-context-meter")?.getAttribute("data-limit-alert"),
+    ).toBe("exhausted");
+  });
+
+  it("marks the ring as exhausted when the context snapshot's service quota is spent", () => {
+    const base = contextFixture();
+    const snapshot = {
+      ...base,
+      serviceLimits: { ...base.serviceLimits, quota: "exhausted" as never },
+    };
+    render(<Harness snapshot={snapshot} />);
+
+    expect(
+      document.querySelector(".composer-context-meter")?.getAttribute("data-limit-alert"),
+    ).toBe("exhausted");
+    expect(screen.getByRole("button", { name: /A provider limit is exhausted.?$/i })).toBeVisible();
+  });
+
+  it("draws no alert dot while every provider limit is allowed", () => {
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          limits: [{ window: "seven_day", status: "allowed", utilization: 0.12 }],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    expect(document.querySelector(".composer-context-meter__alert")).toBeNull();
+  });
 });

@@ -78,7 +78,7 @@ describe("ComposerModelPicker", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(screen.queryByRole("group", { name: "Effort level" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Effort level" })).not.toBeInTheDocument();
   });
 
   it("names a hidden bound model without offering it as a new selection", async () => {
@@ -341,36 +341,75 @@ describe("ComposerModelPicker", () => {
   it("draws the selected model's reasoning level and reports the chosen level", async () => {
     const user = userEvent.setup();
     const onModelOptionChange = vi.fn();
-    render(
-      <ComposerModelPicker
-        groups={groups()}
-        modelOptions={[
-          {
-            id: "effort",
-            displayName: "Effort",
-            values: ["low", "medium", "high"],
-            value: "medium",
-          },
-        ]}
-        onModelOptionChange={onModelOptionChange}
-        onSelect={vi.fn()}
-        selectedModelId={modelOne}
-        selectedProviderInstanceId={providerA}
-      />,
-    );
+    const view = (effortValue?: string) =>
+      render(
+        <ComposerModelPicker
+          groups={groups()}
+          modelOptions={[
+            {
+              id: "effort",
+              displayName: "Effort",
+              values: ["low", "medium", "high"],
+              ...(effortValue === undefined ? {} : { value: effortValue }),
+            },
+          ]}
+          onModelOptionChange={onModelOptionChange}
+          onSelect={vi.fn()}
+          selectedModelId={modelOne}
+          selectedProviderInstanceId={providerA}
+        />,
+      );
+    view("medium");
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const levels = await screen.findByRole("group", { name: "Effort level" });
-    expect(within(levels).getByRole("button", { name: "Medium" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    const level = await screen.findByRole("slider", { name: "Effort level" });
+    // Default is the first stop; the model's three declared levels fill the
+    // rest, so the knob starts at stop 2 of 4 and reads the level it sits on.
+    expect(level).toHaveAttribute("aria-valuenow", "2");
+    expect(level).toHaveAttribute("aria-valuemax", "3");
+    expect(level).toHaveAttribute("aria-valuetext", "Medium");
+
+    await user.click(level);
+    await user.keyboard("{ArrowRight}");
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", "high");
+    await user.keyboard("{Home}");
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
+  });
+
+  it("reads the knob's level from the thread's stored effort", async () => {
+    const user = userEvent.setup();
+    const renderView = (effortValue: string) =>
+      render(
+        <ComposerModelPicker
+          groups={groups()}
+          modelOptions={[
+            {
+              id: "effort",
+              displayName: "Effort",
+              values: ["low", "medium", "high"],
+              value: effortValue,
+            },
+          ]}
+          onModelOptionChange={vi.fn()}
+          onSelect={vi.fn()}
+          selectedModelId={modelOne}
+          selectedProviderInstanceId={providerA}
+        />,
+      );
+
+    const { unmount } = renderView("high");
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
+      "aria-valuetext",
+      "High",
     );
-
-    await user.click(within(levels).getByRole("button", { name: "High" }));
-    expect(onModelOptionChange).toHaveBeenCalledWith("effort", "high");
-
-    await user.click(within(levels).getByRole("button", { name: "Default" }));
-    expect(onModelOptionChange).toHaveBeenCalledWith("effort", undefined);
+    unmount();
+    renderView("medium");
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
+      "aria-valuetext",
+      "Medium",
+    );
   });
 
   it("keeps the level control out when no reasoning option is declared", async () => {
@@ -388,7 +427,7 @@ describe("ComposerModelPicker", () => {
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     await screen.findByRole("dialog", { name: "Choose provider and model" });
-    expect(screen.queryByRole("group", { name: /level$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: /level$/i })).not.toBeInTheDocument();
   });
 });
 

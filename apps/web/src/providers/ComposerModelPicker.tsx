@@ -18,7 +18,6 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSeparator } from "../ui/base/OctantSeparator";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderGlyph } from "./ProviderGlyph";
 
 /**
@@ -209,6 +208,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     levelOption.values.includes(levelOption.value)
       ? levelOption.value
       : DEFAULT_LEVEL_ID;
+  // Stop 0 is the provider default; stop i is values[i - 1], so the knob
+  // never has to point at a value the model does not declare.
+  const levelIndex =
+    levelOption === undefined || levelValue === DEFAULT_LEVEL_ID
+      ? 0
+      : levelOption.values.indexOf(levelValue) + 1;
+  const levelName = levelIndex === 0 ? "Default" : (levelOption?.values[levelIndex - 1] ?? "");
   const favoritesActive = !searching && activeRailId === FAVORITES_RAIL_ID;
   // With a search query, matches span every provider; the Favorites rail entry
   // lists starred models across providers; otherwise the list shows the active
@@ -560,38 +566,18 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           </div>
         </div>
         {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
-          <div className="composer-model-picker__level">
-            <span className="composer-model-picker__level-label">{levelOption.displayName}</span>
-            <OctantToggleGroup<string>
-              aria-label={`${levelOption.displayName} level`}
-              className="composer-model-picker__level-group segmented"
-              onValueChange={(value) => {
-                const next = value[0];
-                if (next === undefined) return;
-                props.onModelOptionChange?.(
-                  levelOption.id,
-                  next === DEFAULT_LEVEL_ID ? undefined : next,
-                );
-              }}
-              value={[levelValue]}
-            >
-              <OctantToggleGroupItem<string>
-                className="composer-model-picker__level-option segment"
-                value={DEFAULT_LEVEL_ID}
-              >
-                Default
-              </OctantToggleGroupItem>
-              {levelOption.values.map((value) => (
-                <OctantToggleGroupItem<string>
-                  className="composer-model-picker__level-option segment"
-                  key={value}
-                  value={value}
-                >
-                  {levelLabel(value)}
-                </OctantToggleGroupItem>
-              ))}
-            </OctantToggleGroup>
-          </div>
+          <LevelSlider
+            displayName={levelOption.displayName}
+            label={levelIndex === 0 ? "Default" : levelLabel(levelName)}
+            onIndexChange={(index) =>
+              props.onModelOptionChange?.(
+                levelOption.id,
+                index === 0 ? undefined : levelOption.values[index - 1],
+              )
+            }
+            index={levelIndex}
+            stopCount={levelOption.values.length + 1}
+          />
         )}
       </OctantPopover>
     </div>
@@ -601,6 +587,94 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
 /** “medium” reads as “Medium” beside the model the control belongs to. */
 function levelLabel(value: string): string {
   return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
+}
+
+/**
+ * The reasoning/effort choice as a discrete slider: the model's declared
+ * levels are the stops, the provider default is the first one, and the knob
+ * snaps to a stop. A row of segments needed a tap per level and overflowed
+ * the menu past six of them; the slider keeps every level in the same width
+ * and lets the reader hear which stop the knob sits on.
+ */
+function LevelSlider(props: {
+  readonly displayName: string;
+  readonly index: number;
+  readonly label: string;
+  readonly onIndexChange: (index: number) => void;
+  readonly stopCount: number;
+}) {
+  const { index, stopCount } = props;
+  const position = stopCount === 1 ? 0 : (index / (stopCount - 1)) * 100;
+
+  function moveTo(next: number) {
+    props.onIndexChange(Math.max(0, Math.min(stopCount - 1, next)));
+  }
+
+  return (
+    <div className="composer-model-picker__level">
+      <div className="composer-model-picker__level-reading">
+        <span className="composer-model-picker__level-label">{props.displayName}</span>
+        <strong className="composer-model-picker__level-value">{props.label}</strong>
+      </div>
+      <div
+        aria-label={`${props.displayName} level`}
+        aria-orientation="horizontal"
+        aria-valuemax={stopCount - 1}
+        aria-valuemin={0}
+        aria-valuenow={index}
+        aria-valuetext={props.label}
+        className="composer-model-picker__level-slider"
+        onKeyDown={(event) => {
+          if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+            event.preventDefault();
+            moveTo(index + 1);
+          } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+            event.preventDefault();
+            moveTo(index - 1);
+          } else if (event.key === "Home") {
+            event.preventDefault();
+            moveTo(0);
+          } else if (event.key === "End") {
+            event.preventDefault();
+            moveTo(stopCount - 1);
+          }
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          // Focus comes first: a pointer without layout (a test environment,
+          // a window mid-resize) still means the slider is selected.
+          const track = event.currentTarget;
+          track.focus();
+          const rect = track.getBoundingClientRect();
+          if (rect.width === 0) return;
+          const stop = Math.round(((event.clientX - rect.left) / rect.width) * (stopCount - 1));
+          moveTo(stop);
+        }}
+        role="slider"
+        tabIndex={0}
+      >
+        <span
+          aria-hidden="true"
+          className="composer-model-picker__level-fill"
+          style={{ inlineSize: `${String(position)}%` }}
+        />
+        <span
+          aria-hidden="true"
+          className="composer-model-picker__level-knob"
+          style={{ insetInlineStart: `${String(position)}%` }}
+        />
+        {Array.from({ length: stopCount }, (_, stop) => (
+          <span
+            aria-hidden="true"
+            className={`composer-model-picker__level-stop${stop === index ? " composer-model-picker__level-stop--on" : ""}`}
+            key={stop}
+            style={{ insetInlineStart: `${stopCount === 1 ? 0 : (stop / (stopCount - 1)) * 100}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function matchesQuery(row: ModelRow, trimmedQuery: string): boolean {
