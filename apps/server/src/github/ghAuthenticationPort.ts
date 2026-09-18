@@ -159,6 +159,10 @@ export class GhAuthenticationPort {
       ) {
         throw new Error("secure-storage-unavailable");
       }
+      if (command.kind === "migrate-storage") {
+        await this.#migratePlaintextCredential(signal, environment);
+        return { kind: "completed" };
+      }
       const arguments_ =
         command.kind === "setup"
           ? ["auth", "login", "--hostname", "github.com", "--web", "--git-protocol", "https"]
@@ -244,6 +248,67 @@ export class GhAuthenticationPort {
     const [account] = observation.accounts;
     if (account === undefined) throw new Error("github-authentication-unavailable");
     return account.login;
+  }
+
+  /**
+   * Moves a plaintext gh credential into host-managed storage without asking
+   * the user for the token again.
+   *
+   * Order matters and is the whole safety property: read the token, prove the
+   * secure store works, write the token there, and only then let gh drop the
+   * plaintext copy. Every failure before the write leaves the existing
+   * credential untouched, so a host that cannot store securely keeps working
+   * exactly as it does today rather than losing its only credential.
+   */
+  async #migratePlaintextCredential(
+    signal: AbortSignal,
+    environment: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    if (!(await this.#secureStorageAvailable(signal, environment)))
+      throw new Error("secure-storage-unavailable");
+    const observation = await this.observe(signal);
+    if (observation.kind !== "observed" || observation.accounts.length !== 1)
+      throw new Error("github-authentication-unavailable");
+    const [account] = observation.accounts;
+    if (account === undefined) throw new Error("github-authentication-unavailable");
+    if (!isPlaintextCredentialSource(account.source))
+      throw new Error("github-credential-already-secure");
+    const read = await withDeadline(
+      (deadlineSignal) =>
+        this.#command.run(
+          ["auth", "token", "--hostname", "github.com", "--user", account.login],
+          { environment },
+          deadlineSignal,
+        ),
+      signal,
+      INTERACTIVE_AUTH_TIMEOUT_MS,
+    );
+    const token = read.stdout.trim();
+    if (read.exitCode !== 0 || token === "") throw new Error("gh-auth-failed");
+    // gh writes to host-managed storage here. The token travels on stdin, so
+    // it never appears in a process listing or in this adapter's output.
+    const written = await withDeadline(
+      (deadlineSignal) =>
+        this.#command.run(
+          ["auth", "login", "--hostname", "github.com", "--with-token", "--git-protocol", "https"],
+          { environment, stdin: token },
+          deadlineSignal,
+        ),
+      signal,
+      INTERACTIVE_AUTH_TIMEOUT_MS,
+    );
+    if (written.exitCode !== 0) throw new Error("gh-auth-failed");
+    // Prove the credential now resolves from secure storage before the
+    // plaintext copy is allowed to disappear. A store that accepted the write
+    // but cannot read it back would otherwise leave the host with neither.
+    const verified = await this.observe(signal);
+    if (
+      verified.kind !== "observed" ||
+      verified.accounts.length !== 1 ||
+      isPlaintextCredentialSource(verified.accounts[0]!.source)
+    ) {
+      throw new Error("github-credential-migration-unverified");
+    }
   }
 
   #releaseLifecycle(): void {
@@ -411,6 +476,20 @@ function normalizeCredentialSource(source: string): string {
   // Keep the credential path inside this adapter and pass only a closed source
   // category to the policy layer.
   return /(?:^|[\\/])hosts\.ya?ml$/i.test(source) ? "config-file" : source;
+}
+
+/**
+ * The credential categories the domain policy treats as insecure, tested
+ * against the already-normalized source this adapter passes on. The migration
+ * must not run when gh resolved a secure store, or it would rewrite a working
+ * credential for no reason.
+ */
+function isPlaintextCredentialSource(normalizedSource: string): boolean {
+  return (
+    normalizedSource === "config-file" ||
+    normalizedSource === "plaintext" ||
+    normalizedSource === "file"
+  );
 }
 export function sanitizedEnvironment(inherited: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0" };
