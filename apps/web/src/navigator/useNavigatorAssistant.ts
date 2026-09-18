@@ -2,7 +2,12 @@ import {
   NavigatorAssistantClientFailure,
   type NavigatorAssistantClient,
 } from "@octant/client-runtime";
-import type { NavigatorAssistantSnapshot, SettingsDeepLink } from "@octant/contracts";
+import type {
+  NavigatorAssistantModelRef,
+  NavigatorAssistantSettings,
+  NavigatorAssistantSnapshot,
+  SettingsDeepLink,
+} from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -40,6 +45,35 @@ export interface UseNavigatorAssistantOptions {
    * first connect as a denied principal.
    */
   readonly enabled?: boolean;
+  /**
+   * Identifies the host's current Navigator configuration — which provider and
+   * model each role is pinned to.
+   *
+   * The host decides between `ready` and `unconfigured` from this
+   * configuration, and it changes it without telling the renderer: choosing or
+   * clearing a default model in Settings is an ordinary settings write. So the
+   * previous answer stops being true the moment it changes, and without this
+   * the profile menu kept offering a Navigator the host had already withdrawn,
+   * or hid one it had just admitted, until the window was reloaded.
+   */
+  readonly configuration?: string;
+}
+
+/**
+ * The identity of a Navigator configuration, for callers that watch the
+ * shell's settings.
+ *
+ * Two configurations that pin the same roles to the same provider/model pairs
+ * are the same configuration as far as the host's answer is concerned, so the
+ * key is built from the roles rather than from object identity — a settings
+ * write that changes something else must not look like a Navigator change.
+ */
+export function navigatorConfigurationKey(
+  settings: NavigatorAssistantSettings | undefined,
+): string {
+  const role = (ref: NavigatorAssistantModelRef | undefined): string =>
+    ref === undefined ? "" : `${String(ref.providerInstanceId)}/${String(ref.modelId)}`;
+  return `${role(settings?.defaultProvider)}|${role(settings?.visionReviewer)}`;
 }
 
 /**
@@ -62,7 +96,8 @@ export const UNSUPPORTED_NAVIGATOR_ASSISTANT: NavigatorAssistantController = {
  * on the one configured model rather than each keeping their own.
  *
  * There is no polling loop: the snapshot is re-read on mount, after every
- * send, and when the user asks, exactly as Zen's assistant already refreshes.
+ * send, when the host's Navigator configuration changes, and when the user
+ * asks, exactly as Zen's assistant already refreshes.
  */
 export function useNavigatorAssistant(
   client: NavigatorAssistantClient | undefined,
@@ -107,7 +142,7 @@ export function useNavigatorAssistant(
 
   useEffect(() => {
     void read();
-  }, [read]);
+  }, [read, options?.configuration]);
 
   const send = useCallback(
     async (prompt: string) => {
