@@ -24,8 +24,8 @@ interface CommandResult {
  * fallback to be usable; a profile with only a name is not an identity.
  */
 export interface CommitIdentity {
-  readonly name: string;
-  readonly email: string;
+  readonly name?: string;
+  readonly email?: string;
 }
 
 /** Reads the host's recorded commit identity when a commit needs a fallback. */

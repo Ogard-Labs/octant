@@ -3777,8 +3777,14 @@ export function startOctantServer(
       const gitMutationPort = new GitMutationPort(undefined, {
         commitIdentity: () => {
           const profile = persistence.readShellSettings()?.settings.userProfile;
-          if (profile?.displayName === undefined || profile?.email === undefined) return undefined;
-          return { name: profile.displayName, email: profile.email };
+          // The profile's fields are independent: a name without an address
+          // still completes a checkout that has an address but no name. The
+          // port merges per field and refuses only when the combination
+          // cannot name an author at all.
+          return {
+            ...(profile?.displayName === undefined ? {} : { name: profile.displayName }),
+            ...(profile?.email === undefined ? {} : { email: profile.email }),
+          };
         },
       });
       codeOperationRuntime = createCodeOperationRuntime({

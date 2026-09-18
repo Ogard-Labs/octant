@@ -451,6 +451,33 @@ describe("GitMutationPort", () => {
     );
   });
 
+  it("combines a partial host profile with the fields the checkout supplies", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    // The checkout names an author but no address; a profile carrying only an
+    // address must be able to complete that identity.
+    git(repository, "config", "--local", "user.name", "Checkout Author");
+    writeFileSync(join(repository, "README.md"), "combined identity");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, {
+      ...confinedOptions(),
+      commitIdentity: () => ({ email: "ada@octant.test" }) as never,
+    });
+
+    const result = await port.commit({
+      checkoutRoot: repository,
+      message: "Combined identity",
+      stagedSummary: [{ path: "README.md", index: "A", worktree: " " }],
+    });
+
+    expect(result).toMatchObject({ status: "applied" });
+    expect(gitOutput(repository, "log", "-1", "--format=%an <%ae>").trim()).toBe(
+      "Checkout Author <ada@octant.test>",
+    );
+  });
+
   it("checkpoints the working tree and puts every kind of change back on restore", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, "doomed.txt"), "doomed\n");
