@@ -173,6 +173,7 @@ export function useDockToolCapabilities(
       hasAppleSimulator: false,
       hasChildRuns: false,
       addAgentInvoked: false,
+      hasExistingThread: false,
     };
   }
   return {
@@ -183,5 +184,6 @@ export function useDockToolCapabilities(
     hasAppleSimulator: options.hasAppleSimulator,
     hasChildRuns: childRuns.threadId === threadId ? childRuns.value : "unknown",
     addAgentInvoked: options.addAgentInvoked,
+    hasExistingThread: true,
   };
 }
