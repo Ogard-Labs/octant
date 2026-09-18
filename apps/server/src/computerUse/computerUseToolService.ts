@@ -100,6 +100,11 @@ export function createComputerUseToolService(options: {
   const runtime = createComputerUseRuntime({
     destination: { status: "available", kind: "macos-host" },
     approvalScope: "application-session",
+    // Both surfaces and the approval summary say five minutes; the runtime's
+    // own default is one. An offer that dies while still reading as a
+    // five-minute grant turns a late click into a silent no-op that the agent
+    // then reports as a denial.
+    approvalTtlMs: 5 * 60_000,
     approvalSummary: (request) => {
       const action = pending.get(String(request.actionId));
       return `Allow control of ${action?.appId ?? "this application"} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.`;
@@ -265,8 +270,16 @@ export function createComputerUseToolService(options: {
       const result = pending.get(actionId)?.result;
       if (view.state !== "completed" || result === undefined) {
         await options.desktop.release(owner);
+        // The failure sentence is the newest session-failed event; cleanup
+        // appends after it, so the last event alone would say "cleaned up"
+        // and hide the reason an approved action never completed.
+        const failure = view.events.findLast((event) => event.kind === "session-failed");
         return (
-          result ?? refused("not-approved", "Computer use was denied, expired, or interrupted.")
+          result ??
+          refused(
+            "not-approved",
+            failure?.detail ?? "Computer use was denied, expired, or interrupted.",
+          )
         );
       }
       if (requiresApproval) {
