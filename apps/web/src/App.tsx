@@ -330,7 +330,10 @@ import {
   threadHandOffMessage,
 } from "./thread/threadHandOff";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
-import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
+import {
+  navigatorConfigurationKey,
+  useNavigatorAssistant,
+} from "./navigator/useNavigatorAssistant";
 import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
 import { useContextController } from "./context/useContextController";
@@ -1199,6 +1202,7 @@ function LaunchedShell(
   // on screen in both.
   const navigatorAssistant = useNavigatorAssistant(navigatorAssistantClient, {
     enabled: controller.status === "ready",
+    configuration: navigatorConfigurationKey(controller.settings?.navigatorAssistant),
   });
   const chatReadCursorStore = useMemo(() => createChatReadCursorStore(), []);
   // Skills this host reports as installed and effective. They become the
