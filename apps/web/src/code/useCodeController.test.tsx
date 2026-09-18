@@ -1829,6 +1829,28 @@ describe("useCodeController", () => {
     expect(started).toBe(false);
     expect(result.current.pendingDraft).toBe("Read this page");
     expect(result.current.turnError).toBe(refusal);
+    // The create flow reads this to hand the reason to the thread's own
+    // controller, which is not the one that started the turn.
+    expect(result.current.lastStartRefusal.current).toBe(refusal);
+  });
+
+  it("puts a refusal it did not perform in front of the person", async () => {
+    const client = fakeClient({});
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    act(() => {
+      result.current.showTurnRefusal(
+        "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
+      );
+    });
+
+    expect(result.current.turnStatus).toBe("failed");
+    expect(result.current.turnError).toBe(
+      "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
+    );
   });
 
   it("restores a persisted waiting turn and its operation when the thread reopens", async () => {
