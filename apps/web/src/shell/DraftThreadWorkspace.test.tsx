@@ -198,6 +198,35 @@ describe("DraftThreadWorkspace", () => {
     expect(within(list).getByRole("option", { name: /Open Settings/ })).toBeVisible();
   });
 
+  it("closes the command list when the caret leaves the slash token", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    const onCreateThread = vi.fn();
+    render(
+      <OctantCommandProvider
+        commands={[
+          {
+            id: "settings:open",
+            title: "Open Settings",
+            group: "Settings",
+            action: { kind: "run", run: onOpenSettings },
+          },
+        ]}
+      >
+        <DraftThreadWorkspace {...baseProps} onCreateThread={onCreateThread} />
+      </OctantCommandProvider>,
+    );
+
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "/");
+    expect(screen.getByRole("listbox", { name: "Commands you can run" })).toBeVisible();
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.queryByRole("listbox", { name: "Commands you can run" })).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledOnce());
+  });
+
   it("renders mode-specific welcome copy for code", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="code" />);
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();

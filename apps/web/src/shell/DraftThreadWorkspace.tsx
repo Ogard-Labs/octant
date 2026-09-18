@@ -976,6 +976,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 onClick={(event) => {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
+                onSelect={(event) => {
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder={tip}
                 ref={textareaRef}
