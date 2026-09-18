@@ -51,13 +51,14 @@ describe("resolveDesktopCredentialBackend", () => {
     expect(backend).toEqual({ kind: "unavailable" });
   });
 
-  it("does not invent a Windows credential store yet", async () => {
+  it("uses Credential Manager on Windows", async () => {
     const backend = await resolveDesktopCredentialBackend({
       platform: "win32",
       keychainHelperPath: helperPath,
       storeScope,
       probe: vi.fn(),
     });
-    expect(backend).toEqual({ kind: "unavailable" });
+    expect(backend.kind).toBe("credential-manager");
+    expect(backend.store).toBeDefined();
   });
 });

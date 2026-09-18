@@ -91,6 +91,16 @@ export {
 } from "./secretServiceCredentialStore";
 export { isExecutable } from "./executableCheck";
 export {
+  CMDKEY_PATH,
+  POWERSHELL_PATH,
+  makeWindowsCredentialStore,
+  type MakeWindowsCredentialStoreOptions,
+  type WindowsCommandExecutor,
+  type WindowsCommandLimits,
+  type WindowsCommandResult,
+  type WindowsCommandSpec,
+} from "./windowsCredentialStore";
+export {
   deriveHostServiceState,
   nextRestartBackoff,
   type HostServiceManagerObservation,

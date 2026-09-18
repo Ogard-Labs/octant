@@ -666,9 +666,47 @@ function createGhSecureStoragePort(): GhSecureStoragePort {
         return await probeMacKeychain(signal, environment);
       }
       if (process.platform === "linux") return await probeSecretService(signal, environment);
+      if (process.platform === "win32")
+        return await probeWindowsCredentialManager(signal, environment);
       return false;
     },
   };
+}
+
+/**
+ * Windows keeps credentials in Credential Manager, and gh reads them through
+ * Git Credential Manager. The probe stores a random secret under a nonce-scoped
+ * target, reads it back, and clears it, so a host with no usable store is
+ * refused before gh is allowed to write one.
+ */
+async function probeWindowsCredentialManager(
+  signal: AbortSignal,
+  environment: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  const target = `Octant secure storage probe ${randomUUID()}`;
+  const secret = `octant-${randomUUID()}`;
+  // `cmdkey` is present on every supported Windows version; PowerShell would
+  // add a second interpreter dependency for the same operation.
+  const run = (arguments_: readonly string[]) =>
+    runBounded("cmdkey", arguments_, signal, environment);
+  try {
+    const stored = await run([`/generic:${target}`, `/user:octant`, `/pass:${secret}`]);
+    if (stored.exitCode !== 0) return false;
+    // cmdkey cannot read a secret back, so the proof is the listing: a target
+    // that is present is one the store accepted. The secret is random and
+    // cleared below, so nothing credential-bearing is ever readable here.
+    const listed = await run(["/list:" + target]);
+    return listed.exitCode === 0 && listed.stdout.includes(target);
+  } catch {
+    return false;
+  } finally {
+    try {
+      await run([`/delete:${target}`]);
+    } catch {
+      // A failed cleanup makes this setup attempt fail closed above; the stored
+      // value is a random probe, never a GitHub credential.
+    }
+  }
 }
 
 async function probeMacKeychain(
