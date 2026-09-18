@@ -3,10 +3,11 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
 } from "@octant/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
+import { OctantCommandProvider } from "../palette/CommandRegistry";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
@@ -171,6 +172,59 @@ describe("DraftThreadWorkspace", () => {
         "Help me understand pull request #12",
       ),
     );
+  });
+
+  it("opens the host command list from a Chat draft's first-message composer", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <OctantCommandProvider
+        commands={[
+          {
+            id: "settings:open",
+            title: "Open Settings",
+            group: "Settings",
+            action: { kind: "run", run: onOpenSettings },
+          },
+        ]}
+      >
+        <DraftThreadWorkspace {...baseProps} />
+      </OctantCommandProvider>,
+    );
+
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "/");
+    const list = screen.getByRole("listbox", { name: "Commands you can run" });
+    expect(within(list).getByRole("option", { name: /Open Settings/ })).toBeVisible();
+  });
+
+  it("closes the command list when the caret leaves the slash token", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    const onCreateThread = vi.fn();
+    render(
+      <OctantCommandProvider
+        commands={[
+          {
+            id: "settings:open",
+            title: "Open Settings",
+            group: "Settings",
+            action: { kind: "run", run: onOpenSettings },
+          },
+        ]}
+      >
+        <DraftThreadWorkspace {...baseProps} onCreateThread={onCreateThread} />
+      </OctantCommandProvider>,
+    );
+
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "/");
+    expect(screen.getByRole("listbox", { name: "Commands you can run" })).toBeVisible();
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.queryByRole("listbox", { name: "Commands you can run" })).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledOnce());
   });
 
   it("renders mode-specific welcome copy for code", () => {
