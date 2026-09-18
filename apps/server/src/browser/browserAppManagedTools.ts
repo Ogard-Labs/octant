@@ -81,6 +81,10 @@ type BrowserToolInput =
       readonly expectedObservationRevision?: number;
     }
   | {
+      readonly operation: "diagnostics";
+      readonly expectedObservationRevision?: number;
+    }
+  | {
       readonly operation: "click" | "wait";
       readonly selector: string;
       readonly expectedObservationRevision?: number;
@@ -313,6 +317,8 @@ function browserAction(
       };
     case "screenshot":
       return { ...base, kind: "screenshot" };
+    case "diagnostics":
+      return { ...base, kind: "observe-diagnostics" };
     case "stop":
       return undefined;
   }
@@ -379,7 +385,13 @@ function parseInput(value: string): BrowserToolInput | undefined {
       ...(typeof deltaY === "number" ? { deltaY } : {}),
     };
   }
-  if ((operation === "read-page" || operation === "screenshot" || operation === "stop") && only())
+  if (
+    (operation === "read-page" ||
+      operation === "screenshot" ||
+      operation === "diagnostics" ||
+      operation === "stop") &&
+    only()
+  )
     return { ...common, operation };
   return undefined;
 }
@@ -422,6 +434,12 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(observation.contentHash === undefined
                 ? {}
                 : { contentHash: observation.contentHash }),
+              ...(observation.consoleErrors === undefined
+                ? {}
+                : { consoleErrors: observation.consoleErrors }),
+              ...(observation.failedRequests === undefined
+                ? {}
+                : { failedRequests: observation.failedRequests }),
               ...(!includeScreenshot || observation.screenshotDataUrl === undefined
                 ? {}
                 : observation.screenshotDataUrl.length <= MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS

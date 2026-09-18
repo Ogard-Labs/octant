@@ -18,6 +18,16 @@ export const MAX_BROWSER_TABS_PER_CONTEXT = 8;
 /** How many contexts one thread inspect may name. Stopping windows can pile up. */
 export const MAX_BROWSER_THREAD_CONTEXTS = 8;
 
+/**
+ * Bounds for the diagnostic observations a page yields. A page can log without
+ * limit and a broken subresource can fail on every request, so both the number
+ * of entries and the length of each one are capped the way every other
+ * browser-observation field is: evidence the agent can act on, not a transcript
+ * of everything the page did.
+ */
+export const MAX_BROWSER_DIAGNOSTIC_ENTRIES = 32;
+export const MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS = 2_048;
+
 export const BrowserContextId = brandedUuid("BrowserContextId");
 export type BrowserContextId = typeof BrowserContextId.Type;
 export const BrowserThreadId = brandedUuid("BrowserThreadId");
@@ -84,6 +94,7 @@ export const BrowserActionKind = Schema.Literal(
   "extract-text",
   "wait",
   "close-tab",
+  "observe-diagnostics",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -114,6 +125,29 @@ export const BrowserActionRequest = Schema.Struct({
 }).annotations(strict);
 export type BrowserActionRequest = typeof BrowserActionRequest.Type;
 
+/** One error the page's own console reported, bounded like every other read. */
+export const BrowserConsoleError = Schema.Struct({
+  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS)),
+  /** The page's URL when the error was logged, so a navigation is not misread. */
+  url: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+}).annotations(strict);
+export type BrowserConsoleError = typeof BrowserConsoleError.Type;
+
+/**
+ * One request the page made and did not complete.
+ *
+ * The method and the failure are the actionable part; the URL is capped to the
+ * same length as a navigation target because a page can put anything in a path.
+ */
+export const BrowserFailedRequest = Schema.Struct({
+  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  method: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(16))),
+  failure: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS),
+  ),
+}).annotations(strict);
+export type BrowserFailedRequest = typeof BrowserFailedRequest.Type;
+
 export const BrowserObservation = Schema.Struct({
   contextId: BrowserContextId,
   actionId: ToolActionId,
@@ -123,6 +157,18 @@ export const BrowserObservation = Schema.Struct({
   title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   contentHash: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   extractedText: Schema.optional(Schema.String.pipe(Schema.maxLength(65_536))),
+  /**
+   * What the page reported while the agent was driving it. Only the
+   * `observe-diagnostics` action fills these: an agent that wants to know why a
+   * page misbehaved asks for it, and every other action's payload stays the
+   * shape it already had.
+   */
+  consoleErrors: Schema.optional(
+    Schema.Array(BrowserConsoleError).pipe(Schema.maxItems(MAX_BROWSER_DIAGNOSTIC_ENTRIES)),
+  ),
+  failedRequests: Schema.optional(
+    Schema.Array(BrowserFailedRequest).pipe(Schema.maxItems(MAX_BROWSER_DIAGNOSTIC_ENTRIES)),
+  ),
   screenshotDataUrl: Schema.optional(
     Schema.String.pipe(
       Schema.maxLength(MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS),

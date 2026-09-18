@@ -20,6 +20,7 @@ export const BROWSER_TOOL_DEFINITION = {
           "scroll",
           "wait",
           "screenshot",
+          "diagnostics",
           "stop",
         ],
       },

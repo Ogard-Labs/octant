@@ -14,6 +14,16 @@ export interface BrowserRuntimeObservation {
   readonly extractedText?: string;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** Only the observe-diagnostics action fills these; see the contract. */
+  readonly consoleErrors?: ReadonlyArray<{
+    readonly text: string;
+    readonly url?: string;
+  }>;
+  readonly failedRequests?: ReadonlyArray<{
+    readonly url: string;
+    readonly method?: string;
+    readonly failure: string;
+  }>;
 }
 
 export interface BrowserTargetInspection {
