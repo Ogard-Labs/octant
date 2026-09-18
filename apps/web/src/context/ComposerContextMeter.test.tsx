@@ -518,6 +518,20 @@ describe("ComposerContextMeter", () => {
     ).toBe("exhausted");
   });
 
+  it("marks the ring as exhausted when the context snapshot's service quota is spent", () => {
+    const base = contextFixture();
+    const snapshot = {
+      ...base,
+      serviceLimits: { ...base.serviceLimits, quota: "exhausted" as never },
+    };
+    render(<Harness snapshot={snapshot} />);
+
+    expect(
+      document.querySelector(".composer-context-meter")?.getAttribute("data-limit-alert"),
+    ).toBe("exhausted");
+    expect(screen.getByRole("button", { name: /A provider limit is exhausted.?$/i })).toBeVisible();
+  });
+
   it("draws no alert dot while every provider limit is allowed", () => {
     render(
       <ComposerContextMeterProvider

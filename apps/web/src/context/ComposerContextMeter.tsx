@@ -76,7 +76,12 @@ export function ComposerContextMeter() {
   const percent =
     windowModel === undefined ? (reported?.percent ?? limit?.percent ?? 0) : windowModel.percent;
   const usedArc = (Math.max(0, Math.min(100, percent)) / 100) * METER_CIRCUMFERENCE;
-  const limitAlert = fallback === undefined ? undefined : limitAlertState(fallback);
+  const limitAlert =
+    snapshot?.serviceLimits.quota === "exhausted"
+      ? "exhausted"
+      : fallback === undefined
+        ? undefined
+        : limitAlertState(fallback);
   const limitAlertText =
     limitAlert === undefined
       ? ""
