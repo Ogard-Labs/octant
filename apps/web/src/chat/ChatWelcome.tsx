@@ -1,4 +1,8 @@
 import { useComposerTip } from "../composer/useComposerTip";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+} from "../composer/useComposerSlashCommands";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
@@ -74,8 +78,16 @@ const starterIdeas = [
 export function ChatWelcome(props: ChatWelcomeProps) {
   const ready = props.status === undefined || props.status === "ready";
   const presentation = draftThreadModePresentation("chat");
-  const tip = useComposerTip({ scopeKey: "chat-welcome" });
   const [prompt, setPrompt] = useState("");
+  const slash = useComposerSlashCommands({
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+  });
+  const tip = useComposerTip({
+    scopeKey: "chat-welcome",
+    commands: slash.commandIds,
+  });
   const modelKey = `${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
   const [modelChoice, setModelChoice] = useState<{
     readonly key: string;
@@ -87,7 +99,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && ready && !props.creating;
+  const canSubmit = trimmed.length > 0 && ready && !props.creating && !slash.resolving;
   const statusMessage =
     props.errorMessage ??
     (props.status === "loading"
@@ -105,6 +117,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   }, [canSubmit, props, trimmed, modelOptionValues]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slash.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -140,11 +153,23 @@ export function ChatWelcome(props: ChatWelcomeProps) {
           <ThreadComposer
             input={
               <OctantTextarea
+                aria-activedescendant={
+                  slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
+                }
+                aria-autocomplete={slash.commandIds.length === 0 ? undefined : "list"}
+                aria-controls={slash.open ? slash.listId : undefined}
+                aria-expanded={slash.commandIds.length === 0 ? undefined : slash.open}
                 aria-label="First message"
                 autoFocus
                 className="composer-input"
                 disabled={!ready || props.creating}
-                onChange={(event) => setPrompt(event.target.value)}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  slash.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
+                onClick={(event) => {
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder={tip}
                 ref={textareaRef}
@@ -152,6 +177,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 value={prompt}
               />
             }
+            typeahead={slash.open ? <ComposerSlashTypeahead controller={slash} /> : undefined}
             row={{
               leading: (
                 <>

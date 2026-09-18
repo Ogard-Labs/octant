@@ -197,7 +197,7 @@ explicit with **`$skill-name`** in the composer, or `@plugin-name/skill-name`
 for a plugin-contributed skill. Unambiguous discovery must hold; an
 ambiguous unqualified invocation opens a chooser or fails closed.
 
-Type `/` in a Chat, Work, or Code composer to find commands and enabled skills.
+Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.
 Choosing a skill creates a visible selection that can be removed before sending;
 it does not enable a disabled skill. Chat, Work, and Code resolve selected skill
 instructions through the extension service before provider execution. Unavailable

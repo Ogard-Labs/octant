@@ -3,9 +3,10 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
 } from "@octant/contracts";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { OctantCommandProvider } from "../palette/CommandRegistry";
 import { ChatWelcome } from "./ChatWelcome";
 
 describe("ChatWelcome", () => {
@@ -96,6 +97,33 @@ describe("ChatWelcome", () => {
     );
     await user.click(screen.getByRole("button", { name: "Start chat" }));
     expect(onCreateChat).toHaveBeenCalledExactlyOnceWith("Hello");
+  });
+
+  it("opens the host command list from Chat's first-message composer", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <OctantCommandProvider
+        commands={[
+          {
+            id: "settings:open",
+            title: "Open Settings",
+            group: "Settings",
+            action: { kind: "run", run: onOpenSettings },
+          },
+        ]}
+      >
+        <ChatWelcome onCreateChat={vi.fn()} />
+      </OctantCommandProvider>,
+    );
+
+    const draft = screen.getByRole("textbox", { name: "First message" });
+    await user.type(draft, "/");
+    const list = screen.getByRole("listbox", { name: "Commands you can run" });
+    expect(within(list).getByRole("option", { name: /Open Settings/ })).toBeVisible();
+    await user.click(within(list).getByRole("option", { name: /Open Settings/ }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(draft).toHaveValue("");
   });
 
   it("starts a conversation from the harness composer", async () => {
