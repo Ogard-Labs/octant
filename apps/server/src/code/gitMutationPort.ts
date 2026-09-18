@@ -18,6 +18,19 @@ interface CommandResult {
   readonly stderr: string;
 }
 
+/**
+ * The person the host records as its user, offered to confined commits whose
+ * checkout has no identity of its own. Both fields must be present for the
+ * fallback to be usable; a profile with only a name is not an identity.
+ */
+export interface CommitIdentity {
+  readonly name?: string;
+  readonly email?: string;
+}
+
+/** Reads the host's recorded commit identity when a commit needs a fallback. */
+export type CommitIdentityResolver = () => CommitIdentity | undefined;
+
 export interface GitMutationDependencies {
   readonly execFile: (
     file: string,
@@ -57,9 +70,10 @@ export type GitMutationResult =
         | "invalid-remote"
         | "invalid-refspec"
         | "unconfirmed-target"
-        | "ignored-path-collision";
+        | "ignored-path-collision"
+        | "identity-missing";
     }
-  | { readonly status: "failed" };
+  | { readonly status: "failed"; readonly detail?: string };
 
 const liveDependencies: GitMutationDependencies = {
   execFile: (file, args, environment, signal) =>
@@ -103,15 +117,18 @@ export class GitMutationPort {
   readonly #dependencies: GitMutationDependencies;
   readonly #commandTimeoutMs: number;
   readonly #confinement: ReturnType<typeof createGitSeatbeltConfinement>;
+  readonly #commitIdentity: CommitIdentityResolver | undefined;
 
   constructor(
     dependencies: GitMutationDependencies = liveDependencies,
     options: {
       readonly commandTimeoutMs?: number;
+      readonly commitIdentity?: CommitIdentityResolver;
     } & GitSeatbeltPortOptions = {},
   ) {
     this.#dependencies = dependencies;
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 15_000;
+    this.#commitIdentity = options.commitIdentity;
     // A shared port serves every thread. Plan confinement is applied per
     // mutation from that thread's executionPolicy, not at construction.
     this.#confinement = createGitSeatbeltConfinement(options);
@@ -174,7 +191,7 @@ export class GitMutationPort {
       undefined,
       input.executionPolicy,
     );
-    if (symbolic.exitCode !== 0) return { status: "failed" };
+    if (symbolic.exitCode !== 0) return failedMutation(symbolic.stderr);
     // `--cached` never touches the file on disk, and `--force` only waives
     // Git's warning about discarding staged content, which is what unstaging
     // asks for when the content was never committed.
@@ -222,13 +239,29 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const identity = await this.#effectiveCommitIdentity(
+      input.checkoutRoot,
+      signal,
+      input.executionPolicy,
+    );
+    if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
+    // The host profile fills only the fields the checkout could not supply;
+    // a checkout that names its own author keeps that author, because per-
+    // field -c overlays cannot lose to config already resolved by git.
     const result = await this.#run(
-      ["-C", input.checkoutRoot, "commit", "--message", input.message],
+      [
+        "-C",
+        input.checkoutRoot,
+        ...identity.config.flatMap((entry) => ["-c", entry] as const),
+        "commit",
+        "--message",
+        input.message,
+      ],
       signal,
       undefined,
       input.executionPolicy,
     );
-    if (result.exitCode !== 0) return { status: "failed" };
+    if (result.exitCode !== 0) return failedMutation(result.stderr);
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
@@ -238,7 +271,7 @@ export class GitMutationPort {
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
       ? { status: "applied", oid }
-      : { status: "failed" };
+      : failedMutation(head.stderr);
   }
 
   async push(
@@ -290,8 +323,23 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const identity = await this.#effectiveCommitIdentity(
+      input.checkoutRoot,
+      signal,
+      input.executionPolicy,
+    );
+    if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
     const result = await this.#run(
-      ["-C", input.checkoutRoot, "merge", "--no-ff", "--no-edit", "--end-of-options", input.branch],
+      [
+        "-C",
+        input.checkoutRoot,
+        ...identity.config.flatMap((entry) => ["-c", entry] as const),
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        "--end-of-options",
+        input.branch,
+      ],
       signal,
       undefined,
       input.executionPolicy,
@@ -303,7 +351,7 @@ export class GitMutationPort {
         undefined,
         input.executionPolicy,
       );
-      return { status: "failed" };
+      return failedMutation(result.stderr);
     }
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
@@ -314,7 +362,7 @@ export class GitMutationPort {
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
       ? { status: "applied", oid }
-      : { status: "failed" };
+      : failedMutation(head.stderr);
   }
 
   async revertCommit(
@@ -325,13 +373,27 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const identity = await this.#effectiveCommitIdentity(
+      input.checkoutRoot,
+      signal,
+      input.executionPolicy,
+    );
+    if (identity === undefined) return { status: "rejected", reason: "identity-missing" };
     const result = await this.#run(
-      ["-C", input.checkoutRoot, "revert", "--no-edit", "--", input.oid],
+      [
+        "-C",
+        input.checkoutRoot,
+        ...identity.config.flatMap((entry) => ["-c", entry] as const),
+        "revert",
+        "--no-edit",
+        "--",
+        input.oid,
+      ],
       signal,
       undefined,
       input.executionPolicy,
     );
-    if (result.exitCode !== 0) return { status: "failed" };
+    if (result.exitCode !== 0) return failedMutation(result.stderr);
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
@@ -341,7 +403,7 @@ export class GitMutationPort {
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
       ? { status: "applied", oid }
-      : { status: "failed" };
+      : failedMutation(head.stderr);
   }
 
   /**
@@ -569,14 +631,14 @@ export class GitMutationPort {
         undefined,
         input.executionPolicy,
       );
-      if (index.exitCode !== 0) return { status: "failed" };
+      if (index.exitCode !== 0) return failedMutation(index.stderr);
       const worktree = await this.#run(
         ["-C", input.checkoutRoot, "read-tree", "-u", "--reset", input.snapshot.worktree],
         signal,
         environment,
         input.executionPolicy,
       );
-      return worktree.exitCode === 0 ? { status: "applied" } : { status: "failed" };
+      return worktree.exitCode === 0 ? { status: "applied" } : failedMutation(worktree.stderr);
     } finally {
       await this.#discardScratchIndex(scratch);
     }
@@ -749,6 +811,48 @@ export class GitMutationPort {
     }
   }
 
+  /**
+   * The identity a confined commit will actually carry, resolved before the
+   * commit runs. The checkout's own config is asked first; the host profile
+   * fills only the fields it left unset; and a commit that would still have
+   * no name or address is refused rather than attributed to the placeholder
+   * git invents from the OS account and hostname. Git's own auto-detection
+   * writes "unknown@host.local" into history with only a warning, which is
+   * the wrong-identity failure this prevents.
+   */
+  async #effectiveCommitIdentity(
+    checkoutRoot: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<{ readonly config: readonly string[] } | undefined> {
+    const [nameProbe, emailProbe] = await Promise.all([
+      this.#run(
+        ["-C", checkoutRoot, "config", "--get", "user.name"],
+        signal,
+        undefined,
+        executionPolicy,
+      ),
+      this.#run(
+        ["-C", checkoutRoot, "config", "--get", "user.email"],
+        signal,
+        undefined,
+        executionPolicy,
+      ),
+    ]);
+    const configuredName = nameProbe.exitCode === 0 ? nameProbe.stdout.trim() : undefined;
+    const configuredEmail = emailProbe.exitCode === 0 ? emailProbe.stdout.trim() : undefined;
+    const hostIdentity = this.#commitIdentity?.();
+    const name = configuredName ?? hostIdentity?.name;
+    const email = configuredEmail ?? hostIdentity?.email;
+    if (name === undefined || name === "" || email === undefined || email === "") {
+      return undefined;
+    }
+    const config: string[] = [];
+    if (configuredName === undefined) config.push(`user.name=${name}`);
+    if (configuredEmail === undefined) config.push(`user.email=${email}`);
+    return { config };
+  }
+
   async #apply(
     checkoutRoot: string,
     args: readonly string[],
@@ -761,7 +865,7 @@ export class GitMutationPort {
       undefined,
       executionPolicy,
     );
-    return result.exitCode === 0 ? { status: "applied" } : { status: "failed" };
+    return result.exitCode === 0 ? { status: "applied" } : failedMutation(result.stderr);
   }
 
   async #run(
@@ -891,6 +995,19 @@ function validBranchName(value: string): boolean {
 
 function isObjectId(value: string): boolean {
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+}
+
+/**
+ * Git's stderr is the only legible account of why a mutation stopped: the
+ * identity it could not find, the index it could not lock, the object it could
+ * not read. Keep it bounded so a pathological command cannot turn the failure
+ * into a memory or journal problem of its own.
+ */
+function failedMutation(stderr: string): GitMutationResult {
+  const detail = stderr.trim();
+  return detail === ""
+    ? { status: "failed" }
+    : { status: "failed", detail: detail.slice(0, 2_048) };
 }
 
 function validPaths(paths: readonly string[]): boolean {
