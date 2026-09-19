@@ -124,6 +124,13 @@ against the intended host. A successful transport smoke does not replace the
 physical-device acceptance pass below. Root binding and desktop shell commands
 remain local-only.
 
+Saved-host reads are cancelled when the vault session is torn down. A read that
+finishes after locking cannot restart host connections; a new unlocked session
+reads and reconnects normally. Pairing approvals that finish during locking are
+saved for the next unlock but cannot reconnect the closed session. Include
+locking immediately after launch or while polling pairing approval in the
+lifecycle acceptance pass.
+
 ## Device acceptance pass
 
 - Install from TestFlight, cold launch, terminate, and relaunch.

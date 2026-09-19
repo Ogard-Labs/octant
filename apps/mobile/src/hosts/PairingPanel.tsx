@@ -1,5 +1,5 @@
 import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -12,6 +12,7 @@ import {
 import { MOBILE_COPY, MOBILE_PRODUCT_NAME } from "../copy";
 import { GlassSurface, useTheme } from "../../design-system";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
+import { finishLiveMobilePairing } from "../session/mobileSessionLifecycle";
 import type { MobileHostRegistry } from "./HostRegistry";
 
 export interface PairingPanelProps {
@@ -39,6 +40,12 @@ export function PairingPanel(props: PairingPanelProps) {
   const [ticketProof, setTicketProof] = useState("");
   const [phase, setPhase] = useState<PairingPhase>({ kind: "idle" });
   const deviceKeyStore = props.deviceKeyStore;
+  const lifetime = useRef(new AbortController());
+  useEffect(() => {
+    const current = new AbortController();
+    lifetime.current = current;
+    return () => current.abort();
+  }, []);
 
   const styles = useMemo(
     () =>
@@ -181,6 +188,7 @@ export function PairingPanel(props: PairingPanelProps) {
 
   const pollStatus = async () => {
     if (phase.kind !== "pending") return;
+    const signal = lifetime.current.signal;
     setPhase({ kind: "working", message: "Checking approval…" });
     try {
       const origin = phase.claim.origin;
@@ -202,15 +210,21 @@ export function PairingPanel(props: PairingPanelProps) {
         setPhase({ kind: "failed", message: status.message });
         return;
       }
-      await props.registry.upsert({
-        hostId: status.approval.hostId,
-        origin: status.approval.origin,
-        label: phase.claim.hostDisplayName,
-        keyId: status.approval.deviceKeyId,
-        credentialGeneration: status.approval.credentialGeneration,
-        hostKeyFingerprint: phase.claim.hostKeyFingerprint,
+      const connected = await finishLiveMobilePairing({
+        registry: props.registry,
+        bridge: props.bridge,
+        approval: status.approval,
+        signal,
+        registration: {
+          hostId: status.approval.hostId,
+          origin: status.approval.origin,
+          label: phase.claim.hostDisplayName,
+          keyId: status.approval.deviceKeyId,
+          credentialGeneration: status.approval.credentialGeneration,
+          hostKeyFingerprint: phase.claim.hostKeyFingerprint,
+        },
       });
-      props.bridge.connect(status.approval);
+      if (!connected || signal.aborted) return;
       setPhase({
         kind: "approved",
         message: `Paired with ${phase.claim.hostDisplayName}.`,
