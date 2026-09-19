@@ -8,6 +8,14 @@ import {
   type ProjectViewLifecycle,
   type ProjectViewSort,
 } from "@octant/contracts/project-view";
+import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
+import {
+  compareSidebarProjectStatus,
+  resolveSidebarThreadStatus,
+  rollUpSidebarProjectStatus,
+  SIDEBAR_THREAD_STATUS_ORDER,
+  type SidebarThreadStatusInput,
+} from "./sidebarThreadStatusPolicy";
 
 export type {
   ProjectViewActivityPeriod,
@@ -23,7 +31,7 @@ export { DEFAULT_PROJECT_VIEW_FILTERS };
 
 const LIFECYCLES: ReadonlyArray<ProjectViewLifecycle> = ["active", "archived", "all"];
 const GROUPINGS: ReadonlyArray<ProjectViewGrouping> = ["project", "environment", "status", "none"];
-const SORTS: ReadonlyArray<ProjectViewSort> = ["recency", "alphabetical", "created"];
+const SORTS: ReadonlyArray<ProjectViewSort> = ["recency", "alphabetical", "created", "status"];
 const ACTIVITY_PERIODS: ReadonlyArray<ProjectViewActivityPeriod> = [
   "all",
   "today",
@@ -42,9 +50,27 @@ export interface ProjectViewProjectLike {
   readonly updatedAt?: string;
 }
 
+/**
+ * What a saved view needs to know about one thread.
+ *
+ * The status facts are optional because most callers filter and sort on time
+ * alone. A caller that omits them gets a thread that reports no status, which
+ * a status filter treats as not matching and a status sort treats as quiet —
+ * the same reading either way, rather than one that guesses.
+ */
 export interface ProjectViewThreadLike {
   readonly projectId?: string;
   readonly updatedAt?: string;
+  readonly status?: Partial<SidebarThreadStatusInput>;
+}
+
+function threadStatusFacts(thread: ProjectViewThreadLike): SidebarThreadStatusInput {
+  return {
+    working: thread.status?.working ?? false,
+    attention: thread.status?.attention ?? false,
+    woke: thread.status?.woke ?? false,
+    unread: thread.status?.unread ?? false,
+  };
 }
 
 /**
@@ -63,6 +89,7 @@ export function normalizeProjectViewFilters(value: unknown): ProjectViewFilters 
     readonly sorting?: unknown;
     readonly activity?: unknown;
     readonly activityRange?: unknown;
+    readonly statuses?: unknown;
   };
   const lifecycle = LIFECYCLES.find((candidate) => candidate === record.lifecycle);
   const grouping = GROUPINGS.find((candidate) => candidate === record.grouping);
@@ -80,6 +107,7 @@ export function normalizeProjectViewFilters(value: unknown): ProjectViewFilters 
       ]
     : [];
   const range = normalizeActivityRange(record.activityRange);
+  const statuses = normalizeStatuses(record.statuses);
   return {
     lifecycle: lifecycle ?? DEFAULT_PROJECT_VIEW_FILTERS.lifecycle,
     environmentIds,
@@ -91,7 +119,24 @@ export function normalizeProjectViewFilters(value: unknown): ProjectViewFilters 
     sorting: sorting ?? DEFAULT_PROJECT_VIEW_FILTERS.sorting,
     activity: activity ?? DEFAULT_PROJECT_VIEW_FILTERS.activity,
     ...(range === undefined ? {} : { activityRange: range }),
+    ...(statuses === undefined ? {} : { statuses }),
   };
+}
+
+/**
+ * The statuses a saved view asked for, or `undefined` when it asked for no
+ * constraint.
+ *
+ * An absent field and an empty list both mean every status, so a view saved
+ * before this field existed keeps showing what it showed. Unknown words are
+ * dropped rather than rejected: a lens written by a newer build should narrow
+ * to what this build understands, not empty itself. Dropping every word a
+ * caller sent collapses back to no constraint for the same reason.
+ */
+function normalizeStatuses(value: unknown): ReadonlyArray<SidebarThreadStatus> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const statuses = SIDEBAR_THREAD_STATUS_ORDER.filter((status) => value.includes(status));
+  return statuses.length === 0 ? undefined : statuses;
 }
 
 /**
@@ -115,16 +160,33 @@ export function filterProjectsForView<T extends ProjectViewProjectLike>(
   });
 }
 
-/** Returns only threads whose server-authored `updatedAt` falls in the window. */
+/**
+ * Returns only the threads a saved view asks to see: those whose
+ * server-authored `updatedAt` falls in its activity window and whose strongest
+ * status is one it selected.
+ *
+ * The status test reads the thread's strongest status rather than any status it
+ * holds, so asking for "Needs attention" shows the threads that are waiting on
+ * the reader, not the ones that are already running and happen to also be
+ * unread. That matches what the row and the Project heading show.
+ */
 export function filterProjectViewThreads<T extends ProjectViewThreadLike>(
   threads: ReadonlyArray<T>,
   filters: ProjectViewFilters,
   now: Date = new Date(),
 ): ReadonlyArray<T> {
-  if (filters.activity === "all") return threads;
+  const statuses = normalizeStatuses(filters.statuses);
+  const byStatus =
+    statuses === undefined
+      ? threads
+      : threads.filter((thread) => {
+          const status = resolveSidebarThreadStatus(threadStatusFacts(thread));
+          return status !== undefined && statuses.includes(status);
+        });
+  if (filters.activity === "all") return byStatus;
   const range = projectViewActivityRange(filters, now);
-  if (range === undefined) return threads;
-  return threads.filter((thread) => {
+  if (range === undefined) return byStatus;
+  return byStatus.filter((thread) => {
     if (thread.updatedAt === undefined) return false;
     const timestamp = Date.parse(thread.updatedAt);
     if (Number.isNaN(timestamp)) return false;
@@ -182,6 +244,14 @@ export function projectViewActivityRangeError(filters: ProjectViewFilters): stri
   return undefined;
 }
 
+/**
+ * Orders the Projects a saved view shows.
+ *
+ * `status` leads with the Project holding the loudest thread and falls back to
+ * recency, then name, for the Projects that report the same thing — including
+ * every quiet Project, which keeps the tail of the list in the order a reader
+ * already knows rather than shuffling it.
+ */
 export function sortProjectsForView<T extends ProjectViewProjectLike>(
   projects: ReadonlyArray<T>,
   sorting: ProjectViewSort,
@@ -195,7 +265,35 @@ export function sortProjectsForView<T extends ProjectViewProjectLike>(
       latestByProject.set(thread.projectId, thread.updatedAt);
     }
   }
+  const rollups = new Map<string, ReturnType<typeof rollUpSidebarProjectStatus>>();
+  if (sorting === "status") {
+    const byProject = new Map<string, SidebarThreadStatusInput[]>();
+    for (const thread of threads) {
+      if (thread.projectId === undefined) continue;
+      const bucket = byProject.get(thread.projectId);
+      const facts = threadStatusFacts(thread);
+      if (bucket === undefined) byProject.set(thread.projectId, [facts]);
+      else bucket.push(facts);
+    }
+    for (const project of projects) {
+      const id = String(project.id);
+      rollups.set(id, rollUpSidebarProjectStatus(byProject.get(id) ?? []));
+    }
+  }
   return [...projects].sort((left, right) => {
+    if (sorting === "status") {
+      const byStatus = compareSidebarProjectStatus(
+        rollups.get(String(left.id)),
+        rollups.get(String(right.id)),
+      );
+      if (byStatus !== 0) return byStatus;
+      const leftRecency = latestByProject.get(String(left.id)) ?? String(left.updatedAt ?? "");
+      const rightRecency = latestByProject.get(String(right.id)) ?? String(right.updatedAt ?? "");
+      return (
+        rightRecency.localeCompare(leftRecency) ||
+        (left.name ?? "").localeCompare(right.name ?? "", undefined, { sensitivity: "base" })
+      );
+    }
     if (sorting === "alphabetical") {
       return (left.name ?? "").localeCompare(right.name ?? "", undefined, { sensitivity: "base" });
     }
