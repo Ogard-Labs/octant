@@ -149,6 +149,7 @@ distilled successor of the earlier long-form design specifications.
 | [0135](0135-confined-git-reads-its-worktree-s-metadata.md) | Confined Git reads its worktree's metadata | Accepted |
 | [0136](0136-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
 | [0137](0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md) | Simulator input reaches the guest through a native device helper | Accepted |
+| [0138](0138-the-simulator-frame-is-a-live-view-streamed-through-the-host.md) | The Simulator frame is a live view streamed through the host | Accepted |
 
 ## Adding an ADR
 
