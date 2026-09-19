@@ -113,6 +113,29 @@ describe("RepositoryTestProcessPort", () => {
     expect(new TextDecoder().decode(result.stderr)).toBe("stderr");
   });
 
+  it("hands the child the launch's temporary root when the host's TMPDIR is unusable", async () => {
+    const cwd = temporaryDirectory();
+    vi.stubEnv("TMPDIR", "relative/tmp");
+    vi.stubEnv("TEMP", "");
+    const options = confinedOptions();
+    const port = new RepositoryTestProcessPort(options);
+    const result = await port.execute({
+      argv: [
+        process.execPath,
+        "-e",
+        "process.stdout.write(JSON.stringify({tmpdir:process.env.TMPDIR,temp:process.env.TEMP??null}))",
+      ],
+      cwd: realpathSync(cwd),
+      environment: {},
+      timeoutMs: 5_000,
+    });
+    expect(result).toMatchObject({ termination: "exited", exitCode: 0 });
+    expect(JSON.parse(new TextDecoder().decode(result.stdout))).toEqual({
+      tmpdir: options.temporaryDirectory,
+      temp: null,
+    });
+  });
+
   it("launches through Seatbelt and fails closed when sandbox-exec is unavailable", async () => {
     const child = fakeChild(99);
     const spawn = vi.fn(() => child);

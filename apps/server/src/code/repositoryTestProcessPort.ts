@@ -203,7 +203,7 @@ export class RepositoryTestProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.cwd,
-        env: sanitizedEnvironment(input.environment),
+        env: sanitizedEnvironment(input.environment, this.#temporaryDirectory),
         shell: false,
         detached: true,
         windowsHide: true,
@@ -580,12 +580,23 @@ function unsafeEnvironmentName(name: string): boolean {
   );
 }
 
-function sanitizedEnvironment(explicit: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
+const TEMPORARY_VARIABLES: ReadonlySet<string> = new Set(["TMPDIR", "TMP", "TEMP"]);
+
+function sanitizedEnvironment(
+  explicit: Readonly<Record<string, string>>,
+  temporaryDirectory: string,
+): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   for (const name of SAFE_INHERITED_ENVIRONMENT) {
     const value = process.env[name];
-    if (value !== undefined) environment[name] = value;
+    if (value === undefined) continue;
+    // An empty or relative temporary variable resolves beneath the checkout
+    // inside the child and meets the sandbox's write denial there, although
+    // the launch was given a usable temporary root.
+    if (TEMPORARY_VARIABLES.has(name) && !isAbsolute(value)) continue;
+    environment[name] = value;
   }
+  if (environment.TMPDIR === undefined) environment.TMPDIR = temporaryDirectory;
   return { ...environment, ...explicit };
 }
 
