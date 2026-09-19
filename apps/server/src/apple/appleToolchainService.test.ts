@@ -969,6 +969,59 @@ describe("AppleToolchainService lifecycle", () => {
     }
   });
 
+  it("leaves a retried capture's file alone when an earlier attempt's return visit comes round", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+      let attempt = 0;
+      let capturePath = "";
+      let releaseRetry!: () => void;
+      const retryHeld = new Promise<void>((resolve) => {
+        releaseRetry = resolve;
+      });
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        attempt += 1;
+        capturePath = input.argv.at(-1)!;
+        if (attempt === 1) {
+          return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+        }
+        await writeFile(capturePath, png);
+        await retryHeld;
+        return processResult("");
+      });
+      const request = simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined });
+
+      await service.execute(request, context);
+      // The same action is asked for again and is still capturing a minute later.
+      const retried = service.execute(request, context);
+      await vi.waitFor(() => expect(attempt).toBe(2));
+      await vi.advanceTimersByTimeAsync(61_000);
+      // A removal runs off the event loop; give it real time to have happened.
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(existsSync(capturePath)).toBe(true);
+      releaseRetry();
+
+      expect((await retried).outcome).toBe("succeeded");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shrugs off a return visit that cannot remove what it finds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const rejections: unknown[] = [];

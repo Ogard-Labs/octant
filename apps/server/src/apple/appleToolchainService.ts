@@ -617,6 +617,9 @@ export class AppleToolchainService {
           if (!exitedCleanly) {
             for (const delayMs of CAPTURE_RETURN_VISITS_MS) {
               setTimeout(() => {
+                // A retry under the same action id reuses this path; while it
+                // runs the file is its own, and its `finally` removes it.
+                if (this.#capturesInProgress.has(capturePath)) return;
                 // Nothing awaits this; a path that cannot be removed is left to
                 // the next sweep instead of becoming an unhandled rejection.
                 void rm(capturePath, { force: true }).catch(() => undefined);
