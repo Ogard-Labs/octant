@@ -311,3 +311,99 @@ describe("createBrowserAppManagedTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe("browser diagnostics reach the provider-facing result", () => {
+  // The fields travel runtime -> observation -> automation service -> this
+  // conversion -> provider, and every one of those is a place they can be
+  // dropped. A drop here is invisible downstream: the provider receives a
+  // perfectly valid observation that simply carries no diagnostic evidence,
+  // so nothing fails and the agent answers from a blank. The automation
+  // service boundary had exactly this defect and no test covered it.
+  const diagnosticsObservation = {
+    revision: 11,
+    consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+    failedRequests: [
+      { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+    ],
+  };
+
+  // A non-navigate operation only proceeds against an existing active context,
+  // so the inspection has to describe one rather than an empty thread.
+  function activeContext() {
+    return {
+      contextId: "50000000-0000-4000-8000-000000000001" as never,
+      threadId,
+      actionId: "60000000-0000-4000-8000-000000000001" as never,
+      correlationId: "70000000-0000-4000-8000-000000000001" as never,
+      authority,
+      policy: {
+        profileMode: "isolated" as const,
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 8,
+        sessionTimeoutMs: 600_000,
+      },
+      state: "active" as const,
+      createdAt: "2026-09-09T10:00:00.000Z" as never,
+    };
+  }
+
+  function toolsFor(observation: unknown) {
+    const running = snapshot({
+      status: "running",
+      context: activeContext(),
+      observation: observation as never,
+    });
+    return createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act: vi.fn(async () => running),
+        releaseThread: vi.fn(async () => running),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+  }
+
+  it("passes what the page logged and failed to load through to the result", async () => {
+    const tools = toolsFor(diagnosticsObservation);
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "diagnostics" }),
+    });
+    expect(result).toMatchObject({
+      isError: false,
+      result: {
+        page: {
+          consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+          failedRequests: [
+            { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+          ],
+        },
+      },
+    });
+  });
+
+  it("omits the diagnostics rather than inventing an empty list", async () => {
+    // Absent and empty are different claims: an empty array tells the agent the
+    // page was clean, which an ordinary observation never asserted.
+    const tools = toolsFor({ revision: 12 });
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "diagnostics" }),
+    });
+    const page = (result as { result?: { page?: Record<string, unknown> } }).result?.page;
+    expect(page).toBeDefined();
+    expect(page?.consoleErrors).toBeUndefined();
+    expect(page?.failedRequests).toBeUndefined();
+  });
+});
