@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import {
+  compareSidebarProjectStatus,
   describeSidebarProjectStatus,
   resolveSidebarThreadStatus,
   rollUpSidebarProjectStatus,
   sidebarThreadStatuses,
   SIDEBAR_THREAD_STATUS_LABEL,
+  SIDEBAR_THREAD_STATUS_ORDER,
   type SidebarThreadStatusInput,
 } from "./sidebarThreadStatusPolicy";
 
@@ -17,9 +20,20 @@ function thread(overrides: Partial<SidebarThreadStatusInput> = {}): SidebarThrea
   };
 }
 
+describe("SIDEBAR_THREAD_STATUS_ORDER", () => {
+  it("ranks every status a saved view is allowed to store", () => {
+    // The legal set is a wire contract and the ranking is policy, so they live
+    // in different packages. A status added to the contract and left unranked
+    // would resolve to -1 here and silently outrank every other one.
+    expect([...SIDEBAR_THREAD_STATUS_ORDER].sort()).toEqual(
+      [...SidebarThreadStatus.literals].sort(),
+    );
+  });
+});
+
 describe("resolveSidebarThreadStatus", () => {
   it("reports nothing for a thread with no facts to report", () => {
-    expect(resolveSidebarThreadStatus(thread())).toBe("idle");
+    expect(resolveSidebarThreadStatus(thread())).toBeUndefined();
   });
 
   it("shows a running thread as working even when it is also unread and woken", () => {
@@ -54,11 +68,11 @@ describe("sidebarThreadStatuses", () => {
 
 describe("rollUpSidebarProjectStatus", () => {
   it("reports nothing for a Project with no threads", () => {
-    expect(rollUpSidebarProjectStatus([])).toEqual({ status: "idle", count: 0 });
+    expect(rollUpSidebarProjectStatus([])).toBeUndefined();
   });
 
   it("reports nothing for a Project whose threads are all quiet", () => {
-    expect(rollUpSidebarProjectStatus([thread(), thread()])).toEqual({ status: "idle", count: 0 });
+    expect(rollUpSidebarProjectStatus([thread(), thread()])).toBeUndefined();
   });
 
   it("reports the strongest status its threads reach", () => {
@@ -88,10 +102,6 @@ describe("rollUpSidebarProjectStatus", () => {
 });
 
 describe("describeSidebarProjectStatus", () => {
-  it("says nothing about a quiet Project", () => {
-    expect(describeSidebarProjectStatus("Packaging", { status: "idle", count: 0 })).toBeUndefined();
-  });
-
   it("names the Project and its status without a count for a single thread", () => {
     expect(describeSidebarProjectStatus("Packaging", { status: "attention", count: 1 })).toBe(
       "Packaging: Needs attention",
@@ -108,5 +118,36 @@ describe("describeSidebarProjectStatus", () => {
     expect(describeSidebarProjectStatus("Docs", { status: "unread", count: 1 })).toContain(
       SIDEBAR_THREAD_STATUS_LABEL.unread,
     );
+  });
+});
+
+describe("compareSidebarProjectStatus", () => {
+  it("puts the Project with the stronger status first", () => {
+    expect(
+      compareSidebarProjectStatus({ status: "unread", count: 9 }, { status: "working", count: 1 }),
+    ).toBeGreaterThan(0);
+  });
+
+  it("puts the busier Project first when both report the same status", () => {
+    expect(
+      compareSidebarProjectStatus({ status: "working", count: 1 }, { status: "working", count: 4 }),
+    ).toBeGreaterThan(0);
+  });
+
+  it("leaves two Projects reporting the same status and count to the caller's own order", () => {
+    expect(
+      compareSidebarProjectStatus({ status: "woke", count: 2 }, { status: "woke", count: 2 }),
+    ).toBe(0);
+  });
+
+  it("sorts a Project with nothing to report after every Project that has something", () => {
+    expect(compareSidebarProjectStatus(undefined, { status: "unread", count: 1 })).toBeGreaterThan(
+      0,
+    );
+    expect(compareSidebarProjectStatus({ status: "unread", count: 1 }, undefined)).toBeLessThan(0);
+  });
+
+  it("leaves two Projects with nothing to report in the order they came", () => {
+    expect(compareSidebarProjectStatus(undefined, undefined)).toBe(0);
   });
 });

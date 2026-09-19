@@ -205,3 +205,102 @@ describe("sortProjectsForView and groupProjectsForView", () => {
     expect(groupProjectsForView([alpha], "project")).toEqual([]);
   });
 });
+
+describe("a saved view that reads thread status", () => {
+  const working = { projectId: alpha.id, status: { working: true } };
+  const waiting = { projectId: beta.id, status: { attention: true } };
+  const quiet = { projectId: beta.id };
+
+  it("shows only the threads whose strongest status the view asked for", () => {
+    expect(
+      filterProjectViewThreads([working, waiting, quiet], {
+        ...DEFAULT_PROJECT_VIEW_FILTERS,
+        statuses: ["attention"],
+      }),
+    ).toEqual([waiting]);
+  });
+
+  it("judges a thread by its strongest status, not by every status it holds", () => {
+    const busy = { projectId: alpha.id, status: { working: true, unread: true } };
+    expect(
+      filterProjectViewThreads([busy], { ...DEFAULT_PROJECT_VIEW_FILTERS, statuses: ["unread"] }),
+    ).toEqual([]);
+    expect(
+      filterProjectViewThreads([busy], { ...DEFAULT_PROJECT_VIEW_FILTERS, statuses: ["working"] }),
+    ).toEqual([busy]);
+  });
+
+  it("shows every thread when the view named no status", () => {
+    expect(
+      filterProjectViewThreads([working, waiting, quiet], {
+        ...DEFAULT_PROJECT_VIEW_FILTERS,
+        statuses: [],
+      }),
+    ).toEqual([working, waiting, quiet]);
+  });
+
+  it("keeps the activity window in force alongside a status the view asked for", () => {
+    const stale = {
+      projectId: alpha.id,
+      status: { working: true },
+      updatedAt: "2020-01-01T00:00:00.000Z",
+    };
+    const fresh = {
+      projectId: alpha.id,
+      status: { working: true },
+      updatedAt: "2026-09-19T00:00:00.000Z",
+    };
+    expect(
+      filterProjectViewThreads(
+        [stale, fresh],
+        { ...DEFAULT_PROJECT_VIEW_FILTERS, activity: "today", statuses: ["working"] },
+        new Date("2026-09-19T12:00:00.000Z"),
+      ),
+    ).toEqual([fresh]);
+  });
+
+  it("puts the Project holding the loudest thread first", () => {
+    expect(
+      sortProjectsForView([beta, alpha], "status", [waiting, working]).map((project) => project.id),
+    ).toEqual([alpha.id, beta.id]);
+  });
+
+  it("sorts a Project with nothing to report after one that has something", () => {
+    expect(
+      sortProjectsForView([alpha, beta], "status", [
+        { projectId: beta.id, status: { unread: true } },
+      ]).map((project) => project.id),
+    ).toEqual([beta.id, alpha.id]);
+  });
+
+  it("falls back to recency for Projects reporting the same thing", () => {
+    const threads = [
+      { projectId: alpha.id, status: { unread: true }, updatedAt: "2026-08-01T00:00:00.000Z" },
+      { projectId: beta.id, status: { unread: true }, updatedAt: "2026-09-01T00:00:00.000Z" },
+    ];
+    expect(
+      sortProjectsForView([alpha, beta], "status", threads).map((project) => project.id),
+    ).toEqual([beta.id, alpha.id]);
+  });
+
+  it("keeps a status a newer build saved and drops a word it does not know", () => {
+    expect(
+      normalizeProjectViewFilters({
+        ...DEFAULT_PROJECT_VIEW_FILTERS,
+        statuses: ["unread", "onfire"],
+      }).statuses,
+    ).toEqual(["unread"]);
+  });
+
+  it("treats a saved view with no status field as asking for every status", () => {
+    expect(
+      normalizeProjectViewFilters({ ...DEFAULT_PROJECT_VIEW_FILTERS }).statuses,
+    ).toBeUndefined();
+  });
+
+  it("keeps the status sort a newer build saved", () => {
+    expect(
+      normalizeProjectViewFilters({ ...DEFAULT_PROJECT_VIEW_FILTERS, sorting: "status" }).sorting,
+    ).toBe("status");
+  });
+});

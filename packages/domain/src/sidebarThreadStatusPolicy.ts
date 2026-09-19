@@ -1,50 +1,52 @@
+import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
+
 /**
- * The one status vocabulary the sidebar speaks, and how a Project summarizes
- * the threads filed under it.
+ * How the sidebar ranks the thread statuses it speaks about, and how a Project
+ * summarizes the threads filed under it.
  *
- * The sidebar row already ranked its states, but it did so inline in the
- * renderer, so nothing else could read the same ranking. A Project heading had
- * no way to say what its folded threads were doing without re-deriving the
- * order and drifting from the row. This module names the vocabulary once so the
- * row and the heading cannot disagree.
+ * The row already ranked its states, but it did so inline in the renderer, so
+ * nothing else could read the same ranking. A Project heading had no way to say
+ * what its folded threads were doing without re-deriving the order and drifting
+ * from the row.
  *
- * Every status is a fact the sidebar already carries. A status the sidebar
- * cannot observe — a failed run, a blocked check — is absent here rather than
- * inferred from silence, because a heading that under-reports is recoverable
- * and one that invents trouble is not.
+ * `@octant/contracts` names the legal set, because a saved Project View
+ * persists the words and they have to round-trip. This module owns everything a
+ * caller concludes from them: the strength order, the labels, the roll-up, and
+ * the comparison. A rank is never written down, so it is policy rather than a
+ * wire value and belongs here.
+ *
+ * Nothing to report is the absence of a status, not a status called "idle". A
+ * quiet thread returns `undefined` and a quiet Project rolls up to `undefined`,
+ * so a caller has to handle silence deliberately rather than receive a word it
+ * might render, filter for, or sort by.
  */
 
 /**
- * Descending strength. `working` leads because a running thread is the one the
- * reader is most likely waiting on; `idle` carries no claim at all and draws
- * nothing.
+ * The statuses in descending strength.
+ *
+ * The contract fixes the set; this fixes the order. Ranking is what makes one
+ * status the one a row shows and one Project louder than another, so the order
+ * travels with the meaning rather than with the wire format.
+ *
+ * `SIDEBAR_THREAD_STATUS_LABEL` below is typed over the contract's union, so a
+ * status added to the contract without a label fails to build. That is what
+ * keeps this list honest: a status ranked nowhere resolves to -1 and would
+ * silently outrank every other, and the label record is the reason a new word
+ * cannot reach the sidebar unnoticed.
  */
 export const SIDEBAR_THREAD_STATUS_ORDER = [
   "working",
   "attention",
   "woke",
   "unread",
-  "idle",
-] as const;
-
-export type SidebarThreadStatus = (typeof SIDEBAR_THREAD_STATUS_ORDER)[number];
-
-/** Every status that says something, in the same descending strength. */
-export const SIDEBAR_THREAD_STATUS_SPOKEN = [
-  "working",
-  "attention",
-  "woke",
-  "unread",
-] as const satisfies ReadonlyArray<Exclude<SidebarThreadStatus, "idle">>;
-
-export type SpokenSidebarThreadStatus = (typeof SIDEBAR_THREAD_STATUS_SPOKEN)[number];
+] as const satisfies ReadonlyArray<SidebarThreadStatus>;
 
 /**
- * What each status is called wherever it is named. `idle` has no label: it is
- * the absence of a claim, and a row that wears "Idle" reads as a state someone
- * chose rather than as nothing to report.
+ * What each status is called wherever it is named. Silence has no label: a row
+ * that wears "Idle" reads as a state someone chose rather than as nothing to
+ * report.
  */
-export const SIDEBAR_THREAD_STATUS_LABEL: Readonly<Record<SpokenSidebarThreadStatus, string>> = {
+export const SIDEBAR_THREAD_STATUS_LABEL: Readonly<Record<SidebarThreadStatus, string>> = {
   working: "Working",
   attention: "Needs attention",
   woke: "Snooze ended",
@@ -67,79 +69,107 @@ export interface SidebarThreadStatusInput {
   readonly unread: boolean;
 }
 
+/**
+ * Where a status sits in the order, lower being stronger.
+ *
+ * Callers that need to compare a present status against silence should treat
+ * silence as weaker than every rank rather than giving it a number of its own.
+ */
 export function sidebarThreadStatusRank(status: SidebarThreadStatus): number {
   return SIDEBAR_THREAD_STATUS_ORDER.indexOf(status);
 }
 
-/** The strongest status the facts support. */
-export function resolveSidebarThreadStatus(input: SidebarThreadStatusInput): SidebarThreadStatus {
-  if (input.working) return "working";
-  if (input.attention) return "attention";
-  if (input.woke) return "woke";
-  if (input.unread) return "unread";
-  return "idle";
+/** The strongest status the facts support, or `undefined` when they support none. */
+export function resolveSidebarThreadStatus(
+  input: SidebarThreadStatusInput,
+): SidebarThreadStatus | undefined {
+  return SIDEBAR_THREAD_STATUS_ORDER.find((status) => input[status]);
 }
 
 /**
- * Every status the facts support, strongest first. The row shows the first and
- * keeps the rest in its label, so a working thread that is also unread still
- * says so to a reader who stops on it.
+ * Every status the facts support, strongest first.
+ *
+ * A row draws one mark but names them all, so a reader using a screen reader
+ * hears that a thread is working *and* unread where a sighted reader infers it
+ * from the row's other marks.
  */
 export function sidebarThreadStatuses(
   input: SidebarThreadStatusInput,
-): ReadonlyArray<SpokenSidebarThreadStatus> {
-  return SIDEBAR_THREAD_STATUS_SPOKEN.filter((status) => input[status]);
+): ReadonlyArray<SidebarThreadStatus> {
+  return SIDEBAR_THREAD_STATUS_ORDER.filter((status) => input[status]);
 }
 
+/** The strongest status across a Project's threads, and how many reached it. */
 export interface SidebarProjectStatusRollup {
-  /** The strongest status across the counted threads, or `idle` for none. */
   readonly status: SidebarThreadStatus;
-  /** How many threads resolved to the strongest status. Zero when `idle`. */
   readonly count: number;
 }
 
 /**
- * What a Project heading says about the threads filed under it.
+ * What a Project says about the threads filed under it, or `undefined` when
+ * they have nothing to report.
  *
- * Each thread is counted once, at its own strongest status, so a working thread
- * that is also unread raises the working count and not the unread one. The
- * count answers "how many threads are in the state this heading is reporting",
- * which is the question a reader has when the Project is folded shut.
+ * Each thread is counted once, at its own strongest status, so a thread that is
+ * both working and unread raises the working count and not the unread one. The
+ * count answers how many threads are in the state being reported, which is a
+ * different question from how many statuses are present.
  */
 export function rollUpSidebarProjectStatus(
   threads: ReadonlyArray<SidebarThreadStatusInput>,
-): SidebarProjectStatusRollup {
-  let status: SidebarThreadStatus = "idle";
+): SidebarProjectStatusRollup | undefined {
+  let leading: SidebarThreadStatus | undefined;
   let count = 0;
   for (const thread of threads) {
     const resolved = resolveSidebarThreadStatus(thread);
-    if (resolved === "idle") continue;
+    if (resolved === undefined) continue;
+    if (leading === undefined) {
+      leading = resolved;
+      count = 1;
+      continue;
+    }
     const rank = sidebarThreadStatusRank(resolved);
-    const leadingRank = sidebarThreadStatusRank(status);
+    const leadingRank = sidebarThreadStatusRank(leading);
     if (rank < leadingRank) {
-      status = resolved;
+      leading = resolved;
       count = 1;
     } else if (rank === leadingRank) {
       count += 1;
     }
   }
-  return { status, count };
+  return leading === undefined ? undefined : { status: leading, count };
 }
 
 /**
- * How a rolled-up Project reads aloud. Absent when there is nothing to report,
- * so a quiet Project is named by its own label alone rather than by "Idle".
+ * How a Project reads its roll-up aloud.
  *
- * A single thread is described without a count, because "(1 thread)" tells the
- * reader nothing the status did not already say.
+ * The count is stated only when it adds something: "(1 thread)" invites the
+ * reader to wonder what the other threads are doing when there is nothing else
+ * to know.
  */
 export function describeSidebarProjectStatus(
   projectName: string,
   rollup: SidebarProjectStatusRollup,
-): string | undefined {
-  if (rollup.status === "idle") return undefined;
+): string {
   const label = SIDEBAR_THREAD_STATUS_LABEL[rollup.status];
   return rollup.count > 1
     ? `${projectName}: ${label} (${String(rollup.count)} threads)`
     : `${projectName}: ${label}`;
+}
+
+/**
+ * Orders two Projects loudest first by what their threads are doing.
+ *
+ * A Project with nothing to report sorts after every Project that has
+ * something, and two Projects reporting the same status are separated by how
+ * many threads reached it, so the busier one leads. Ties beyond that are left
+ * to the caller, which already has a secondary order to fall back on.
+ */
+export function compareSidebarProjectStatus(
+  left: SidebarProjectStatusRollup | undefined,
+  right: SidebarProjectStatusRollup | undefined,
+): number {
+  if (left === undefined) return right === undefined ? 0 : 1;
+  if (right === undefined) return -1;
+  const byStatus = sidebarThreadStatusRank(left.status) - sidebarThreadStatusRank(right.status);
+  return byStatus !== 0 ? byStatus : right.count - left.count;
 }
