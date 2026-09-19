@@ -108,8 +108,7 @@ export interface AppleToolchainServiceOptions {
    * `-` into the working directory — the checkout — and reports nothing, so
    * the capture names a file here instead. It must be a directory the confined
    * command may write; by default that is the process port's own temporary
-   * directory. The host passes the Apple port's private root: a capture is raw
-   * device pixels and must not sit where other confined commands can read it.
+   * directory.
    */
   readonly captureDirectory?: string;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;

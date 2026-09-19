@@ -4199,22 +4199,14 @@ export function startOctantServer(
       },
     };
     const appleRuntimeStore = new AppleRuntimeStore(join(providerDataDirectory, "apple-runtime"));
-    // Apple commands get a private scratch root instead of the process-wide
-    // temporary directory. A screen capture is raw device pixels, and every
-    // other confined command may read the shared root for as long as the file
-    // exists; only Apple toolchain launches can read this one.
-    const appleWorkDirectory = join(providerDataDirectory, "apple-runtime", "work");
-    mkdirSync(appleWorkDirectory, { recursive: true, mode: 0o700 });
     const appleProcess = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "apple-runtime", "test-receipts"),
-      temporaryDirectory: appleWorkDirectory,
       literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
-      captureDirectory: appleWorkDirectory,
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
       readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
