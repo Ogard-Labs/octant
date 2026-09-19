@@ -210,6 +210,95 @@ describe("useAppleWorkbench", () => {
     );
   });
 
+  it("takes the host's newer state over the one its own passed action implies", async () => {
+    const before = {
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: [{ simulatorId: "sim-1", name: "iPhone 17", state: "shutdown" }],
+    };
+    const discover = vi.fn(async () => before);
+    const client = {
+      discover,
+      // Someone else shut the Simulator down between the boot passing and the
+      // snapshot being read: the host's word is newer than the boot's.
+      snapshot: vi.fn(async () => ({
+        sequence: 3,
+        active: [],
+        recentEvidence: [],
+        simulators: [{ simulatorId: "sim-1", name: "iPhone 17", state: "shutdown" }],
+      })),
+      execute: vi.fn(async () => ({ outcome: "succeeded" })),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    discover.mockRejectedValue(new Error("Xcode is unavailable on this host."));
+    await result.current.execute({ kind: "boot", simulatorId: "sim-1" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.current.discovery?.simulators[0]?.state).toBe("shutdown");
+  });
+
+  it("lets only the newest of two overlapping actions update the destinations", async () => {
+    const list = (state: string) => [{ simulatorId: "sim-1", name: "iPhone 17", state }];
+    const before = {
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: list("shutdown"),
+    };
+    const afterBoot = { ...before, simulators: list("booted") };
+    const afterShutdown = { ...before, simulators: list("shutdown") };
+    const discover = vi.fn(async () => before);
+    let finishBoot!: (value: { outcome: string }) => void;
+    const execute = vi
+      .fn()
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishBoot = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ outcome: "succeeded" });
+    const client = {
+      discover,
+      snapshot: vi.fn(async () => ({
+        sequence: 4,
+        active: [],
+        recentEvidence: [],
+        simulators: list("shutdown"),
+      })),
+      execute,
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    // The boot is still running when a shutdown starts and finishes; the boot
+    // then completes and its slower discovery answers "booted" last.
+    const boot = result.current.execute({ kind: "boot", simulatorId: "sim-1" });
+    discover.mockResolvedValueOnce(afterShutdown as never);
+    await result.current.execute({ kind: "shutdown", simulatorId: "sim-1" });
+    await waitFor(() => expect(result.current.discovery).toBe(afterShutdown));
+    discover.mockResolvedValueOnce(afterBoot as never);
+    finishBoot({ outcome: "succeeded" });
+    await boot;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.current.discovery).toBe(afterShutdown);
+  });
+
   it("exposes successful discovery even before the first action produces evidence", async () => {
     const discovery = { workspace: { schemes: ["Fixture"] }, toolchain: {}, simulators: [] };
     const snapshot = { sequence: 0, active: [], recentEvidence: [] };

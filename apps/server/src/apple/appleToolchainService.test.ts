@@ -846,6 +846,9 @@ describe("AppleToolchainService Simulator input", () => {
       .join(" ")}`;
     expect(recorded).toContain("[PROJECT]/Fixture.xcodeproj");
     expect(recorded).not.toContain(context.checkoutRoot);
+    // With no other output the note was also picked up as the log's last line,
+    // so the same reason was listed twice.
+    expect(evidence.diagnostics).toHaveLength(1);
   });
 
   it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {

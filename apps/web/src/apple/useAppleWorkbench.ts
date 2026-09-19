@@ -91,6 +91,12 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
 
   const execute = useCallback(
     async (request: AppleActionRequest) => {
+      const changesDestinations = request.kind === "boot" || request.kind === "shutdown";
+      // Taken before the first wait: two overlapping actions can finish out of
+      // order, and only the one started last may write the destination list.
+      const generation = changesDestinations
+        ? ++discoveryGeneration.current
+        : discoveryGeneration.current;
       const evidence = await client.execute(request);
       const snapshot = await refreshSnapshot();
       // A boot or shutdown changes the destination list itself, and that list
@@ -100,7 +106,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
       // those at once; the full discovery — six probes, `xcodebuild -list`
       // among them — follows in the background instead of holding the action's
       // result and every control behind it, and a failure there changes nothing.
-      if (request.kind === "boot" || request.kind === "shutdown") {
+      if (changesDestinations && generation === discoveryGeneration.current) {
         const acted =
           evidence.outcome === "succeeded" && request.simulatorId !== undefined
             ? {
@@ -116,7 +122,6 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
                 simulators: withNewerStates(previous.simulators, snapshot.simulators, acted),
               },
         );
-        const generation = ++discoveryGeneration.current;
         void client
           .discover(discoveryRequestRef.current)
           .then((next) => {
@@ -157,8 +162,9 @@ type SimulatorRecords = AppleDiscoverySnapshot["simulators"];
  * merged into the records already shown rather than the list being replaced:
  * a discovery that failed its first probe empties the host's runtime list, and
  * replacing with that removed every destination until a later discovery
- * succeeded. The action's own passed result wins for the Simulator it acted on,
- * because in that case the host's list no longer names it at all.
+ * succeeded. The action's own passed result is used only for a Simulator the
+ * host's list no longer names; where the host names it, the host's state is
+ * the newer one — someone else may have acted since the action passed.
  */
 function withNewerStates(
   listed: SimulatorRecords,
@@ -166,7 +172,9 @@ function withNewerStates(
   acted: { readonly simulatorId: string; readonly state: "booted" | "shutdown" } | undefined,
 ): SimulatorRecords {
   const states = new Map(reported.map((record) => [String(record.simulatorId), record.state]));
-  if (acted !== undefined) states.set(acted.simulatorId, acted.state);
+  if (acted !== undefined && !states.has(acted.simulatorId)) {
+    states.set(acted.simulatorId, acted.state);
+  }
   return listed.map((record) => {
     const state = states.get(String(record.simulatorId));
     return state === undefined || state === record.state ? record : { ...record, state };

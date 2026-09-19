@@ -717,13 +717,15 @@ export class AppleToolchainService {
       // enters the note: an error raised on a type-text path can quote the
       // script, so that kind records the fact without the detail.
       const note = unrecordedActionNote(request, error, context);
-      outputs.push(new TextEncoder().encode(`${note}\n`));
-      const logReference = `apple-log-${request.actionId}`;
-      await this.#writeArtifact(logReference, outputs);
+      // Read before the note joins the log: with no other output the note
+      // would be picked up as the log's last line and listed twice.
       const diagnostics = [
         ...diagnosticsFor(outputs, context).slice(0, MAX_DIAGNOSTICS - 1),
         { severity: "note" as const, message: note },
       ];
+      outputs.push(new TextEncoder().encode(`${note}\n`));
+      const logReference = `apple-log-${request.actionId}`;
+      await this.#writeArtifact(logReference, outputs);
       return evidence(
         request,
         signal.aborted ? "cancelled" : "interrupted",
