@@ -114,11 +114,12 @@ describe("RepositoryTestProcessPort", () => {
   });
 
   it("hands the child the launch's temporary root when the host's TMPDIR is unusable", async () => {
+    // Fixtures first: they are made under the real temporary directory.
     const cwd = temporaryDirectory();
-    vi.stubEnv("TMPDIR", "relative/tmp");
-    vi.stubEnv("TEMP", "");
     const options = confinedOptions();
     const port = new RepositoryTestProcessPort(options);
+    vi.stubEnv("TMPDIR", "relative/tmp");
+    vi.stubEnv("TEMP", "");
     const result = await port.execute({
       argv: [
         process.execPath,
