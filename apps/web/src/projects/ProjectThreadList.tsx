@@ -32,8 +32,8 @@ import {
   resolveSidebarThreadStatus,
   sidebarThreadStatuses,
   SIDEBAR_THREAD_STATUS_LABEL,
-  type SidebarThreadStatus,
 } from "@octant/domain/sidebar-thread-status-policy";
+import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
@@ -121,7 +121,7 @@ export function ThreadStatusMark(props: {
 }) {
   const facts = sidebarThreadStatusInput(props);
   const state = resolveSidebarThreadStatus(facts);
-  if (state === "idle") {
+  if (state === undefined) {
     return (
       <span aria-hidden="true" className="sidebar-navigation__thread-status" data-activity="idle" />
     );

@@ -24,6 +24,7 @@ const authority = decodeToolActionAuthority({
 
 function fixture() {
   let current = true;
+  let tainted = false;
   const execute = vi.fn(async () =>
     decodeComputerControlResult({
       kind: "windows",
@@ -57,7 +58,7 @@ function fixture() {
     authority: () => authority,
     ownerIsCurrent: () => current,
     toolConstraints: () => [],
-    externalContentIngested: () => false,
+    externalContentIngested: () => tainted,
     threadTitle: () => "Fixture task",
     record: async () => {},
   });
@@ -70,6 +71,9 @@ function fixture() {
     release,
     revoke: () => {
       current = false;
+    },
+    taint: () => {
+      tainted = true;
     },
   };
 }
@@ -247,6 +251,96 @@ describe("Computer use through a provider tool", () => {
       });
 
       expect(await result).toMatchObject({ result: { kind: "windows" } });
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("completes an approved control call after the thread ingested the tool's own listing", async () => {
+    // Observed 2026-09-19: the application listing is journaled as ingested
+    // external content, and the very next approved action was refused as
+    // "owner-changed" although nothing about the owner had changed.
+    const f = fixture();
+    try {
+      f.taint();
+      const result = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+
+      expect(await result).toMatchObject({ result: { kind: "windows" } });
+      expect(f.execute).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("asks again under taint instead of honouring the five-minute app grant", async () => {
+    const f = fixture();
+    try {
+      const first = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+      expect(await first).toMatchObject({ result: { kind: "windows" } });
+
+      // The grant now covers the app for five minutes. Once the thread has
+      // ingested external content, a standing grant must not carry an
+      // irreversible action: the runtime asks again for a fresh confirmation.
+      f.taint();
+      const second = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(
+          f.service.runtime.list(owner.windowId).find((s) => s.pendingApproval !== undefined),
+        ).toBeDefined(),
+      );
+      const again = f.service.runtime
+        .list(owner.windowId)
+        .find((s) => s.pendingApproval !== undefined);
+      if (again?.pendingApproval === undefined) throw new Error("Expected a fresh approval.");
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: again.sessionId,
+        actionId: again.pendingApproval.actionId,
+        approvalId: again.pendingApproval.approvalId,
+        decision: "approved",
+      });
+      expect(await second).toMatchObject({ result: { kind: "windows" } });
+      expect(f.execute).toHaveBeenCalledTimes(2);
     } finally {
       await f.service.close();
     }

@@ -71,6 +71,7 @@ export * from "./previews";
 export * from "./productFeedback";
 export * from "./projects";
 export * from "./projectView";
+export * from "./sidebarThreadStatus";
 export * from "./settings";
 export * from "./providers";
 export * from "./providerDiscovery";

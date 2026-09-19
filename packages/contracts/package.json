@@ -77,6 +77,7 @@
     "./previews": "./src/previews.ts",
     "./product-feedback": "./src/productFeedback.ts",
     "./project-view": "./src/projectView.ts",
+    "./sidebar-thread-status": "./src/sidebarThreadStatus.ts",
     "./projects": "./src/projects.ts",
     "./providers": "./src/providers.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",

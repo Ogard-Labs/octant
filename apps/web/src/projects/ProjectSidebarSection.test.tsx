@@ -1467,6 +1467,99 @@ describe("ProjectSidebarSection search", () => {
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
   });
 
+  it("explains that a status-only filter hid every thread rather than implying deletion", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({
+        filters: {
+          lifecycle: "active",
+          environmentIds: [],
+          showEmptyProjects: true,
+          grouping: "project",
+          sorting: "recency",
+          activity: "all",
+          statuses: ["woke"],
+        },
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={now}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-planning",
+            title: "Planning",
+            updatedAt: "2026-08-14T12:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    const empty = screen.getByRole("status");
+    expect(empty).toHaveTextContent(/nothing was deleted/i);
+    expect(empty).toHaveTextContent(/clear search or filters/i);
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+  });
+
+  it("counts a status filter among the active filters on the view trigger", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({
+        filters: {
+          lifecycle: "active",
+          environmentIds: [],
+          showEmptyProjects: true,
+          grouping: "project",
+          sorting: "recency",
+          activity: "all",
+          statuses: ["attention"],
+        },
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={now}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-planning",
+            title: "Planning",
+            updatedAt: "2026-08-14T12:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Project view filters, 1 active" }),
+    ).toBeInTheDocument();
+  });
+
   it("hides activity-view groups with no matches and restores them when search clears", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
