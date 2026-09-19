@@ -76,6 +76,38 @@ describe("useAppleWorkbench", () => {
     expect(discover).toHaveBeenCalledTimes(2);
   });
 
+  it("returns a boot's evidence even when the follow-up discovery fails", async () => {
+    const before = {
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: [{ simulatorId: "sim-1", state: "shutdown" }],
+    };
+    const snapshot = { sequence: 1, active: [], recentEvidence: [] };
+    const discover = vi.fn(async () => before);
+    const evidence = { outcome: "succeeded" };
+    const client = {
+      discover,
+      snapshot: vi.fn(async () => snapshot),
+      execute: vi.fn(async () => evidence),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    discover.mockRejectedValue(new Error("Apple toolchain service is unavailable."));
+    await expect(result.current.execute({ kind: "boot", simulatorId: "sim-1" })).resolves.toBe(
+      evidence,
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.discovery).toBe(before);
+  });
+
   it("exposes successful discovery even before the first action produces evidence", async () => {
     const discovery = { workspace: { schemes: ["Fixture"] }, toolchain: {}, simulators: [] };
     const snapshot = { sequence: 0, active: [], recentEvidence: [] };
