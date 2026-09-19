@@ -960,11 +960,17 @@ function ProjectGroup(props: {
  *
  * The mark is the one its rows wear, so opening the Project shows the reader
  * exactly the state the heading reported, in the same shape.
+ *
+ * It obeys the same Status row property as those rows. A reader who turned
+ * status marks off asked not to be told what threads are doing, and folding a
+ * Project is not consent to be told anyway.
  */
 function ProjectStatusRollup(props: {
   readonly projectName: string;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }) {
+  const shows = useSidebarRowProperties();
+  if (!shows.status) return null;
   const rollup = rollUpSidebarProjectStatus(props.threads.map(threadRowStatusInput));
   const label = describeSidebarProjectStatus(props.projectName, rollup);
   if (label === undefined) return null;

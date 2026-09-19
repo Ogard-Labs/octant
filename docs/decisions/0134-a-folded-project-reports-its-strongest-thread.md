@@ -46,9 +46,17 @@ it only while its threads are out of sight.
 - **The report is the mark its rows wear.** Opening the Project shows the
   reader the state the heading reported, in the same shape, rather than a
   second visual language for the same facts.
-- **The report costs the row no width.** It shares the trailing run with the
-  row's hover controls and yields its width the moment they appear, so a
-  Project name never loses room to it and no row grows a second line.
+- **The report never widens the row.** It shares the trailing run with the
+  row's hover controls and yields its width entirely the moment they appear, so
+  no row grows, no row gains a second line, and a folded Project's name is never
+  narrower than the same name under the pointer. A mark still has to be drawn
+  somewhere: a folded Project with something to report spends the width of one
+  mark on saying so, and a long name in it truncates that much earlier. That is
+  the trade the report is worth, and hiding the mark behind the name it would
+  otherwise overlap is not.
+- **The report obeys the Status row property.** A reader who turned status
+  marks off is not told what threads are doing, and folding a Project is not
+  consent to be told anyway.
 
 ## Consequences
 

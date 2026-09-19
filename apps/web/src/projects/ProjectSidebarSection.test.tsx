@@ -1889,7 +1889,10 @@ describe("ProjectSidebarSection row property visibility", () => {
 });
 
 describe("ProjectSidebarSection folded Project status", () => {
-  function renderProject(threads: ReadonlyArray<Omit<ChatThreadNavigationItem, "projectId">>) {
+  function renderProject(
+    threads: ReadonlyArray<Omit<ChatThreadNavigationItem, "projectId">>,
+    rowProperties?: SidebarRowProperties,
+  ) {
     return render(
       <ProjectSidebarSection
         archivedProjects={[]}
@@ -1905,6 +1908,7 @@ describe("ProjectSidebarSection folded Project status", () => {
           ...thread,
           projectId: String(chatProjectA.id),
         }))}
+        {...(rowProperties === undefined ? {} : { rowProperties })}
       />,
     );
   }
@@ -1961,5 +1965,16 @@ describe("ProjectSidebarSection folded Project status", () => {
 
     expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
     expect(screen.getByRole("img", { name: "Needs attention" })).toBeVisible();
+  });
+
+  it("stays quiet about a folded Project for a reader who turned status marks off", async () => {
+    const user = userEvent.setup();
+    renderProject([{ threadId: "thread-a", title: "Planning", activity: "working" }], {
+      ...DEFAULT_SIDEBAR_ROW_PROPERTIES,
+      projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects, status: false },
+    });
+    await fold(user);
+
+    expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
   });
 });
