@@ -316,6 +316,35 @@ describe("GitObservationPort", () => {
     expect(result.mergeability).toBe("clean");
     expect(allObjectNames(repository)).toEqual(before);
   });
+
+  it("answers mergeability for a checkout whose path contains a newline", async () => {
+    // A newline is legal in a macOS path, and the alternates file the merge
+    // reads its objects through is newline-separated, so an unquoted entry
+    // would name two directories that do not exist.
+    const root = join(temporaryDirectory(), "one\ntwo");
+    const repository = join(root, "repository");
+    mkdirSync(repository, { recursive: true });
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "README.md"), "test\n");
+    git(repository, "add", "--", "README.md");
+    git(repository, "commit", "-m", "initial");
+    git(repository, "checkout", "-q", "-b", "feature/newline");
+    writeFileSync(join(repository, "head.txt"), "head\n");
+    git(repository, "add", "--", "head.txt");
+    git(repository, "commit", "-m", "head moves");
+
+    const result = await new GitObservationPort(confinedOptions()).compareBranch({
+      checkoutRoot: repository,
+      baseRef: "main",
+      headRef: "HEAD",
+    });
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.mergeability).toBe("clean");
+  });
 });
 
 function observationPortWithNumstat(stdout: string): GitObservationPort {

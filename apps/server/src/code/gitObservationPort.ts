@@ -511,7 +511,11 @@ export class GitObservationPort {
       // rather than in GIT_ALTERNATE_OBJECT_DIRECTORIES, which is separated by
       // colons and so cannot carry a checkout path that contains one.
       await mkdir(join(quarantine, "info"), { recursive: true });
-      await writeFile(join(quarantine, "info", "alternates"), `${objectDirectory}\n`, "utf8");
+      await writeFile(
+        join(quarantine, "info", "alternates"),
+        `${quotedAlternatesEntry(objectDirectory)}\n`,
+        "utf8",
+      );
       const result = await this.#run(
         ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
         signal,
@@ -599,6 +603,43 @@ async function readRemotes(
 }
 
 /** Shared with the environment port so one reading of `--numstat` is parsed one way. */
+const ALTERNATES_ESCAPES: ReadonlyMap<string, string> = new Map([
+  ["\u0007", "\\a"],
+  ["\b", "\\b"],
+  ["\f", "\\f"],
+  ["\n", "\\n"],
+  ["\r", "\\r"],
+  ["\t", "\\t"],
+  ["\v", "\\v"],
+]);
+
+/**
+ * A path as Git's alternates file spells it.
+ *
+ * Entries there are separated by newlines, and a newline is a legal character
+ * in a macOS path, so an unquoted entry for such a checkout reads as two
+ * directories that do not exist and the merge finds no commits. Git unquotes
+ * any entry that begins with a double quote, so every entry is written that
+ * way rather than only the ones that would otherwise break.
+ */
+function quotedAlternatesEntry(path: string): string {
+  let escaped = "";
+  for (const character of path) {
+    if (character === "\\" || character === '"') {
+      escaped += `\\${character}`;
+      continue;
+    }
+    const named = ALTERNATES_ESCAPES.get(character);
+    if (named !== undefined) {
+      escaped += named;
+      continue;
+    }
+    const code = character.codePointAt(0) ?? 0;
+    escaped += code < 0x20 || code === 0x7f ? `\\${code.toString(8).padStart(3, "0")}` : character;
+  }
+  return `"${escaped}"`;
+}
+
 export function parseNumstat(
   output: string,
 ): { readonly insertions: number; readonly deletions: number } | undefined {
