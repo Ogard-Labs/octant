@@ -4,7 +4,7 @@
   "type": "module",
   "main": "dist/main.mjs",
   "scripts": {
-    "build": "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts",
+    "build": "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-device-helper.ts",
     "start": "electron dist/main.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
