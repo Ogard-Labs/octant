@@ -89,4 +89,4 @@ sanitized environment, the write scoping, and Plan and Chat process denial.
 - 0009 Sandbox confinement, approvals, and Plan mode (two rules scoped)
 - 0115 Terminal cache ancestors expose only directory metadata
 - 0126 Seatbelt opens trust evaluation and launcher symlink metadata
-- 0134 Confined Git reads its worktree's metadata (scoped exception)
+- 0135 Confined Git reads its worktree's metadata (scoped exception)

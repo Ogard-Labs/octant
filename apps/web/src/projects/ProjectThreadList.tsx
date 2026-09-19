@@ -23,10 +23,17 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { resolveSnoozePresets } from "@octant/domain";
 import {
+  sidebarThreadStatusInput,
   threadRowActivity,
   type ChatThreadNavigationItem,
   type ThreadRowActivity,
 } from "../shell/navigationModel";
+import {
+  resolveSidebarThreadStatus,
+  sidebarThreadStatuses,
+  SIDEBAR_THREAD_STATUS_LABEL,
+  type SidebarThreadStatus,
+} from "@octant/domain/sidebar-thread-status-policy";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
@@ -87,11 +94,23 @@ export function ProjectThreadStatus(props: ProjectThreadStatusProps) {
   );
 }
 
-const ACTIVITY_LABELS: Record<Exclude<ThreadRowActivity, "idle">, string> = {
-  working: "Working",
-  attention: "Needs attention",
-  unread: "New activity",
-};
+/**
+ * The mark one status wears. `unread` and `idle` have none: the stylesheet
+ * draws unread as a dot and idle as nothing at all, so an icon here would be a
+ * second, louder reading of the same state.
+ */
+export function sidebarThreadStatusIcon(status: SidebarThreadStatus): LucideIcon | undefined {
+  switch (status) {
+    case "working":
+      return LoaderCircle;
+    case "attention":
+      return CircleAlert;
+    case "woke":
+      return Clock;
+    default:
+      return undefined;
+  }
+}
 
 /** One trailing position carries the strongest state; its label retains the others. */
 export function ThreadStatusMark(props: {
@@ -100,33 +119,18 @@ export function ThreadStatusMark(props: {
   readonly woke: boolean;
   readonly followUp?: boolean;
 }) {
-  const state =
-    props.activity === "working" || props.activity === "attention"
-      ? props.activity
-      : props.woke
-        ? "woke"
-        : props.unread
-          ? "unread"
-          : "idle";
+  const facts = sidebarThreadStatusInput(props);
+  const state = resolveSidebarThreadStatus(facts);
   if (state === "idle") {
     return (
       <span aria-hidden="true" className="sidebar-navigation__thread-status" data-activity="idle" />
     );
   }
   const label = [
-    state === "woke" ? "Snooze ended" : ACTIVITY_LABELS[state],
-    ...(props.woke && state !== "woke" ? ["Snooze ended"] : []),
-    ...(props.unread && state !== "unread" ? [ACTIVITY_LABELS.unread] : []),
+    ...sidebarThreadStatuses(facts).map((status) => SIDEBAR_THREAD_STATUS_LABEL[status]),
     ...(props.followUp === true ? ["Follow-up"] : []),
   ].join(" · ");
-  const Icon =
-    state === "working"
-      ? LoaderCircle
-      : state === "attention"
-        ? CircleAlert
-        : state === "woke"
-          ? Clock
-          : undefined;
+  const Icon = sidebarThreadStatusIcon(state);
   return (
     <span
       aria-label={label}

@@ -1,4 +1,4 @@
-# 0134. Confined Git reads its worktree's metadata
+# 0135. Confined Git reads its worktree's metadata
 
 **Status:** Accepted
 

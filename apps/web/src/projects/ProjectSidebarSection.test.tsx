@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
 
 const chatProjectA = {
@@ -1884,5 +1885,96 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("feature/sidebar"),
     ).toBeVisible();
+  });
+});
+
+describe("ProjectSidebarSection folded Project status", () => {
+  function renderProject(
+    threads: ReadonlyArray<Omit<ChatThreadNavigationItem, "projectId">>,
+    rowProperties?: SidebarRowProperties,
+  ) {
+    return render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[chatProjectA]}
+        threads={threads.map((thread) => ({
+          ...thread,
+          projectId: String(chatProjectA.id),
+        }))}
+        {...(rowProperties === undefined ? {} : { rowProperties })}
+      />,
+    );
+  }
+
+  async function fold(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "Collapse Test" }));
+    await screen.findByRole("button", { name: "Expand Test" });
+  }
+
+  it("tells a folded Project what the threads it is hiding are doing", async () => {
+    const user = userEvent.setup();
+    renderProject([
+      { threadId: "thread-a", title: "Planning", activity: "working" },
+      { threadId: "thread-b", title: "Notes", unread: true },
+    ]);
+
+    expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
+    await fold(user);
+
+    expect(screen.getByRole("img", { name: "Test: Working" })).toBeVisible();
+  });
+
+  it("counts the threads that reached the status it reports, and no others", async () => {
+    const user = userEvent.setup();
+    renderProject([
+      { threadId: "thread-a", title: "Planning", activity: "working" },
+      { threadId: "thread-b", title: "Notes", activity: "working", unread: true },
+      { threadId: "thread-c", title: "Draft", unread: true },
+    ]);
+    await fold(user);
+
+    expect(screen.getByRole("img", { name: "Test: Working (2 threads)" })).toBeVisible();
+  });
+
+  it("says nothing about a folded Project whose threads are all quiet", async () => {
+    const user = userEvent.setup();
+    renderProject([
+      { threadId: "thread-a", title: "Planning" },
+      { threadId: "thread-b", title: "Notes" },
+    ]);
+    await fold(user);
+
+    expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
+  });
+
+  it("drops the roll-up once the Project opens and its rows carry their own marks", async () => {
+    const user = userEvent.setup();
+    renderProject([{ threadId: "thread-a", title: "Planning", activity: "attention" }]);
+    await fold(user);
+    expect(screen.getByRole("img", { name: "Test: Needs attention" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Expand Test" }));
+    await screen.findByRole("button", { name: "Collapse Test" });
+
+    expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
+    expect(screen.getByRole("img", { name: "Needs attention" })).toBeVisible();
+  });
+
+  it("stays quiet about a folded Project for a reader who turned status marks off", async () => {
+    const user = userEvent.setup();
+    renderProject([{ threadId: "thread-a", title: "Planning", activity: "working" }], {
+      ...DEFAULT_SIDEBAR_ROW_PROPERTIES,
+      projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects, status: false },
+    });
+    await fold(user);
+
+    expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
   });
 });

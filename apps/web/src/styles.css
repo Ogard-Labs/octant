@@ -1264,11 +1264,12 @@ h6 {
 .project-row {
   display: grid;
   min-width: 0;
-  /* The name, then the row's trailing controls: the context-health mark, the
-     row menu, and new-thread. A control the row is not showing leaves its
-     `auto` track at zero width, so the count costs nothing when it is absent
-     and nothing wraps to a second line when it is not. */
-  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+  /* The name, then the row's trailing controls: the folded-Project status
+     roll-up, the context-health mark, the row menu, and new-thread. A control
+     the row is not showing leaves its `auto` track at zero width, so the count
+     costs nothing when it is absent and nothing wraps to a second line when it
+     is not. */
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
   align-items: center;
   min-height: var(--oct-nav-row-h);
   border: 0;
@@ -1343,6 +1344,51 @@ h6 {
   font-size: var(--oct-text-xs);
   letter-spacing: normal;
   text-transform: none;
+}
+
+/* The folded Project's roll-up shares the trailing run with the row's
+   controls, and hands its width straight back the moment they arrive. A row is
+   therefore never wider for carrying one, and the name keeps the column it
+   had: the roll-up is for the row the pointer is not on, and the controls are
+   for the row it is. */
+.project-row__rollup {
+  display: inline-grid;
+  /* The count keeps its column whether or not this Project has one, so the
+     marks down a list of folded Projects land on one vertical line instead of
+     stepping left and right with each Project's thread count. */
+  grid-template-columns: auto minmax(10px, auto);
+  align-items: center;
+  gap: 3px;
+  height: var(--oct-nav-row-h);
+  padding-right: var(--oct-space-2);
+  overflow: hidden;
+  color: var(--oct-meta);
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+/* A single thread needs no count: the mark alone already says which state the
+   folded Project is in, and "1" beside it reads as a quantity worth noting. */
+.project-row__rollup-count {
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
+
+.project-row:hover .project-row__rollup,
+.project-row:focus-within .project-row__rollup,
+.project-row:has([aria-expanded="true"]) .project-row__rollup,
+.project-row:has([data-popup-open]) .project-row__rollup {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-row__rollup {
+    transition: none;
+  }
 }
 
 .project-row__action {

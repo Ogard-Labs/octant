@@ -60,6 +60,7 @@
     "./provider-policy": "./src/providerPolicy.ts",
     "./research-policy": "./src/researchPolicy.ts",
     "./shell-policy": "./src/shellPolicy.ts",
+    "./sidebar-thread-status-policy": "./src/sidebarThreadStatusPolicy.ts",
     "./theme-policy": "./src/themePolicy.ts",
     "./tool-action-policy": "./src/toolActionPolicy.ts",
     "./tool-call-policy": "./src/toolCallPolicy.ts",

@@ -76,6 +76,7 @@ export * from "./navigatorAssistantPolicy";
 export * from "./providerPolicy";
 export * from "./researchPolicy";
 export * from "./shellPolicy";
+export * from "./sidebarThreadStatusPolicy";
 export * from "./speechPolicy";
 export * from "./imageSourcePolicy";
 export * from "./themePolicy";
