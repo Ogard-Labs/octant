@@ -163,6 +163,27 @@ describe("Simulator device helpers", () => {
     expect(fake.child.kill).toHaveBeenCalled();
   });
 
+  it("counts idle time from the last answer, so a long input is not stopped half way", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({
+      helperPath: "/h",
+      spawn: () => fake.child,
+      idleMs: 1_000,
+    });
+
+    const long = helpers.send(simulator, { op: "text", text: "a long passage" }, 60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 1, ok: true });
+    await expect(long).resolves.toEqual({ status: "delivered" });
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(fake.child.kill).toHaveBeenCalled();
+  });
+
   it("stops an idle helper and every helper when the desktop quits", async () => {
     vi.useFakeTimers();
     const idle = fakeChild();

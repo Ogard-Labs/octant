@@ -196,6 +196,18 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     helper.child.kill();
   }
 
+  /** Starts the idle clock: nothing is waiting on this helper any more. */
+  function restIdle(simulatorId: string, helper: RunningHelper): void {
+    if (helper.idle !== undefined) clearTimeout(helper.idle);
+    helper.idle = undefined;
+    // A helper someone is watching is in use even when no input arrives.
+    if (helper.viewers.size > 0) return;
+    helper.idle = setTimeout(
+      () => stop(simulatorId, helper, "The device helper was stopped while idle."),
+      idleMs,
+    );
+  }
+
   function start(simulatorId: string): RunningHelper {
     const helper: RunningHelper = {
       child: spawn(options.helperPath, simulatorId),
@@ -245,6 +257,7 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         if (waiting === undefined || typeof id !== "number") continue;
         helper.pending.delete(id);
         clearTimeout(waiting.timer);
+        if (helper.pending.size === 0) restIdle(simulatorId, helper);
         waiting.settle(replyFrom(value));
       }
     });
@@ -266,16 +279,10 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     request: DeviceHelperRequest,
     timeoutMs: number,
   ): Promise<DeviceHelperReply> {
+    // A helper with a request in hand is not idle, however long the request
+    // takes; the clock starts again when the last answer arrives.
     if (helper.idle !== undefined) clearTimeout(helper.idle);
-    // A helper someone is watching is in use even when no input arrives.
-    helper.idle =
-      helper.viewers.size > 0
-        ? undefined
-        : setTimeout(() => {
-            if (helper.viewers.size === 0) {
-              stop(simulatorId, helper, "The device helper was stopped while idle.");
-            }
-          }, idleMs);
+    helper.idle = undefined;
     const id = helper.nextId;
     helper.nextId += 1;
     return new Promise<DeviceHelperReply>((settle) => {
