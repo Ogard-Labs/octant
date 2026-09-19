@@ -6,10 +6,23 @@ import { ShellDialogHost, type ShellDialogHostProps } from "./ShellDialogHost";
 // The wizard is fetched on demand, and importing its module is the launch cost
 // this host exists to avoid once first run has been answered. Counting the
 // import is the only way to observe that from here.
-const { importedOnboarding } = vi.hoisted(() => ({ importedOnboarding: vi.fn() }));
-vi.mock("../onboarding/FirstRunOnboarding", () => {
+const { importedOnboarding, mountedOnboarding } = vi.hoisted(() => ({
+  importedOnboarding: vi.fn(),
+  mountedOnboarding: vi.fn(),
+}));
+vi.mock("../onboarding/FirstRunOnboarding", async () => {
   importedOnboarding();
-  return { FirstRunOnboarding: () => <div data-testid="first-run" /> };
+  const { useEffect } = await import("react");
+  return {
+    // Like the real surface, it draws nothing while it is not visible but keeps
+    // whatever it holds; a mount is what would reset the step it was left on.
+    FirstRunOnboarding: (props: { readonly controller: { readonly visible: boolean } }) => {
+      useEffect(() => {
+        mountedOnboarding();
+      }, []);
+      return props.controller.visible ? <div data-testid="first-run" /> : null;
+    },
+  };
 });
 
 describe("ShellDialogHost", () => {
@@ -36,6 +49,30 @@ describe("ShellDialogHost", () => {
     expect(screen.queryByTestId("first-run")).not.toBeInTheDocument();
     expect(importedOnboarding).not.toHaveBeenCalled();
   });
+
+  it("keeps the first-run draft while Project create covers it, so it returns to the step it left", async () => {
+    const host = (controller: { readonly visible: boolean; readonly pending: boolean }) => {
+      const props = hostProps();
+      return (
+        <OctantCommandProvider commands={[]}>
+          <ShellDialogHost
+            {...props}
+            firstRun={{ ...props.firstRun, controller: controller as never }}
+          />
+        </OctantCommandProvider>
+      );
+    };
+    const { rerender } = render(host({ visible: true, pending: true }));
+    expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+
+    // "Create a Chat Project" on the readiness step opens Project create over it.
+    rerender(host({ visible: false, pending: true }));
+    expect(screen.queryByTestId("first-run")).not.toBeInTheDocument();
+    rerender(host({ visible: true, pending: true }));
+
+    expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+    expect(mountedOnboarding).toHaveBeenCalledOnce();
+  });
 });
 
 function hostProps(): ShellDialogHostProps {
@@ -48,6 +85,7 @@ function hostProps(): ShellDialogHostProps {
       chatModelGroups: [],
       controller: {
         visible: false,
+        pending: false,
         status: "complete",
         currentStep: "profile",
         canContinue: false,

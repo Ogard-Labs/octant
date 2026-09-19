@@ -88,6 +88,7 @@ function controller(
   overrides: Partial<FirstRunOnboardingController> = {},
 ): FirstRunOnboardingController {
   return {
+    pending: true,
     visible: true,
     submitting: undefined,
     blockedMessage: undefined,

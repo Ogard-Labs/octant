@@ -47,6 +47,9 @@ describe("useFirstRunOnboardingController", () => {
     const { result, rerender, resolve } = render({ concealed: true });
 
     expect(result.current.visible).toBe(false);
+    // Hidden is not answered: the surface stays mounted on this, and its draft
+    // is what makes "the same pending draft" true when the cover closes.
+    expect(result.current.pending).toBe(true);
     expect(resolve).not.toHaveBeenCalled();
 
     rerender({
