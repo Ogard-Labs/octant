@@ -50,8 +50,11 @@
 
 ## Residual risk
 
-- Live jailbreak/root SDK signals and real screen-capture blocking require device
-  builds and platform APIs not available in Linux cloud agents.
+- Device-integrity detection, native screenshot/app-switcher protection, and push
+  delivery are unavailable in the current client, including device builds. Settings
+  disclose those limits and omit unavailable capture and push-enablement controls;
+  integrity stays unknown. Vault locking is not evidence of native capture protection.
+  Platform adapters and device acceptance are still required.
 - EAS `projectId`, signing, TestFlight, and Play internal uploads need Henrik-owned
   credentials.
 - Live APNs/FCM delivery remains a Mobile C residual.

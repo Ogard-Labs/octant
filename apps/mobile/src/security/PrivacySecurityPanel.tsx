@@ -53,6 +53,7 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
   }, [props.integrity, props.screenshotPrivacy]);
 
   const setMode = async (mode: ScreenshotPrivacyMode) => {
+    if (!props.screenshotPrivacy.available) return;
     setBusy(true);
     setMessage(undefined);
     try {
@@ -144,34 +145,43 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
       </Text>
 
       <Text style={styles.subtitle}>Screenshot privacy</Text>
-      <Text style={styles.help}>
-        {privacyDecision?.summary ?? MOBILE_COPY.screenshotPrivacyHint}
-      </Text>
-      <Pressable
-        disabled={busy}
-        onPress={() => void setMode("hide-in-recents")}
-        style={[styles.button, busy ? styles.buttonDisabled : null]}
-        testID="mobile-screenshot-hide-recents"
-      >
-        {busy ? (
-          <ActivityIndicator color={colors.sendLabel} />
-        ) : (
-          <Text style={styles.buttonLabel}>Hide in recents</Text>
-        )}
-      </Pressable>
-      <Pressable
-        disabled={busy}
-        onPress={() => void setMode("standard")}
-        style={styles.secondary}
-        testID="mobile-screenshot-standard"
-      >
-        <Text style={styles.secondaryLabel}>Use standard capture</Text>
-      </Pressable>
-      {nativeApply !== undefined ? (
-        <Text style={styles.meta} testID="mobile-screenshot-native-apply">
-          Native apply: {nativeApply}
+      {props.screenshotPrivacy.available ? (
+        <>
+          <Text style={styles.help}>
+            {privacyDecision?.summary ?? MOBILE_COPY.screenshotPrivacyHint}
+          </Text>
+          <Pressable
+            disabled={busy}
+            onPress={() => void setMode("hide-in-recents")}
+            style={[styles.button, busy ? styles.buttonDisabled : null]}
+            testID="mobile-screenshot-hide-recents"
+          >
+            {busy ? (
+              <ActivityIndicator color={colors.sendLabel} />
+            ) : (
+              <Text style={styles.buttonLabel}>Hide in recents</Text>
+            )}
+          </Pressable>
+          <Pressable
+            disabled={busy}
+            onPress={() => void setMode("standard")}
+            style={styles.secondary}
+            testID="mobile-screenshot-standard"
+          >
+            <Text style={styles.secondaryLabel}>Use standard capture</Text>
+          </Pressable>
+          {nativeApply !== undefined ? (
+            <Text style={styles.meta} testID="mobile-screenshot-native-apply">
+              Native apply: {nativeApply}
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <Text style={styles.help} testID="mobile-screenshot-unavailable">
+          Screenshot and app-switcher protection is unavailable in this build. Avoid capturing
+          sensitive thread content.
         </Text>
-      ) : null}
+      )}
       {message !== undefined ? <Text style={styles.message}>{message}</Text> : null}
     </View>
   );

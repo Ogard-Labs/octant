@@ -74,6 +74,7 @@
       },
       "devDependencies": {
         "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
         "babel-preset-expo": "~57.0.5",
         "typescript": "~6.0.3",
         "vitest": "catalog:",

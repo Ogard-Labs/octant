@@ -106,6 +106,25 @@ SecureStore, URLSession cookie handling, or UIKit launch behavior. The existing
 key-store and remote-client tests complement this native pass. Screenshot
 capture protection, push notifications, and device-integrity detection currently
 have unavailable native adapters and must not be recorded as passing checks.
+The app names those limitations before interaction: unavailable capture settings
+and push enablement are not offered, while clearing a previously registered push
+token remains possible on a connected host. Device-integrity status remains
+unknown and does not block pairing. Installing a TestFlight build does not enable
+any of these missing adapters.
+
+## Code connection limitation
+
+Code creation is not yet accepted against a live host. A paired mobile client can
+list the host's Code Projects, but `prepare-code-project-checkout` is refused
+because the device's service scope has no selected Code Project. The host's
+current Code authorization reads a persisted workspace binding, and the shell
+endpoint that changes that binding is local-only.
+
+A supported remote Project-selection path must be designed and validated before
+claiming mobile Code creation or follow-through works. Keep the existing project
+boundary and the local-only shell endpoint intact; do not treat a listed Project
+as an implicit authorization grant. Chat and Work validation does not close this
+Code acceptance check.
 
 ## Device acceptance pass
 
