@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { decodeAppleSimulatorId } from "@octant/contracts/apple-toolchain";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
@@ -224,25 +224,138 @@ describe("AppleSimulatorLiveFrameView", () => {
       expect(document.querySelector("img")).toBeNull();
     });
 
-    it("sends a tap as a point on the device's own screen, whatever size the canvas is shown at", () => {
-      const onInput = vi.fn();
-      render(
+    // jsdom has no PointerEvent; a MouseEvent carries the same coordinates.
+    if (typeof globalThis.PointerEvent === "undefined") {
+      (globalThis as { PointerEvent?: unknown }).PointerEvent = class extends MouseEvent {};
+    }
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function liveView(props: { readonly busy?: boolean; readonly onInput: () => void }) {
+      return (
         <AppleSimulatorLiveFrameView
+          busy={props.busy === true}
           frame={frame}
           inputEnabled
           liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
-          onInput={onInput}
-        />,
+          onInput={props.onInput}
+        />
       );
+    }
+    function drawnAt402() {
       const canvas = screen.getByLabelText("iPhone 17 live screen");
       vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 20, 402, 874));
+      return screen.getByLabelText("Tap on iPhone 17 Simulator screen");
+    }
 
-      fireEvent.click(screen.getByLabelText("Tap on iPhone 17 Simulator screen"), {
-        clientX: 10 + 201,
-        clientY: 20 + 437,
+    it("sends a press and release in one place as a tap on the device's own screen", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.pointerDown(region, { clientX: 10 + 201, clientY: 20 + 437 });
+      fireEvent.pointerUp(region, { clientX: 10 + 202, clientY: 20 + 437 });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 1311 } });
+    });
+
+    it("sends a drag as one swipe when the finger lifts", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 800 });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 300 });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput.mock.calls[0]?.[0]).toMatchObject({
+        kind: "swipe",
+        from: { x: 603, y: 2340 },
+        to: { x: 603, y: 840 },
+      });
+    });
+
+    it("types what is typed on the focused screen as one text once the typing pauses", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      for (const key of ["O", "c", "t"]) fireEvent.keyDown(region, { key });
+      expect(onInput).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(400);
       });
 
-      expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 1311 } });
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput).toHaveBeenCalledWith({ kind: "type-text", text: "Oct" });
+    });
+
+    it("sends the text typed so far before a key that acts on it", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "h" });
+      fireEvent.keyDown(region, { key: "i" });
+      fireEvent.keyDown(region, { key: "Enter" });
+
+      // One action at a time: the text goes first, Return waits for it.
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+      ]);
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+        { kind: "key-press", key: "return" },
+      ]);
+    });
+
+    it("does not hold later input forever when an input never made the pane busy", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "Enter" });
+      fireEvent.keyDown(region, { key: "Escape" });
+      expect(onInput).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(1_100);
+      });
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "return" },
+        { kind: "key-press", key: "escape" },
+      ]);
+    });
+
+    it("leaves app shortcuts alone while the screen has focus", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      const handled = fireEvent.keyDown(region, { key: "k", metaKey: true });
+
+      expect(handled).toBe(true);
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("offers Home and Lock as the device's buttons", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+      fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "home" },
+        { kind: "key-press", key: "lock" },
+      ]);
     });
 
     it("falls back to the captured still when the host has no live view", () => {

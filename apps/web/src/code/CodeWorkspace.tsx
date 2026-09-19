@@ -685,6 +685,17 @@ function appleActionRequest(input: {
         ...(intent.target === undefined ? {} : { target: intent.target }),
         timeoutMs: 30_000,
       };
+    case "swipe":
+      return {
+        ...base,
+        kind: "swipe",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        point: intent.point,
+        toPoint: intent.toPoint,
+        durationMs: intent.durationMs,
+        timeoutMs: 30_000,
+      };
     case "type-text":
       return {
         ...base,

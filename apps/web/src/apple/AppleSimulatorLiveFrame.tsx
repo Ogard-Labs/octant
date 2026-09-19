@@ -1,12 +1,19 @@
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { canOfferAppleSimulatorFrameInput } from "@octant/domain";
-import { useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { gestureFrom, keyIntentFor, type PointerSample } from "./simulatorGestures";
 import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 
 export type AppleSimulatorFrameInputIntent =
   | { readonly kind: "tap"; readonly point: { readonly x: number; readonly y: number } }
+  | {
+      readonly kind: "swipe";
+      readonly from: { readonly x: number; readonly y: number };
+      readonly to: { readonly x: number; readonly y: number };
+      readonly durationMs: number;
+    }
   | { readonly kind: "type-text"; readonly text: string }
   | { readonly kind: "key-press"; readonly key: string };
 
@@ -130,6 +137,11 @@ function LiveScreen(props: {
   );
 }
 
+/** Typing is sent as one text once the keys stop for this long. */
+const TYPING_PAUSE_MS = 350;
+/** An input that has not made the pane busy by now never will; stop waiting for it. */
+const UNANSWERED_INPUT_MS = 1_000;
+
 function StreamedScreen(props: {
   readonly name: string;
   readonly screen: { readonly width: number; readonly height: number };
@@ -139,10 +151,77 @@ function StreamedScreen(props: {
   readonly busy: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { attach } = props;
+  const pressRef = useRef<PointerSample | undefined>(undefined);
+  // The host runs one Simulator action at a time. What a person does meanwhile
+  // is kept in order and sent as each action finishes, so fast typing and a tap
+  // right after a swipe are not lost to a disabled control.
+  const waitingRef = useRef<AppleSimulatorFrameInputIntent[]>([]);
+  const sentRef = useRef(false);
+  const busyRef = useRef(props.busy);
+  busyRef.current = props.busy;
+  const unansweredRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const typingRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { attach, busy, offerInput, onInput } = props;
+  const active = offerInput && onInput !== undefined;
+
+  const sendNext = useCallback(() => {
+    if (onInput === undefined || busy || sentRef.current) return;
+    const next = waitingRef.current.shift();
+    if (next === undefined) return;
+    // Until `busy` is seen to rise and fall, nothing else goes out. An input
+    // the pane refused without ever going busy must not hold the rest forever.
+    sentRef.current = true;
+    if (unansweredRef.current !== undefined) clearTimeout(unansweredRef.current);
+    unansweredRef.current = setTimeout(() => {
+      unansweredRef.current = undefined;
+      if (busyRef.current) return;
+      sentRef.current = false;
+      sendNextRef.current();
+    }, UNANSWERED_INPUT_MS);
+    onInput(next);
+  }, [busy, onInput]);
+  const sendNextRef = useRef(sendNext);
+  sendNextRef.current = sendNext;
+
+  useEffect(() => {
+    if (busy) return;
+    sentRef.current = false;
+    if (typingRef.current === undefined) sendNext();
+  }, [busy, sendNext]);
+
+  useEffect(
+    () => () => {
+      if (typingRef.current !== undefined) clearTimeout(typingRef.current);
+      if (unansweredRef.current !== undefined) clearTimeout(unansweredRef.current);
+    },
+    [],
+  );
+
+  const enqueue = (intent: AppleSimulatorFrameInputIntent, typing: boolean) => {
+    const waiting = waitingRef.current;
+    const last = waiting.at(-1);
+    if (intent.kind === "type-text" && last?.kind === "type-text") {
+      waiting[waiting.length - 1] = { kind: "type-text", text: last.text + intent.text };
+    } else {
+      waiting.push(intent);
+    }
+    if (typingRef.current !== undefined) clearTimeout(typingRef.current);
+    typingRef.current = undefined;
+    if (typing) {
+      typingRef.current = setTimeout(() => {
+        typingRef.current = undefined;
+        sendNext();
+      }, TYPING_PAUSE_MS);
+      return;
+    }
+    sendNext();
+  };
+
   return (
     // The same coordinate hit region as the captured still: the recipe's fixed
-    // height and padding would distort the mapped geometry.
+    // height and padding would distort the mapped geometry. It is not disabled
+    // while an action runs — a disabled control drops focus and with it the
+    // keys being typed.
     /* ui-boundary-exception: specialized-editor-surface */
     <button
       aria-label={
@@ -151,19 +230,36 @@ function StreamedScreen(props: {
           : `${props.name} Simulator screen`
       }
       className="apple-simulator-frame__screen"
-      disabled={!props.offerInput || props.busy || props.onInput === undefined}
-      onClick={(event) => {
-        if (!props.offerInput || props.onInput === undefined || props.busy) return;
+      disabled={!active}
+      onKeyDown={(event) => {
+        if (!active) return;
+        const intent = keyIntentFor(event);
+        if (intent === undefined) return;
+        event.preventDefault();
+        if (intent.kind === "text") enqueue({ kind: "type-text", text: intent.text }, true);
+        else enqueue({ kind: "key-press", key: intent.key }, false);
+      }}
+      onPointerCancel={() => {
+        pressRef.current = undefined;
+      }}
+      onPointerDown={(event) => {
+        if (!active) return;
+        pressRef.current = { x: event.clientX, y: event.clientY, atMs: event.timeStamp };
+        // Keeps the release coming here when a drag runs off the screen.
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }}
+      onPointerUp={(event) => {
+        const down = pressRef.current;
+        pressRef.current = undefined;
         const canvas = canvasRef.current;
-        if (canvas === null) return;
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        // Frames are scaled down for the pane, so the canvas's own pixels are
-        // not the device's. A tap is a point on the device's screen, whose size
-        // the host named when the view began.
-        const x = ((event.clientX - rect.left) / rect.width) * props.screen.width;
-        const y = ((event.clientY - rect.top) / rect.height) * props.screen.height;
-        props.onInput({ kind: "tap", point: { x: Math.round(x), y: Math.round(y) } });
+        if (!active || down === undefined || canvas === null) return;
+        const gesture = gestureFrom(
+          down,
+          { x: event.clientX, y: event.clientY, atMs: event.timeStamp },
+          canvas.getBoundingClientRect(),
+          props.screen,
+        );
+        if (gesture !== undefined) enqueue(gesture, false);
       }}
       type="button"
     >
@@ -234,6 +330,22 @@ function FrameInputControls(props: {
           variant="secondary"
         >
           Escape
+        </OctantButton>
+        <OctantButton
+          disabled={props.busy}
+          onClick={() => props.onInput({ kind: "key-press", key: "home" })}
+          type="button"
+          variant="secondary"
+        >
+          Home
+        </OctantButton>
+        <OctantButton
+          disabled={props.busy}
+          onClick={() => props.onInput({ kind: "key-press", key: "lock" })}
+          type="button"
+          variant="secondary"
+        >
+          Lock
         </OctantButton>
       </div>
     </div>
