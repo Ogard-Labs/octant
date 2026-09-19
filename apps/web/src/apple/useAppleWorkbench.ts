@@ -101,8 +101,20 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
       // among them — follows in the background instead of holding the action's
       // result and every control behind it, and a failure there changes nothing.
       if (request.kind === "boot" || request.kind === "shutdown") {
+        const acted =
+          evidence.outcome === "succeeded" && request.simulatorId !== undefined
+            ? {
+                simulatorId: String(request.simulatorId),
+                state: request.kind === "boot" ? ("booted" as const) : ("shutdown" as const),
+              }
+            : undefined;
         setDiscovery((previous) =>
-          previous === undefined ? previous : { ...previous, simulators: snapshot.simulators },
+          previous === undefined
+            ? previous
+            : {
+                ...previous,
+                simulators: withNewerStates(previous.simulators, snapshot.simulators, acted),
+              },
         );
         const generation = ++discoveryGeneration.current;
         void client
@@ -136,6 +148,29 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     execute,
     cancel,
   };
+}
+
+type SimulatorRecords = AppleDiscoverySnapshot["simulators"];
+
+/**
+ * The listed destinations with the states the host now reports. States are
+ * merged into the records already shown rather than the list being replaced:
+ * a discovery that failed its first probe empties the host's runtime list, and
+ * replacing with that removed every destination until a later discovery
+ * succeeded. The action's own passed result wins for the Simulator it acted on,
+ * because in that case the host's list no longer names it at all.
+ */
+function withNewerStates(
+  listed: SimulatorRecords,
+  reported: SimulatorRecords,
+  acted: { readonly simulatorId: string; readonly state: "booted" | "shutdown" } | undefined,
+): SimulatorRecords {
+  const states = new Map(reported.map((record) => [String(record.simulatorId), record.state]));
+  if (acted !== undefined) states.set(acted.simulatorId, acted.state);
+  return listed.map((record) => {
+    const state = states.get(String(record.simulatorId));
+    return state === undefined || state === record.state ? record : { ...record, state };
+  });
 }
 
 function classifyFailure(error: unknown): {

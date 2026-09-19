@@ -167,6 +167,49 @@ describe("useAppleWorkbench", () => {
     );
   });
 
+  it("keeps its destinations when the host's runtime list came back empty", async () => {
+    const before = {
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: [
+        { simulatorId: "sim-1", name: "iPhone 17", state: "booted" },
+        { simulatorId: "sim-2", name: "iPad", state: "shutdown" },
+      ],
+    };
+    const discover = vi.fn(async () => before);
+    const client = {
+      discover,
+      // A discovery that failed its first probe clears the host's runtime list
+      // while the per-project cache still lets the shutdown run.
+      snapshot: vi.fn(async () => ({
+        sequence: 2,
+        active: [],
+        recentEvidence: [],
+        simulators: [],
+      })),
+      execute: vi.fn(async () => ({ outcome: "succeeded" })),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    discover.mockRejectedValue(new Error("Xcode is unavailable on this host."));
+    await result.current.execute({ kind: "shutdown", simulatorId: "sim-1" });
+
+    await waitFor(() =>
+      expect(result.current.discovery?.simulators).toEqual([
+        { simulatorId: "sim-1", name: "iPhone 17", state: "shutdown" },
+        { simulatorId: "sim-2", name: "iPad", state: "shutdown" },
+      ]),
+    );
+  });
+
   it("exposes successful discovery even before the first action produces evidence", async () => {
     const discovery = { workspace: { schemes: ["Fixture"] }, toolchain: {}, simulators: [] };
     const snapshot = { sequence: 0, active: [], recentEvidence: [] };
