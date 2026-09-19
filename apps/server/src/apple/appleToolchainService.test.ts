@@ -792,6 +792,8 @@ describe("AppleToolchainService Simulator input", () => {
     const artifacts = new Map<string, Uint8Array>();
     const service = new AppleToolchainService({
       execute: execute as never,
+      // The osascript fallback is Darwin-only; CI runs this suite on Linux too.
+      platform: "darwin",
       writeArtifact: async (reference: string, bytes: Uint8Array) => {
         artifacts.set(reference, bytes);
       },
@@ -827,8 +829,6 @@ describe("AppleToolchainService Simulator input", () => {
     );
     const service = new AppleToolchainService({
       execute,
-      // The osascript fallback is Darwin-only; CI runs this suite on Linux too.
-      platform: "darwin",
       injectSimulatorInput,
       writeArtifact: async () => undefined,
       realpath: async (path: string) => path,
