@@ -274,7 +274,12 @@ describe("Apple workbench input through Device Hub", () => {
   it("types into the device window as key presses without opening a session or granting an app", async () => {
     const { host, call } = deviceHubFixture([[deviceWindow]]);
     try {
-      const result = await host.simulatorInput({ kind: "type-text", ...command, text: "Hi 4" });
+      const result = await host.simulatorInput({
+        kind: "type-text",
+        ...command,
+        text: "Hi 4",
+        budgetMs: 30_000,
+      });
       expect(result).toEqual({
         kind: "delivered",
         detail: "4 key presses reached the iPhone 17 Pro window",
@@ -336,15 +341,65 @@ describe("Apple workbench input through Device Hub", () => {
     }
   });
 
+  it("counts a Simulator input in flight as driver work, and reports idle once it lands", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const onIdle = vi.fn();
+    const call = vi.fn(async (name: string) => {
+      if (name === "press_key") await gate;
+      const data =
+        name === "list_windows"
+          ? { windows: [deviceWindow] }
+          : name === "get_window_state"
+            ? { snapshot_id: "s00000001", elements: [] }
+            : { ok: true };
+      return {
+        text: "",
+        images: [],
+        structuredJson: JSON.stringify(data),
+        rawJson: "{}",
+        isError: false,
+        degraded: false,
+      };
+    });
+    const host = createComputerUseControlHost({
+      runtime: async () => ({ generation: "g", version: "0.28.2", call, close: async () => {} }),
+      onIdle,
+    });
+    try {
+      const input = host.simulatorInput({ kind: "key-press", ...command, key: "return" });
+      await vi.waitFor(() =>
+        expect(call).toHaveBeenCalledWith("press_key", expect.anything(), undefined),
+      );
+      // An update that swapped the driver now would cut the key press off.
+      expect(host.busy()).toBe(true);
+      expect(host.activeSessions()).toBe(0);
+      release();
+      await expect(input).resolves.toMatchObject({ kind: "delivered" });
+      expect(host.busy()).toBe(false);
+      expect(onIdle).toHaveBeenCalledTimes(1);
+    } finally {
+      await host.close();
+    }
+  });
+
   it("refuses by name what Device Hub cannot deliver: unsupported characters, unknown keys, missing targets", async () => {
     const { host, call } = deviceHubFixture([[deviceWindow]]);
     try {
       expect(
-        await host.simulatorInput({ kind: "type-text", ...command, text: "a@b" }),
-      ).toMatchObject({
-        kind: "refused",
-        reason: "unsupported-characters",
-      });
+        await host.simulatorInput({ kind: "type-text", ...command, text: "a@b", budgetMs: 30_000 }),
+      ).toMatchObject({ kind: "refused", reason: "unsupported-characters" });
+      // 24 key presses cost about 31 s; a 30 s action must not start typing.
+      expect(
+        await host.simulatorInput({
+          kind: "type-text",
+          ...command,
+          text: "x".repeat(24),
+          budgetMs: 30_000,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "text-too-long" });
       expect(
         await host.simulatorInput({ kind: "key-press", ...command, key: "f13" }),
       ).toMatchObject({

@@ -5,6 +5,7 @@ import {
   deviceScreenRect,
   driverKeyFor,
   elementAtPoint,
+  fitsKeyPressBudget,
   elementForTarget,
   isDeviceHubWindow,
   keyPressesFor,
@@ -89,7 +90,24 @@ describe("Device Hub input geometry", () => {
     expect(elementForTarget(device, "generelt")?.index).toBe(4);
     expect(elementForTarget(device, "Sø")?.index).toBe(13);
     expect(elementForTarget(device, "Record")).toBeUndefined();
-    expect(chromeButtonIndex(elements, "Home")).toBe(29);
+    expect(chromeButtonIndex(elements, window, "Home")).toBe(29);
+  });
+
+  it("never mistakes an app's own Home button for Device Hub's hardware control", () => {
+    // The device's tree precedes Device Hub's controls in a snapshot, so a
+    // tab bar "Home" inside the screen would otherwise be found first.
+    const withAppHome = [
+      {
+        element_index: 3,
+        role: "AXButton",
+        label: "Home",
+        actions: ["AXPress"],
+        frame: { x: 1830, y: 1560, w: 80, h: 48 },
+      },
+      ...elements,
+    ];
+    expect(chromeButtonIndex(withAppHome, window, "Home")).toBe(29);
+    expect(chromeButtonIndex(withAppHome.slice(0, 1), window, "Home")).toBeUndefined();
   });
 
   it("recognises the device window by app and title, on screen only", () => {
@@ -131,6 +149,12 @@ describe("Device Hub keyboard delivery", () => {
       ],
     });
     expect(keyPressesFor("a@b.c")).toEqual({ kind: "unsupported", characters: ["@", "."] });
+  });
+
+  it("fits text to the action's deadline at the measured cost of a key press", () => {
+    expect(fitsKeyPressBudget(9, 30_000)).toBe(true);
+    expect(fitsKeyPressBudget(23, 30_000)).toBe(true);
+    expect(fitsKeyPressBudget(24, 30_000)).toBe(false);
   });
 
   it("maps the workbench key names the pane and the tool send", () => {

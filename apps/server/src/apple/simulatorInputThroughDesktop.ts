@@ -15,8 +15,8 @@ type InjectSimulatorInput = NonNullable<AppleToolchainServiceOptions["injectSimu
 export function simulatorInputThroughDesktop(
   desktop: Pick<DesktopComputerUsePort, "simulatorInput">,
 ): InjectSimulatorInput {
-  return async (request, _context, _timeoutMs, signal, destination) => {
-    const command = simulatorInputCommand(request, destination);
+  return async (request, _context, timeoutMs, signal, destination) => {
+    const command = simulatorInputCommand(request, destination, timeoutMs);
     if (command.kind === "unavailable") return unavailable(command.message);
     try {
       const result = await desktop.simulatorInput(command.command, signal);
@@ -34,6 +34,7 @@ export function simulatorInputThroughDesktop(
 export function simulatorInputCommand(
   request: AppleSimulatorRequest,
   destination: AppleSimulatorRecord | undefined,
+  timeoutMs: number,
 ):
   | { readonly kind: "command"; readonly command: SimulatorInputCommand }
   | { readonly kind: "unavailable"; readonly message: string } {
@@ -44,7 +45,10 @@ export function simulatorInputCommand(
     };
   const simulator = { udid: destination.udid, name: destination.name };
   if (request.kind === "type-text" && request.text !== undefined)
-    return { kind: "command", command: { kind: "type-text", ...simulator, text: request.text } };
+    return {
+      kind: "command",
+      command: { kind: "type-text", ...simulator, text: request.text, budgetMs: timeoutMs },
+    };
   if (request.kind === "key-press" && request.key !== undefined)
     return { kind: "command", command: { kind: "key-press", ...simulator, key: request.key } };
   if (request.kind === "tap" && request.target !== undefined)

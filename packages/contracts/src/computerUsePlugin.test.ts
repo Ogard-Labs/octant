@@ -39,8 +39,16 @@ describe("Simulator input through the desktop broker", () => {
   it("names the device window and refuses a coordinate tap without its frame", () => {
     const destination = { udid: "348B3796-90BE-4B03-ADC1-46D7468C9D43", name: "iPhone 17 Pro" };
     expect(
-      decodeSimulatorInputCommand({ kind: "type-text", ...destination, text: " spaced " }),
+      decodeSimulatorInputCommand({
+        kind: "type-text",
+        ...destination,
+        text: " spaced ",
+        budgetMs: 30_000,
+      }),
     ).toMatchObject({ text: " spaced " });
+    expect(() =>
+      decodeSimulatorInputCommand({ kind: "type-text", ...destination, text: "x" }),
+    ).toThrow();
     expect(
       decodeSimulatorInputCommand({
         kind: "tap",
@@ -61,7 +69,13 @@ describe("Simulator input through the desktop broker", () => {
       }),
     ).toThrow();
     expect(() =>
-      decodeSimulatorInputCommand({ kind: "type-text", ...destination, text: "x", appId: "*" }),
+      decodeSimulatorInputCommand({
+        kind: "type-text",
+        ...destination,
+        text: "x",
+        budgetMs: 30_000,
+        appId: "*",
+      }),
     ).toThrow();
   });
 });

@@ -25,6 +25,23 @@ export interface AppleExecutionScope {
 
 const SIMULATOR_INPUT_KINDS = new Set(["tap", "type-text", "key-press"]);
 
+/**
+ * Typed text reaches a Simulator one key press at a time, and the desktop
+ * driver confirms each press before the next (about 1.3 s each, measured on
+ * the packaged app), so the action's deadline grows with the text instead of
+ * cutting a long string off part-way. The contract caps an action at ten
+ * minutes.
+ */
+const APPLE_TYPE_TEXT_BASE_TIMEOUT_MS = 30_000;
+const APPLE_TYPE_TEXT_KEY_TIMEOUT_MS = 1_500;
+const APPLE_ACTION_TIMEOUT_CEILING_MS = 10 * 60_000;
+export function appleTypeTextTimeoutMs(text: string): number {
+  return Math.min(
+    APPLE_ACTION_TIMEOUT_CEILING_MS,
+    APPLE_TYPE_TEXT_BASE_TIMEOUT_MS + [...text].length * APPLE_TYPE_TEXT_KEY_TIMEOUT_MS,
+  );
+}
+
 export function isAppleSimulatorInputKind(
   kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
 ): boolean {

@@ -94,6 +94,12 @@ export const SimulatorInputCommand = Schema.Union(
     kind: Schema.Literal("type-text"),
     ...simulatorDestination,
     text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+    /**
+     * The action's deadline. Text goes key by key, so the desktop refuses a
+     * string it cannot finish in time before the first key, rather than
+     * leaving a typed prefix behind a timeout.
+     */
+    budgetMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("key-press"),

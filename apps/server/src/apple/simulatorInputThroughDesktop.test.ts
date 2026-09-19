@@ -83,6 +83,28 @@ describe("Simulator input through the desktop broker", () => {
     expect(text(result.stderr)).toMatch(/^unsupported-characters: /);
   });
 
+  it("hands typed text its action deadline so the desktop can refuse what cannot fit", async () => {
+    const simulatorInput = vi.fn(async () => ({ kind: "delivered" as const, detail: "ok" }));
+    const inject = simulatorInputThroughDesktop({ simulatorInput });
+    await inject(
+      request({ kind: "type-text", text: "hello" }),
+      context,
+      37_500,
+      undefined,
+      destination,
+    );
+    expect(simulatorInput).toHaveBeenCalledWith(
+      {
+        kind: "type-text",
+        udid: destination.udid,
+        name: "iPhone 17 Pro",
+        text: "hello",
+        budgetMs: 37_500,
+      },
+      undefined,
+    );
+  });
+
   it("refuses a coordinate tap without its frame and a request for an undiscovered destination without calling the desktop", async () => {
     const simulatorInput = vi.fn();
     const inject = simulatorInputThroughDesktop({ simulatorInput });

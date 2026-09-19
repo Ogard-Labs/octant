@@ -26,6 +26,7 @@ import type {
   ApplePlatform,
 } from "@octant/contracts";
 import {
+  appleTypeTextTimeoutMs,
   clampTurnAccessPosture,
   decideProfileToolConstraint,
   isToolAllowedByAllowlist,
@@ -839,7 +840,7 @@ function appleActionRequest(
           simulatorId: input.simulatorId as never,
           requestedBy,
           text: input.text,
-          timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+          timeoutMs: appleTypeTextTimeoutMs(input.text),
         } as AppleActionRequest;
       }
       if (input.key === undefined) return undefined;

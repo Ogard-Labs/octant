@@ -10,6 +10,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
 import {
   appleLiveFrameIsStaleAfterRestart,
+  appleTypeTextTimeoutMs,
   decidesCodeEffectsByApproval,
   latestAppleScreenshotEvidence,
   presentAppleSimulatorLiveFrame,
@@ -669,7 +670,7 @@ function appleActionRequest(input: {
         simulatorId: intent.simulatorId,
         requestedBy: localUserActor(),
         text: intent.text,
-        timeoutMs: 30_000,
+        timeoutMs: appleTypeTextTimeoutMs(intent.text),
       };
     case "key-press":
       return {

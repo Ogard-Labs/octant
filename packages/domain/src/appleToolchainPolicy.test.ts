@@ -489,3 +489,14 @@ describe("isToolchainAvailable", () => {
     expect(isToolchainAvailable(unavailableToolchain)).toBe(false);
   });
 });
+
+describe("Typed text deadline", () => {
+  it("grows with the text so a long string is not cut off part-way, up to the contract ceiling", async () => {
+    const { appleTypeTextTimeoutMs } = await import("./appleToolchainPolicy");
+    expect(appleTypeTextTimeoutMs("hi")).toBe(33_000);
+    expect(appleTypeTextTimeoutMs("x".repeat(100))).toBe(180_000);
+    expect(appleTypeTextTimeoutMs("x".repeat(4_096))).toBe(600_000);
+    // Counted in characters, not UTF-16 units: one key press per character.
+    expect(appleTypeTextTimeoutMs("😀")).toBe(31_500);
+  });
+});

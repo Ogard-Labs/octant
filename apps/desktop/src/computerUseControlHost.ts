@@ -11,6 +11,7 @@ import type { ComputerDriverRuntime } from "./computerUseSdkRuntime";
 import {
   DEVICE_HUB_APP_ID,
   HOME_KEY,
+  KEY_PRESS_COST_MS,
   chromeButtonIndex,
   deviceElements,
   deviceScreenRect,
@@ -18,6 +19,7 @@ import {
   driverKeyFor,
   elementAtPoint,
   elementForTarget,
+  fitsKeyPressBudget,
   isDeviceHubWindow,
   keyPressesFor,
   windowPointFor,
@@ -131,6 +133,9 @@ export function createComputerUseControlHost(options: {
 }) {
   const sessions = new Map<string, OwnedSession>();
   const windowOwners = new Map<string, string>();
+  // Simulator input owns no session, but it is driver work all the same: a
+  // driver replaced mid-typing would leave a typed prefix behind.
+  let inputsInFlight = 0;
   let tail = Promise.resolve();
   let closed = false;
 
@@ -516,6 +521,15 @@ export function createComputerUseControlHost(options: {
     signal?: AbortSignal,
   ): Promise<SimulatorInputResult> {
     if (closed) return refusedInput("unavailable", "Computer use is closed.");
+    if (command.kind === "type-text") {
+      const keys = keyPressesFor(command.text);
+      if (keys.kind === "presses" && !fitsKeyPressBudget(keys.presses.length, command.budgetMs))
+        return refusedInput(
+          "text-too-long",
+          `This text needs about ${Math.ceil((keys.presses.length * KEY_PRESS_COST_MS) / 1_000)} s as key presses and the action allows ${Math.floor(command.budgetMs / 1_000)} s; send at most ${Math.floor(command.budgetMs / KEY_PRESS_COST_MS)} characters at a time.`,
+        );
+    }
+    inputsInFlight += 1;
     const pending = tail.then(async (): Promise<SimulatorInputResult> => {
       if (signal?.aborted) return refusedInput("cancelled", "Simulator input was cancelled.");
       try {
@@ -575,7 +589,7 @@ export function createComputerUseControlHost(options: {
         }
         if (command.kind === "key-press") {
           if (command.key.trim().toLowerCase() === HOME_KEY) {
-            const home = chromeButtonIndex(data.elements, "Home");
+            const home = chromeButtonIndex(data.elements, window.bounds, "Home");
             if (home === undefined)
               return refusedInput(
                 "unsupported-key",
@@ -634,10 +648,16 @@ export function createComputerUseControlHost(options: {
       () => undefined,
       () => undefined,
     );
-    return pending;
+    try {
+      return await pending;
+    } finally {
+      inputsInFlight -= 1;
+      if (inputsInFlight === 0 && sessions.size === 0) options.onIdle?.();
+    }
   }
 
   return {
+    busy: () => sessions.size > 0 || inputsInFlight > 0,
     reserve: async (owner: ComputerUseOwner) => (await reserve(owner)) !== undefined,
     execute,
     release,

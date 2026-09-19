@@ -52,13 +52,20 @@ recording.
   recording or press Home by accident.
 - Typed text goes as key presses for letters, digits, space and newline, with
   shift for capitals. Any other character refuses the whole request by name
-  rather than delivering a layout-dependent guess. The device Home button is
-  Device Hub's own control and is pressed by accessibility; other named keys
-  map to the driver's key names.
+  rather than delivering a layout-dependent guess. The driver confirms each
+  press before the next (about 1.3 s each, measured), so a typed-text action's
+  deadline grows with its length up to the contract's ten minutes, and the
+  desktop refuses text that cannot finish inside the deadline before the first
+  key rather than leaving a typed prefix behind a timeout.
+- The device Home button is Device Hub's own control and is pressed by
+  accessibility. It is looked up only inside Device Hub's bars, never in the
+  device's tree, so an app's own "Home" button is never pressed in its place.
+  Other named keys map to the driver's key names.
 - Simulator input borrows the embedded driver without enabling the Computer
   use plugin for agents. It starts no computer-use session, grants no
   application, and the Apple policy that admitted the request remains the
-  approval. It requires Octant's macOS Accessibility permission and refuses by
+  approval. An input in flight still counts as driver work, so a staged driver
+  update waits for it instead of replacing the driver mid-typing. It requires Octant's macOS Accessibility permission and refuses by
   name without it. Plan mode and read-only postures are refused before the
   request reaches the desktop, as 0009 requires.
 - The driver's application list and Device Hub's toolbar labels are observed

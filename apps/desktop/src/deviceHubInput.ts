@@ -186,19 +186,27 @@ export function elementForTarget(
   );
 }
 
-/** Device Hub's own button of that label (its toolbar is English on every locale seen). */
+/**
+ * Device Hub's own button of that label (its toolbar is English on every
+ * locale seen). Only a button inside the bars above and below the bezel
+ * counts: the device's tree comes first in a snapshot, and an app with its own
+ * "Home" button must never be pressed in place of the hardware control.
+ */
 export function chromeButtonIndex(
   elements: ReadonlyArray<unknown>,
+  window: Rect,
   label: string,
 ): number | undefined {
-  const button = elements
-    .filter(record)
-    .find(
-      (element) =>
-        element.role === "AXButton" &&
-        element.label === label &&
-        typeof element.element_index === "number",
+  const button = elements.filter(record).find((element) => {
+    const frame = localFrame(element, window);
+    return (
+      element.role === "AXButton" &&
+      element.label === label &&
+      typeof element.element_index === "number" &&
+      frame !== undefined &&
+      (frame.y + frame.height <= BAR_HEIGHT || frame.y >= window.height - BAR_HEIGHT)
     );
+  });
   return typeof button?.element_index === "number" ? button.element_index : undefined;
 }
 
@@ -266,6 +274,17 @@ export function keyPressesFor(text: string):
   if (unsupported.size > 0)
     return { kind: "unsupported", characters: [...unsupported].slice(0, 8) };
   return { kind: "presses", presses };
+}
+
+/**
+ * What one key press costs end to end: the driver confirms each press before
+ * the next, and nine presses took 12.7 s on the packaged app. Text that cannot
+ * finish inside the action's deadline is refused before the first key.
+ */
+export const KEY_PRESS_COST_MS = 1_300;
+
+export function fitsKeyPressBudget(presses: number, budgetMs: number): boolean {
+  return presses * KEY_PRESS_COST_MS <= budgetMs;
 }
 
 export type SimulatorTap = Extract<SimulatorInputCommand, { readonly kind: "tap" }>;

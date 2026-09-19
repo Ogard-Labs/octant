@@ -111,9 +111,9 @@ export function createComputerUseDesktopService(options: {
     currentVersion: active.version,
     check: latestComputerDriverRelease,
     stage: (release, signal) => stageComputerDriver(release, versions, signal),
-    isBusy: () => controls.activeSessions() > 0 || replacing,
+    isBusy: () => controls.busy() || replacing,
     activate: async (candidate) => {
-      if (closed || replacing || !settings.enabled || controls.activeSessions() > 0) return false;
+      if (closed || replacing || !settings.enabled || controls.busy()) return false;
       replacing = true;
       const admittedRevision = revision;
       const previous = active;

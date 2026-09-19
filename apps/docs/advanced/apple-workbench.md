@@ -80,7 +80,9 @@ stays in front. That needs Octant's macOS Accessibility permission (Settings ›
 Computer use shows it) but not the Computer use plugin itself. A tap presses
 the accessible element under the point or the element named as a target;
 typed text goes as key presses for letters, digits, space and newline, and
-other characters are refused by name rather than typed wrongly. When the
+other characters are refused by name rather than typed wrongly. Each key
+takes a little over a second to confirm, so longer text gets a longer
+deadline, and text too long to finish in time is refused before it starts. When the
 host cannot deliver an input action, the evidence names the host's refusal
 rather than reading as interrupted. Remote, Linux, and headless clients stay
 read-only. Typed characters never land in durable evidence, and neither does
