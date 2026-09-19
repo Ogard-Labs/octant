@@ -19,6 +19,25 @@ export interface GitSeatbeltLaunchOptions {
   readonly args: ReadonlyArray<string>;
   readonly temporaryDirectory: string;
   readonly networkEgress: OsNetworkEgress;
+  /**
+   * Whether this launch may write the out-of-root worktree metadata. It
+   * defaults to **false**: these rules are appended last and Seatbelt resolves
+   * by last matching rule, so a write allow emitted here outranks whatever
+   * posture the caller set on the launch itself — including Plan's, which 0009
+   * keeps read-only always. A caller that genuinely writes that metadata opts
+   * in and says why; a caller that forgets is confined rather than widened.
+   */
+  readonly writable?: boolean;
+  /**
+   * Directories this launch may write besides the bound root.
+   *
+   * Naming one is not only a permission. On Linux a shared host temporary root
+   * is replaced by a private tmpfs rather than bound, so a directory the caller
+   * created under it does not exist for the confined process at all until it is
+   * named here. Mounts are applied shallowest first, so the bind lands inside
+   * that tmpfs.
+   */
+  readonly additionalWriteRoots?: ReadonlyArray<string>;
 }
 
 export interface GitSeatbeltPortOptions {
@@ -126,13 +145,29 @@ export function gitShimExtraRules(
   return MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`);
 }
 
+export interface GitLinkedWorktreeMetadataOptions {
+  /**
+   * Whether the launch may write the out-of-root metadata. Staging, committing
+   * and checkpoint restore do; observing history does not. It defaults to
+   * false because these rules are appended last, and Seatbelt resolves by last
+   * matching rule: a write allow here overrides a caller's own write deny on
+   * the same path, so a launch that asked to stay read-only would silently
+   * receive write authority over the parent repository's entire .git — refs,
+   * objects and hooks included.
+   */
+  readonly writable?: boolean;
+}
+
 /**
  * A linked worktree's .git file points at the main repository's
  * .git/worktrees/<name>, outside the bound root. Allow that metadata and its
  * commondir so git can see it is a repository, without opening the parent
  * working tree.
  */
-export function gitLinkedWorktreeMetadataRules(checkoutRoot: string): ReadonlyArray<string> {
+export function gitLinkedWorktreeMetadataRules(
+  checkoutRoot: string,
+  options: GitLinkedWorktreeMetadataOptions = {},
+): ReadonlyArray<string> {
   let gitdir: string | undefined;
   try {
     const text = readFileSync(join(checkoutRoot, ".git"), "utf8");
@@ -152,7 +187,7 @@ export function gitLinkedWorktreeMetadataRules(checkoutRoot: string): ReadonlyAr
   }
   return roots.flatMap((path) => [
     seatbeltAllowRule("file-read*", path),
-    seatbeltAllowRule("file-write*", path),
+    ...(options.writable === true ? [seatbeltAllowRule("file-write*", path)] : []),
     ...ancestorMetadataRules(path),
   ]);
 }
@@ -253,7 +288,9 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
   const binaryDirectory = dirname(options.gitExecutable);
   const extraRules = [
     ...gitShimExtraRules(),
-    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot),
+    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, {
+      writable: options.writable ?? false,
+    }),
   ];
   return options.confinement.prepare({
     executable: options.gitExecutable,
@@ -269,6 +306,9 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
       dirname(binaryDirectory),
       ...gitGlobalConfigReadRoots(),
     ],
+    ...(options.additionalWriteRoots === undefined
+      ? {}
+      : { additionalWriteRoots: options.additionalWriteRoots }),
     ...(extraRules.length === 0 ? {} : { extraRules }),
   });
 }

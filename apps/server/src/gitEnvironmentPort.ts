@@ -280,6 +280,10 @@ export class GitEnvironmentPort {
             "Git environment commands require an absolute -C checkout root.",
           );
         }
+        // Every command this port runs reads: rev-parse, worktree list,
+        // symbolic-ref, status and diff, with GIT_OPTIONAL_LOCKS=0 so even
+        // the index stays untouched. It therefore takes the launch's
+        // read-only default and never receives the out-of-root write grant.
         const launch = prepareGitSeatbeltLaunch({
           confinement: this.#confinement.confinement,
           gitExecutable: this.#confinement.gitExecutable,
