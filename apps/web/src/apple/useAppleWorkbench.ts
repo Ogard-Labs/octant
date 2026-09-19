@@ -92,7 +92,15 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
       // lives in discovery, not the runtime snapshot. Without re-discovering,
       // a passed boot still read "Shutdown" until the tool was re-opened.
       if (request.kind === "boot" || request.kind === "shutdown") {
-        setDiscovery(await client.discover(discoveryRequestRef.current));
+        // The action already ran and its evidence is in hand. A discovery that
+        // fails afterwards must not turn that into "the service did not
+        // answer"; the snapshot above already carries the host's new state, and
+        // the list catches up on the next discovery.
+        try {
+          setDiscovery(await client.discover(discoveryRequestRef.current));
+        } catch {
+          // Keep the evidence; the destination list stays as last discovered.
+        }
       }
       setStatus("ready");
       return evidence;
