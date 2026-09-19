@@ -1,5 +1,6 @@
 import {
   makeSecretServiceCredentialStore,
+  makeWindowsCredentialStore,
   probeSecretService,
   type CredentialPurgeStore,
   type CredentialStore,
@@ -17,6 +18,11 @@ export type DesktopCredentialBackend =
     }
   | {
       readonly kind: "secret-service";
+      readonly store: CredentialStore;
+      readonly purgeStore?: undefined;
+    }
+  | {
+      readonly kind: "credential-manager";
       readonly store: CredentialStore;
       readonly purgeStore?: undefined;
     }
@@ -56,6 +62,12 @@ export async function resolveDesktopCredentialBackend(options: {
     return {
       kind: "secret-service",
       store: makeSecretServiceCredentialStore(),
+    };
+  }
+  if (options.platform === "win32") {
+    return {
+      kind: "credential-manager",
+      store: makeWindowsCredentialStore(),
     };
   }
   return { kind: "unavailable" };
