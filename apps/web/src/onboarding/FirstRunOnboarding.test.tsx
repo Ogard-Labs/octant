@@ -237,24 +237,46 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByText(/no account and signs you in to nothing/)).toBeVisible();
   });
 
-  it("will not go on, or be dismissed, until it knows what to call the user", async () => {
+  it("asks for a name as help, and calls it missing only once the reader tries to leave", async () => {
+    const user = userEvent.setup();
+    const props = mount({ profile: emptyProfile });
+    const name = screen.getByLabelText("Name");
+
+    // The requirement is said up front, as help under the field. Nothing has
+    // been done wrong yet, so nothing is marked wrong.
+    expect(screen.getByText("Enter a name to continue.")).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(name).not.toHaveAttribute("aria-invalid", "true");
+    // Skipping cannot be honoured without a name, so it is absent, not dead.
+    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Providers/ })).toBeDisabled();
+
+    // Continue answers instead of sitting disabled: the field says what it
+    // needs and takes focus.
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a name to continue");
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "About you" })).toBeVisible();
+
+    await user.type(name, "Ada");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
+    expect(props.controller.skip).not.toHaveBeenCalled();
+  });
+
+  it("says why it will not close when it is dismissed without a name", async () => {
     const user = userEvent.setup();
     const props = mount({ profile: emptyProfile });
 
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Providers/ })).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a name to continue");
-    expect(screen.queryByText(/needs something to call you/)).toBeNull();
-
     // Dismissing is one of this dialog's exits, and it would leave the host
-    // with no name at all, so it refuses for the same reason Skip does.
+    // with no name at all, so it refuses. The refusal used to be silent, which
+    // made Escape look broken.
     await user.keyboard("{Escape}");
-    expect(props.controller.skip).not.toHaveBeenCalled();
 
-    await user.type(screen.getByLabelText("Name"), "Ada");
-    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
+    expect(props.controller.skip).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a name to continue");
+    expect(screen.getByLabelText("Name")).toHaveFocus();
   });
 
   it("saves the profile when the step is left, not on every keystroke", async () => {
@@ -292,11 +314,16 @@ describe("FirstRunOnboarding", () => {
     // Typed one character at a time, the 64th character makes a storable name
     // and the 65th makes the field invalid.
     await user.type(screen.getByLabelText("Name"), "A".repeat(65));
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    // A name past the limit is no name, so Skip is not offered and Continue
+    // asks for one instead of leaving. (Skip used to sit disabled here, so a
+    // click on it proved nothing.)
+    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "About you" })).toBeVisible();
 
-    // Skipping still records what was answered, but the 64-character prefix is
-    // not an answer: the user never settled on it and the field stopped showing
-    // it. Saving it here would journal a name that exists nowhere on screen.
+    // The 64-character prefix is not an answer: the user never settled on it
+    // and the field stopped showing it. Saving it here would journal a name
+    // that exists nowhere on screen.
     expect(props.onSaveProfile).not.toHaveBeenCalledWith(
       expect.objectContaining({ displayName: expect.anything() }),
     );
@@ -799,6 +826,18 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("button", { name: "Close setup" }));
     expect(screen.getByRole("dialog", { name: "Welcome to Octant" })).toBeVisible();
     expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
+  });
+
+  it("titles the readiness view and does not count it as a sixth setup step", async () => {
+    const user = userEvent.setup();
+    mount(readyHandoff());
+
+    await user.click(screen.getByRole("button", { name: /Navigator/ }));
+    expect(screen.getByText("Step 5 of 5")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Your first thread" })).toBeVisible();
+    expect(screen.queryByText(/^Step \d of \d$/)).toBeNull();
   });
 
   it("does not start a thread or fabricate readiness when first run is skipped", async () => {

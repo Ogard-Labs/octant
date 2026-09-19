@@ -131,6 +131,10 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [syncedProfile, setSyncedProfile] = useState<UserProfile>(props.profile);
   const [importing, setImporting] = useState(false);
   const [resolving, setResolving] = useState(false);
+  // Whether the reader has tried to go on, skip, or dismiss without a name.
+  // The requirement reads as help until then: the step used to open with its
+  // one field already marked invalid, before anything had been typed.
+  const [nameAsked, setNameAsked] = useState(false);
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const answerLost = useRef(false);
   const nameField = useRef<HTMLInputElement>(null);
@@ -268,6 +272,18 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     track(props.onSaveProfile(profileDraft));
   }
 
+  /**
+   * Answer an attempt to leave without the one required answer.
+   *
+   * Every way out of the first step refuses while there is no name. Refusing
+   * silently made Continue, Skip, and Escape all look broken, so the refusal is
+   * said where the answer goes: the field takes focus and states what it needs.
+   */
+  function askForName() {
+    setNameAsked(true);
+    nameField.current?.focus();
+  }
+
   function goTo(target: FirstRunStepId) {
     // Leaving the profile step flushes its draft, so walking away mid-import
     // would flush the profile without the picture and unmount the editor that
@@ -312,6 +328,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function skip() {
+    // Escape and a backdrop press arrive here too, and would leave the host
+    // with nothing to call the reader.
+    if (unnamed) {
+      askForName();
+      return;
+    }
     void resolveWith(controller.skip);
   }
 
@@ -391,7 +413,14 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         </nav>
 
         <div className="first-run__panel">
-          {handoffOpen ? null : (
+          {handoffOpen ? (
+            // The readiness view follows "Step 5 of 5" and is not a sixth setup
+            // step, so it carries a title and no count. Untitled, it read as a
+            // page the counter had forgotten.
+            <header className="first-run__step-header">
+              <h3 className="first-run__step-title">Your first thread</h3>
+            </header>
+          ) : (
             <header className="first-run__step-header">
               <h3 className="first-run__step-title">{currentStep?.title ?? "Setup"}</h3>
               <span className="first-run__step-count">
@@ -433,6 +462,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   track(props.onSaveProfile(next));
                 }}
                 profile={profileDraft}
+                requiredNameAsked={nameAsked}
                 requiredNameMessage="Enter a name to continue."
                 {...(props.avatarEnvironment === undefined
                   ? {}
@@ -530,14 +560,13 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 Back
               </OctantButton>
             ) : null}
-            <OctantButton
-              disabled={busy || blocked || unnamed}
-              onClick={skip}
-              type="button"
-              variant="ghost"
-            >
-              {controller.submitting === "skipped" ? "Skipping…" : "Skip for now"}
-            </OctantButton>
+            {/* Skipping cannot be honoured without a name, so it is not offered
+                until there is one, rather than shown and dead. */}
+            {unnamed ? null : (
+              <OctantButton disabled={busy || blocked} onClick={skip} type="button" variant="ghost">
+                {controller.submitting === "skipped" ? "Skipping…" : "Skip for now"}
+              </OctantButton>
+            )}
             {handoffOpen ? (
               <OctantButton disabled={busy || blocked || unnamed} onClick={finish} type="button">
                 {controller.submitting === "completed"
@@ -548,8 +577,15 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               </OctantButton>
             ) : (
               <OctantButton
-                disabled={importing || unnamed}
-                onClick={() => (forward === undefined ? openHandoff() : goTo(forward))}
+                disabled={importing}
+                onClick={() => {
+                  if (unnamed) {
+                    askForName();
+                    return;
+                  }
+                  if (forward === undefined) openHandoff();
+                  else goTo(forward);
+                }}
                 type="button"
               >
                 Continue
