@@ -148,6 +148,16 @@ interface OwnedRuntimeContext {
    */
   consoleErrors: Array<{ text: string; url?: string }>;
   failedRequests: Array<{ url: string; method?: string; failure: string }>;
+  /**
+   * Pages already carrying diagnostic listeners.
+   *
+   * The context reports a page before `newPage()` resolves, so a replacement
+   * page reaches the `page` handler while `owned.page` is still undefined and
+   * again when `#page` adopts it. Without this, both calls attach, every entry
+   * is recorded twice, and a full buffer holds half as many distinct events as
+   * it claims.
+   */
+  instrumentedPages: WeakSet<PlaywrightPagePort>;
 }
 
 export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
@@ -213,6 +223,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       blockedNavigationUrl: undefined,
       consoleErrors: [],
       failedRequests: [],
+      instrumentedPages: new WeakSet(),
     };
     try {
       // Every request, not only navigations: a subresource reaches the network
@@ -256,10 +267,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         // later page passes through, which is what makes the diagnostics
         // answer cover the popup too instead of only the first page.
         //
-        // A context can report the page this runtime already adopted, so the
-        // collection is guarded: attaching twice would count every entry
-        // twice and make the bounded arrays evict real evidence.
-        if (candidate !== owned.page) this.#collectDiagnostics(owned, candidate);
+        // No comparison against owned.page here: a context reports a page
+        // before newPage() resolves, so that comparison is false for the very
+        // case it looks like it handles. The collection refuses a page it has
+        // already instrumented, which is the property that actually matters.
+        this.#collectDiagnostics(owned, candidate);
         if (owned.page === undefined) {
           owned.page = candidate;
           return;
@@ -569,6 +581,12 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
    * are full: the last errors before a failure are the ones worth reading.
    */
   #collectDiagnostics(owned: OwnedRuntimeContext, page: PlaywrightPagePort): void {
+    // Attaching twice would record every entry twice, so a full buffer would
+    // hold half as many distinct events as its limit claims. Callers cannot
+    // deduplicate this themselves: a replacement page arrives from the context
+    // while owned.page is still undefined, and again when it is adopted.
+    if (owned.instrumentedPages.has(page)) return;
+    owned.instrumentedPages.add(page);
     page.on?.("console", (message) => {
       if (message.type() !== "error") return;
       const text = bounded(message.text(), MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS);
