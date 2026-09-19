@@ -357,6 +357,138 @@ describe("GhAuthenticationPort", () => {
     expect(command.run).not.toHaveBeenCalled();
   });
 
+  it("moves a plaintext credential into secure storage and proves it before finishing", async () => {
+    let source = "/Users/someone/.config/gh/hosts.yml";
+    const calls: Array<{ readonly args: readonly string[]; readonly stdin?: string }> = [];
+    const command = {
+      run: vi.fn(
+        async (arguments_: readonly string[], options: { readonly stdin?: string } = {}) => {
+          calls.push({
+            args: arguments_,
+            ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+          });
+          if (arguments_[1] === "status") {
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                hosts: {
+                  "github.com": [
+                    {
+                      login: "octant",
+                      active: true,
+                      scopes: "repo",
+                      tokenSource: source,
+                      gitProtocol: "https",
+                    },
+                  ],
+                },
+              }),
+            };
+          }
+          if (arguments_[1] === "token") return { exitCode: 0, stdout: "gho_migrated\n" };
+          if (arguments_[1] === "login") {
+            // gh writes to host-managed storage, so the reported source changes.
+            source = "keyring";
+            return { exitCode: 0, stdout: "" };
+          }
+          return { exitCode: 0, stdout: "" };
+        },
+      ),
+    };
+    const port = new GhAuthenticationPort({
+      command,
+      inheritedEnvironment: {},
+      secureStorage: { isAvailable: async () => true },
+    });
+
+    await expect(
+      port.execute(
+        { kind: "migrate-storage", confirmation: "confirm-github-storage-migration" },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ kind: "completed" });
+
+    const login = calls.find((call) => call.args[1] === "login");
+    // The token reaches gh on stdin, never as an argument.
+    expect(login?.stdin).toBe("gho_migrated");
+    expect(login?.args).not.toContain("gho_migrated");
+    expect(login?.args).toContain("--with-token");
+  });
+
+  it("leaves the plaintext credential untouched when the secure store is unavailable", async () => {
+    const command = {
+      run: vi.fn(async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          hosts: {
+            "github.com": [
+              {
+                login: "octant",
+                active: true,
+                scopes: "repo",
+                tokenSource: "/Users/someone/.config/gh/hosts.yml",
+                gitProtocol: "https",
+              },
+            ],
+          },
+        }),
+      })),
+    };
+    const port = new GhAuthenticationPort({
+      command,
+      inheritedEnvironment: {},
+      secureStorage: { isAvailable: async () => false },
+    });
+
+    await expect(
+      port.execute(
+        { kind: "migrate-storage", confirmation: "confirm-github-storage-migration" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("secure-storage-unavailable");
+    // Nothing was read and nothing was rewritten.
+    expect(command.run).not.toHaveBeenCalled();
+  });
+
+  it("does not rewrite a credential that already resolves from secure storage", async () => {
+    const command = {
+      run: vi.fn(async (arguments_: readonly string[]) => {
+        if (arguments_[1] === "status") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              hosts: {
+                "github.com": [
+                  {
+                    login: "octant",
+                    active: true,
+                    scopes: "repo",
+                    tokenSource: "keyring",
+                    gitProtocol: "https",
+                  },
+                ],
+              },
+            }),
+          };
+        }
+        return { exitCode: 0, stdout: "" };
+      }),
+    };
+    const port = new GhAuthenticationPort({
+      command,
+      inheritedEnvironment: {},
+      secureStorage: { isAvailable: async () => true },
+    });
+
+    await expect(
+      port.execute(
+        { kind: "migrate-storage", confirmation: "confirm-github-storage-migration" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("github-credential-already-secure");
+    expect(command.run.mock.calls.every((call) => call[0][1] !== "login")).toBe(true);
+  });
+
   it("refuses refresh before gh can replace a credential through plaintext storage", async () => {
     const command = { run: vi.fn(), beginInteractive: vi.fn() };
     const port = new GhAuthenticationPort({
