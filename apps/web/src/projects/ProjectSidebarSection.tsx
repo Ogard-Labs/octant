@@ -11,6 +11,7 @@ import {
   Briefcase,
   Bug,
   Bell,
+  ChevronRight,
   Clock3,
   Code,
   Flag,
@@ -100,6 +101,7 @@ import {
   type SidebarRowPropertyView,
 } from "../shell/sidebarRowProperties";
 import {
+  EARLIER_ACTIVITY_GROUP_ID,
   buildSidebarActivityView,
   matchesSidebarSearch,
   readActivityViewEnabled,
@@ -1120,6 +1122,13 @@ function ActivityThreadList(props: {
   readonly groups: ReturnType<typeof buildSidebarActivityView>["groups"];
   readonly onSelectThread: (threadId: string) => void;
 }) {
+  // Every other group is bounded by its day. "Earlier" is everything older than
+  // a week, so it is the one group that only grows, and left open it pushed the
+  // recent groups' neighbours off the bottom of a feed meant for what happened
+  // lately. It starts folded; the thread the workspace is showing stays visible
+  // while it is, as it does in a folded Project list.
+  const [earlierOpen, setEarlierOpen] = useState(false);
+  const earlierThreadsId = useId();
   if (props.groups.length === 0) {
     return props.emptyLabel === undefined ? (
       <p className="project-nav__empty">No threads in this mode.</p>
@@ -1131,25 +1140,49 @@ function ActivityThreadList(props: {
   }
   return (
     <div className="activity-nav">
-      {props.groups.map((group) => (
-        <section aria-label={group.label} className="activity-nav__group" key={group.id}>
-          <h2 className="sidebar-section">{group.label}</h2>
-          <div className="activity-nav__threads">
-            {group.threads.map((thread) => (
-              <ActivityThreadButton
-                actions={props.actions}
-                {...(props.activeThreadId === undefined
-                  ? {}
-                  : { activeThreadId: props.activeThreadId })}
-                key={thread.navigationId}
-                lineageThreads={props.lineageThreads}
-                onSelectThread={props.onSelectThread}
-                thread={thread}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+      {props.groups.map((group) => {
+        const folds = group.id === EARLIER_ACTIVITY_GROUP_ID;
+        const threads =
+          !folds || earlierOpen
+            ? group.threads
+            : group.threads.filter((thread) => thread.navigationId === props.activeThreadId);
+        return (
+          <section aria-label={group.label} className="activity-nav__group" key={group.id}>
+            {folds ? (
+              <h2 className="sidebar-section">
+                <OctantButton
+                  aria-controls={earlierThreadsId}
+                  aria-expanded={earlierOpen}
+                  className="activity-nav__fold"
+                  onClick={() => setEarlierOpen((open) => !open)}
+                  type="button"
+                  variant="link"
+                >
+                  <span>{group.label}</span>
+                  <span className="activity-nav__fold-count">{group.threads.length}</span>
+                  <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
+                </OctantButton>
+              </h2>
+            ) : (
+              <h2 className="sidebar-section">{group.label}</h2>
+            )}
+            <div className="activity-nav__threads" id={folds ? earlierThreadsId : undefined}>
+              {threads.map((thread) => (
+                <ActivityThreadButton
+                  actions={props.actions}
+                  {...(props.activeThreadId === undefined
+                    ? {}
+                    : { activeThreadId: props.activeThreadId })}
+                  key={thread.navigationId}
+                  lineageThreads={props.lineageThreads}
+                  onSelectThread={props.onSelectThread}
+                  thread={thread}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
