@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
+import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAppleBuildEvidence,
@@ -518,9 +518,12 @@ export class AppleToolchainService {
         );
       } else if (request.kind === "screenshot") {
         this.#advance(active, "capturing-screen");
+        // A capture whose process outlived its timeout can write its file after
+        // this action already removed it; the next capture clears what is left.
+        await sweepStaleCaptures(this.#captureDirectory, Date.now());
         const capturePath = join(
           this.#captureDirectory,
-          `octant-apple-capture-${request.actionId}.png`,
+          `${CAPTURE_FILE_PREFIX}${request.actionId}.png`,
         );
         // Whatever happens to the command, the read or the artifact write, the
         // raw screen must not stay behind in the temporary directory.
@@ -1396,6 +1399,32 @@ function unauthorizedFailure(): AppleDiscoveryResult {
 
 function invalidFailure(message: string): AppleDiscoveryResult {
   return { kind: "failure", failure: { category: "invalid", message } };
+}
+
+const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
+const STALE_CAPTURE_MS = 60_000;
+
+/** Removes this service's capture files that no running action can still own. */
+async function sweepStaleCaptures(directory: string, nowMs: number): Promise<void> {
+  let names: ReadonlyArray<string>;
+  try {
+    names = await readdir(directory);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith(CAPTURE_FILE_PREFIX) && name.endsWith(".png"))
+      .map(async (name) => {
+        const path = join(directory, name);
+        try {
+          if (nowMs - (await stat(path)).mtimeMs > STALE_CAPTURE_MS)
+            await rm(path, { force: true });
+        } catch {
+          // Already gone, or not ours to remove; neither blocks a capture.
+        }
+      }),
+  );
 }
 
 async function readCapture(path: string): Promise<Uint8Array | undefined> {

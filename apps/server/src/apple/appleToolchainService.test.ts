@@ -6,7 +6,7 @@ import type {
   ToolActionCancellation,
 } from "@octant/contracts";
 import { existsSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -751,6 +751,47 @@ describe("AppleToolchainService lifecycle", () => {
     expect(evidence.outcome).not.toBe("succeeded");
     expect(capturePath).toBeDefined();
     expect(existsSync(capturePath!)).toBe(false);
+  });
+
+  it("clears a capture left behind by a process that outlived its action before taking the next one", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const leftover = join(
+      captureDirectory,
+      "octant-apple-capture-30000000-0000-4000-8000-0000000000aa.png",
+    );
+    const recent = join(
+      captureDirectory,
+      "octant-apple-capture-30000000-0000-4000-8000-0000000000bb.png",
+    );
+    const unrelated = join(captureDirectory, "someone-elses.png");
+    for (const path of [leftover, recent, unrelated]) await writeFile(path, new Uint8Array([1]));
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(leftover, old, old);
+    await utimes(unrelated, old, old);
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      await writeFile(input.argv.at(-1)!, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      return processResult("");
+    });
+
+    await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(existsSync(leftover)).toBe(false);
+    // A capture another action may still be writing, and files that are not ours, stay.
+    expect(existsSync(recent)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
   });
 
   it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
