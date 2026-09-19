@@ -1448,46 +1448,6 @@ describe("the planner board and proposal as agent tools", () => {
       proposalId: "a0000000-0000-4000-8000-000000000001",
     });
   });
-});
-
-function thread(overrides: Partial<CodeThread> = {}): CodeThread {
-  return {
-    id: threadId,
-    checkoutId,
-    projectId: "40000000-0000-4000-8000-000000000001",
-    repositoryId: "50000000-0000-4000-8000-000000000001",
-    providerInstanceId: "60000000-0000-4000-8000-000000000001",
-    modelId: "test-model",
-    bindingRevisionId: "70000000-0000-4000-8000-000000000001",
-    lifecycle: "active",
-    executionPolicy: "full-access",
-    permissionPersistence: "current-session",
-    title: "Managed tools",
-    workingDirectory: ".",
-    deliveryTarget: {
-      branchIntent: "feature/tools",
-      proposedBaseRepository: "octant/octant",
-      proposedBaseBranch: "development",
-    },
-    version: 1,
-    createdAt: "2026-08-06T08:00:00.000Z",
-    updatedAt: "2026-08-06T08:00:00.000Z",
-    ...overrides,
-  } as unknown as CodeThread;
-}
-
-function browserAuthority(): ToolActionAuthority {
-  return {
-    hostId: "80000000-0000-4000-8000-000000000001" as never,
-    mode: "code",
-    projectId: "40000000-0000-4000-8000-000000000001" as never,
-    rootId: "70000000-0000-4000-8000-000000000001" as never,
-    worktreeId: checkoutId as never,
-    providerInstanceId: "60000000-0000-4000-8000-000000000001" as never,
-    extension: { kind: "core" },
-  };
-}
-
   it("passes what the page logged and failed to load through to the Code tool result", async () => {
     // The same conversion as the browser app-managed tools, reached through a
     // separate code path. Dropping the fields here fails nothing downstream:
@@ -1545,7 +1505,45 @@ function browserAuthority(): ToolActionAuthority {
       },
     });
   });
+});
 
+function thread(overrides: Partial<CodeThread> = {}): CodeThread {
+  return {
+    id: threadId,
+    checkoutId,
+    projectId: "40000000-0000-4000-8000-000000000001",
+    repositoryId: "50000000-0000-4000-8000-000000000001",
+    providerInstanceId: "60000000-0000-4000-8000-000000000001",
+    modelId: "test-model",
+    bindingRevisionId: "70000000-0000-4000-8000-000000000001",
+    lifecycle: "active",
+    executionPolicy: "full-access",
+    permissionPersistence: "current-session",
+    title: "Managed tools",
+    workingDirectory: ".",
+    deliveryTarget: {
+      branchIntent: "feature/tools",
+      proposedBaseRepository: "octant/octant",
+      proposedBaseBranch: "development",
+    },
+    version: 1,
+    createdAt: "2026-08-06T08:00:00.000Z",
+    updatedAt: "2026-08-06T08:00:00.000Z",
+    ...overrides,
+  } as unknown as CodeThread;
+}
+
+function browserAuthority(): ToolActionAuthority {
+  return {
+    hostId: "80000000-0000-4000-8000-000000000001" as never,
+    mode: "code",
+    projectId: "40000000-0000-4000-8000-000000000001" as never,
+    rootId: "70000000-0000-4000-8000-000000000001" as never,
+    worktreeId: checkoutId as never,
+    providerInstanceId: "60000000-0000-4000-8000-000000000001" as never,
+    extension: { kind: "core" },
+  };
+}
 
 function browserSnapshot(authority: ToolActionAuthority): BrowserAutomationSnapshot {
   return {
