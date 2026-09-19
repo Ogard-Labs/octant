@@ -93,10 +93,11 @@ Statuses are still limited to facts the sidebar carries, so a filter cannot yet
 ask for a failed run or a blocked check. Giving the sidebar those facts is the
 prerequisite, not this filter.
 
-The view menu is only rendered where Project Views are enabled, so the filter
-and the ordering reach Code and not Chat. That is a property of where the menu
-lives rather than a decision about who should have them; a Chat surface that
-grows an equivalent menu inherits both without new vocabulary.
+The view menu is only rendered where Project Views are enabled, which is Work and
+Code, so the filter and the ordering reach both of those and not Chat. That is a
+property of where the menu lives rather than a decision about who should have
+them; a Chat surface that grows an equivalent menu inherits both without new
+vocabulary.
 
 ## Supersession
 
