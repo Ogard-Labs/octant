@@ -150,6 +150,7 @@ distilled successor of the earlier long-form design specifications.
 | [0136](0136-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
 | [0137](0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md) | Simulator input reaches the guest through a native device helper | Accepted |
 | [0138](0138-the-simulator-frame-is-a-live-view-streamed-through-the-host.md) | The Simulator frame is a live view streamed through the host | Accepted |
+| [0139](0139-the-live-simulator-screen-is-driven-directly.md) | The live Simulator screen is driven directly | Accepted |
 
 ## Adding an ADR
 
