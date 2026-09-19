@@ -89,15 +89,36 @@ export function createSimulatorInputDelivery(
     const looked = await screenOf(command.udid, budgetMs);
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
-    const x = command.point.x / screen.width;
-    const y = command.point.y / screen.height;
-    if (x > 1 || y > 1) {
-      return {
-        kind: "refused",
-        reason: "point-off-screen",
-        message: `The point is outside the ${screen.width}×${screen.height} screen.`,
-      };
+    const fraction = (point: { readonly x: number; readonly y: number }) => ({
+      x: point.x / screen.width,
+      y: point.y / screen.height,
+    });
+    const offScreen: SimulatorDeviceInputResult = {
+      kind: "refused",
+      reason: "point-off-screen",
+      message: `The point is outside the ${screen.width}×${screen.height} screen.`,
+    };
+    if (command.kind === "swipe") {
+      const from = fraction(command.from);
+      const to = fraction(command.to);
+      if (from.x > 1 || from.y > 1 || to.x > 1 || to.y > 1) return offScreen;
+      return result(
+        await helpers.send(
+          command.udid,
+          {
+            op: "swipe",
+            fromX: from.x,
+            fromY: from.y,
+            toX: to.x,
+            toY: to.y,
+            durationMs: command.durationMs,
+          },
+          budgetMs,
+        ),
+      );
     }
+    const { x, y } = fraction(command.point);
+    if (x > 1 || y > 1) return offScreen;
     return result(await helpers.send(command.udid, { op: "tap", x, y }, budgetMs));
   };
 }

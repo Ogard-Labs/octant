@@ -23,6 +23,16 @@ describe("Simulator device input", () => {
     expect(
       decodeSimulatorDeviceInput({ kind: "key-press", udid, budgetMs: 30_000, key: "home" }),
     ).toMatchObject({ kind: "key-press" });
+    expect(
+      decodeSimulatorDeviceInput({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 600, y: 2_000 },
+        to: { x: 600, y: 800 },
+        durationMs: 250,
+      }),
+    ).toMatchObject({ kind: "swipe" });
   });
 
   it("refuses a destination that is not a Simulator identifier", () => {

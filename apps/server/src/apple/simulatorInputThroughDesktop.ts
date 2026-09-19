@@ -48,6 +48,23 @@ export function simulatorDeviceInput(
   if (request.kind === "key-press" && request.key !== undefined) {
     return { kind: "input", input: { kind: "key-press", ...destination, key: request.key } };
   }
+  if (request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined) {
+    const ends = [request.point, request.toPoint];
+    if (ends.some((end) => end.x < 0 || end.y < 0)) {
+      return { kind: "unavailable", message: "The swipe leaves the captured screen." };
+    }
+    return {
+      kind: "input",
+      input: {
+        kind: "swipe",
+        ...destination,
+        from: { x: request.point.x, y: request.point.y },
+        to: { x: request.toPoint.x, y: request.toPoint.y },
+        // The pace of a finger flicking a list; slower reads as a drag.
+        durationMs: request.durationMs ?? 250,
+      },
+    };
+  }
   if (request.kind === "tap" && request.point !== undefined) {
     if (request.point.x < 0 || request.point.y < 0) {
       return { kind: "unavailable", message: "The tap point is off the captured screen." };

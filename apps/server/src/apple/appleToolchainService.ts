@@ -541,11 +541,7 @@ export class AppleToolchainService {
           request.timeoutMs,
           signal,
         );
-      } else if (
-        request.kind === "tap" ||
-        request.kind === "type-text" ||
-        request.kind === "key-press"
-      ) {
+      } else if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
         this.#advance(active, "injecting-input");
         terminal = await this.#injectInput(request, context, signal);
         // Typed text must never land in stdout/stderr artifacts or diagnostics.
@@ -771,6 +767,11 @@ export class AppleToolchainService {
       if (request.kind === "tap" && request.point !== undefined && request.target === undefined) {
         return unavailableInputResult(
           "Coordinate taps require a reviewed injectSimulatorInput adapter or a semantic target. Darwin Accessibility fallback refuses guessed screen coordinates.",
+        );
+      }
+      if (request.kind === "swipe") {
+        return unavailableInputResult(
+          "A swipe needs the Octant desktop app's device helper; this host has none.",
         );
       }
       return unavailableInputResult("Simulator input request is incomplete for host injection.");
