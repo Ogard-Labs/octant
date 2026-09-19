@@ -78,10 +78,16 @@ the bound root, and Plan and Chat process denial.
 
 ## Consequences
 
-- Confined Git runs for linked worktrees as well as ordinary checkouts, which is
-  what Code needs to stage, commit and show history at all. Reading history,
-  status, a diff or mergeability no longer implies any write authority outside
-  the bound root, so an observation cannot reach the parent repository's hooks.
+- Confined Git runs **on macOS** for linked worktrees as well as ordinary
+  checkouts, which is what Code needs to stage, commit and show history at all.
+  Reading history, status, a diff or mergeability no longer implies any write
+  authority outside the bound root, so an observation cannot reach the parent
+  repository's hooks.
+- These allowances are Seatbelt rules, and Linux confinement refuses any launch
+  that carries one, so a linked worktree is not usable there at all: every Git
+  command in it fails before it runs. An ordinary checkout emits no such rule
+  and is unaffected. Saying the same thing in Bubblewrap mounts is outstanding
+  and is its own change, sequenced by 0058.
 - The person's own Git settings do not apply inside the sandbox, and their
   identity reaches a commit through Octant's profile instead. That is the cost
   of not opening their home. The unused read allowance on those paths stays
