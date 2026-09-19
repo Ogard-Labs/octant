@@ -112,7 +112,12 @@ import { threadRowStatusInput, type ChatThreadNavigationItem } from "../shell/na
 import {
   describeSidebarProjectStatus,
   rollUpSidebarProjectStatus,
+  SIDEBAR_THREAD_STATUS_LABEL,
 } from "@octant/domain/sidebar-thread-status-policy";
+import {
+  SIDEBAR_THREAD_STATUS_ORDER,
+  type SidebarThreadStatus,
+} from "@octant/contracts/sidebar-thread-status";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import { lineageParentTitle } from "./threadLineage";
 import {
@@ -348,10 +353,19 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const filteringThreads =
     searching || (currentFilters !== undefined && currentFilters.environmentIds.length > 0);
   const threadsReady = props.threadStatus === undefined || props.threadStatus === "ready";
+  // A saved view can filter and order on what threads are doing, so the rows it
+  // reads carry their status facts alongside their timestamps. Rows keep every
+  // field they already had, so everything downstream still reads them as rows.
+  const statedThreads = useMemo(
+    () =>
+      listedThreads?.map((thread) => ({ ...thread, status: threadRowStatusInput(thread) })) ??
+      undefined,
+    [listedThreads],
+  );
   const timeFilteredThreads =
-    currentFilters === undefined || listedThreads === undefined
+    currentFilters === undefined || statedThreads === undefined
       ? listedThreads
-      : filterProjectViewThreads(listedThreads, currentFilters, props.now);
+      : filterProjectViewThreads(statedThreads, currentFilters, props.now);
   const projectCandidates =
     props.projectViewsEnabled === true && projectViewState !== undefined
       ? filterProjectsForView(
@@ -972,8 +986,8 @@ function ProjectStatusRollup(props: {
   const shows = useSidebarRowProperties();
   if (!shows.status) return null;
   const rollup = rollUpSidebarProjectStatus(props.threads.map(threadRowStatusInput));
+  if (rollup === undefined) return null;
   const label = describeSidebarProjectStatus(props.projectName, rollup);
-  if (label === undefined) return null;
   const Icon = sidebarThreadStatusIcon(rollup.status);
   return (
     <span aria-label={label} className="project-row__rollup" role="img" title={label}>
@@ -1457,6 +1471,7 @@ const PROJECT_VIEW_SORTING_OPTIONS = [
   { id: "recency", label: "Recency" },
   { id: "alphabetical", label: "Alphabetical" },
   { id: "created", label: "Created time" },
+  { id: "status", label: "Status" },
 ] as const;
 const PROJECT_VIEW_ACTIVITY_OPTIONS = [
   { id: "all", label: "Any activity" },
@@ -1608,6 +1623,10 @@ function ProjectViewFilterMenu(props: {
               visibility={props.rowProperties}
             />
             <OctantMenuSeparator />
+            <ProjectViewStatusMenu
+              onChange={(statuses) => update({ statuses })}
+              statuses={props.filters.statuses}
+            />
             <OctantMenuSub>
               <OctantMenuSubTrigger>Activity</OctantMenuSubTrigger>
               <OctantMenuSubPopup>
@@ -1735,6 +1754,53 @@ function SidebarRowPropertyMenu(props: {
           onClick={() => props.onChange(sidebarRowPropertiesAll(props.view, !anyShown))}
         >
           {anyShown ? "Hide all" : "Show all"}
+        </OctantMenuActionItem>
+      </OctantMenuSubPopup>
+    </OctantMenuSub>
+  );
+}
+
+/**
+ * Which thread statuses a saved view lists.
+ *
+ * Nothing ticked means no constraint rather than nothing shown, the same way
+ * this menu's environment filter reads, so a reader who opens the submenu and
+ * closes it again has not quietly emptied their sidebar. "Any status" is the
+ * way back to that state without unticking each word.
+ */
+function ProjectViewStatusMenu(props: {
+  readonly onChange: (statuses: ReadonlyArray<SidebarThreadStatus>) => void;
+  readonly statuses: ReadonlyArray<SidebarThreadStatus> | undefined;
+}) {
+  const selected = props.statuses ?? [];
+  const constrained = selected.length > 0;
+  return (
+    <OctantMenuSub>
+      <OctantMenuSubTrigger>Status</OctantMenuSubTrigger>
+      <OctantMenuSubPopup>
+        <OctantMenuGroup>
+          <OctantMenuGroupLabel>Thread status</OctantMenuGroupLabel>
+          {SIDEBAR_THREAD_STATUS_ORDER.map((status) => (
+            <OctantMenuCheckboxItem
+              checked={selected.includes(status)}
+              key={status}
+              onCheckedChange={(checked) =>
+                props.onChange(
+                  checked
+                    ? SIDEBAR_THREAD_STATUS_ORDER.filter(
+                        (candidate) => candidate === status || selected.includes(candidate),
+                      )
+                    : selected.filter((candidate) => candidate !== status),
+                )
+              }
+            >
+              {SIDEBAR_THREAD_STATUS_LABEL[status]}
+            </OctantMenuCheckboxItem>
+          ))}
+        </OctantMenuGroup>
+        <OctantMenuSeparator />
+        <OctantMenuActionItem closeOnClick={false} onClick={() => props.onChange([])}>
+          Any status
         </OctantMenuActionItem>
       </OctantMenuSubPopup>
     </OctantMenuSub>

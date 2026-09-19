@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { SidebarThreadStatus } from "./sidebarThreadStatus";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -13,7 +14,12 @@ export type ProjectViewLifecycle = typeof ProjectViewLifecycle.Type;
 export const ProjectViewGrouping = Schema.Literal("project", "environment", "status", "none");
 export type ProjectViewGrouping = typeof ProjectViewGrouping.Type;
 
-export const ProjectViewSort = Schema.Literal("recency", "alphabetical", "created");
+/**
+ * How the Project list is ordered. `status` puts the Project with the loudest
+ * thread first, so a list too long to read top to bottom still opens on the
+ * work that is waiting.
+ */
+export const ProjectViewSort = Schema.Literal("recency", "alphabetical", "created", "status");
 export type ProjectViewSort = typeof ProjectViewSort.Type;
 
 /**
@@ -45,6 +51,11 @@ export type ProjectViewActivityRange = typeof ProjectViewActivityRange.Type;
  * `environmentIds` means every host environment available to the window.
  * Host ids are ordinary strings so a disconnected host can still round-trip
  * without branding a value the window no longer has.
+ *
+ * `statuses` reads the same way: empty means no status constraint, not that
+ * every status was deselected. A saved view written before this field existed
+ * therefore keeps showing everything instead of emptying itself, which is why
+ * the field is optional rather than defaulted to the full set.
  */
 export const ProjectViewFilters = Schema.Struct({
   lifecycle: ProjectViewLifecycle,
@@ -54,6 +65,7 @@ export const ProjectViewFilters = Schema.Struct({
   sorting: ProjectViewSort,
   activity: ProjectViewActivityPeriod,
   activityRange: Schema.optional(ProjectViewActivityRange),
+  statuses: Schema.optional(Schema.Array(SidebarThreadStatus)),
 }).annotations(strict);
 export type ProjectViewFilters = typeof ProjectViewFilters.Type;
 

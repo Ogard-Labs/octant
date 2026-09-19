@@ -146,6 +146,7 @@ distilled successor of the earlier long-form design specifications.
 | [0132](0132-provider-runtimes-reach-provider-endpoints.md) | Provider runtimes reach provider endpoints on Chat and Work turns | Accepted |
 | [0133](0133-confined-discovery-reads-open-named-nodes.md) | Confined discovery reads open named nodes, never trees | Accepted |
 | [0134](0134-a-folded-project-reports-its-strongest-thread.md) | A folded Project reports its strongest thread | Accepted |
+| [0135](0135-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
 
 ## Adding an ADR
 
