@@ -6,7 +6,7 @@ import type {
   ToolActionCancellation,
 } from "@octant/contracts";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -783,7 +783,10 @@ describe("AppleToolchainService lifecycle", () => {
     let capturePath: string | undefined;
     execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
       capturePath = input.argv.at(-1)!;
-      await writeFile(capturePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
       return processResult(`Wrote screenshot to: ${capturePath}\n`);
     });
 
@@ -823,7 +826,10 @@ describe("AppleToolchainService lifecycle", () => {
     });
     await service.discover(discoveryRequest, context);
     execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
-      await writeFile(input.argv.at(-1)!, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      await writeFile(
+        input.argv.at(-1)!,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
       return processResult("");
     });
 
@@ -853,7 +859,7 @@ describe("AppleToolchainService lifecycle", () => {
       newId: () => "30000000-0000-4000-8000-000000000012",
     });
     await service.discover(discoveryRequest, context);
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     let releaseSlowCapture!: () => void;
     const slowCaptureHeld = new Promise<void>((resolve) => {
       releaseSlowCapture = resolve;
@@ -924,7 +930,10 @@ describe("AppleToolchainService lifecycle", () => {
         context,
       );
       // The abandoned process writes its file after the action already cleaned up.
-      await writeFile(capturePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
       await vi.advanceTimersByTimeAsync(61_000);
 
       await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
@@ -960,7 +969,10 @@ describe("AppleToolchainService lifecycle", () => {
       );
       await vi.advanceTimersByTimeAsync(2 * 60_000);
       // Written after the first return visit already passed.
-      await writeFile(capturePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
       await vi.advanceTimersByTimeAsync(4 * 60_000);
 
       await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
@@ -986,7 +998,7 @@ describe("AppleToolchainService lifecycle", () => {
         newId: () => "30000000-0000-4000-8000-000000000012",
       });
       await service.discover(discoveryRequest, context);
-      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
       let attempt = 0;
       let capturePath = "";
       let releaseRetry!: () => void;
@@ -1081,6 +1093,61 @@ describe("AppleToolchainService lifecycle", () => {
     });
 
     await vi.waitFor(() => expect(existsSync(leftover)).toBe(false));
+  });
+
+  it("never reads through a link planted where the capture should be, or keeps what is not a PNG", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const secret = join(captureDirectory, "host-secret.txt");
+    const pngElsewhere = join(captureDirectory, "someone-elses.png");
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+    await writeFile(secret, "AWS_SECRET_ACCESS_KEY=do-not-leak");
+    await writeFile(pngElsewhere, png);
+    // Code from the checkout shares this temporary root and knows the file's name.
+    const plants: Array<(capturePath: string) => Promise<void>> = [
+      (capturePath) => symlink(secret, capturePath),
+      (capturePath) => symlink(pngElsewhere, capturePath),
+      (capturePath) => link(pngElsewhere, capturePath),
+      (capturePath) => writeFile(capturePath, "AWS_SECRET_ACCESS_KEY=do-not-leak"),
+    ];
+    for (const [index, plant] of plants.entries()) {
+      const execute = discoveryExecutor();
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        await plant(input.argv.at(-1)!);
+        return processResult("");
+      });
+
+      const evidence = await service.execute(
+        simulatorRequest({
+          kind: "screenshot",
+          bundleIdentifier: undefined,
+          actionId: `30000000-0000-4000-8000-0000000000e${index}` as never,
+        }),
+        context,
+      );
+
+      expect(evidence.outcome).toBe("failed");
+      expect(
+        evidence.artifacts.some(
+          (artifact: { readonly kind: string }) => artifact.kind === "screenshot",
+        ),
+      ).toBe(false);
+      const kept = [...artifacts.values()]
+        .map((bytes) => new TextDecoder().decode(bytes))
+        .join(" ");
+      expect(kept).not.toContain("do-not-leak");
+    }
   });
 
   it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {

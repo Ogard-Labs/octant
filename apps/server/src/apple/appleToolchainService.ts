@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, rm, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAppleBuildEvidence,
@@ -1563,12 +1564,38 @@ async function sweepStaleCaptures(
   );
 }
 
+/** A Simulator screen is a few megabytes; nothing near this is a capture. */
+const MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/**
+ * The capture `simctl` wrote, or nothing. The file sits in a temporary root
+ * that code from the checkout can also write to, under a name it can guess, and
+ * this read happens in the host process with the host's reach. So the path is
+ * opened without following a link, the opened file must be one ordinary file
+ * with no second name, of a plausible size, and it is read from that same
+ * descriptor; and only a PNG is kept. A link to a host file, a second name for
+ * someone else's file, or any other content reads as no capture at all.
+ */
 async function readCapture(path: string): Promise<Uint8Array | undefined> {
+  let handle: FileHandle | undefined;
   try {
-    const bytes = await readFile(path);
-    return bytes.byteLength === 0 ? undefined : new Uint8Array(bytes);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat();
+    if (
+      !opened.isFile() ||
+      opened.nlink !== 1 ||
+      opened.size < PNG_SIGNATURE.length ||
+      opened.size > MAX_CAPTURE_BYTES
+    ) {
+      return undefined;
+    }
+    const bytes = new Uint8Array(await handle.readFile());
+    return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte) ? bytes : undefined;
   } catch {
     return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 
