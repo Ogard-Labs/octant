@@ -79,8 +79,11 @@ captured screen. **Type** sends letters, digits, spaces, and new lines; text
 with any other character is refused whole rather than typed wrong, because a
 Simulator maps key positions with its own keyboard language. **Return**,
 **Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
-later. Remote, Linux, and headless clients stay read-only. Typed characters never land in
-durable evidence. Destination actions remain on the workbench list: each
+later. When the host cannot deliver an input action, the evidence names the
+host's refusal rather than reading as interrupted. Remote, Linux, and
+headless clients stay read-only. Typed characters never land in durable
+evidence, and neither does the reason a type-text action failed, since it can
+quote the script. Destination actions remain on the workbench list: each
 Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,

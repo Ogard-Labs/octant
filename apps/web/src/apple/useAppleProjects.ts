@@ -1,4 +1,4 @@
-import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
+import type { CodeCheckoutId, CodeCheckoutIdentity, CodeThreadId } from "@octant/contracts";
 import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useMemo } from "react";
@@ -16,6 +16,13 @@ export interface UseAppleProjectsOptions {
   readonly client?: CodeFileListingClient;
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
+  /**
+   * The checkout's availability as the thread view reports it. The host
+   * answers a listing with `waiting` while it is still resolving the checkout,
+   * and this one-shot read would keep that refusal for the life of the view,
+   * so it waits for `available` instead of asking early.
+   */
+  readonly checkoutAvailability?: CodeCheckoutIdentity["availability"] | undefined;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -33,7 +40,10 @@ export function useAppleProjects(
   options: UseAppleProjectsOptions,
 ): ReadonlyArray<AppleProjectEntry> {
   const controller = useCodeFileListingController({
-    enabled: options.threadId !== undefined && options.checkoutId !== undefined,
+    enabled:
+      options.threadId !== undefined &&
+      options.checkoutId !== undefined &&
+      options.checkoutAvailability === "available",
     watch: false,
     ...(options.client === undefined ? {} : { client: options.client }),
     ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
@@ -47,8 +57,12 @@ export function useAppleProjects(
   return useMemo(
     () =>
       entries
-        .filter((entry) =>
-          APPLE_PROJECT_SUFFIXES.some((suffix) => String(entry.path).endsWith(suffix)),
+        // Root entries only: the listing also names an .xcodeproj's own
+        // project.xcworkspace, which is part of that project, not a second one.
+        .filter(
+          (entry) =>
+            !String(entry.path).includes("/") &&
+            APPLE_PROJECT_SUFFIXES.some((suffix) => String(entry.path).endsWith(suffix)),
         )
         .flatMap((entry) => {
           const listed = String(entry.path);
