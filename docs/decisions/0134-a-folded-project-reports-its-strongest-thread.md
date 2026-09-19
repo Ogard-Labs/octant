@@ -1,4 +1,4 @@
-# 0133. A folded Project reports its strongest thread
+# 0134. A folded Project reports its strongest thread
 
 **Status:** Accepted
 

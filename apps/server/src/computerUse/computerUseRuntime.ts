@@ -151,7 +151,10 @@ export function createComputerUseRuntime(_options: {
   readonly approvalSummary?: (request: ComputerUseActionRequest) => string;
 }): ComputerUseRuntime {
   const options = _options;
-  const approvalTtlMs = options.approvalTtlMs ?? 60_000;
+  // The fallback summary below promises five minutes; the default offer must
+  // live as long as its words, or a decision made inside the promised window
+  // expires silently and reads as a denial.
+  const approvalTtlMs = options.approvalTtlMs ?? 5 * 60_000;
   const sessions = new Map<string, RuntimeSession>();
   const destination = (): ComputerUseDestinationReport =>
     options.destination ??
@@ -332,7 +335,7 @@ export function createComputerUseRuntime(_options: {
           session.state === "interrupted" ? "session-interrupted" : "session-failed",
           session.state === "interrupted"
             ? "Owned native action process ended before completion."
-            : "Owned native action or evidence recording failed.",
+            : `Owned native action or evidence recording failed: ${error instanceof Error && error.message !== "" ? error.message : "the host did not report a reason."}`,
         );
       } catch {
         // The failed evidence write itself is the reason execution remains

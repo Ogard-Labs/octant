@@ -233,6 +233,44 @@ describe("ComputerUseRuntime", () => {
     expect(adapter.execute).not.toHaveBeenCalled();
   });
 
+  it("keeps an approval live for the five minutes its summary offers", async () => {
+    let now = Date.parse("2026-07-27T20:00:00.000Z");
+    let id = 0;
+    const adapter: ComputerUseNativeAdapter = {
+      observe: vi.fn(async () => ({
+        targetApp: "Preview",
+        windowTitle: "Issue 373 QA",
+        reference: "computer-use-observation-1",
+      })),
+      execute: vi.fn(async () => ({ reference: "computer-use-action-result-1" })),
+      cleanup: vi.fn(async () => true),
+    };
+    const runtime = createComputerUseRuntime({
+      adapter,
+      evidence: { record: async () => {} },
+      uuid: () => `b0000000-0000-4000-8000-${(++id).toString().padStart(12, "0")}`,
+      clock: () => new Date(now).toISOString(),
+    });
+    const waiting = await runtime.start({ ownerWindowId, threadId, requestedBy, request, policy });
+    if (!("pendingApproval" in waiting) || waiting.pendingApproval === undefined) {
+      throw new Error("Expected a pending approval.");
+    }
+
+    now += 4 * 60_000;
+    const decided = await runtime.decide({
+      ownerWindowId,
+      threadId,
+      authority,
+      sessionId: request.sessionId,
+      actionId: request.actionId,
+      approvalId: waiting.pendingApproval.approvalId,
+      decision: "approved",
+    });
+
+    expect(decided.state).toBe("completed");
+    expect(adapter.execute).toHaveBeenCalledOnce();
+  });
+
   it("fails closed before execution when the host observes a protected field", async () => {
     const { adapter, runtime } = fixture({
       observation: {

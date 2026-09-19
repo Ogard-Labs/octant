@@ -217,4 +217,116 @@ describe("Computer use through a provider tool", () => {
       await f.service.close();
     }
   });
+
+  it("completes an approved control call and grants the app for the window", async () => {
+    const f = fixture();
+    try {
+      const result = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+
+      expect(await result).toMatchObject({ result: { kind: "windows" } });
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("carries the host's refusal reason to the agent instead of a generic denial", async () => {
+    const f = fixture();
+    f.execute.mockImplementation(async () =>
+      decodeComputerControlResult({
+        kind: "refused",
+        reason: "accessibility-timeout",
+        message: "The application did not respond to the accessibility probe.",
+      }),
+    );
+    try {
+      const result = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+
+      const outcome = await result;
+      expect(outcome).toMatchObject({
+        isError: true,
+        result: {
+          kind: "refused",
+          reason: "accessibility-timeout",
+          message: "The application did not respond to the accessibility probe.",
+        },
+      });
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("names the desktop failure when an approved action crashes instead of reading as a denial", async () => {
+    const f = fixture();
+    f.execute.mockImplementation(async () => {
+      throw new Error("Computer-use desktop connection is unavailable.");
+    });
+    try {
+      const result = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+
+      const outcome = await result;
+      expect(outcome).toMatchObject({ isError: true });
+      expect(outcome).toMatchObject({
+        result: {
+          message:
+            "Owned native action or evidence recording failed: Computer-use desktop connection is unavailable.",
+        },
+      });
+    } finally {
+      await f.service.close();
+    }
+  });
 });

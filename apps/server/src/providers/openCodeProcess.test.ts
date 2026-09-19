@@ -662,6 +662,57 @@ describe("OpenCodeProcessPort", () => {
     expect(rules).toContain('(allow network-outbound (remote ip "localhost:41234"))');
   });
 
+  // OpenCode 2 resolves each bundled coding tool's home directory while it
+  // lists providers, and a refusal there is fatal to the listing, so the
+  // confined child has to resolve those paths without being able to read them.
+  it("resolves the tool home directories OpenCode probes without opening them", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const home = mkdtempSync(join(tmpdir(), "octant-opencode-discovery-"));
+    directories.push(home);
+    mkdirSync(join(home, ".claude"));
+    mkdirSync(join(home, ".agents"));
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".claude.json"), "{}");
+    const resolvedHome = realpathSync(home);
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+          inheritedEnvironment: { ...process.env, HOME: home },
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "work",
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    );
+
+    const rules = captured?.extraRules ?? [];
+    expect(rules).toContain(
+      `(allow file-read-metadata (literal "${join(resolvedHome, ".claude")}"))`,
+    );
+    expect(rules).toContain(`(allow file-read-data (literal "${join(resolvedHome, ".claude")}"))`);
+    expect(rules).toContain(`(allow file-read-data (literal "${join(resolvedHome, ".agents")}"))`);
+    expect(rules).toContain(
+      `(allow file-read-metadata (literal "${join(resolvedHome, ".claude.json")}"))`,
+    );
+    // A bundled tool home OpenCode does not probe stays out of the set even
+    // when it exists, and no rule opens a subtree: the probe may resolve each
+    // node and still read nothing inside.
+    expect(rules.some((rule) => rule.includes(`"${join(resolvedHome, ".codex")}"`))).toBe(false);
+    expect(rules.some((rule) => rule.includes(`(subpath "${resolvedHome}`))).toBe(false);
+  });
+
   it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     const inheritedEnvironment = {
