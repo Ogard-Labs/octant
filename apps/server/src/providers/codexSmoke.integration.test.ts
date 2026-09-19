@@ -20,6 +20,7 @@ const interruptSessionId = decodeProviderSessionId("90000000-0000-4000-8000-0000
 const approvalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000403");
 const resumedSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000404");
 const fallbackApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000405");
+const inRootApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000406");
 const installedSmokeOuterTimeoutMs = 360_000;
 const installedSmokeCleanupMarginMs = 30_000;
 const installedSmokeStageTimeouts = {
@@ -238,6 +239,49 @@ describe("installed Codex runtime", () => {
               declineObserved = undefined;
               return providerApprovalDeclined;
             }),
+        );
+
+        // The outside-root attempts above prove reach past the bound root is
+        // refused. They cannot prove the ordinary case: a write the posture
+        // confines to the root still has to be the user's decision. Under
+        // `workspace-write` that write simply succeeded and Codex sent nothing,
+        // so this stage is asserted rather than skipped — the model may choose a
+        // shell redirect or its patch tool, but under `read-only` either one has
+        // to escalate before it can touch the file.
+        await stage("declined in-root write approval", installedSmokeStageTimeouts.approval, () =>
+          usingConnection(driver, projectRoot, activeConnections, async (approval) => {
+            const inRootTarget = join(projectRoot, "must-not-exist.md");
+            let answered = false;
+            await Effect.runPromise(
+              approval.connection.start({
+                sessionId: inRootApprovalSessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              }),
+            );
+            const approvalEvents = collectApprovalAttempt(
+              Stream.unwrapScoped(approval.connection.subscribe),
+              (event) => {
+                if (answered) return Effect.void;
+                answered = true;
+                return approval.connection.answerApproval({
+                  sessionId: inRootApprovalSessionId,
+                  requestId: event.requestId,
+                  approved: false,
+                });
+              },
+            );
+            await Effect.runPromise(
+              approval.connection.send({
+                sessionId: inRootApprovalSessionId,
+                prompt: `Create the file ${inRootTarget} containing the single line: must not exist. Then stop.`,
+                attachments: [],
+                tools: [],
+              }),
+            );
+            expect(await approvalEvents).toBe(true);
+            expect(await pathExists(inRootTarget)).toBe(false);
+          }),
         );
 
         await stage("driver restart", installedSmokeStageTimeouts.restart, () =>

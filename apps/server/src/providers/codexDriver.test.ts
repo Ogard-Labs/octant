@@ -832,7 +832,7 @@ describe("Codex thread and turn lifecycle", () => {
       cwd: projectRoot,
       model: "gpt-5.4",
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
       serviceTier: "fast",
       config: { model_reasoning_effort: "low" },
     });
@@ -840,7 +840,7 @@ describe("Codex thread and turn lifecycle", () => {
       cwd: projectRoot,
       model: "gpt-5.4",
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
     });
     await acquired.close();
   });
@@ -874,7 +874,7 @@ describe("Codex thread and turn lifecycle", () => {
       cwd: projectRoot,
       model: "gpt-5.4",
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
     } satisfies Partial<CodexThreadStartInput>);
     await Effect.runPromise(
       acquired.connection.send({
@@ -1544,7 +1544,11 @@ describe("Codex execution authority and approvals", () => {
     });
     expect(codexExecutionSettings("approval-gated")).toEqual({
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
+    });
+    expect(codexExecutionSettings("auto-accept-edits")).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
     });
     expect(codexExecutionSettings("plan")).toEqual({
       approvalPolicy: "never",
@@ -1552,9 +1556,24 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
+  it("keeps a sandbox that still refuses an in-root write on both prompting postures", () => {
+    // Measured against codex-cli 0.154.0: `on-request` only means the model may
+    // escalate, so under `workspace-write` it ran `printf ... > NOTES.md` inside
+    // the bound root and sent no request at all — silently waiving the
+    // `shell-commands` class for both postures. Under `read-only` the same
+    // prompt raised `item/commandExecution/requestApproval` ("The workspace is
+    // read-only") and declining it left no file. The sandbox is what decides
+    // whether the handler below is ever consulted, so it has to keep refusing.
+    for (const policy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(codexExecutionSettings(policy).sandbox).toBe("read-only");
+      expect(codexExecutionSettings(policy).approvalPolicy).toBe("on-request");
+    }
+  });
+
   it.each([
     ["full-access", "never", "danger-full-access"],
-    ["approval-gated", "on-request", "workspace-write"],
+    ["approval-gated", "on-request", "read-only"],
+    ["auto-accept-edits", "on-request", "read-only"],
     ["plan", "never", "read-only"],
   ] as const)(
     "starts %s with only the Project root and exact authority",

@@ -241,14 +241,25 @@ export function codexExecutionSettings(
     return { approvalPolicy: "never", sandbox: "danger-full-access" };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
-    // Codex confines writes to the workspace either way; which of those writes
-    // Octant asks about is decided by the driver's approval handler (auto-accept
-    // edits answers project-confined file changes itself), not by this mapping.
+    // `on-request` lets the model decide when to escalate, so the sandbox — not
+    // this policy — settles what Octant is ever asked about. Measured against
+    // codex-cli 0.154.0: under `workspace-write` an in-root write just succeeds
+    // and Codex sends no request at all, which silently waived the
+    // `shell-commands` class 0009 keeps independent and 0018 keeps prompting
+    // under both of these postures. Under `read-only` the same write escalates,
+    // so the approval handler below decides it: a patch edit arrives as
+    // `file-change` (auto-accept edits answers those itself) and a shell write
+    // arrives as `command`, which neither posture waives. Reads still need no
+    // escalation, so only writes and network reach a person.
+    //
+    // A `command` is never auto-accepted from its text: Codex reports
+    // `commandActions` as `unknown` for a plain `> file` redirect, so "this
+    // command only writes in-root" is not something either side can prove.
     // When the user opts into harness-delegated approvals, the reviewer answers
     // prompts Octant would otherwise surface; the sandbox is unchanged (0104).
     return {
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
       ...(autoApprove === true ? { approvalsReviewer: "auto_review" as const } : {}),
     };
   }
