@@ -410,7 +410,7 @@ attach gate (see
 On the desktop that injection drives the device's Device Hub window through
 the private computer-use broker and the embedded driver, semantic first and
 without a computer-use session or application grant (see
-[decisions/0136-simulator-input-reaches-the-device-through-device-hub.md](decisions/0136-simulator-input-reaches-the-device-through-device-hub.md)).
+[decisions/0137-simulator-input-reaches-the-device-through-device-hub.md](decisions/0137-simulator-input-reaches-the-device-through-device-hub.md)).
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a
 thread as a context-aware dock tab opened from the title-bar shortcut or Add
 tool. It may
