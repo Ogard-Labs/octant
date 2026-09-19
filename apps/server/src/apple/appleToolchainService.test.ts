@@ -838,6 +838,66 @@ describe("AppleToolchainService lifecycle", () => {
     expect(existsSync(unrelated)).toBe(true);
   });
 
+  it("leaves the file of a capture that is still running, however long it has been", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    let releaseSlowCapture!: () => void;
+    const slowCaptureHeld = new Promise<void>((resolve) => {
+      releaseSlowCapture = resolve;
+    });
+    let slowPath = "";
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const path = input.argv.at(-1)!;
+      await writeFile(path, png);
+      if (slowPath === "") {
+        // The first capture wrote its file long ago and its process is still going.
+        slowPath = path;
+        const old = new Date(Date.now() - 5 * 60_000);
+        await utimes(path, old, old);
+        await slowCaptureHeld;
+      }
+      return processResult("");
+    });
+    const slowAction = "30000000-0000-4000-8000-0000000000c1";
+    const quickAction = "30000000-0000-4000-8000-0000000000c2";
+
+    const slow = service.execute(
+      simulatorRequest({
+        kind: "screenshot",
+        bundleIdentifier: undefined,
+        actionId: slowAction as never,
+      }),
+      context,
+    );
+    await vi.waitFor(() => expect(slowPath).not.toBe(""));
+    await service.execute(
+      simulatorRequest({
+        kind: "screenshot",
+        bundleIdentifier: undefined,
+        actionId: quickAction as never,
+      }),
+      context,
+    );
+    expect(existsSync(slowPath)).toBe(true);
+    releaseSlowCapture();
+
+    expect((await slow).outcome).toBe("succeeded");
+    expect(artifacts.get(`apple-screenshot-${slowAction}`)).toEqual(png);
+  });
+
   it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();

@@ -175,6 +175,9 @@ export class AppleToolchainService {
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
   readonly #captureDirectory: string;
+  // Files a running capture owns. A capture may run for minutes, so its file's
+  // age says nothing about whether it was abandoned; only this does.
+  readonly #capturesInProgress = new Set<string>();
   // States an action set while a discovery was reading. A discovery lists the
   // devices and then probes the project, which can take seconds; a boot or
   // shutdown that finishes in between is newer than that list and must not be
@@ -559,11 +562,12 @@ export class AppleToolchainService {
         this.#advance(active, "capturing-screen");
         // A capture whose process outlived its timeout can write its file after
         // this action already removed it; the next capture clears what is left.
-        await sweepStaleCaptures(this.#captureDirectory, Date.now());
+        await sweepStaleCaptures(this.#captureDirectory, Date.now(), this.#capturesInProgress);
         const capturePath = join(
           this.#captureDirectory,
           `${CAPTURE_FILE_PREFIX}${request.actionId}.png`,
         );
+        this.#capturesInProgress.add(capturePath);
         // Whatever happens to the command, the read or the artifact write, the
         // raw screen must not stay behind in the temporary directory.
         try {
@@ -599,6 +603,7 @@ export class AppleToolchainService {
             }
           }
         } finally {
+          this.#capturesInProgress.delete(capturePath);
           await rm(capturePath, { force: true });
         }
       } else if (request.kind === "logs") {
@@ -1507,8 +1512,12 @@ function invalidFailure(message: string): AppleDiscoveryResult {
 const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
 const STALE_CAPTURE_MS = 60_000;
 
-/** Removes this service's capture files that no running action can still own. */
-async function sweepStaleCaptures(directory: string, nowMs: number): Promise<void> {
+/** Removes this service's capture files that no running action still owns. */
+async function sweepStaleCaptures(
+  directory: string,
+  nowMs: number,
+  inProgress: ReadonlySet<string>,
+): Promise<void> {
   let names: ReadonlyArray<string>;
   try {
     names = await readdir(directory);
@@ -1520,6 +1529,7 @@ async function sweepStaleCaptures(directory: string, nowMs: number): Promise<voi
       .filter((name) => name.startsWith(CAPTURE_FILE_PREFIX) && name.endsWith(".png"))
       .map(async (name) => {
         const path = join(directory, name);
+        if (inProgress.has(path)) return;
         try {
           if (nowMs - (await stat(path)).mtimeMs > STALE_CAPTURE_MS)
             await rm(path, { force: true });
