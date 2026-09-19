@@ -8,14 +8,12 @@ import {
   type ProjectViewLifecycle,
   type ProjectViewSort,
 } from "@octant/contracts/project-view";
-import {
-  SIDEBAR_THREAD_STATUS_ORDER,
-  type SidebarThreadStatus,
-} from "@octant/contracts/sidebar-thread-status";
+import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import {
   compareSidebarProjectStatus,
   resolveSidebarThreadStatus,
   rollUpSidebarProjectStatus,
+  SIDEBAR_THREAD_STATUS_ORDER,
   type SidebarThreadStatusInput,
 } from "./sidebarThreadStatusPolicy";
 

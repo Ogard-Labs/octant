@@ -113,11 +113,9 @@ import {
   describeSidebarProjectStatus,
   rollUpSidebarProjectStatus,
   SIDEBAR_THREAD_STATUS_LABEL,
-} from "@octant/domain/sidebar-thread-status-policy";
-import {
   SIDEBAR_THREAD_STATUS_ORDER,
-  type SidebarThreadStatus,
-} from "@octant/contracts/sidebar-thread-status";
+} from "@octant/domain/sidebar-thread-status-policy";
+import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import { lineageParentTitle } from "./threadLineage";
 import {

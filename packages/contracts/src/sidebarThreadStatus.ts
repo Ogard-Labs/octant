@@ -1,17 +1,23 @@
 import { Schema } from "effect";
 
 /**
- * The thread statuses the sidebar speaks about, in descending strength.
+ * The thread statuses a saved Project View may ask for.
  *
- * This vocabulary started in the renderer and moved into a domain policy so a
- * thread row and a Project heading could not rank the same facts differently.
- * It lives here because a saved Project View now stores which statuses it wants
- * to see: the words are written to disk and read back, so they are a wire
- * contract, and a value the schema does not name cannot round-trip.
+ * This vocabulary is defined here because a Project View's filters are written
+ * to disk and read back by a later build: the moment a status word can be
+ * saved, the set of legal words is a wire contract, and a value the schema does
+ * not name cannot round-trip.
+ *
+ * Only the legal set lives here. How strongly the statuses rank against one
+ * another decides which one a row shows and which Project a status sort puts
+ * first, which is policy rather than a wire value — nothing writes a rank down —
+ * so `@octant/domain` owns the ordering, the labels, and what a caller may
+ * conclude from a status.
  *
  * Every status is a fact the sidebar already carries. A status it cannot
  * observe — a failed run, a blocked check — is absent rather than inferred from
- * silence, so adding one means giving the sidebar the fact first.
+ * silence, so adding one means giving the sidebar the fact first, and here it
+ * also means a word a saved view can persist.
  *
  * `idle` is not here. It is the absence of a claim rather than a state a view
  * could filter for, and a schema that accepted it would invite a saved filter
@@ -19,20 +25,5 @@ import { Schema } from "effect";
  */
 export const SidebarThreadStatus = Schema.Literal("working", "attention", "woke", "unread");
 export type SidebarThreadStatus = typeof SidebarThreadStatus.Type;
-
-/**
- * The same words as an ordered array, strongest first.
- *
- * The schema fixes the set; this fixes the order. Ranking is what makes one
- * status the one a folded Project reports and one Project louder than another,
- * so the order travels with the vocabulary instead of being restated by each
- * surface that needs it.
- */
-export const SIDEBAR_THREAD_STATUS_ORDER = [
-  "working",
-  "attention",
-  "woke",
-  "unread",
-] as const satisfies ReadonlyArray<SidebarThreadStatus>;
 
 export const decodeSidebarThreadStatus = Schema.decodeUnknownSync(SidebarThreadStatus);

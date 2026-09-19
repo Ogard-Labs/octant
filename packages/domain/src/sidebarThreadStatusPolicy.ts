@@ -1,7 +1,4 @@
-import {
-  SIDEBAR_THREAD_STATUS_ORDER,
-  type SidebarThreadStatus,
-} from "@octant/contracts/sidebar-thread-status";
+import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 
 /**
  * How the sidebar ranks the thread statuses it speaks about, and how a Project
@@ -10,15 +7,39 @@ import {
  * The row already ranked its states, but it did so inline in the renderer, so
  * nothing else could read the same ranking. A Project heading had no way to say
  * what its folded threads were doing without re-deriving the order and drifting
- * from the row. The words and their strength order now live in
- * `@octant/contracts` because a saved Project View stores them; this module
- * holds what the words mean and what a caller may conclude from them.
+ * from the row.
+ *
+ * `@octant/contracts` names the legal set, because a saved Project View
+ * persists the words and they have to round-trip. This module owns everything a
+ * caller concludes from them: the strength order, the labels, the roll-up, and
+ * the comparison. A rank is never written down, so it is policy rather than a
+ * wire value and belongs here.
  *
  * Nothing to report is the absence of a status, not a status called "idle". A
  * quiet thread returns `undefined` and a quiet Project rolls up to `undefined`,
  * so a caller has to handle silence deliberately rather than receive a word it
  * might render, filter for, or sort by.
  */
+
+/**
+ * The statuses in descending strength.
+ *
+ * The contract fixes the set; this fixes the order. Ranking is what makes one
+ * status the one a row shows and one Project louder than another, so the order
+ * travels with the meaning rather than with the wire format.
+ *
+ * `SIDEBAR_THREAD_STATUS_LABEL` below is typed over the contract's union, so a
+ * status added to the contract without a label fails to build. That is what
+ * keeps this list honest: a status ranked nowhere resolves to -1 and would
+ * silently outrank every other, and the label record is the reason a new word
+ * cannot reach the sidebar unnoticed.
+ */
+export const SIDEBAR_THREAD_STATUS_ORDER = [
+  "working",
+  "attention",
+  "woke",
+  "unread",
+] as const satisfies ReadonlyArray<SidebarThreadStatus>;
 
 /**
  * What each status is called wherever it is named. Silence has no label: a row

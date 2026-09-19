@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import {
   compareSidebarProjectStatus,
   describeSidebarProjectStatus,
@@ -6,6 +7,7 @@ import {
   rollUpSidebarProjectStatus,
   sidebarThreadStatuses,
   SIDEBAR_THREAD_STATUS_LABEL,
+  SIDEBAR_THREAD_STATUS_ORDER,
   type SidebarThreadStatusInput,
 } from "./sidebarThreadStatusPolicy";
 
@@ -17,6 +19,17 @@ function thread(overrides: Partial<SidebarThreadStatusInput> = {}): SidebarThrea
     unread: overrides.unread ?? false,
   };
 }
+
+describe("SIDEBAR_THREAD_STATUS_ORDER", () => {
+  it("ranks every status a saved view is allowed to store", () => {
+    // The legal set is a wire contract and the ranking is policy, so they live
+    // in different packages. A status added to the contract and left unranked
+    // would resolve to -1 here and silently outrank every other one.
+    expect([...SIDEBAR_THREAD_STATUS_ORDER].sort()).toEqual(
+      [...SidebarThreadStatus.literals].sort(),
+    );
+  });
+});
 
 describe("resolveSidebarThreadStatus", () => {
   it("reports nothing for a thread with no facts to report", () => {
