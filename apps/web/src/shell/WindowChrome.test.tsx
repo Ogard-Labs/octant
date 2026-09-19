@@ -334,7 +334,9 @@ describe("WindowChrome", () => {
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
       "opacity: 0;",
     );
-    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: 14px;");
+    // The mark fills a destination's icon slot, so a thread's title starts in
+    // the same text column as "Inbox" and "Board".
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: var(--oct-icon-md);");
     expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0.78;");
     expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
       "var(--oct-accent)",
@@ -550,12 +552,28 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("keeps thread row actions in a reserved gutter and bounds the context menu", () => {
-    expect(
-      cssRule(
-        ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions) > .sidebar-navigation__thread",
-      ),
-    ).toContain("padding-inline-end: 56px;");
+  it("makes room for thread row actions only while they show, and bounds the context menu", () => {
+    // DESIGN.md: hover-only actions take no width until their row is hovered
+    // or focused. Reserved at all times, the room left the age and the status
+    // dot floating 56px short of the row's end.
+    const row = ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)";
+    for (const shown of [
+      ":hover",
+      ":focus-within",
+      ':has([aria-expanded="true"])',
+      ":has([data-popup-open])",
+    ]) {
+      expect(cssRule(`${row}${shown} > .sidebar-navigation__thread`)).toContain(
+        "padding-inline-end: 56px;",
+      );
+    }
+    // At rest the only room kept is for the one always-visible overflow action
+    // on a coarse pointer.
+    expect(cssRule(`${row} > .sidebar-navigation__thread`)).not.toContain("56px");
+    expect(cssRule(".sidebar-navigation__thread")).toContain(
+      "padding-inline: var(--oct-nav-inset);",
+    );
+    expect(cssRule(".project-threads")).toContain("padding-left: 0;");
     expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
     expect(cssRule(".thread-row-context-menu")).toContain("width: min(248px, calc(100vw - 24px));");
   });
