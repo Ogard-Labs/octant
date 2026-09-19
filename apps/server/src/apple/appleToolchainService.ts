@@ -616,7 +616,11 @@ export class AppleToolchainService {
           // A host restart in between is covered by the sweep at start.
           if (!exitedCleanly) {
             for (const delayMs of CAPTURE_RETURN_VISITS_MS) {
-              setTimeout(() => void rm(capturePath, { force: true }), delayMs).unref();
+              setTimeout(() => {
+                // Nothing awaits this; a path that cannot be removed is left to
+                // the next sweep instead of becoming an unhandled rejection.
+                void rm(capturePath, { force: true }).catch(() => undefined);
+              }, delayMs).unref();
             }
           }
         }

@@ -6,7 +6,7 @@ import type {
   ToolActionCancellation,
 } from "@octant/contracts";
 import { existsSync } from "node:fs";
-import { mkdtemp, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -966,6 +966,46 @@ describe("AppleToolchainService lifecycle", () => {
       await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("shrugs off a return visit that cannot remove what it finds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      let capturePath = "";
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        capturePath = input.argv.at(-1)!;
+        return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+      });
+      await service.execute(
+        simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+        context,
+      );
+      // Something else in the shared temporary root put a directory there.
+      await mkdir(join(capturePath, "inside"), { recursive: true });
+
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(rejections).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      process.off("unhandledRejection", onRejection);
     }
   });
 
