@@ -516,6 +516,11 @@ export class GitObservationPort {
         args,
         temporaryDirectory: this.#confinement.temporaryDirectory,
         networkEgress: this.#confinement.networkEgress,
+        // `merge-tree --write-tree` writes the merged tree into the object
+        // database, which for a linked worktree lives in the common directory
+        // outside the bound root. Observing mergeability therefore needs the
+        // write grant even though nothing here touches the working tree.
+        writable: true,
       });
       return await this.#dependencies.execFile(
         launch.command,

@@ -87,6 +87,25 @@ describe("git Seatbelt launch", () => {
       expect(gitLinkedWorktreeMetadataRules(worktree, { writable: true })).toContain(
         `(allow file-write* (subpath "${common}"))`,
       );
+
+      // The launch itself defaults to read-only. These rules are appended
+      // last, so a caller that simply forgets the option is confined rather
+      // than silently handed write on another repository's .git.
+      let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+      prepareGitSeatbeltLaunch({
+        confinement: {
+          prepare: (input) => {
+            captured = input;
+            return { command: "/usr/bin/sandbox-exec", args: [] };
+          },
+        },
+        gitExecutable: "/usr/bin/git",
+        checkoutRoot: worktree,
+        args: ["status"],
+        temporaryDirectory: "/tmp",
+        networkEgress: "none",
+      });
+      expect((captured?.extraRules ?? []).some((rule) => rule.includes("file-write"))).toBe(false);
       expect(rules).not.toContain(`(allow file-read* (subpath "${root}"))`);
     } finally {
       rmSync(root, { recursive: true, force: true });

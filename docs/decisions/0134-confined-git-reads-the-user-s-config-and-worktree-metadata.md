@@ -53,15 +53,15 @@ supersede 0133; it covers what 0133 declines to cover.
   those two paths is granted `file-read-metadata` and nothing more; the walk
   stops at the first ancestor it cannot stat. Metadata on an ancestor discloses
   that it exists, not its listing or its contents.
-- **Write follows the launch's effective policy, and is opt-in.** A launch that
-  stages, commits or restores a checkpoint asks for write on that metadata
-  explicitly. A launch that observes history does not. Neither does a Plan
-  mutation: 0009 keeps Plan read-only always, so a Plan stage or commit is
-  refused this grant even though it runs through the writable launch path.
-  The grant tracks the policy in force, not the helper the caller reached for.
-  These rules are appended last, so a write allow emitted here silently
-  overrides a caller's own write deny on the same path, and a launch that asked
-  to stay read-only must not be widened by a rule it did not choose.
+- **Write on that metadata is refused by default and opted into per launch.**
+  These rules are appended last, so a write allow emitted here outranks
+  whatever posture the launch itself declared — including Plan's, which 0009
+  keeps read-only always. The default is therefore read-only: a caller that
+  genuinely writes the metadata asks for it and says why, and a caller that
+  forgets is confined rather than widened. The grant tracks the policy in
+  force, not the helper the caller reached for, so a Plan mutation is refused
+  it even though it runs the writable path. Writing a merged tree into the
+  object database is a write; reading history, status or a diff is not.
 - A rule emitted through `extraRules` is **authority the caller granted**, not a
   detail of how the command is spelled. Where a launch declares a posture, the
   appended rules honor it rather than outrank it.
