@@ -287,6 +287,35 @@ describe("GitObservationPort", () => {
     expect(fifth.statusEntries).toEqual(fourth.statusEntries);
     expect(fifth.stateToken).not.toBe(fourth.stateToken);
   });
+
+  it("answers mergeability from a linked worktree without adding objects to the repository it shares", async () => {
+    const repository = createRepository();
+    const linked = join(repository, "..", "linked worktree");
+    git(repository, "worktree", "add", "-b", "feature/compare", linked);
+    // Both sides move, so the merged tree is one the repository has never
+    // stored. A merge that resolves to an existing tree would write nothing
+    // and could not tell a quarantined object database from a shared one.
+    writeFileSync(join(repository, "base.txt"), "base\n");
+    git(repository, "add", "--", "base.txt");
+    git(repository, "commit", "-m", "base moves");
+    writeFileSync(join(linked, "head.txt"), "head\n");
+    git(linked, "add", "--", "head.txt");
+    git(linked, "commit", "-m", "head moves");
+    const before = allObjectNames(repository);
+
+    const result = await new GitObservationPort(confinedOptions()).compareBranch({
+      checkoutRoot: linked,
+      baseRef: "main",
+      headRef: "HEAD",
+    });
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.ahead).toBe(1);
+    expect(result.behind).toBe(1);
+    expect(result.mergeability).toBe("clean");
+    expect(allObjectNames(repository)).toEqual(before);
+  });
 });
 
 function observationPortWithNumstat(stdout: string): GitObservationPort {
@@ -330,6 +359,14 @@ function createRepository(): string {
   git(repository, "add", "--", "README.md");
   git(repository, "commit", "-m", "initial");
   return repository;
+}
+
+/** Every object the repository holds, so a stray write shows up by name. */
+function allObjectNames(root: string): readonly string[] {
+  return gitOutput(root, "cat-file", "--batch-all-objects", "--batch-check=%(objectname)")
+    .split("\n")
+    .filter(Boolean)
+    .sort();
 }
 
 function temporaryDirectory(): string {

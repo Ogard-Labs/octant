@@ -82,19 +82,19 @@ sanitized environment, the write scoping, and Plan and Chat process denial.
   denial reaches the caller as an empty catalogue and a success exit code, not
   as an error. Diagnosing one means reading the runtime's own log, and a fix
   is not proven by an exit code.
-- Two allowances already in the tree fall outside this record, and it does not
-  cover them retroactively. Confined Git reads the user's global git config and
-  the files that config pulls in through `[include]`, and it canonicalizes
-  linked-worktree metadata that points into a repository outside the bound
-  root. Both are wider than an existence check on a named node — one is a
-  person's configuration content, the other reaches outside the bound root, and
-  this record excludes each by name. 0134 covers them, so a later change reads
-  its boundary rather than stretching this one.
+- One allowance already in the tree falls outside this record, and it does not
+  cover it retroactively. Confined Git canonicalizes linked-worktree metadata
+  that points into a repository outside the bound root, which is wider than an
+  existence check on a named node and is excluded here by name. 0134 covers it,
+  so a later change reads its boundary rather than stretching this one. The
+  profile also allows reads on the user's global git config, which this record
+  likewise does not cover; 0134 records that Git is configured never to open
+  those paths, so the allowance grants nothing and is reach to remove.
 
 ## Related
 
 - 0009 Sandbox confinement, approvals, and Plan mode (two rules scoped)
 - 0115 Terminal cache ancestors expose only directory metadata
 - 0126 Seatbelt opens trust evaluation and launcher symlink metadata
-- 0134 Confined Git reads the user's config and its worktree's metadata (the
-  two cases this record excludes)
+- 0134 Confined Git reads its worktree's metadata (the case this record
+  excludes)

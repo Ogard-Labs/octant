@@ -1,7 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpath } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -485,19 +485,56 @@ export class GitObservationPort {
     headOid: string,
     signal?: AbortSignal,
   ): Promise<"clean" | "conflicts" | "unknown"> {
-    const result = await this.#run(
-      ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
+    // `merge-tree --write-tree` is the one observation that writes: it puts the
+    // merged tree in the object database, which for a linked worktree lives
+    // outside the bound root. Asking the launch for that write would hand the
+    // authority to every caller of this port, none of which is policy-aware,
+    // so a Plan thread — read-only always under 0009 — could reach the parent
+    // repository's refs, objects and hooks. Quarantine the output in the
+    // launch's own temporary directory instead and read the real objects
+    // through an alternate, the way Git quarantines an incoming push, so
+    // observing mergeability writes nothing the caller owns.
+    const objects = await this.#run(
+      ["-C", checkoutRoot, "rev-parse", "--path-format=absolute", "--git-path", "objects"],
       signal,
     );
-    // `merge-tree --write-tree` exits 0 for a clean merge and 1 for conflicts.
-    // Anything else is a Git that could not answer — an older one, or a
-    // repository state it refused to read — and is reported as such.
-    if (result.exitCode === 0) return "clean";
-    if (result.exitCode === 1) return "conflicts";
-    return "unknown";
+    const objectDirectory = objects.stdout.trim();
+    if (objects.exitCode !== 0 || !isAbsolute(objectDirectory)) return "unknown";
+    let quarantine: string;
+    try {
+      quarantine = await mkdtemp(join(this.#confinement.temporaryDirectory, "octant-merge-"));
+    } catch {
+      return "unknown";
+    }
+    try {
+      // The real objects are named in the quarantine's own `info/alternates`
+      // rather than in GIT_ALTERNATE_OBJECT_DIRECTORIES, which is separated by
+      // colons and so cannot carry a checkout path that contains one.
+      await mkdir(join(quarantine, "info"), { recursive: true });
+      await writeFile(join(quarantine, "info", "alternates"), `${objectDirectory}\n`, "utf8");
+      const result = await this.#run(
+        ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
+        signal,
+        { GIT_OBJECT_DIRECTORY: quarantine },
+      );
+      // `merge-tree --write-tree` exits 0 for a clean merge and 1 for conflicts.
+      // Anything else is a Git that could not answer — an older one, or a
+      // repository state it refused to read — and is reported as such.
+      if (result.exitCode === 0) return "clean";
+      if (result.exitCode === 1) return "conflicts";
+      return "unknown";
+    } catch {
+      return "unknown";
+    } finally {
+      await rm(quarantine, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
-  async #run(args: readonly string[], parentSignal?: AbortSignal): Promise<CommandResult> {
+  async #run(
+    args: readonly string[],
+    parentSignal?: AbortSignal,
+    extraEnvironment?: NodeJS.ProcessEnv,
+  ): Promise<CommandResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
     parentSignal?.addEventListener("abort", abort, { once: true });
@@ -516,16 +553,13 @@ export class GitObservationPort {
         args,
         temporaryDirectory: this.#confinement.temporaryDirectory,
         networkEgress: this.#confinement.networkEgress,
-        // `merge-tree --write-tree` writes the merged tree into the object
-        // database, which for a linked worktree lives in the common directory
-        // outside the bound root. Observing mergeability therefore needs the
-        // write grant even though nothing here touches the working tree.
-        writable: true,
+        // Every command this port runs is a read, so the launch keeps its
+        // read-only default and never receives the out-of-root write grant.
       });
       return await this.#dependencies.execFile(
         launch.command,
         launch.args,
-        createGitCommandEnvironment(process.env),
+        { ...createGitCommandEnvironment(process.env), ...extraEnvironment },
         controller.signal,
       );
     } catch (error) {
