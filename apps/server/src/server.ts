@@ -4202,6 +4202,7 @@ export function startOctantServer(
     const appleProcess = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "apple-runtime", "test-receipts"),
       literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
+      allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
     const appleToolchainService = new AppleToolchainService({

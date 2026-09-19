@@ -63,6 +63,15 @@ export interface SeatbeltProfileInput {
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
   /**
+   * Whether this process drives the iOS Simulator.
+   *
+   * `simctl` reaches CoreSimulatorService over XPC, and the service reaches
+   * back into the caller for the device set. Under a deny-default profile the
+   * connection is refused and every simulator command fails with "connection
+   * became invalid" — measured on this host, see the comment at the rule.
+   */
+  readonly allowSimulatorControl?: boolean;
+  /**
    * Extra read denials kept alongside the defaults instead of replacing them.
    *
    * Use this for a shared parent whose siblings belong to other authority
@@ -113,6 +122,8 @@ export interface SeatbeltConfinementPrepareInput {
   readonly allowProcessFork?: boolean;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
+  /** See {@link SeatbeltProfileInput.allowSimulatorControl}. */
+  readonly allowSimulatorControl?: boolean;
   /** See {@link SeatbeltProfileInput.additionalDenyReadPaths}. */
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.additionalDenyWritePaths}. */
@@ -497,6 +508,28 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
           seatbeltAllowRule("file-read*", "/System/Library/Security"),
         ]
       : []),
+    // Driving the Simulator needs three things, and the failure without them is
+    // silent rather than loud. Measured by bisection on macOS 27:
+    //
+    //   - `simctl` reaches CoreSimulatorService and the disk-image daemon over
+    //     XPC. Denying mach-lookup gives "connection became invalid".
+    //   - CoreSimulatorService resolves the caller through opendirectoryd.
+    //   - The installed runtimes live on the cryptex mount under
+    //     /private/var/run, which the profile denies wholesale. Without that
+    //     read every runtime resolves as "runtime profile not found" and
+    //     `simctl list devices available` prints an EMPTY device set and
+    //     still exits 0 — so a caller that trusts the exit code reports "no
+    //     Simulator available" on a host with fourteen of them.
+    //
+    // Each rule below is load-bearing: removing any one returns an empty device
+    // set. The CoreSimulator prefix keeps this working across host
+    // architectures, whose launch-host service name is arch-specific.
+    ...(input.allowSimulatorControl === true
+      ? [
+          '(allow mach-lookup (global-name-prefix "com.apple.CoreSimulator."))',
+          '(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))',
+        ]
+      : []),
     ...(input.allowFileReadStar === true ? ["(allow file-read*)"] : []),
     ...DEFAULT_DENY_READ_PATHS.map((path) => seatbeltDenyRule("file-read*", path)),
     // macOS /bin/sh resolves this system-owned selector before starting its
@@ -521,6 +554,15 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...resolvedRootForms(input.temporaryDirectory).map((path) =>
       seatbeltAllowRule("file-write*", path),
     ),
+    // The installed Simulator runtimes live on the cryptex mount under
+    // /private/var/run, which the /private denial above covers. This re-allow
+    // must come after that denial: Seatbelt resolves by last matching rule, so
+    // an allow emitted earlier is simply overwritten. Without it every runtime
+    // resolves as "runtime profile not found" and `simctl list devices
+    // available` prints an empty set while still exiting 0.
+    ...(input.allowSimulatorControl === true
+      ? [seatbeltAllowRule("file-read*", "/private/var/run/com.apple.security.cryptexd/mnt")]
+      : []),
     ...additionalDenyWritePaths.map((path) => seatbeltDenyRule("file-write*", path)),
     ...uniqueAbsolutePaths(additionalWriteRoots.flatMap((path) => resolvedRootForms(path))).map(
       (path) => seatbeltAllowRule("file-write*", path),
@@ -632,6 +674,9 @@ function prepareDarwinSeatbelt(
       ? {}
       : { allowFileReadStar: input.allowFileReadStar }),
     ...(input.writeBoundRoot === undefined ? {} : { writeBoundRoot: input.writeBoundRoot }),
+    ...(input.allowSimulatorControl === undefined
+      ? {}
+      : { allowSimulatorControl: input.allowSimulatorControl }),
     ...(input.additionalDenyReadPaths === undefined
       ? {}
       : { additionalDenyReadPaths: input.additionalDenyReadPaths }),
