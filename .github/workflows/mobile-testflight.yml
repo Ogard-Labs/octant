@@ -1,0 +1,65 @@
+name: Mobile (TestFlight)
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: Upload the successful build to App Store Connect and TestFlight
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: mobile-testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate the mobile release source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/mobile typecheck
+      - run: bun run --cwd apps/mobile test
+      - name: Resolve the production Expo configuration
+        working-directory: apps/mobile
+        run: bunx expo config --type public --json >/dev/null
+
+  build:
+    name: Build${{ inputs.submit && ' and upload' || '' }} iOS
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: mobile-testflight
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: 24.7.0
+          packager: bun
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Build the App Store artifact
+        working-directory: apps/mobile
+        env:
+          SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit }}
+        run: |
+          set -euo pipefail
+          args=(--platform ios --profile production --non-interactive --wait)
+          if [ "$SUBMIT_TO_TESTFLIGHT" = "true" ]; then
+            args+=(--auto-submit)
+          fi
+          eas build "${args[@]}"

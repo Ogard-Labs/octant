@@ -1,6 +1,8 @@
 # Mobile maturity phases beyond remote control
 
-Design only. Does not authorize store packaging or native distribution work.
+Phase B internal TestFlight distribution is authorized by
+[0136](decisions/0136-internal-testflight-carries-the-existing-remote-client.md).
+The remaining phases are design only and do not authorize their implementation.
 Public App Store / Play distribution stays outside the first release (Current
 Release Boundary in `AGENTS.md`). The Expo remote-control client itself remains
 in scope as a remote principal ([0013](decisions/0013-remote-access-and-mobile.md)).
@@ -30,6 +32,10 @@ Internal and TestFlight / Play internal tracks for the **same** Expo remote
 client. Still not a public store listing. Signing and CI live with maintainer
 credentials; the release boundary for _public_ store distribution stays closed
 (see [mobile-store-v1-hold](mobile-store-v1-hold.md) when that note lands).
+
+Status: iOS internal TestFlight setup and device acceptance are active under
+[0136](decisions/0136-internal-testflight-carries-the-existing-remote-client.md).
+Android internal distribution remains unstarted.
 
 Exit: testers install without a laptop sideload ritual.
 

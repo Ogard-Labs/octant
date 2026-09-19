@@ -24,6 +24,11 @@ internal TestFlight / Play internal tracks may appear in later mobile maturity
 phases ([mobile-maturity-phases.md](mobile-maturity-phases.md)) without opening
 a public listing.
 
+The iOS internal TestFlight slice is now authorized by
+[0136](decisions/0136-internal-testflight-carries-the-existing-remote-client.md).
+It creates the private App Store Connect record needed for build processing but
+does not prepare or publish a public product page.
+
 Remote control ≠ store packaging. Confusing them would either pull review and
 listing work into the preview or wrongly defer the remote client itself.
 
