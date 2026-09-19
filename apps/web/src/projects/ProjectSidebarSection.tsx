@@ -347,9 +347,14 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           projectViewState.activeViewId,
           allProjectsPreferences,
         );
-  // Search and environment filters both hide threads without deleting them.
+  // Search, environment and status filters all hide threads without deleting
+  // them. A status filter can match nothing legitimately — ticking "Snooze
+  // ended" when no snooze has ended empties the list — so it has to count here
+  // or that reader gets a blank sidebar with no explanation.
   const filteringThreads =
-    searching || (currentFilters !== undefined && currentFilters.environmentIds.length > 0);
+    searching ||
+    (currentFilters !== undefined &&
+      (currentFilters.environmentIds.length > 0 || (currentFilters.statuses?.length ?? 0) > 0));
   const threadsReady = props.threadStatus === undefined || props.threadStatus === "ready";
   // A saved view can filter and order on what threads are doing, so the rows it
   // reads carry their status facts alongside their timestamps. Rows keep every
@@ -1506,6 +1511,7 @@ function ProjectViewFilterMenu(props: {
   const activeCount =
     (props.filters.lifecycle === "active" ? 0 : 1) +
     (environmentSelection.length > 0 ? 1 : 0) +
+    ((props.filters.statuses?.length ?? 0) > 0 ? 1 : 0) +
     (props.filters.showEmptyProjects ? 0 : 1) +
     (props.filters.grouping === "project" ? 0 : 1) +
     (props.filters.sorting === "recency" ? 0 : 1) +
