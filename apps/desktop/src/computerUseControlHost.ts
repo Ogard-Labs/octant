@@ -95,6 +95,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
     );
   });
 }
+const KEY_PRESS_GAP_MS = 120;
 const refusedInput = (reason: string, message: string): SimulatorInputResult => ({
   kind: "refused",
   reason,
@@ -553,7 +554,12 @@ export function createComputerUseControlHost(options: {
                 .map((character) => `«${character}»`)
                 .join(" ")} cannot be typed yet.`,
             );
-          for (const key of keys.presses) await press(key.key, key.modifiers);
+          // Back-to-back presses lose keys in the bridge: "octant 42" arrived
+          // as "Octa" with none, and whole on the probe that paused ~120 ms.
+          for (const [index, key] of keys.presses.entries()) {
+            if (index > 0) await delay(KEY_PRESS_GAP_MS, signal);
+            await press(key.key, key.modifiers);
+          }
           return {
             kind: "delivered",
             detail: `${keys.presses.length} key presses reached the ${command.name} window`,
