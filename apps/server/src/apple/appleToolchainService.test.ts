@@ -898,6 +898,41 @@ describe("AppleToolchainService lifecycle", () => {
     expect(artifacts.get(`apple-screenshot-${slowAction}`)).toEqual(png);
   });
 
+  it("removes a file written after the capture that asked for it was given up on", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      let capturePath = "";
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        capturePath = input.argv.at(-1)!;
+        // The command is given up on; its process is still out there.
+        return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+      });
+
+      await service.execute(
+        simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+        context,
+      );
+      // The abandoned process writes its file after the action already cleaned up.
+      await writeFile(capturePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();

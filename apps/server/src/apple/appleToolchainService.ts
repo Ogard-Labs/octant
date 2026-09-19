@@ -568,6 +568,7 @@ export class AppleToolchainService {
           `${CAPTURE_FILE_PREFIX}${request.actionId}.png`,
         );
         this.#capturesInProgress.add(capturePath);
+        let exitedCleanly = false;
         // Whatever happens to the command, the read or the artifact write, the
         // raw screen must not stay behind in the temporary directory.
         try {
@@ -586,6 +587,7 @@ export class AppleToolchainService {
             request.timeoutMs,
             signal,
           );
+          exitedCleanly = terminal.termination === "exited";
           if (succeeded(terminal)) {
             const bytes = await readCapture(capturePath);
             if (bytes === undefined) {
@@ -605,6 +607,13 @@ export class AppleToolchainService {
         } finally {
           this.#capturesInProgress.delete(capturePath);
           await rm(capturePath, { force: true });
+          // A command that did not end as a clean exit may still have a process
+          // out there, and it can write the file after the removal above. No
+          // later capture is promised, so this action comes back for its own
+          // file once; the timer never keeps the host alive.
+          if (!exitedCleanly) {
+            setTimeout(() => void rm(capturePath, { force: true }), STALE_CAPTURE_MS).unref();
+          }
         }
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
