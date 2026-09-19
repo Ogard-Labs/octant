@@ -38,6 +38,44 @@ describe("useAppleWorkbench", () => {
     expect(client.snapshot).toHaveBeenCalledTimes(2);
   });
 
+  it("re-discovers destinations after a Simulator boot so the pane stops reading Shutdown", async () => {
+    // Observed 2026-09-19: a boot passed, simctl reported the device Booted,
+    // and the pane kept "Simulator is unavailable" with the row on "Shutdown"
+    // until the tool was closed and re-opened.
+    const before = {
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: [{ simulatorId: "sim-1", state: "shutdown" }],
+    };
+    const after = {
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: [{ simulatorId: "sim-1", state: "booted" }],
+    };
+    const snapshot = { sequence: 1, active: [], recentEvidence: [] };
+    const discover = vi.fn(async () => before);
+    const client = {
+      discover,
+      snapshot: vi.fn(async () => snapshot),
+      execute: vi.fn(async () => ({ outcome: "succeeded" })),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.discovery).toBe(before);
+
+    discover.mockResolvedValue(after);
+    await result.current.execute({ kind: "boot", simulatorId: "sim-1" });
+    await waitFor(() => expect(result.current.discovery).toBe(after));
+    expect(discover).toHaveBeenCalledTimes(2);
+  });
+
   it("exposes successful discovery even before the first action produces evidence", async () => {
     const discovery = { workspace: { schemes: ["Fixture"] }, toolchain: {}, simulators: [] };
     const snapshot = { sequence: 0, active: [], recentEvidence: [] };

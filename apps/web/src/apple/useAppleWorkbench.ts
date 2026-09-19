@@ -88,6 +88,12 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     async (request: AppleActionRequest) => {
       const evidence = await client.execute(request);
       await refreshSnapshot();
+      // A boot or shutdown changes the destination list itself, and that list
+      // lives in discovery, not the runtime snapshot. Without re-discovering,
+      // a passed boot still read "Shutdown" until the tool was re-opened.
+      if (request.kind === "boot" || request.kind === "shutdown") {
+        setDiscovery(await client.discover(discoveryRequestRef.current));
+      }
       setStatus("ready");
       return evidence;
     },

@@ -557,7 +557,7 @@ export class AppleToolchainService {
               message:
                 request.kind === "type-text"
                   ? `type-text ${outcomeFor(terminal)} (text redacted)`
-                  : `${request.kind} ${outcomeFor(terminal)}: ${text(terminal.stderr).slice(0, MAX_DIAGNOSTIC_LENGTH)}`,
+                  : inputFailureNote(request.kind, outcomeFor(terminal), text(terminal.stderr)),
             };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
@@ -667,15 +667,25 @@ export class AppleToolchainService {
         artifacts,
         cleanup,
       );
-    } catch {
+    } catch (error) {
+      // Whatever threw is the reason this action has no evidence; dropping it
+      // left the person with "interrupted" and an empty log. Typed text never
+      // enters the note: an error raised on a type-text path can quote the
+      // script, so that kind records the fact without the detail.
+      const note = unrecordedActionNote(request, error);
+      outputs.push(new TextEncoder().encode(`${note}\n`));
       const logReference = `apple-log-${request.actionId}`;
       await this.#writeArtifact(logReference, outputs);
+      const diagnostics = [
+        ...diagnosticsFor(outputs, context).slice(0, MAX_DIAGNOSTICS - 1),
+        { severity: "note" as const, message: note },
+      ];
       return evidence(
         request,
         signal.aborted ? "cancelled" : "interrupted",
         startedAt,
         this.#options.now(),
-        diagnosticsFor(outputs, context),
+        diagnostics,
         [{ kind: "log", reference: logReference }],
         "uncertain",
       );
@@ -1202,6 +1212,41 @@ function parseBuildProduct(
     throw new Error("build product outside artifact root");
   }
   return { applicationPath, bundleIdentifier };
+}
+
+/**
+ * A host refusal in the form the diagnostic schema accepts: trimmed, non-empty,
+ * bounded. `osascript` ends its stderr with a bare `osascript[pid] ` line and a
+ * trailing space, and a message the schema refuses threw past the evidence
+ * builder into the blanket catch, which reported "interrupted" with an empty
+ * log — the one thing a person needed to read was the one thing lost.
+ */
+function inputFailureNote(
+  kind: AppleSimulatorRequest["kind"],
+  outcome: AppleBuildEvidence["outcome"],
+  stderr: string,
+): string {
+  const detail = stderr
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)
+    .trim();
+  return detail.length === 0 ? `${kind} ${outcome}` : `${kind} ${outcome}: ${detail}`;
+}
+
+function unrecordedActionNote(request: AppleActionRequest, error: unknown): string {
+  if (request.kind === "type-text") return "type-text did not record evidence (detail redacted)";
+  const reason = (error instanceof Error ? error.message : String(error))
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)
+    .trim();
+  return reason.length === 0
+    ? `${request.kind} did not record evidence`
+    : `${request.kind} did not record evidence: ${reason}`;
 }
 
 function outcomeFor(result: AppleProcessResult): AppleBuildEvidence["outcome"] {
