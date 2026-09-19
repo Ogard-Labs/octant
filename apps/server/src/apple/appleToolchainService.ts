@@ -140,6 +140,20 @@ const MAX_RECENT_EVIDENCE = 64;
 export const APPLE_INPUT_MUST_REISSUE_NOTE =
   "Interrupted or unknown Simulator input cannot be retried under the same action id. Issue a new actionId.";
 
+function withSimulatorState(
+  records: ReadonlyArray<AppleSimulatorRecord>,
+  change: {
+    readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+    readonly state: AppleSimulatorRecord["state"];
+  },
+): ReadonlyArray<AppleSimulatorRecord> {
+  return records.map((record) =>
+    record.simulatorId === change.simulatorId
+      ? decodeAppleSimulatorRecord({ ...record, state: change.state })
+      : record,
+  );
+}
+
 export class AppleToolchainService {
   readonly #options: AppleToolchainServiceOptions;
   readonly #discovery = new Map<string, DiscoveryCacheEntry>();
@@ -149,6 +163,15 @@ export class AppleToolchainService {
   #sequence = 0;
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
+  // States an action set while a discovery was reading. A discovery lists the
+  // devices and then probes the project, which can take seconds; a boot or
+  // shutdown that finishes in between is newer than that list and must not be
+  // put back by it.
+  #stateChangesDuringDiscovery: Array<{
+    readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+    readonly state: AppleSimulatorRecord["state"];
+  }> = [];
+  #discoveriesReading = 0;
 
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
@@ -156,6 +179,19 @@ export class AppleToolchainService {
   }
 
   async discover(
+    request: AppleDiscoveryRequest,
+    context: AppleExecutionContext,
+  ): Promise<AppleDiscoveryResult> {
+    if (this.#discoveriesReading === 0) this.#stateChangesDuringDiscovery = [];
+    this.#discoveriesReading += 1;
+    try {
+      return await this.#discover(request, context);
+    } finally {
+      this.#discoveriesReading -= 1;
+    }
+  }
+
+  async #discover(
     request: AppleDiscoveryRequest,
     context: AppleExecutionContext,
   ): Promise<AppleDiscoveryResult> {
@@ -183,6 +219,7 @@ export class AppleToolchainService {
     const version = await this.#command(["xcodebuild", "-version"], context, DISCOVERY_TIMEOUT_MS);
     const swift = await this.#command(["swift", "--version"], context, DISCOVERY_TIMEOUT_MS);
     const sdks = await this.#command(["xcodebuild", "-showsdks"], context, DISCOVERY_TIMEOUT_MS);
+    const changesBeforeDeviceList = this.#stateChangesDuringDiscovery.length;
     const devices = await this.#command(
       ["xcrun", "simctl", "list", "devices", "available", "--json"],
       context,
@@ -213,7 +250,9 @@ export class AppleToolchainService {
       available: true,
       discoveredAt: this.#options.now(),
     });
-    const simulators = parseSimulators(text(devices.stdout));
+    const simulators = this.#stateChangesDuringDiscovery
+      .slice(changesBeforeDeviceList)
+      .reduce(withSimulatorState, parseSimulators(text(devices.stdout)));
     let metadata: ReturnType<typeof parseProjectMetadata>;
     try {
       metadata = parseProjectMetadata(text(project.stdout));
@@ -908,11 +947,10 @@ export class AppleToolchainService {
     state: AppleSimulatorRecord["state"],
   ): void {
     const update = (records: ReadonlyArray<AppleSimulatorRecord>) =>
-      records.map((record) =>
-        record.simulatorId === simulatorId
-          ? decodeAppleSimulatorRecord({ ...record, state })
-          : record,
-      );
+      withSimulatorState(records, { simulatorId, state });
+    if (this.#discoveriesReading > 0) {
+      this.#stateChangesDuringDiscovery.push({ simulatorId, state });
+    }
     this.#lastSimulators = update(this.#lastSimulators);
     for (const [key, entry] of this.#discovery) {
       this.#discovery.set(key, { ...entry, simulators: update(entry.simulators) });

@@ -648,6 +648,50 @@ describe("AppleToolchainService lifecycle", () => {
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
 
+  it("keeps a shutdown that finished while a slower discovery was still reading", async () => {
+    const base = discoveryExecutor();
+    let releaseProjectProbe!: () => void;
+    const projectProbeHeld = new Promise<void>((resolve) => {
+      releaseProjectProbe = resolve;
+    });
+    let holdProjectProbe = false;
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const command = input.argv.join(" ");
+      if (command.includes("simctl shutdown")) return processResult("ok\n");
+      if (holdProjectProbe && command.includes("-list -json")) await projectProbeHeld;
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    // The discovery has read the device list as booted and is now stuck on
+    // the project probe; the shutdown completes before it returns.
+    holdProjectProbe = true;
+    const slowDiscovery = service.discover(discoveryRequest, context);
+    await vi.waitFor(() =>
+      expect(
+        execute.mock.calls.filter(([input]) => input.argv.join(" ").includes("-list -json")),
+      ).toHaveLength(2),
+    );
+    await service.execute(
+      simulatorRequest({ kind: "shutdown", approval: buildRequest().approval }),
+      context,
+    );
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+    releaseProjectProbe();
+    const discovered = await slowDiscovery;
+
+    expect(discovered.kind).toBe("discovered");
+    if (discovered.kind !== "discovered") return;
+    expect(discovered.simulators[0]?.state).toBe("shutdown");
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+  });
+
   it("captures the Simulator screen as its own evidence artifact, keeping the log readable", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
