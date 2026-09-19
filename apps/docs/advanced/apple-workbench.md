@@ -72,9 +72,11 @@ erase, or transfer the destination.
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
-requests; the host injects XCTest-less input behind that channel. Remote,
-Linux, and headless clients stay read-only. Typed characters never land in
-durable evidence. Destination actions remain on the workbench list: each
+requests; the host injects XCTest-less input behind that channel. When the
+host cannot deliver an input action, the evidence names the host's refusal
+rather than reading as interrupted. Remote, Linux, and headless clients stay
+read-only. Typed characters never land in durable evidence, and neither does
+the reason a type-text action failed, since it can quote the script. Destination actions remain on the workbench list: each
 Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,
