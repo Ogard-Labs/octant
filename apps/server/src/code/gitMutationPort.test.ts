@@ -710,6 +710,21 @@ describe("GitMutationPort", () => {
     expect(defaultFlags !== undefined && defaultFlags.writeBoundRoot !== false).toBe(true);
     expect(defaultFlags !== undefined && defaultFlags.allowProcessExec !== false).toBe(true);
     expect(defaultFlags !== undefined && defaultFlags.allowProcessFork !== false).toBe(true);
+
+    // The flags above are not the whole posture. The linked-worktree rules
+    // reach the profile through `extraRules`, which is appended last, and
+    // Seatbelt resolves by last matching rule — so a write allow emitted there
+    // outranks the `writeBoundRoot: false` this Plan launch just set. A Plan
+    // stage could otherwise write the worktree's index and reach the parent
+    // repository's shared objects and refs, outside the bound root.
+    const worktree = linkedWorktreeCheckout();
+    await port.stage({ checkoutRoot: worktree, paths: ["README.md"], executionPolicy: "plan" });
+    const planRules = captured?.extraRules ?? [];
+    expect(planRules.some((rule) => rule.includes("file-write"))).toBe(false);
+
+    await port.stage({ checkoutRoot: worktree, paths: ["README.md"] });
+    const writableRules = captured?.extraRules ?? [];
+    expect(writableRules.some((rule) => rule.includes("file-write"))).toBe(true);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {
@@ -739,6 +754,23 @@ function createRepository(root: string): string {
   git(repository, "add", "--", "README.md");
   git(repository, "commit", "-m", "initial");
   return repository;
+}
+
+/**
+ * A checkout shaped like a linked worktree: its `.git` is a file naming a
+ * gitdir inside another repository, with the `commondir` that repository
+ * shares. Both sit outside the bound root, which is what makes the launch's
+ * out-of-root metadata rules apply to it.
+ */
+function linkedWorktreeCheckout(): string {
+  const root = temporaryDirectory();
+  const checkout = join(root, "worktree");
+  const gitdir = join(root, "main.git", "worktrees", "feature");
+  mkdirSync(checkout);
+  mkdirSync(gitdir, { recursive: true });
+  writeFileSync(join(checkout, ".git"), `gitdir: ${gitdir}\n`);
+  writeFileSync(join(gitdir, "commondir"), `${join(root, "main.git")}\n`);
+  return checkout;
 }
 
 function temporaryDirectory(): string {

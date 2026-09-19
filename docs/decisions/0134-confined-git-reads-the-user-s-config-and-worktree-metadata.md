@@ -50,16 +50,18 @@ supersede 0133; it covers what 0133 declines to cover.
   directory names. Nothing else outside the bound root is opened, and the parent
   repository's working tree stays denied.
 - Because Git canonicalizes a path component by component, every **ancestor** of
-  those two paths is granted `file-read-metadata` and nothing more. The walk
-  stops at the first ancestor it cannot stat, so without this the grant above
-  would not be reachable. Metadata on an ancestor discloses that it exists; it
-  does not open its listing or its contents.
-- **Write follows the launch, and is opt-in.** A launch that stages, commits or
-  restores a checkpoint asks for write on that metadata explicitly. A launch
-  that observes history does not, and does not receive it. The default is
-  read-only, because these rules are appended last: a write allow emitted here
-  silently overrides a caller's own write deny on the same path, and a launch
-  that asked to stay read-only must not be widened by a rule it did not choose.
+  those two paths is granted `file-read-metadata` and nothing more; the walk
+  stops at the first ancestor it cannot stat. Metadata on an ancestor discloses
+  that it exists, not its listing or its contents.
+- **Write follows the launch's effective policy, and is opt-in.** A launch that
+  stages, commits or restores a checkpoint asks for write on that metadata
+  explicitly. A launch that observes history does not. Neither does a Plan
+  mutation: 0009 keeps Plan read-only always, so a Plan stage or commit is
+  refused this grant even though it runs through the writable launch path.
+  The grant tracks the policy in force, not the helper the caller reached for.
+  These rules are appended last, so a write allow emitted here silently
+  overrides a caller's own write deny on the same path, and a launch that asked
+  to stay read-only must not be widened by a rule it did not choose.
 - A rule emitted through `extraRules` is **authority the caller granted**, not a
   detail of how the command is spelled. Where a launch declares a posture, the
   appended rules honor it rather than outrank it.
@@ -78,8 +80,7 @@ the write scoping of the bound root, and Plan and Chat process denial.
 - Reading history no longer implies any write authority outside the bound root,
   so an observation path cannot reach the parent repository's hooks.
 - A person's configuration can name include paths anywhere, so a wider grant
-  follows a wider configuration rather than a wider rule. The bounded depth is
-  what keeps that from being unbounded.
+  follows a wider configuration rather than a wider rule.
 - Verified by generating the profile and reading its rules in order, not by
   running `sandbox-exec`. Live confirmation on macOS remains outstanding.
 

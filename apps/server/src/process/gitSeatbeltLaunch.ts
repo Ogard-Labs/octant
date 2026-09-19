@@ -19,6 +19,15 @@ export interface GitSeatbeltLaunchOptions {
   readonly args: ReadonlyArray<string>;
   readonly temporaryDirectory: string;
   readonly networkEgress: OsNetworkEgress;
+  /**
+   * Whether this launch may write. It defaults to true because staging,
+   * committing and checkpoint restore run through here, but a caller whose
+   * execution policy is read-only — Plan, which 0009 keeps read-only always —
+   * must pass false. These rules are appended last and Seatbelt resolves by
+   * last matching rule, so a write allow emitted here outranks the read-only
+   * `writeBoundRoot: false` the caller set on the launch itself.
+   */
+  readonly writable?: boolean;
 }
 
 export interface GitSeatbeltPortOptions {
@@ -269,9 +278,11 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
   const binaryDirectory = dirname(options.gitExecutable);
   const extraRules = [
     ...gitShimExtraRules(),
-    // This launch leaves the bound root writable, so staging, committing and
-    // checkpoint restore reach the worktree's own metadata here too.
-    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, { writable: true }),
+    // Staging, committing and checkpoint restore reach the worktree's own
+    // metadata, so a writable launch grants it. A read-only policy does not.
+    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, {
+      writable: options.writable ?? true,
+    }),
   ];
   return options.confinement.prepare({
     executable: options.gitExecutable,
