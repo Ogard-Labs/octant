@@ -220,16 +220,36 @@ private func refusal(for error: Error) -> Refusal {
     }
 }
 
+/// The developer directory the person selected, as `xcodebuild` and `simctl`
+/// resolve it: `DEVELOPER_DIR` first, then `xcode-select`. Xcode is often
+/// installed beside a beta or under another name, so a fixed path would reach
+/// the wrong toolchain or none.
+private func selectedDeveloperDirectory() -> String {
+    if let configured = ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !configured.isEmpty {
+        return configured
+    }
+    let select = Process()
+    select.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+    select.arguments = ["-p"]
+    let output = Pipe()
+    select.standardOutput = output
+    select.standardError = FileHandle.nullDevice
+    if (try? select.run()) != nil {
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        select.waitUntilExit()
+        let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if select.terminationStatus == 0, !path.isEmpty { return path }
+    }
+    return "/Applications/Xcode.app/Contents/Developer"
+}
+
 private func run() -> Int32 {
     let arguments = CommandLine.arguments
     guard arguments.count == 2, UUID(uuidString: arguments[1]) != nil else {
         FileHandle.standardError.write(Data("usage: octant-device-helper <simulator-udid>\n".utf8))
         return 64
     }
-    let developerDirectory =
-        ProcessInfo.processInfo.environment["DEVELOPER_DIR"]
-        ?? "/Applications/Xcode.app/Contents/Developer"
-    let session = Session(udid: arguments[1], developerDirectory: developerDirectory)
+    let session = Session(udid: arguments[1], developerDirectory: selectedDeveloperDirectory())
     signal(SIGPIPE, SIG_IGN)
     while true {
         var identifier: Any = NSNull()
