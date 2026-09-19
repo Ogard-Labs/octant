@@ -609,7 +609,12 @@ export class AppleToolchainService {
           }
         } finally {
           this.#capturesInProgress.delete(capturePath);
-          await rm(capturePath, { force: true });
+          // A removal that fails must not throw past this action: that turned a
+          // known result into "interrupted". It counts as unconfirmed instead,
+          // so the return visits below still come back for the path.
+          await rm(capturePath, { force: true }).catch(() => {
+            exitedCleanly = false;
+          });
           // A command that did not end as a confirmed clean exit may still have
           // a process out there, and it can write the file after the removal
           // above. No later capture is promised, so this action comes back for

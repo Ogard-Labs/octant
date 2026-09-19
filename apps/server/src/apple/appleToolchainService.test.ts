@@ -1034,6 +1034,34 @@ describe("AppleToolchainService lifecycle", () => {
     }
   });
 
+  it("keeps the capture's own result when its file cannot be cleaned up", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      // Something else in the shared temporary root put a full directory there.
+      await mkdir(join(input.argv.at(-1)!, "inside"), { recursive: true });
+      return processResult("", { exitCode: 1, stderr: "Invalid device state" });
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    // The command failed, and that is what is recorded — not "interrupted"
+    // because a directory could not be removed afterwards.
+    expect(evidence.outcome).toBe("failed");
+  });
+
   it("shrugs off a return visit that cannot remove what it finds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const rejections: unknown[] = [];
