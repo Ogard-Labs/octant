@@ -35,6 +35,15 @@ interface SpawnedProcess {
   ): unknown;
 }
 
+/**
+ * The temporary directory a confined launch may write when none is named.
+ * Callers that hand a confined command a path to write share this resolution
+ * so the path is inside the launch's writable temporary root.
+ */
+export function defaultTemporaryDirectory(): string {
+  return process.env.TMPDIR ?? process.env.TMP ?? process.env.TEMP ?? "/tmp";
+}
+
 interface RepositoryTestProcessPortOptions {
   readonly platform?: NodeJS.Platform;
   readonly spawn?: (
@@ -123,12 +132,7 @@ export class RepositoryTestProcessPort {
     this.#receiptDirectory = options.receiptDirectory;
     this.#processIdentity = options.processIdentity;
     this.#processGroupExists = options.processGroupExists ?? defaultProcessGroupExists;
-    this.#temporaryDirectory =
-      options.temporaryDirectory ??
-      process.env.TMPDIR ??
-      process.env.TMP ??
-      process.env.TEMP ??
-      "/tmp";
+    this.#temporaryDirectory = options.temporaryDirectory ?? defaultTemporaryDirectory();
     this.#networkEgress = options.networkEgress ?? "allow";
     this.#literalReadPaths = options.literalReadPaths ?? [];
     this.#allowSimulatorControl = options.allowSimulatorControl === true;

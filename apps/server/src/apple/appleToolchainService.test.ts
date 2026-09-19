@@ -5,6 +5,10 @@ import type {
   ToolActionAuthority,
   ToolActionCancellation,
 } from "@octant/contracts";
+import { existsSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 type ServiceConstructor = new (options: Record<string, unknown>) => {
@@ -648,14 +652,16 @@ describe("AppleToolchainService lifecycle", () => {
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
 
-  it("captures the Simulator screen as its own evidence artifact, keeping the log readable", async () => {
+  it("captures the Simulator screen into a file it reads back and removes, never onto the checkout", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
     const writeArtifact = vi.fn(async (reference: string, bytes: Uint8Array) => {
       artifacts.set(reference, bytes);
     });
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
     const service = new AppleToolchainService({
       execute,
+      captureDirectory,
       writeArtifact,
       readArtifact: async (reference: string) => artifacts.get(reference),
       realpath: async (path: string) => path,
@@ -664,13 +670,12 @@ describe("AppleToolchainService lifecycle", () => {
     });
     await service.discover(discoveryRequest, context);
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
-    execute.mockResolvedValue({
-      termination: "exited" as const,
-      exitCode: 0,
-      stdout: png,
-      stderr: new TextEncoder().encode(""),
-      parserFailed: false,
-      cleanupUncertain: false,
+    // Xcode 27's simctl writes the PNG to the path it is given and reports
+    // that path on stdout; a `-` would become a file named `-` in the cwd.
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const target = input.argv.at(-1)!;
+      await writeFile(target, png);
+      return processResult(`Wrote screenshot to: ${target}\n`);
     });
 
     const evidence = await service.execute(
@@ -686,7 +691,7 @@ describe("AppleToolchainService lifecycle", () => {
     expect(screenshot).toBeDefined();
     expect(artifacts.get(screenshot!.reference)).toEqual(png);
     const command = execute.mock.calls.at(-1)?.[0] as { readonly argv: ReadonlyArray<string> };
-    expect(command.argv).toEqual([
+    expect(command.argv.slice(0, 7)).toEqual([
       "xcrun",
       "simctl",
       "io",
@@ -694,14 +699,18 @@ describe("AppleToolchainService lifecycle", () => {
       "screenshot",
       "--type",
       "png",
-      "-",
     ]);
-    // The screen is bytes, not text: putting it in the log would make the log
-    // unreadable and would say nothing a reader could act on.
+    const capturePath = command.argv[7]!;
+    expect(dirname(capturePath)).toBe(captureDirectory);
+    expect(capturePath).not.toBe("-");
+    expect(existsSync(capturePath)).toBe(false);
+    // The capture path is host-private; the log keeps simctl's own line.
     const log = evidence.artifacts.find(
       (artifact: { readonly kind: string }) => artifact.kind === "log",
     );
-    expect(artifacts.get(log!.reference)).toEqual(new Uint8Array());
+    expect(new TextDecoder().decode(artifacts.get(log!.reference))).toContain(
+      "Wrote screenshot to:",
+    );
 
     const readBack = await service.readScreenshotArtifact(screenshot!.reference, context);
     expect(readBack).toEqual({ kind: "found", bytes: png });
@@ -711,6 +720,37 @@ describe("AppleToolchainService lifecycle", () => {
       kind: "unauthorized",
       message: "Apple screenshot evidence is not available for this thread.",
     });
+  });
+
+  it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
+    const execute = discoveryExecutor();
+    const artifacts = new Map<string, Uint8Array>();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockResolvedValue(processResult("Wrote screenshot to: somewhere-else\n"));
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.artifacts.map((artifact: { readonly kind: string }) => artifact.kind)).toEqual([
+      "log",
+    ]);
+    expect(
+      evidence.diagnostics.map((item: { readonly message: string }) => item.message),
+    ).toContainEqual(expect.stringContaining("no PNG"));
   });
 
   it("records a failed capture without inventing a screenshot artifact", async () => {

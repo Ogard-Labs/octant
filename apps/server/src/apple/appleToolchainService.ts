@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { readFile, rm } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAppleBuildEvidence,
   decodeAppleRuntimeSnapshot,
@@ -28,6 +29,7 @@ import {
   redactedAppleInputDiagnostic,
   type AppleExecutionScope,
 } from "@octant/domain";
+import { defaultTemporaryDirectory } from "../code/repositoryTestProcessPort";
 
 /**
  * Host link state `xcode-select` reads to answer where the developer directory
@@ -100,6 +102,15 @@ export interface AppleToolchainServiceOptions {
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
+  /**
+   * Where a screen capture lands before it becomes an artifact. Xcode 27's
+   * `simctl io … screenshot -` no longer means stdout: it writes a file named
+   * `-` into the working directory — the checkout — and reports nothing, so
+   * the capture names a file here instead. It must be a directory the confined
+   * command may write; by default that is the process port's own temporary
+   * directory.
+   */
+  readonly captureDirectory?: string;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
@@ -149,9 +160,11 @@ export class AppleToolchainService {
   #sequence = 0;
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
+  readonly #captureDirectory: string;
 
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
+    this.#captureDirectory = options.captureDirectory ?? defaultTemporaryDirectory();
     this.#lastToolchain = unavailableToolchain(options.newId(), options.now());
   }
 
@@ -505,21 +518,42 @@ export class AppleToolchainService {
         );
       } else if (request.kind === "screenshot") {
         this.#advance(active, "capturing-screen");
+        const capturePath = join(
+          this.#captureDirectory,
+          `octant-apple-capture-${request.actionId}.png`,
+        );
         terminal = await this.#command(
-          ["xcrun", "simctl", "io", request.simulatorId, "screenshot", "--type", "png", "-"],
+          [
+            "xcrun",
+            "simctl",
+            "io",
+            request.simulatorId,
+            "screenshot",
+            "--type",
+            "png",
+            capturePath,
+          ],
           context,
           request.timeoutMs,
           signal,
         );
         if (succeeded(terminal)) {
-          const screenshotReference = `apple-screenshot-${request.actionId}`;
-          await this.#writeArtifact(screenshotReference, [terminal.stdout]);
-          artifacts = [{ kind: "screenshot", reference: screenshotReference }];
-          // The captured screen is PNG bytes on stdout. They belong to the
-          // screenshot artifact; folding them into the log would make the log
-          // unreadable and tell a reader nothing.
-          terminal = { ...terminal, stdout: new Uint8Array() };
+          const bytes = await readCapture(capturePath);
+          if (bytes === undefined) {
+            // simctl exited 0 without the file it was asked for: an empty
+            // frame would render as nothing and taps on it would be dropped.
+            terminal = {
+              ...terminal,
+              exitCode: 1,
+              stderr: appendLine(terminal.stderr, "simctl reported a capture but wrote no PNG."),
+            };
+          } else {
+            const screenshotReference = `apple-screenshot-${request.actionId}`;
+            await this.#writeArtifact(screenshotReference, [bytes]);
+            artifacts = [{ kind: "screenshot", reference: screenshotReference }];
+          }
         }
+        await rm(capturePath, { force: true });
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
         terminal = await this.#command(
@@ -1357,6 +1391,25 @@ function unauthorizedFailure(): AppleDiscoveryResult {
 
 function invalidFailure(message: string): AppleDiscoveryResult {
   return { kind: "failure", failure: { category: "invalid", message } };
+}
+
+async function readCapture(path: string): Promise<Uint8Array | undefined> {
+  try {
+    const bytes = await readFile(path);
+    return bytes.byteLength === 0 ? undefined : new Uint8Array(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+function appendLine(existing: Uint8Array, line: string): Uint8Array {
+  const suffix = new TextEncoder().encode(
+    `${existing.byteLength === 0 || existing.at(-1) === 0x0a ? "" : "\n"}${line}\n`,
+  );
+  const merged = new Uint8Array(existing.byteLength + suffix.byteLength);
+  merged.set(existing);
+  merged.set(suffix, existing.byteLength);
+  return merged;
 }
 
 function unavailableInputResult(message: string): AppleProcessResult {
