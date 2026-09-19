@@ -34,6 +34,16 @@ struct SimulatorBridge {
         (device.value(forKey: "state") as? NSNumber)?.intValue == Self.bootedState
     }
 
+    /// The main screen in pixels — the space a captured screenshot is in — so a
+    /// caller can turn a point on a capture into a fraction of the screen.
+    var screenPixelSize: CGSize? {
+        guard let deviceType = device.value(forKey: "deviceType") as? NSObject,
+            let size = (deviceType.value(forKey: "mainScreenSize") as? NSValue)?.sizeValue,
+            size.width > 0, size.height > 0
+        else { return nil }
+        return size
+    }
+
     static func device(udid: String, developerDirectory: String) throws -> SimulatorBridge {
         guard dlopen(coreSimulatorPath, RTLD_NOW) != nil else {
             throw BridgeRefusal.toolchainUnavailable(String(cString: dlerror()))

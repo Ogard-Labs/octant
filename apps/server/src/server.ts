@@ -623,6 +623,8 @@ import {
   type AppleRuntimeReceipt,
   APPLE_TOOLCHAIN_HOST_READ_PATHS,
 } from "./apple/appleToolchainService";
+import { createDesktopSimulatorDevicePort } from "./apple/desktopSimulatorDevicePort";
+import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDesktop";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -4205,8 +4207,13 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
+    // Present only under the desktop app, which owns the native device helper.
+    const simulatorDevice = createDesktopSimulatorDevicePort(process.env);
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
+      ...(simulatorDevice === undefined
+        ? {}
+        : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
       readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),

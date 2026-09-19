@@ -99,10 +99,11 @@ private final class Session {
         switch operation {
         case "hello":
             let simulator = try bridge()
-            return [
-                "protocol": protocolVersion,
-                "device": ["name": simulator.name, "state": simulator.stateDescription],
-            ]
+            var device: [String: Any] = ["name": simulator.name, "state": simulator.stateDescription]
+            if let screen = simulator.screenPixelSize {
+                device["screen"] = ["width": Int(screen.width), "height": Int(screen.height)]
+            }
+            return ["protocol": protocolVersion, "device": device]
         case "touch":
             guard let phaseName = request["phase"] as? String,
                 let phase = ["down": DigitizerEventType.start, "move": .position, "up": .end][phaseName]

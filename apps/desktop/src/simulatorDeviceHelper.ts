@@ -6,6 +6,8 @@ import { spawn as spawnProcess } from "node:child_process";
  * the device's pixel size or the chrome of any window.
  */
 export type DeviceHelperRequest =
+  /** Asks the helper what it is attached to; delivers nothing. */
+  | { readonly op: "hello" }
   | { readonly op: "tap"; readonly x: number; readonly y: number }
   | {
       readonly op: "swipe";
@@ -26,7 +28,11 @@ export type DeviceHelperRequest =
   | { readonly op: "button"; readonly button: "home" | "lock" };
 
 export type DeviceHelperReply =
-  | { readonly status: "delivered" }
+  | {
+      readonly status: "delivered";
+      /** The device's screen in pixels, when the helper reported one. */
+      readonly screen?: { readonly width: number; readonly height: number };
+    }
   /** The helper answered and refused: a bad request, or a Simulator it cannot reach. */
   | { readonly status: "refused"; readonly code: string; readonly message: string }
   /** No answer came: the helper is missing, died, or outlived its budget. */
@@ -82,8 +88,15 @@ function replyFrom(value: unknown): DeviceHelperReply {
     readonly ok?: unknown;
     readonly code?: unknown;
     readonly message?: unknown;
+    readonly device?: { readonly screen?: { readonly width?: unknown; readonly height?: unknown } };
   };
-  if (reply.ok === true) return { status: "delivered" };
+  if (reply.ok === true) {
+    const width = reply.device?.screen?.width;
+    const height = reply.device?.screen?.height;
+    return typeof width === "number" && typeof height === "number" && width > 0 && height > 0
+      ? { status: "delivered", screen: { width, height } }
+      : { status: "delivered" };
+  }
   return {
     status: "refused",
     code: typeof reply.code === "string" ? reply.code : "failed",
