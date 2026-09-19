@@ -108,7 +108,11 @@ import {
   type SidebarActivityThread,
 } from "../shell/activityViewModel";
 import { IconButton } from "../shell/IconButton";
-import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { threadRowStatusInput, type ChatThreadNavigationItem } from "../shell/navigationModel";
+import {
+  describeSidebarProjectStatus,
+  rollUpSidebarProjectStatus,
+} from "@octant/domain/sidebar-thread-status-policy";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import { lineageParentTitle } from "./threadLineage";
 import {
@@ -117,6 +121,7 @@ import {
   ProjectThreadRows,
   ProjectThreadStatus,
   ThreadStatusMark,
+  sidebarThreadStatusIcon,
   threadRowAge,
   threadRowShortAge,
   hasInlineActions,
@@ -875,6 +880,9 @@ function ProjectGroup(props: {
                   {unavailable ? <small>Relink required</small> : null}
                 </span>
               </OctantButton>
+              {showNested && expanded && nestedThreads.length > 0 ? null : (
+                <ProjectStatusRollup projectName={project.name} threads={nestedThreads} />
+              )}
               {degradedContext === undefined || props.onOpenContextHealth === undefined ? null : (
                 <ContextHealthWarning
                   health={degradedContext}
@@ -940,6 +948,50 @@ function ProjectGroup(props: {
         );
       })}
     </section>
+  );
+}
+
+/**
+ * What a folded Project says about the threads it is hiding.
+ *
+ * It appears only while the threads are out of sight. An open Project's rows
+ * already carry their own marks, and repeating the strongest one on the heading
+ * above them would say the same thing twice in the space of two lines.
+ *
+ * The mark is the one its rows wear, so opening the Project shows the reader
+ * exactly the state the heading reported, in the same shape.
+ *
+ * It obeys the same Status row property as those rows. A reader who turned
+ * status marks off asked not to be told what threads are doing, and folding a
+ * Project is not consent to be told anyway.
+ */
+function ProjectStatusRollup(props: {
+  readonly projectName: string;
+  readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+}) {
+  const shows = useSidebarRowProperties();
+  if (!shows.status) return null;
+  const rollup = rollUpSidebarProjectStatus(props.threads.map(threadRowStatusInput));
+  const label = describeSidebarProjectStatus(props.projectName, rollup);
+  if (label === undefined) return null;
+  const Icon = sidebarThreadStatusIcon(rollup.status);
+  return (
+    <span aria-label={label} className="project-row__rollup" role="img" title={label}>
+      <span
+        aria-hidden="true"
+        className="sidebar-navigation__thread-status"
+        data-activity={rollup.status}
+      >
+        {Icon === undefined ? null : (
+          <Icon aria-hidden="true" className="size-3" size={12} strokeWidth={1.8} />
+        )}
+      </span>
+      {rollup.count > 1 ? (
+        <span aria-hidden="true" className="project-row__rollup-count">
+          {rollup.count}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
