@@ -144,6 +144,7 @@ distilled successor of the earlier long-form design specifications.
 | [0130](0130-fx-runs-in-a-managed-home.md) | fx runs in a managed home | Accepted |
 | [0131](0131-usage-opens-at-its-last-completed-reading.md) | Usage opens at its last completed reading | Accepted |
 | [0132](0132-provider-runtimes-reach-provider-endpoints.md) | Provider runtimes reach provider endpoints on Chat and Work turns | Accepted |
+| [0133](0133-confined-discovery-reads-open-named-nodes.md) | Confined discovery reads open named nodes, never trees | Proposed |
 
 ## Adding an ADR
 
