@@ -960,6 +960,8 @@ function browserAction(
       };
     case "screenshot":
       return { ...base, kind: "screenshot" as const };
+    case "diagnostics":
+      return { ...base, kind: "observe-diagnostics" as const };
   }
 }
 
@@ -1058,6 +1060,12 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(snapshot.observation.contentHash === undefined
                 ? {}
                 : { contentHash: snapshot.observation.contentHash }),
+              ...(snapshot.observation.consoleErrors === undefined
+                ? {}
+                : { consoleErrors: snapshot.observation.consoleErrors }),
+              ...(snapshot.observation.failedRequests === undefined
+                ? {}
+                : { failedRequests: snapshot.observation.failedRequests }),
               ...(!includeScreenshot || snapshot.observation.screenshotDataUrl === undefined
                 ? {}
                 : snapshot.observation.screenshotDataUrl.length <=
@@ -1128,6 +1136,7 @@ type BrowserToolInput = {
 } & (
   | { readonly operation: "navigate"; readonly url: string }
   | { readonly operation: "read-page" | "screenshot" | "stop" }
+  | { readonly operation: "diagnostics" }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
   | { readonly operation: "click" | "wait"; readonly selector: string }
   | { readonly operation: "press"; readonly key: string }
@@ -1224,6 +1233,7 @@ function parseBrowserInput(value: string): BrowserToolInput | undefined {
     }
     case "read-page":
     case "screenshot":
+    case "diagnostics":
     case "stop":
       return only() ? { ...common, operation: parsed.operation } : undefined;
     default:

@@ -434,6 +434,14 @@ export class BrowserAutomationService {
           ? {}
           : { screenshotDataUrl: observed.screenshotDataUrl }),
         ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
+        // Only the observe-diagnostics action collects these, and it reports
+        // them as absent rather than empty when the runtime did not supply
+        // them: an empty array would claim the page logged nothing, which is a
+        // different statement from the runtime not being asked to look.
+        ...(observed.consoleErrors === undefined ? {} : { consoleErrors: observed.consoleErrors }),
+        ...(observed.failedRequests === undefined
+          ? {}
+          : { failedRequests: observed.failedRequests }),
         revision: ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,
