@@ -1488,6 +1488,65 @@ function browserAuthority(): ToolActionAuthority {
   };
 }
 
+  it("passes what the page logged and failed to load through to the Code tool result", async () => {
+    // The same conversion as the browser app-managed tools, reached through a
+    // separate code path. Dropping the fields here fails nothing downstream:
+    // the agent still gets a valid observation, just without the evidence, so
+    // the assertion is on the provider-facing result rather than the call.
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    const act = vi.fn(async () => ({
+      ...active,
+      observation: {
+        contextId: active.context!.contextId,
+        actionId: active.context!.actionId,
+        correlationId: active.context!.correlationId,
+        authority,
+        url: "https://example.com/driven",
+        observedAt: "2026-08-06T08:00:00.000Z",
+        revision: 11,
+        stale: false,
+        consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+        failedRequests: [
+          { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+        ],
+      },
+    })) as never;
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => active,
+        create: vi.fn(async () => active),
+        act,
+        releaseThread: vi.fn(async () => active),
+      },
+    });
+
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "diagnostics" }),
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      result: {
+        page: {
+          consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+          failedRequests: [
+            { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+          ],
+        },
+      },
+    });
+  });
+
+
 function browserSnapshot(authority: ToolActionAuthority): BrowserAutomationSnapshot {
   return {
     status: "running",
