@@ -70,6 +70,9 @@ function fakePage(name: string): PlaywrightPagePort {
     url: vi.fn(() => url),
     viewportSize: () => viewport,
     textContent: vi.fn(async () => title),
+    // The runtime attaches its diagnostic listeners here. Present so a test
+    // can count the attachments; this fake never emits an event.
+    on: vi.fn(),
     close: vi.fn(async () => undefined),
   } as unknown as PlaywrightPagePort;
 }
@@ -131,6 +134,27 @@ function action(kind: BrowserActionRequest["kind"], target?: string): BrowserAct
 }
 
 describe("PlaywrightBrowserRuntime", () => {
+  it("instruments a replacement page once, not once per path that reaches it", async () => {
+    // A context reports a page before newPage() resolves, so a replacement
+    // page reaches the listener while owned.page is still undefined, and again
+    // when the page is adopted. Attaching twice records every entry twice and
+    // halves how many distinct events the bounded buffers actually hold.
+    const { runtime, pages, pageListeners } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+
+    const replacement = pages[1]!;
+    const attachments = () =>
+      (replacement.on as unknown as { mock: { calls: Array<[string]> } }).mock.calls.filter(
+        ([event]) => event === "console",
+      ).length;
+
+    // The same page arrives twice by both routes.
+    for (const listener of pageListeners) listener(replacement);
+    for (const listener of pageListeners) listener(replacement);
+
+    expect(attachments()).toBe(1);
+  });
+
   it("accepts the localhost certificate only for the context that asked", async () => {
     const { browser, runtime } = harness();
     await runtime.createContext(firstId, policy, new AbortController().signal);

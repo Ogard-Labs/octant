@@ -840,13 +840,10 @@ export class WorkTurnService {
       input.command.computerUseSelection !== undefined &&
       !appManagedTools?.definitions.some((definition) => definition.name === "octant_computer")
     ) {
-      this.#persistUpdate(current, {
-        status: "failed",
-        failure: {
-          category: "unsupported",
-          message:
-            "Computer use is unavailable for this provider or task. Check Computer use in Settings.",
-        },
+      this.#refuseTurn(input.command, {
+        category: "unsupported",
+        message:
+          "Computer use is unavailable for this provider or task. Check Computer use in Settings.",
       });
       return;
     }
@@ -856,9 +853,9 @@ export class WorkTurnService {
       browserSelections.length > 1 ||
       browserSelections.some((selection) => !validateBrowserUseSelection(selection))
     ) {
-      this.#persistUpdate(current, {
-        status: "failed",
-        failure: { category: "unavailable", message: "Browser selection is invalid or stale." },
+      this.#refuseTurn(input.command, {
+        category: "unavailable",
+        message: "Browser selection is invalid or stale.",
       });
       return;
     }
@@ -866,12 +863,9 @@ export class WorkTurnService {
       if (
         !appManagedTools?.definitions.some((definition) => definition.name === "octant_browser")
       ) {
-        this.#persistUpdate(current, {
-          status: "failed",
-          failure: {
-            category: "unsupported",
-            message: "The selected Browser is unavailable for this provider or task.",
-          },
+        this.#refuseTurn(input.command, {
+          category: "unsupported",
+          message: "The selected Browser is unavailable for this provider or task.",
         });
         return;
       }
@@ -892,9 +886,9 @@ export class WorkTurnService {
           Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
-      this.#persistUpdate(current, {
-        status: "failed",
-        failure: { category: "invalid", message: finalPlan.message },
+      this.#refuseTurn(input.command, {
+        category: "invalid",
+        message: finalPlan.message,
       });
       return;
     }
@@ -919,13 +913,10 @@ export class WorkTurnService {
         ),
       );
       if (!input.signal.aborted)
-        this.#persistUpdate(current, {
-          status: "failed",
-          failure: {
-            category: "invalid",
-            message:
-              "The Work request exceeds the selected model's context budget. Remove context or start a new task.",
-          },
+        this.#refuseTurn(input.command, {
+          category: "invalid",
+          message:
+            "The Work request exceeds the selected model's context budget. Remove context or start a new task.",
         });
       return;
     }
@@ -1075,6 +1066,25 @@ export class WorkTurnService {
     }
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+  }
+
+  /**
+   * End a turn that never reached the provider, and tell the live stream.
+   *
+   * A refusal is still the end of the turn: a reader attached before it — which
+   * is exactly when a view attaches, at the start of the thread — otherwise
+   * waits on a frame that never comes and shows nothing until a reload. Every
+   * early refusal goes through here so none of them can forget to settle.
+   */
+  #refuseTurn(
+    command: ReturnType<typeof decodeStartWorkThreadTurnCommand>,
+    failure: NonNullable<WorkTurnState["failure"]>,
+  ): void {
+    const current = this.#projection.lookup(command.requestId);
+    if (current === undefined) return;
+    this.#persistUpdate(current, { status: "failed", failure });
+    const settled = this.#projection.lookup(command.requestId);
+    if (settled !== undefined) this.#liveUpdates.settle(command.threadId, settled);
   }
 
   #settleSpendReservation(requestId: WorkTurnRequestId | string): void {

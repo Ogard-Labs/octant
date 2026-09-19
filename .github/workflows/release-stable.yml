@@ -128,6 +128,14 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: bun run package:desktop
 
+      # The same packaged-server start check the candidate ring runs. A stable
+      # artifact is the one people are told to install, so it must not be the
+      # ring without the assertion: a bundling error in the packaged server is
+      # platform-independent and would ship here exactly as it did there.
+      - name: Refuse to publish if the packaged server cannot start
+        if: matrix.apple_signing
+        run: bun scripts/assert-packaged-server-starts.ts
+
       - name: Publish the release archive
         id: release
         env:

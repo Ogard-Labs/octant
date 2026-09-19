@@ -754,6 +754,34 @@ function existingAbsolutePaths(paths: ReadonlyArray<string | undefined>): Readon
   return [...resolved];
 }
 
+/**
+ * OpenCode 2's config discovery resolves each bundled coding tool's home
+ * directory and treats a refusal as fatal, so the confined server answers 500
+ * for `/api/provider` and `/api/model` and the provider never appears.
+ *
+ * Resolution needs `file-read-data` on the directory vnode itself, not only
+ * metadata: Bun's realpath fails with EPERM under a metadata-only grant where
+ * Node's succeeds. These rules are literal, so they cover that node and leave
+ * every entry inside unreadable. Measured with @opencode/cli 2.0.1 under this
+ * profile: the confined listing matches the unconfined one, and
+ * `~/.claude/settings.json` and `~/.claude.json` both still refuse to read.
+ * A probed directory left out of the set fails the whole listing, so the set
+ * stays closed rather than representative: `~/.codex` and the other bundled
+ * tool homes exist on the measured host and are not probed, so they stay out.
+ */
+function openCodeDiscoveryRules(home: string | undefined): ReadonlyArray<string> {
+  if (home === undefined) return [];
+  const directories = existingAbsolutePaths([".claude", ".agents"].map((name) => join(home, name)));
+  const files = existingAbsolutePaths([join(home, ".claude.json")]);
+  return [
+    ...directories.flatMap((path) => [
+      `(allow file-read-metadata (literal "${path}"))`,
+      `(allow file-read-data (literal "${path}"))`,
+    ]),
+    ...files.map((path) => `(allow file-read-metadata (literal "${path}"))`),
+  ];
+}
+
 interface OpenCodeLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -886,6 +914,9 @@ function prepareOpenCodeLaunch(
           ...loopbackPorts.map(
             (bridgePort) => `(allow network-outbound (remote ip "localhost:${bridgePort}"))`,
           ),
+          // Its provider listing resolves the other coding tools' home
+          // directories first, and a refusal there fails the listing.
+          ...openCodeDiscoveryRules(profile.environment.HOME),
         ],
       });
       return { ...launch, cwd: root, environment: profile.environment };

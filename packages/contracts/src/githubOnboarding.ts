@@ -78,6 +78,10 @@ export const GithubAuthenticationCommand = Schema.Union(
     kind: Schema.Literal("logout"),
     confirmation: Schema.Literal("confirm-github-local-logout"),
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("migrate-storage"),
+    confirmation: Schema.Literal("confirm-github-storage-migration"),
+  }).annotations(strict),
 );
 export type GithubAuthenticationCommand = typeof GithubAuthenticationCommand.Type;
 

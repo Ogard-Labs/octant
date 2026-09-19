@@ -23,6 +23,7 @@ const processPort = new RepositoryTestProcessPort({
   // The same host reads the app grants its Apple toolchain port, so this smoke
   // exercises the confinement the product actually runs under.
   literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
+  allowSimulatorControl: true,
 });
 const authority: ToolActionAuthority = {
   hostId: LOCAL_TOOL_HOST_ID,

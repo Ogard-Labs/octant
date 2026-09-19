@@ -103,6 +103,15 @@ describe("Code operation approval view controller", () => {
     expect(html).toContain('id="approve"');
     expect(html).toContain("Show authority details");
     expect(html).toContain("prefers-reduced-motion");
+    // Enter must never grant. Three things make that true, and each is the
+    // mechanism a later edit would most plausibly undo: a form would give the
+    // document an implicit submit on Enter, a submit-typed control would be
+    // what that submit activates, and an enabled Approve would be activatable
+    // before its challenge arrived.
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain('type="submit"');
+    expect(html).not.toContain("autofocus");
+    expect(html).toContain('id="approve" type="button" disabled');
     expect(html).not.toContain("http://");
     expect(html).not.toContain("https://");
   });

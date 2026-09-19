@@ -20,6 +20,20 @@ const server = Bun.serve({
         { headers: { "content-type": "text/html" } },
       );
     }
+    if (path === "/broken") {
+      // A page that fails a subresource and logs an error: the two things the
+      // diagnostics action exists to report.
+      return new Response(
+        // A refused connection, not a 404: Playwright reports a request that
+        // never completed as requestfailed, while a 404 is a completed response.
+        '<!doctype html><title>Broken</title><img id="missing" src="http://127.0.0.1:1/x.png">' +
+          '<script>console.error("fixture console error")</script><p>broken</p>',
+        { headers: { "content-type": "text/html" } },
+      );
+    }
+    if (path === "/missing-resource.png") {
+      return new Response("not found", { status: 404 });
+    }
     const name = path === "/two" ? "Two" : "One";
     return new Response(
       `<!doctype html><title>${name}</title><button id="go" onclick="document.title='${name} clicked';document.body.dataset.clicked='yes'">Go</button><input id="password" type="password"><p>${name}</p>`,
@@ -143,6 +157,43 @@ try {
   }
   await runtime.closeContext(first);
   await runtime.closeContext(second);
+  // Diagnostics: a page that failed a subresource and logged an error reports
+  // both, and a second read is empty rather than repeating them.
+  await runtime.createContext(first, policy, controller.signal);
+  await runtime.act(
+    first,
+    request(first, "navigate", `${server.url.origin}/broken`),
+    controller.signal,
+  );
+  // The failed subresource settles after the document does; give the listeners
+  // a moment to see it rather than reading the instant navigation returns.
+  await runtime.act(first, request(first, "wait", "#missing"), controller.signal);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const diagnostics = await runtime.act(
+    first,
+    request(first, "observe-diagnostics"),
+    controller.signal,
+  );
+  if (
+    diagnostics.consoleErrors === undefined ||
+    diagnostics.consoleErrors.length === 0 ||
+    diagnostics.failedRequests === undefined ||
+    diagnostics.failedRequests.length === 0
+  ) {
+    throw new Error(
+      "Diagnostics did not report the fixture console error and failed request: " +
+        JSON.stringify(diagnostics),
+    );
+  }
+  const drained = await runtime.act(
+    first,
+    request(first, "observe-diagnostics"),
+    controller.signal,
+  );
+  if ((drained.consoleErrors?.length ?? 0) !== 0 || (drained.failedRequests?.length ?? 0) !== 0) {
+    throw new Error("Diagnostics repeated evidence that had already been reported.");
+  }
+  await runtime.closeContext(first);
   console.log(
     JSON.stringify({
       status: "passed",
@@ -155,6 +206,7 @@ try {
       formSubmit: true,
       boundedScreenshot: true,
       stopAndReconnect: true,
+      diagnostics: true,
       cleanup: true,
     }),
   );

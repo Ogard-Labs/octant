@@ -187,6 +187,14 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
         className="settings-card-section settings-card-section--open"
       >
         <h2>Connection</h2>
+        {snapshot.state === "insecure-storage" ? (
+          <p className="settings-section-note">
+            This host's GitHub token is stored in gh's plaintext config file, so Octant blocks
+            GitHub until it moves. Moving it keeps the same token and account; Octant writes it to
+            this host's secure credential store and only then lets gh drop the plaintext copy. If
+            the secure store is unavailable the credential is left untouched.
+          </p>
+        ) : null}
         <div className="setgroup">
           <SettingRow
             description="Refresh scopes or remove local credentials."
@@ -196,6 +204,22 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             settingId="github-connection"
           >
             <div className="github-settings__controls">
+              {snapshot.state === "insecure-storage" ? (
+                <OctantButton
+                  disabled={commandBusy}
+                  onClick={() =>
+                    void runCommand({
+                      kind: "migrate-storage",
+                      confirmation: "confirm-github-storage-migration",
+                    })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Move credential to secure storage
+                </OctantButton>
+              ) : null}
               {snapshot.state === "unauthorized" ? (
                 <OctantButton
                   disabled={commandBusy}

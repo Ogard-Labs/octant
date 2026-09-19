@@ -197,6 +197,40 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
+  it("opens the Simulator lookups and the runtime mount only when the launch drives the Simulator", () => {
+    const common = {
+      boundRoot: "/private/tmp/octant-project",
+      temporaryDirectory: "/private/tmp/octant-temporary",
+      networkEgress: "none",
+      privateHomeAllowPaths: [],
+    } as const;
+    const ordinary = buildDenyDefaultSeatbeltProfile({ ...common });
+    const simulator = buildDenyDefaultSeatbeltProfile({
+      ...common,
+      allowSimulatorControl: true,
+    });
+
+    // A repository test run never talks to CoreSimulatorService, so it keeps
+    // the tighter profile.
+    expect(ordinary).not.toContain("mach-lookup");
+    expect(ordinary).not.toContain("cryptexd");
+    expect(simulator).toContain(
+      '(allow mach-lookup (global-name-prefix "com.apple.CoreSimulator."))',
+    );
+    expect(simulator).toContain(
+      '(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))',
+    );
+    // The installed runtimes live on the cryptex mount. Without this read
+    // `simctl` still exits 0, but reports an empty device set.
+    expect(simulator).toContain(
+      seatbeltAllowRule("file-read*", "/private/var/run/com.apple.security.cryptexd/mnt"),
+    );
+    // No unbounded wildcard: the named prefix above is the whole exception.
+    expect(simulator).not.toContain('(allow mach-lookup (global-name "com.apple."))');
+    expect(simulator).not.toContain("(allow mach-lookup)");
+    expect(simulator.match(/mach-lookup/g)).toHaveLength(2);
+  });
+
   it("keeps a toolchain launch able to read its own roots without restating them", () => {
     // The broad-read escape hatch exists for runtimes like Git and provider
     // CLIs. macOS resolves the temporary directory beneath `/private`, so a

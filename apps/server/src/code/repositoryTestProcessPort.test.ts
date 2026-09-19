@@ -212,6 +212,50 @@ describe("RepositoryTestProcessPort", () => {
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });
 
+  it("forwards simulator control to the confinement only when the caller asks for it", async () => {
+    // The Apple toolchain port is the only caller that sets this, and the
+    // profile's Simulator rules only exist when it arrives. A regression that
+    // drops the forward leaves every Apple command without them while the
+    // profile builder keeps working, so the assertion is on what this port
+    // hands to confinement rather than on the profile text.
+    const recorded: Array<Record<string, unknown>> = [];
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const recording = {
+      prepare: (input: Parameters<typeof fake.confinement.prepare>[0]) => {
+        recorded.push(input as unknown as Record<string, unknown>);
+        return fake.confinement.prepare(input);
+      },
+    };
+
+    for (const allowSimulatorControl of [true, false]) {
+      const child = fakeChild(97);
+      const port = new RepositoryTestProcessPort({
+        platform: "darwin",
+        sandboxPath: fake.sandboxPath,
+        temporaryDirectory: fake.temporaryDirectory,
+        seatbeltHomeDirectory: fake.root,
+        seatbeltUsersDirectory: fake.root,
+        confinement: recording,
+        spawn: () => child,
+        networkEgress: "none",
+        allowSimulatorControl,
+      });
+      const execution = port.execute({
+        argv: ["/usr/bin/true"],
+        cwd: temporaryDirectory(),
+        environment: {},
+        timeoutMs: 1_000,
+      });
+      child.close(0, null);
+      await execution;
+    }
+
+    expect(recorded).toHaveLength(2);
+    expect(recorded[0]?.allowSimulatorControl).toBe(true);
+    expect(recorded[1]?.allowSimulatorControl).toBe(false);
+  });
+
   it("writes and removes a test-runner receipt around a clean exit", async () => {
     const receiptDirectory = temporaryDirectory();
     const child = fakeChild(4321);

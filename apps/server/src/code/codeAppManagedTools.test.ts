@@ -340,7 +340,14 @@ describe("Code app-managed tools", () => {
       inputJson: JSON.stringify({ operation: "run", command: "long-command" }),
     });
 
-    expect(result).toEqual({ result: { error: "full-access-required" }, isError: true });
+    expect(result).toEqual({
+      result: {
+        error: "full-access-required",
+        message:
+          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+      },
+      isError: true,
+    });
     expect(interrupt).toHaveBeenCalledOnce();
     expect(executeOperation).toHaveBeenCalledOnce();
   });
@@ -953,7 +960,14 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
       }),
-    ).resolves.toEqual({ result: { error: "full-access-required" }, isError: true });
+    ).resolves.toEqual({
+      result: {
+        error: "full-access-required",
+        message:
+          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+      },
+      isError: true,
+    });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
@@ -973,7 +987,14 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
       }),
-    ).resolves.toEqual({ result: { error: "full-access-required" }, isError: true });
+    ).resolves.toEqual({
+      result: {
+        error: "full-access-required",
+        message:
+          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+      },
+      isError: true,
+    });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
@@ -1425,6 +1446,63 @@ describe("the planner board and proposal as agent tools", () => {
     expect(result.result).toMatchObject({
       status: "pending-user-confirmation",
       proposalId: "a0000000-0000-4000-8000-000000000001",
+    });
+  });
+  it("passes what the page logged and failed to load through to the Code tool result", async () => {
+    // The same conversion as the browser app-managed tools, reached through a
+    // separate code path. Dropping the fields here fails nothing downstream:
+    // the agent still gets a valid observation, just without the evidence, so
+    // the assertion is on the provider-facing result rather than the call.
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    const act = vi.fn(async () => ({
+      ...active,
+      observation: {
+        contextId: active.context!.contextId,
+        actionId: active.context!.actionId,
+        correlationId: active.context!.correlationId,
+        authority,
+        url: "https://example.com/driven",
+        observedAt: "2026-08-06T08:00:00.000Z",
+        revision: 11,
+        stale: false,
+        consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+        failedRequests: [
+          { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+        ],
+      },
+    })) as never;
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => active,
+        create: vi.fn(async () => active),
+        act,
+        releaseThread: vi.fn(async () => active),
+      },
+    });
+
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "diagnostics" }),
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      result: {
+        page: {
+          consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+          failedRequests: [
+            { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+          ],
+        },
+      },
     });
   });
 });

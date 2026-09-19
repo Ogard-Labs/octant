@@ -852,6 +852,45 @@ describe("BrowserAutomationService", () => {
     });
   });
 
+  it("carries what the page logged and failed to load into the observation", async () => {
+    // The runtime collects these, and the contract carries them, so the only
+    // place they can be lost is this conversion. A regression here makes
+    // observe-diagnostics answer an empty shell while the runtime still holds
+    // the evidence, which is why the assertion is on the observation's own
+    // fields rather than on the runtime call.
+    const { runtime, service } = harness();
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/driven",
+      title: "Driven",
+      contentHash: "hash",
+      consoleErrors: [{ text: "Uncaught TypeError", url: "https://example.com/app.js" }],
+      failedRequests: [
+        { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+      ],
+    });
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const result = await service.act({ windowId, request: request() });
+
+    expect(result.observation?.consoleErrors).toEqual([
+      { text: "Uncaught TypeError", url: "https://example.com/app.js" },
+    ]);
+    expect(result.observation?.failedRequests).toEqual([
+      { url: "https://example.com/api", method: "POST", failure: "net::ERR_FAILED" },
+    ]);
+  });
+
+  it("leaves the diagnostics fields absent when the runtime did not collect them", async () => {
+    // Absent is not the same claim as empty: an empty array asserts the page
+    // logged nothing, which the runtime never said. Ordinary actions must keep
+    // the payload shape they already had.
+    const { runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const result = await service.act({ windowId, request: request() });
+
+    expect(result.observation?.consoleErrors).toBeUndefined();
+    expect(result.observation?.failedRequests).toBeUndefined();
+  });
+
   it("normalizes runtime errors without exposing diagnostics", async () => {
     const { runtime, service } = harness();
     vi.mocked(runtime.act).mockRejectedValueOnce(new Error("private runtime diagnostics"));

@@ -9,6 +9,10 @@ import type {
   BrowserContextPolicy,
 } from "@octant/contracts/browser-automation";
 import { MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS } from "@octant/contracts/browser-automation";
+import {
+  MAX_BROWSER_DIAGNOSTIC_ENTRIES,
+  MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
+} from "@octant/contracts/browser-automation";
 import { MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS } from "@octant/contracts/product-feedback";
 import { chromium } from "playwright-core";
 import {
@@ -42,6 +46,20 @@ export interface PlaywrightPagePort {
     argument?: Argument,
   ): Promise<T>;
   frames(): ReadonlyArray<PlaywrightFramePort>;
+  /**
+   * What the page reported while the agent was driving it. Both are optional
+   * because a test double need not model them, and a runtime without them
+   * simply yields no diagnostics rather than failing the action.
+   */
+  on?(event: "console", listener: (message: { type(): string; text(): string }) => void): void;
+  on?(
+    event: "requestfailed",
+    listener: (request: {
+      url(): string;
+      method(): string;
+      failure(): { errorText: string } | null;
+    }) => void,
+  ): void;
   locator(selector: string): {
     evaluate<T>(expression: (element: Element) => T): Promise<T>;
     waitFor(): Promise<void>;
@@ -123,6 +141,23 @@ interface OwnedRuntimeContext {
   page: PlaywrightPagePort | undefined;
   /** Last top-level navigation the allowlist refused during the current action. */
   blockedNavigationUrl: string | undefined;
+  /**
+   * What the page reported since the last diagnostics read. Bounded on write,
+   * not on read: a page that logs in a loop must not grow this without limit
+   * while the agent is looking elsewhere.
+   */
+  consoleErrors: Array<{ text: string; url?: string }>;
+  failedRequests: Array<{ url: string; method?: string; failure: string }>;
+  /**
+   * Pages already carrying diagnostic listeners.
+   *
+   * The context reports a page before `newPage()` resolves, so a replacement
+   * page reaches the `page` handler while `owned.page` is still undefined and
+   * again when `#page` adopts it. Without this, both calls attach, every entry
+   * is recorded twice, and a full buffer holds half as many distinct events as
+   * it claims.
+   */
+  instrumentedPages: WeakSet<PlaywrightPagePort>;
 }
 
 export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
@@ -186,6 +221,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       protectCredentials: policy.credentialFieldProtection,
       page: undefined,
       blockedNavigationUrl: undefined,
+      consoleErrors: [],
+      failedRequests: [],
+      instrumentedPages: new WeakSet(),
     };
     try {
       // Every request, not only navigations: a subresource reaches the network
@@ -221,7 +259,19 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         route.connectToServer();
       });
       owned.page = await context.newPage();
+      this.#collectDiagnostics(owned, owned.page);
       context.on("page", (candidate) => {
+        // Listen before adopting or closing: a popup can log an error or fail
+        // a request while it is briefly open, and closing it discards the
+        // listeners that would have recorded that. This is the one place a
+        // later page passes through, which is what makes the diagnostics
+        // answer cover the popup too instead of only the first page.
+        //
+        // No comparison against owned.page here: a context reports a page
+        // before newPage() resolves, so that comparison is false for the very
+        // case it looks like it handles. The collection refuses a page it has
+        // already instrumented, which is the property that actually matters.
+        this.#collectDiagnostics(owned, candidate);
         if (owned.page === undefined) {
           owned.page = candidate;
           return;
@@ -369,6 +419,18 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         break;
       case "extract-text":
         break;
+      case "observe-diagnostics": {
+        // Hand over what the page reported and clear it: the next read answers
+        // "what happened since I last looked", which is the question an agent
+        // actually has, and keeps one failure from being reported forever.
+        const diagnostics = {
+          consoleErrors: [...owned!.consoleErrors],
+          failedRequests: [...owned!.failedRequests],
+        };
+        owned!.consoleErrors.length = 0;
+        owned!.failedRequests.length = 0;
+        return diagnostics;
+      }
       case "wait":
         await page.locator(required(request.target, "Wait actions require a selector.")).waitFor();
         break;
@@ -501,9 +563,54 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     throwIfAborted(signal);
     const owned = this.#contexts.get(contextId);
     if (owned === undefined) throw new Error("Browser context is unavailable.");
-    if (owned.page === undefined) owned.page = await owned.context.newPage();
+    if (owned.page === undefined) {
+      owned.page = await owned.context.newPage();
+      this.#collectDiagnostics(owned, owned.page);
+    }
     throwIfAborted(signal);
     return owned.page;
+  }
+
+  /**
+   * Keep what the page reports, bounded as it arrives.
+   *
+   * The listeners are attached where pages are created — the one place both
+   * the initial page and any later one pass through — so an agent that asks for
+   * diagnostics gets what happened on this page rather than only what happened
+   * since it started listening. Both arrays drop their oldest entry once they
+   * are full: the last errors before a failure are the ones worth reading.
+   */
+  #collectDiagnostics(owned: OwnedRuntimeContext, page: PlaywrightPagePort): void {
+    // Attaching twice would record every entry twice, so a full buffer would
+    // hold half as many distinct events as its limit claims. Callers cannot
+    // deduplicate this themselves: a replacement page arrives from the context
+    // while owned.page is still undefined, and again when it is adopted.
+    if (owned.instrumentedPages.has(page)) return;
+    owned.instrumentedPages.add(page);
+    page.on?.("console", (message) => {
+      if (message.type() !== "error") return;
+      const text = bounded(message.text(), MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS);
+      if (text === "") return;
+      const url = page.url() === "about:blank" ? undefined : bounded(page.url(), 4096);
+      if (owned.consoleErrors.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.consoleErrors.shift();
+      owned.consoleErrors.push({ text, ...(url === undefined ? {} : { url }) });
+    });
+    page.on?.("requestfailed", (request) => {
+      const url = bounded(request.url(), 4096);
+      if (url === "") return;
+      const method = bounded(request.method(), 16);
+      const failure = bounded(
+        request.failure()?.errorText ?? "The request did not complete.",
+        MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
+      );
+      if (owned.failedRequests.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES)
+        owned.failedRequests.shift();
+      owned.failedRequests.push({
+        url,
+        ...(method === "" ? {} : { method }),
+        failure: failure === "" ? "The request did not complete." : failure,
+      });
+    });
   }
 
   async #waitForProcessGroupExit(pid: number | undefined): Promise<boolean> {
