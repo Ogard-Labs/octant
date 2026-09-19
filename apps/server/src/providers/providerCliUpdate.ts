@@ -58,7 +58,7 @@ export async function runProviderCliUpdate(
       // environment without the broker addresses, tokens and bridge secret the
       // desktop handed this server: with them it could call a broker directly
       // and act outside every approval and evidence path.
-      env: input.environment ?? childProcessEnvironment(process.env),
+      env: childProcessEnvironment(input.environment ?? process.env),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const pid = child.pid;

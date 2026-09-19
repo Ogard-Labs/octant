@@ -217,6 +217,21 @@ exit 1
 
       const environment = JSON.parse(await readFile(seen, "utf8")) as Record<string, string>;
       for (const name of names) expect(environment[name]).toBeUndefined();
+
+      // A caller that builds the environment itself usually starts from the
+      // host's, so what it passes is filtered the same way.
+      await runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: [
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(seen)}, JSON.stringify(process.env))`,
+        ],
+        environment: { ...process.env, OCTANT_UPDATER_EXTRA: "1" },
+        timeoutMs: 5_000,
+      });
+      const supplied = JSON.parse(await readFile(seen, "utf8")) as Record<string, string>;
+      for (const name of names) expect(supplied[name]).toBeUndefined();
+      expect(supplied.OCTANT_UPDATER_EXTRA).toBe("1");
       // Everything else a provider's own tooling relies on still arrives.
       expect(environment.OCTANT_UPDATER_FIXTURE).toBe("kept");
       expect(environment.PATH).toBe(process.env.PATH);
