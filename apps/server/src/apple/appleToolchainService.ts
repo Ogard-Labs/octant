@@ -672,7 +672,7 @@ export class AppleToolchainService {
       // left the person with "interrupted" and an empty log. Typed text never
       // enters the note: an error raised on a type-text path can quote the
       // script, so that kind records the fact without the detail.
-      const note = unrecordedActionNote(request, error);
+      const note = unrecordedActionNote(request, error, context);
       outputs.push(new TextEncoder().encode(`${note}\n`));
       const logReference = `apple-log-${request.actionId}`;
       await this.#writeArtifact(logReference, outputs);
@@ -1237,9 +1237,17 @@ function inputFailureNote(
   return detail.length === 0 ? `${kind} ${outcome}` : `${kind} ${outcome}: ${detail}`;
 }
 
-function unrecordedActionNote(request: AppleActionRequest, error: unknown): string {
+function unrecordedActionNote(
+  request: AppleActionRequest,
+  error: unknown,
+  context: AppleExecutionContext,
+): string {
   if (request.kind === "type-text") return "type-text did not record evidence (detail redacted)";
+  // A filesystem error names absolute host paths; they leave the host the same
+  // way command output does, with the checkout and artifact roots replaced.
   const reason = (error instanceof Error ? error.message : String(error))
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)

@@ -87,7 +87,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   const execute = useCallback(
     async (request: AppleActionRequest) => {
       const evidence = await client.execute(request);
-      await refreshSnapshot();
+      const snapshot = await refreshSnapshot();
       // A boot or shutdown changes the destination list itself, and that list
       // lives in discovery, not the runtime snapshot. Without re-discovering,
       // a passed boot still read "Shutdown" until the tool was re-opened.
@@ -99,7 +99,12 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
         try {
           setDiscovery(await client.discover(discoveryRequestRef.current));
         } catch {
-          // Keep the evidence; the destination list stays as last discovered.
+          // Keep the evidence, and keep the list honest: the snapshot just read
+          // carries the host's Simulator states, so the row that booted stops
+          // reading "Shutdown" even though the full discovery did not answer.
+          setDiscovery((previous) =>
+            previous === undefined ? previous : { ...previous, simulators: snapshot.simulators },
+          );
         }
       }
       setStatus("ready");
