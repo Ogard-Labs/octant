@@ -1,6 +1,6 @@
 # 0133. Confined discovery reads open named nodes, never trees
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
