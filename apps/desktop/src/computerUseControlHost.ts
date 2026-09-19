@@ -73,10 +73,18 @@ async function driverCall(
   signal?: AbortSignal,
 ) {
   const response = await runtime.call(name, args, signal);
-  if (response.isError) throw new Error("The driver refused the request.");
+  if (response.isError) throw new DriverRefusal(name, response.text);
   const data: unknown = JSON.parse(response.structuredJson ?? "{}");
   if (!record(data)) throw new Error("Driver response is invalid.");
   return { data, images: response.images };
+}
+/** The driver's own reason, kept so a refusal can be named rather than guessed at. */
+class DriverRefusal extends Error {
+  constructor(tool: string, text: string) {
+    super(
+      `${tool}: ${text.replace(/\s+/g, " ").trim().slice(0, 240) || "the driver refused the request"}`,
+    );
+  }
 }
 type DriverCall = (
   name: string,
@@ -609,13 +617,16 @@ export function createComputerUseControlHost(options: {
               );
         await pressElement(element.index);
         return { kind: "delivered", detail: `pressed «${element.label}» (${element.role})` };
-      } catch {
+      } catch (error) {
         return signal?.aborted
           ? refusedInput("cancelled", "Simulator input was cancelled.")
           : {
               kind: "failed",
               reason: "driver-unavailable",
-              message: "The computer-use driver could not deliver this input to Device Hub.",
+              message:
+                error instanceof DriverRefusal
+                  ? `The computer-use driver did not deliver this input to Device Hub (${error.message}).`
+                  : "The computer-use driver could not deliver this input to Device Hub.",
             };
       }
     });
