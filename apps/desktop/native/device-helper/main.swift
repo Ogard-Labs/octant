@@ -2,15 +2,28 @@ import Darwin
 import Foundation
 
 // Octant device helper: delivers touch, keyboard and hardware-button input to
-// one booted Simulator. It speaks length-prefixed JSON on stdin/stdout (a
-// 4-byte big-endian length, then one JSON object), answers every request with
-// exactly one response, and exits when stdin closes so it never outlives the
-// desktop process that owns it.
+// one booted Simulator, and streams its screen. It speaks length-prefixed JSON
+// on stdin/stdout (a 4-byte big-endian length, then one JSON object), answers
+// every request with exactly one response, and exits when stdin closes so it
+// never outlives the desktop process that owns it. Screen frames leave on file
+// descriptor 3, each a 4-byte big-endian length and one JPEG, so a slow viewer
+// can never hold up an answer on stdout.
 
 private let protocolVersion = 1
 private let maximumFrameBytes = 262_144
 private let tapHold: TimeInterval = 0.06
 private let swipeStep: TimeInterval = 0.016
+private let frameDescriptor: Int32 = 3
+
+/// Whether the owner opened a frame channel. Read once, before this process
+/// opens anything itself: descriptor numbers are reused, so asking later would
+/// find whatever file or socket happened to land on 3 and write frames into it.
+private let frameChannelIsOpen: Bool = {
+    var status = stat()
+    guard fstat(frameDescriptor, &status) == 0 else { return false }
+    let kind = status.st_mode & S_IFMT
+    return kind == S_IFIFO || kind == S_IFSOCK
+}()
 
 private struct Refusal: Error {
     let code: String
@@ -58,6 +71,23 @@ private func writeResponse(_ response: [String: Any]) {
     }
 }
 
+/// One frame to the viewer. False once the reader has gone away.
+private func writeFrame(_ jpeg: Data) -> Bool {
+    var frame = Data(capacity: jpeg.count + 4)
+    withUnsafeBytes(of: UInt32(jpeg.count).bigEndian) { frame.append(contentsOf: $0) }
+    frame.append(jpeg)
+    return frame.withUnsafeBytes { bytes -> Bool in
+        var offset = 0
+        while offset < bytes.count {
+            let written = write(frameDescriptor, bytes.baseAddress! + offset, bytes.count - offset)
+            if written < 0 && errno == EINTR { continue }
+            if written <= 0 { return false }
+            offset += written
+        }
+        return true
+    }
+}
+
 private func unit(_ request: [String: Any], _ key: String) throws -> Double {
     guard let value = (request[key] as? NSNumber)?.doubleValue, value.isFinite, (0...1).contains(value)
     else { throw Refusal(code: "malformed", message: "\(key) must be a number from 0 to 1") }
@@ -69,6 +99,7 @@ private final class Session {
     private let developerDirectory: String
     private var simulator: SimulatorBridge?
     private var input: GuestInputConnection?
+    private var display: DisplayStream?
 
     init(udid: String, developerDirectory: String) {
         self.udid = udid
@@ -104,6 +135,22 @@ private final class Session {
                 device["screen"] = ["width": Int(screen.width), "height": Int(screen.height)]
             }
             return ["protocol": protocolVersion, "device": device]
+        case "stream-start":
+            guard frameChannelIsOpen else {
+                throw Refusal(code: "stream-unavailable", message: "no frame channel was opened for this helper")
+            }
+            let height = min(max((request["maxHeight"] as? NSNumber)?.intValue ?? 1_100, 240), 4_096)
+            let quality = min(max((request["quality"] as? NSNumber)?.doubleValue ?? 0.7, 0.3), 0.95)
+            let rate = min(max((request["framesPerSecond"] as? NSNumber)?.intValue ?? 30, 1), 60)
+            let simulator = try bridge()
+            guard simulator.isBooted else { throw BridgeRefusal.notBooted(simulator.stateDescription) }
+            let stream = try display ?? DisplayStream(simulator: simulator)
+            display = stream
+            try stream.start(maximumHeight: height, quality: quality, framesPerSecond: rate, write: writeFrame)
+            return [:]
+        case "stream-stop":
+            display?.stop()
+            return [:]
         case "touch":
             guard let phaseName = request["phase"] as? String,
                 let phase = ["down": DigitizerEventType.start, "move": .position, "up": .end][phaseName]
@@ -209,6 +256,8 @@ private func refusal(for error: Error) -> Refusal {
         return Refusal(code: "not-booted", message: "the Simulator is \(state)")
     case BridgeRefusal.inputServiceUnavailable(let detail):
         return Refusal(code: "input-service-unavailable", message: detail)
+    case DisplayRefusal.noDisplay(let detail):
+        return Refusal(code: "stream-unavailable", message: detail)
     case InputRefusal.xpcSymbolsUnavailable:
         return Refusal(code: "input-service-unavailable", message: "this macOS has no Simulator XPC bridge")
     case InputRefusal.connectionFailed:
@@ -244,6 +293,7 @@ private func selectedDeveloperDirectory() -> String {
 }
 
 private func run() -> Int32 {
+    _ = frameChannelIsOpen
     let arguments = CommandLine.arguments
     guard arguments.count == 2, UUID(uuidString: arguments[1]) != nil else {
         FileHandle.standardError.write(Data("usage: octant-device-helper <simulator-udid>\n".utf8))
