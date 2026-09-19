@@ -19,13 +19,16 @@ underlying reason, and each was fixed on its own without stating a shared rule:
   bundled coding tool's home directory and treats a refusal as fatal, so the
   confined server answered 500 for `/api/provider` and `/api/model` in every
   posture.
-- Confined Git cannot run at all: `/usr/bin/git` is a shim that reads the
-  xcode-select links under `/private`.
+- Confined Git could not run at all: `/usr/bin/git` is a shim that reads the
+  xcode-select links under `/private`. Its fix shipped in two parts, also
+  without a record, and reached past this class while doing so: alongside the
+  shim links it opened the user's global git config and the linked-worktree
+  metadata that points outside the bound root.
 
 0115 and 0126 already carry exceptions of exactly this shape, each naming what
-it opens. The first two cases above shipped without a record, so the rule they
-share was never written down and the third has no rule to implement against.
-This record states it once.
+it opens. All three cases above shipped without a record, so the rule they
+share was never written down. This record states it once, and names what it
+does not reach.
 
 A runtime is not asking to read the user's files. It is asking whether a path
 exists and what it resolves to, so it can decide what to offer. That is a
@@ -79,10 +82,15 @@ sanitized environment, the write scoping, and Plan and Chat process denial.
   denial reaches the caller as an empty catalogue and a success exit code, not
   as an error. Diagnosing one means reading the runtime's own log, and a fix
   is not proven by an exit code.
-- Confined Git is left unresolved on purpose. Its second and third blockers —
-  the user's global git config, and linked-worktree metadata pointing into a
-  repository outside the bound root — both fall outside this record and need
-  their own decision.
+- Two allowances already in the tree fall outside this record, and it does not
+  cover them retroactively. Confined Git reads the user's global git config and
+  the files that config pulls in through `[include]`, and it canonicalizes
+  linked-worktree metadata that points into a repository outside the bound
+  root. Both are wider than an existence check on a named node — one is a
+  person's configuration content, the other reaches outside the bound root, and
+  this record excludes each by name. Both still need a record of their own.
+  Saying so here is what keeps a later change from reading this record as their
+  authority.
 
 ## Related
 
