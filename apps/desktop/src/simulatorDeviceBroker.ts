@@ -17,6 +17,7 @@ const WATCH_START_MS = 20_000;
 const MAX_BODY_BYTES = 16 * 1024;
 /** The helper's answer has to reach the server before the action's own deadline. */
 const ANSWER_MARGIN_MS = 2_000;
+const SHORTEST_USEFUL_BUDGET_MS = 1_000;
 const failure = (status: number) =>
   Response.json({ error: "simulator-device-broker-refused" }, { status });
 
@@ -77,7 +78,17 @@ export function createSimulatorInputDelivery(
   const now = options.now ?? Date.now;
   const screenOf = options.screenOf ?? createScreenLookup(helpers);
   return async (command: SimulatorDeviceInput): Promise<SimulatorDeviceInputResult> => {
-    const budgetMs = Math.max(command.budgetMs - ANSWER_MARGIN_MS, 1_000);
+    const budgetMs = command.budgetMs - ANSWER_MARGIN_MS;
+    // The answer has to be back before the server gives the action up. A
+    // deadline with no room for that is refused: stretching it would let the
+    // input land after the server stopped waiting, and a retry would repeat it.
+    if (budgetMs < SHORTEST_USEFUL_BUDGET_MS) {
+      return {
+        kind: "unavailable",
+        reason: "deadline-too-short",
+        message: "The action's deadline leaves no time to deliver input and answer.",
+      };
+    }
     // One deadline for everything this input needs. A tap first asks for the
     // screen; giving the tap a fresh budget after that let it land after the
     // server had already given the action up, and a retried action tapped twice.
@@ -99,7 +110,7 @@ export function createSimulatorInputDelivery(
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
     const remainingMs = deadline - now();
-    if (remainingMs < 1_000) {
+    if (remainingMs < SHORTEST_USEFUL_BUDGET_MS) {
       return {
         kind: "unavailable",
         reason: "deadline-passed",

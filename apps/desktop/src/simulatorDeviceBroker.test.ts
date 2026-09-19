@@ -137,6 +137,15 @@ describe("Simulator input delivery", () => {
     expect(send.mock.calls[0]?.[2]).toBe(28_000);
   });
 
+  it("refuses a deadline too short to answer inside, rather than taking longer than it was given", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({ kind: "key-press", udid, budgetMs: 1_500, key: "home" }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "deadline-too-short" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("tells a helper's refusal from a helper that never answered", async () => {
     const refusing = helpers(() => ({
       status: "refused",

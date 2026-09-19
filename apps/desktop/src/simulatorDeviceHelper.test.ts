@@ -17,6 +17,7 @@ function fakeChild() {
   let emitData: (chunk: Uint8Array) => void = () => undefined;
   let emitFrames: (chunk: Uint8Array) => void = () => undefined;
   const listeners = new Map<string, () => void>();
+  let failStdin: () => void = () => undefined;
   const child: DeviceHelperChild = {
     stdin: {
       write: (chunk) => {
@@ -25,6 +26,9 @@ function fakeChild() {
         return true;
       },
       end: vi.fn(),
+      on: (_event, listener) => {
+        failStdin = listener;
+      },
     },
     stdout: {
       on: (_event, listener) => {
@@ -32,8 +36,8 @@ function fakeChild() {
       },
     },
     frames: {
-      on: (_event, listener) => {
-        emitFrames = listener;
+      on: (event, listener) => {
+        if (event === "data") emitFrames = listener as (chunk: Uint8Array) => void;
       },
     },
     on: (event, listener) => {
@@ -54,6 +58,7 @@ function fakeChild() {
     frames: (...chunks: ReadonlyArray<Uint8Array>) => {
       for (const chunk of chunks) emitFrames(chunk);
     },
+    breakPipe: () => failStdin(),
   };
 }
 
@@ -144,6 +149,18 @@ describe("Simulator device helpers", () => {
     await expect(first).resolves.toMatchObject({ status: "unavailable" });
     await expect(second).resolves.toMatchObject({ status: "unavailable" });
     expect(helpers.busy()).toBe(false);
+  });
+
+  it("treats a pipe that breaks under a write as the helper being gone, not as a crash", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+
+    const reply = helpers.send(simulator, { op: "tap", x: 0.1, y: 0.1 }, 5_000);
+    // Node reports EPIPE on the stream later, not from `write` itself.
+    fake.breakPipe();
+
+    await expect(reply).resolves.toMatchObject({ status: "unavailable" });
+    expect(fake.child.kill).toHaveBeenCalled();
   });
 
   it("stops an idle helper and every helper when the desktop quits", async () => {
