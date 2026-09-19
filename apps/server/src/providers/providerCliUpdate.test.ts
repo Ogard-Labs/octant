@@ -192,6 +192,44 @@ exit 1
     }
   });
 
+  it("keeps the desktop's broker addresses and tokens from a provider's updater", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-cli-update-authority-"));
+    const seen = join(directory, "seen.json");
+    const names = [
+      "OCTANT_SIMULATOR_DEVICE_BROKER_URL",
+      "OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN",
+      "OCTANT_COMPUTER_USE_BROKER_TOKEN",
+      "OCTANT_CREDENTIAL_BROKER_TOKEN",
+      "OCTANT_DESKTOP_BRIDGE_SECRET",
+    ];
+    const before = names.map((name) => process.env[name]);
+    try {
+      for (const name of names) process.env[name] = "only-for-the-host";
+      process.env.OCTANT_UPDATER_FIXTURE = "kept";
+      await runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: [
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(seen)}, JSON.stringify(process.env))`,
+        ],
+        timeoutMs: 5_000,
+      });
+
+      const environment = JSON.parse(await readFile(seen, "utf8")) as Record<string, string>;
+      for (const name of names) expect(environment[name]).toBeUndefined();
+      // Everything else a provider's own tooling relies on still arrives.
+      expect(environment.OCTANT_UPDATER_FIXTURE).toBe("kept");
+      expect(environment.PATH).toBe(process.env.PATH);
+    } finally {
+      names.forEach((name, index) => {
+        if (before[index] === undefined) delete process.env[name];
+        else process.env[name] = before[index];
+      });
+      delete process.env.OCTANT_UPDATER_FIXTURE;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("runs the updater in the binary directory with the inherited host environment", async () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-cli-update-env-"));
     const marker = join(directory, "cwd.txt");
