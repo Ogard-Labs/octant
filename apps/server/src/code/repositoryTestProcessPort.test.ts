@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
+import { defaultTemporaryDirectory, RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 
 const directories: string[] = [];
 
@@ -656,6 +656,19 @@ describe("RepositoryTestProcessPort", () => {
     await expect(
       port.readArtifact({ checkoutRoot: root, relativePath: "artifacts", maximumBytes: 3 }),
     ).rejects.toThrow();
+  });
+});
+
+describe("defaultTemporaryDirectory", () => {
+  it("passes over an empty or relative TMPDIR to the first absolute value, else /tmp", () => {
+    expect(defaultTemporaryDirectory({ TMPDIR: "", TMP: "/var/tmp/usable" })).toBe(
+      "/var/tmp/usable",
+    );
+    expect(defaultTemporaryDirectory({ TMPDIR: "relative/tmp", TEMP: "/private/tmp" })).toBe(
+      "/private/tmp",
+    );
+    expect(defaultTemporaryDirectory({ TMPDIR: "/var/folders/x/T/" })).toBe("/var/folders/x/T/");
+    expect(defaultTemporaryDirectory({})).toBe("/tmp");
   });
 });
 

@@ -522,38 +522,43 @@ export class AppleToolchainService {
           this.#captureDirectory,
           `octant-apple-capture-${request.actionId}.png`,
         );
-        terminal = await this.#command(
-          [
-            "xcrun",
-            "simctl",
-            "io",
-            request.simulatorId,
-            "screenshot",
-            "--type",
-            "png",
-            capturePath,
-          ],
-          context,
-          request.timeoutMs,
-          signal,
-        );
-        if (succeeded(terminal)) {
-          const bytes = await readCapture(capturePath);
-          if (bytes === undefined) {
-            // simctl exited 0 without the file it was asked for: an empty
-            // frame would render as nothing and taps on it would be dropped.
-            terminal = {
-              ...terminal,
-              exitCode: 1,
-              stderr: appendLine(terminal.stderr, "simctl reported a capture but wrote no PNG."),
-            };
-          } else {
-            const screenshotReference = `apple-screenshot-${request.actionId}`;
-            await this.#writeArtifact(screenshotReference, [bytes]);
-            artifacts = [{ kind: "screenshot", reference: screenshotReference }];
+        // Whatever happens to the command, the read or the artifact write, the
+        // raw screen must not stay behind in the temporary directory.
+        try {
+          terminal = await this.#command(
+            [
+              "xcrun",
+              "simctl",
+              "io",
+              request.simulatorId,
+              "screenshot",
+              "--type",
+              "png",
+              capturePath,
+            ],
+            context,
+            request.timeoutMs,
+            signal,
+          );
+          if (succeeded(terminal)) {
+            const bytes = await readCapture(capturePath);
+            if (bytes === undefined) {
+              // simctl exited 0 without the file it was asked for: an empty
+              // frame would render as nothing and taps on it would be dropped.
+              terminal = {
+                ...terminal,
+                exitCode: 1,
+                stderr: appendLine(terminal.stderr, "simctl reported a capture but wrote no PNG."),
+              };
+            } else {
+              const screenshotReference = `apple-screenshot-${request.actionId}`;
+              await this.#writeArtifact(screenshotReference, [bytes]);
+              artifacts = [{ kind: "screenshot", reference: screenshotReference }];
+            }
           }
+        } finally {
+          await rm(capturePath, { force: true });
         }
-        await rm(capturePath, { force: true });
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
         terminal = await this.#command(

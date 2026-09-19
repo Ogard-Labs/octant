@@ -40,8 +40,17 @@ interface SpawnedProcess {
  * Callers that hand a confined command a path to write share this resolution
  * so the path is inside the launch's writable temporary root.
  */
-export function defaultTemporaryDirectory(): string {
-  return process.env.TMPDIR ?? process.env.TMP ?? process.env.TEMP ?? "/tmp";
+export function defaultTemporaryDirectory(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  // An empty or relative TMPDIR is set often enough (stripped environments,
+  // launchers) and a confined launch refuses a temporary root that is not
+  // absolute, so the first usable value wins rather than the first one set.
+  for (const name of ["TMPDIR", "TMP", "TEMP"] as const) {
+    const value = environment[name];
+    if (value !== undefined && isAbsolute(value)) return value;
+  }
+  return "/tmp";
 }
 
 interface RepositoryTestProcessPortOptions {

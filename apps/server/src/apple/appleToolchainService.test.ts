@@ -722,6 +722,37 @@ describe("AppleToolchainService lifecycle", () => {
     });
   });
 
+  it("removes the captured file even when the screenshot artifact cannot be stored", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (reference: string) => {
+        if (reference.startsWith("apple-screenshot-")) throw new Error("ENOSPC: no space left");
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    let capturePath: string | undefined;
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      capturePath = input.argv.at(-1)!;
+      await writeFile(capturePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      return processResult(`Wrote screenshot to: ${capturePath}\n`);
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).not.toBe("succeeded");
+    expect(capturePath).toBeDefined();
+    expect(existsSync(capturePath!)).toBe(false);
+  });
+
   it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
