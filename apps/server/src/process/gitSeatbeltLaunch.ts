@@ -28,6 +28,16 @@ export interface GitSeatbeltLaunchOptions {
    * in and says why; a caller that forgets is confined rather than widened.
    */
   readonly writable?: boolean;
+  /**
+   * Directories this launch may write besides the bound root.
+   *
+   * Naming one is not only a permission. On Linux a shared host temporary root
+   * is replaced by a private tmpfs rather than bound, so a directory the caller
+   * created under it does not exist for the confined process at all until it is
+   * named here. Mounts are applied shallowest first, so the bind lands inside
+   * that tmpfs.
+   */
+  readonly additionalWriteRoots?: ReadonlyArray<string>;
 }
 
 export interface GitSeatbeltPortOptions {
@@ -296,6 +306,9 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
       dirname(binaryDirectory),
       ...gitGlobalConfigReadRoots(),
     ],
+    ...(options.additionalWriteRoots === undefined
+      ? {}
+      : { additionalWriteRoots: options.additionalWriteRoots }),
     ...(extraRules.length === 0 ? {} : { extraRules }),
   });
 }

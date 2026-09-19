@@ -19,16 +19,13 @@ underlying reason, and each was fixed on its own without stating a shared rule:
   bundled coding tool's home directory and treats a refusal as fatal, so the
   confined server answered 500 for `/api/provider` and `/api/model` in every
   posture.
-- Confined Git could not run at all: `/usr/bin/git` is a shim that reads the
-  xcode-select links under `/private`. Its fix shipped in two parts, also
-  without a record, and reached past this class while doing so: alongside the
-  shim links it opened the user's global git config and the linked-worktree
-  metadata that points outside the bound root.
+- Confined Git cannot run at all: `/usr/bin/git` is a shim that reads the
+  xcode-select links under `/private`.
 
 0115 and 0126 already carry exceptions of exactly this shape, each naming what
-it opens. All three cases above shipped without a record, so the rule they
-share was never written down. This record states it once, and names what it
-does not reach.
+it opens. The first two cases above shipped without a record, so the rule they
+share was never written down and the third has no rule to implement against.
+This record states it once.
 
 A runtime is not asking to read the user's files. It is asking whether a path
 exists and what it resolves to, so it can decide what to offer. That is a
@@ -82,19 +79,16 @@ sanitized environment, the write scoping, and Plan and Chat process denial.
   denial reaches the caller as an empty catalogue and a success exit code, not
   as an error. Diagnosing one means reading the runtime's own log, and a fix
   is not proven by an exit code.
-- One allowance already in the tree falls outside this record, and it does not
-  cover it retroactively. Confined Git canonicalizes linked-worktree metadata
-  that points into a repository outside the bound root, which is wider than an
-  existence check on a named node and is excluded here by name. 0134 covers it,
-  so a later change reads its boundary rather than stretching this one. The
-  profile also allows reads on the user's global git config, which this record
-  likewise does not cover; 0134 records that Git is configured never to open
-  those paths, so the allowance grants nothing and is reach to remove.
+- Confined Git is left unresolved on purpose. Its second and third blockers —
+  the user's global git config, and linked-worktree metadata pointing into a
+  repository outside the bound root — both fall outside this record and need
+  their own decision.
 
 ## Related
 
 - 0009 Sandbox confinement, approvals, and Plan mode (two rules scoped)
 - 0115 Terminal cache ancestors expose only directory metadata
 - 0126 Seatbelt opens trust evaluation and launcher symlink metadata
-- 0134 Confined Git reads its worktree's metadata (the case this record
-  excludes)
+- 0134 Confined Git reads its worktree's metadata (corrects this record's
+  consequence that confined Git is unresolved, and covers the linked-worktree
+  metadata this record excludes)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -33,6 +33,42 @@ describe("git Seatbelt launch", () => {
     for (const root of gitGlobalConfigReadRoots()) expect(roots).toContain(root);
     expect(roots).toContain("/repo");
     expect(roots).toContain("/opt/toolchain/usr/bin");
+  });
+
+  it("exposes a write root under a shared temporary directory to a Linux launch", () => {
+    // Bubblewrap replaces a shared host temp root with a private tmpfs rather
+    // than binding it, so a directory created under /tmp is invisible to the
+    // confined process until the launch names it. Mounts are emitted
+    // shallowest first, which is what puts the bind inside that tmpfs.
+    const directory = mkdtempSync(join(tmpdir(), "octant-write-root-"));
+    const bwrap = join(directory, "bwrap");
+    writeFileSync(bwrap, '#!/bin/sh\nexec "$@"\n', { mode: 0o700 });
+    chmodSync(bwrap, 0o700);
+    const quarantine = join(directory, "quarantine");
+    mkdirSync(quarantine);
+    try {
+      const launch = prepareGitSeatbeltLaunch({
+        confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrap }),
+        gitExecutable: "/usr/bin/git",
+        checkoutRoot: directory,
+        args: ["-C", directory, "merge-tree", "--write-tree", "HEAD", "HEAD"],
+        temporaryDirectory: tmpdir(),
+        networkEgress: "none",
+        additionalWriteRoots: [quarantine],
+      });
+      const bind = launch.args.findIndex(
+        (argument, index) =>
+          argument === "--bind" && launch.args[index + 2] === realpathSync(quarantine),
+      );
+      const tmpfs = launch.args.findIndex(
+        (argument, index) => argument === "--tmpfs" && launch.args[index + 1] === tmpdir(),
+      );
+      expect(bind).toBeGreaterThan(-1);
+      expect(tmpfs).toBeGreaterThan(-1);
+      expect(bind).toBeGreaterThan(tmpfs);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("appends the xcode-select shim literals after the rest of the profile", () => {

@@ -519,7 +519,7 @@ export class GitObservationPort {
       const result = await this.#run(
         ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
         signal,
-        { GIT_OBJECT_DIRECTORY: quarantine },
+        quarantine,
       );
       // `merge-tree --write-tree` exits 0 for a clean merge and 1 for conflicts.
       // Anything else is a Git that could not answer — an older one, or a
@@ -537,7 +537,7 @@ export class GitObservationPort {
   async #run(
     args: readonly string[],
     parentSignal?: AbortSignal,
-    extraEnvironment?: NodeJS.ProcessEnv,
+    quarantine?: string,
   ): Promise<CommandResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -559,11 +559,19 @@ export class GitObservationPort {
         networkEgress: this.#confinement.networkEgress,
         // Every command this port runs is a read, so the launch keeps its
         // read-only default and never receives the out-of-root write grant.
+        // The quarantined object database is the one thing it writes, and it
+        // has to be named: on Linux a shared host temporary root becomes a
+        // private tmpfs rather than a bind, so a directory created under it
+        // does not exist for the confined process unless the launch says so.
+        ...(quarantine === undefined ? {} : { additionalWriteRoots: [quarantine] }),
       });
       return await this.#dependencies.execFile(
         launch.command,
         launch.args,
-        { ...createGitCommandEnvironment(process.env), ...extraEnvironment },
+        {
+          ...createGitCommandEnvironment(process.env),
+          ...(quarantine === undefined ? {} : { GIT_OBJECT_DIRECTORY: quarantine }),
+        },
         controller.signal,
       );
     } catch (error) {
