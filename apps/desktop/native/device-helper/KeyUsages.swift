@@ -28,6 +28,36 @@ enum KeyUsages {
         "tab": 43, "space": 44, "right": 79, "left": 80, "down": 81, "up": 82,
     ]
 
+    /// Languages whose Apple hardware layout keeps A–Z and the unshifted digit
+    /// row where a US keyboard has them. Deliberately short: French is AZERTY
+    /// with symbols on the unshifted digit row, German swaps Y and Z, Turkish
+    /// moves I, and a wrong guess types the wrong text without any error.
+    private static let qwertyLanguages: Set<String> = [
+        "en", "nb", "nn", "no", "da", "sv", "fi", "nl", "es", "pt",
+    ]
+
+    /// Whether key positions mean the same letters and digits on this
+    /// Simulator as on a US keyboard. `identifier` is the guest's keyboard
+    /// record (`nb_NO@sw=QWERTY-Norwegian;hw=Automatic`) or a bare language
+    /// (`nb-NO`). An explicit hardware layout other than Automatic, a software
+    /// layout that is not QWERTY, or a language outside the list is not known
+    /// to be safe, and unknown is treated as unsafe.
+    static func typesAsUSPositions(keyboardIdentifier identifier: String) -> Bool {
+        let parts = identifier.split(separator: "@", maxSplits: 1).map(String.init)
+        let language = parts[0].prefix { $0 != "_" && $0 != "-" }.lowercased()
+        guard qwertyLanguages.contains(language) else { return false }
+        guard parts.count == 2 else { return true }
+        var software: String?
+        var hardware: String?
+        for setting in parts[1].split(separator: ";") {
+            if setting.hasPrefix("sw=") { software = String(setting.dropFirst(3)) }
+            if setting.hasPrefix("hw=") { hardware = String(setting.dropFirst(3)) }
+        }
+        if let hardware, hardware != "Automatic" { return false }
+        if let software, !software.hasPrefix("QWERTY") { return false }
+        return true
+    }
+
     /// The keystrokes that type `text`, or nil when a character has none.
     ///
     /// A usage names a key position, and the guest turns it into a character

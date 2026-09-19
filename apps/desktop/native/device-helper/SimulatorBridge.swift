@@ -34,6 +34,23 @@ struct SimulatorBridge {
         (device.value(forKey: "state") as? NSNumber)?.intValue == Self.bootedState
     }
 
+    /// The Simulator's first keyboard, as the guest records it — for example
+    /// `nb_NO@sw=QWERTY-Norwegian;hw=Automatic` — or its first language when no
+    /// keyboard has been shown yet. Read from the device's own preference files;
+    /// nil when neither is there.
+    var keyboardIdentifier: String? {
+        guard let dataPath = device.value(forKey: "dataPath") as? String else { return nil }
+        let preferences = (dataPath as NSString).appendingPathComponent("Library/Preferences")
+        let keyboard = NSDictionary(
+            contentsOfFile: (preferences as NSString).appendingPathComponent(
+                "com.apple.keyboard.preferences.plist"))
+        if let first = (keyboard?["KeyboardsCurrentAndNext"] as? [String])?.first { return first }
+        let global = NSDictionary(
+            contentsOfFile: (preferences as NSString).appendingPathComponent(".GlobalPreferences.plist"))
+        if let first = (global?["AppleKeyboards"] as? [String])?.first { return first }
+        return (global?["AppleLanguages"] as? [String])?.first
+    }
+
     /// The main screen in pixels — the space a captured screenshot is in — so a
     /// caller can turn a point on a capture into a fraction of the screen.
     var screenPixelSize: CGSize? {

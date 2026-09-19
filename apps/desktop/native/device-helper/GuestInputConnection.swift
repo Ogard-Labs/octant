@@ -6,6 +6,9 @@ enum InputRefusal: Error {
     case xpcSymbolsUnavailable
     case connectionFailed
     case daemonUnresponsive(String)
+    /// A message was handed to XPC and never seen leaving. Whether the guest
+    /// got it is unknown, which is not the same as delivered.
+    case sendStalled
 }
 
 /// A live XPC connection to the guest's input daemon.
@@ -28,6 +31,7 @@ final class GuestInputConnection {
     /// told the input landed; without it a capture taken right after can show
     /// the screen from before the input.
     private static let drain: TimeInterval = 0.08
+    private static let sendTimeout = DispatchTimeInterval.seconds(2)
 
     private let connection: xpc_connection_t
     private var invalidated = false
@@ -113,7 +117,13 @@ final class GuestInputConnection {
         let written = DispatchSemaphore(value: 0)
         xpc_connection_send_message(connection, message)
         xpc_connection_send_barrier(connection) { written.signal() }
-        _ = written.wait(timeout: .now() + .seconds(2))
+        guard written.wait(timeout: .now() + Self.sendTimeout) == .success else {
+            // Answering "delivered" here would record evidence of an input the
+            // guest may never have seen, and stop the action being sent again.
+            // The connection is dropped so the next input starts from a probe.
+            close()
+            throw InputRefusal.sendStalled
+        }
     }
 
     /// A barrier carrying keyboard usage 0 — "no event" — so the daemon answers

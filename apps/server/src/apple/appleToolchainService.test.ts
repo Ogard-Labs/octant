@@ -648,6 +648,50 @@ describe("AppleToolchainService lifecycle", () => {
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
 
+  it("keeps a shutdown that finished while a slower discovery was still reading", async () => {
+    const base = discoveryExecutor();
+    let releaseProjectProbe!: () => void;
+    const projectProbeHeld = new Promise<void>((resolve) => {
+      releaseProjectProbe = resolve;
+    });
+    let holdProjectProbe = false;
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const command = input.argv.join(" ");
+      if (command.includes("simctl shutdown")) return processResult("ok\n");
+      if (holdProjectProbe && command.includes("-list -json")) await projectProbeHeld;
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    // The discovery has read the device list as booted and is now stuck on
+    // the project probe; the shutdown completes before it returns.
+    holdProjectProbe = true;
+    const slowDiscovery = service.discover(discoveryRequest, context);
+    await vi.waitFor(() =>
+      expect(
+        execute.mock.calls.filter(([input]) => input.argv.join(" ").includes("-list -json")),
+      ).toHaveLength(2),
+    );
+    await service.execute(
+      simulatorRequest({ kind: "shutdown", approval: buildRequest().approval }),
+      context,
+    );
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+    releaseProjectProbe();
+    const discovered = await slowDiscovery;
+
+    expect(discovered.kind).toBe("discovered");
+    if (discovered.kind !== "discovered") return;
+    expect(discovered.simulators[0]?.state).toBe("shutdown");
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+  });
+
   it("captures the Simulator screen as its own evidence artifact, keeping the log readable", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
@@ -771,6 +815,132 @@ describe("AppleToolchainService Simulator input", () => {
     const second = await service.execute(request, context);
     expect(second).toEqual(first);
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces host paths in the reason an action recorded no evidence", async () => {
+    const discovery = discoveryExecutor();
+    const execute = vi.fn(async (input: { readonly argv: readonly string[] }) => {
+      if (input.argv.includes("screenshot"))
+        throw new Error(
+          `ENOENT: no such file or directory, realpath '${context.checkoutRoot}/Fixture.xcodeproj'`,
+        );
+      return discovery(input as never);
+    });
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+    const recorded = `${JSON.stringify(evidence.diagnostics)} ${[...artifacts.values()]
+      .map((bytes) => new TextDecoder().decode(bytes))
+      .join(" ")}`;
+    expect(recorded).toContain("[PROJECT]/Fixture.xcodeproj");
+    expect(recorded).not.toContain(context.checkoutRoot);
+    // With no other output the note was also picked up as the log's last line,
+    // so the same reason was listed twice.
+    expect(evidence.diagnostics).toHaveLength(1);
+  });
+
+  it("says why typed text was refused by its reason code, and still keeps the words out", async () => {
+    const discovery = discoveryExecutor();
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: discovery,
+      injectSimulatorInput: async () =>
+        processResult("", {
+          exitCode: 1,
+          stderr: "keyboard-layout-unsupported: typing needs a QWERTY Simulator keyboard",
+        }),
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "type-text",
+        bundleIdentifier: undefined,
+        text: "hunter2",
+        requestedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000099" },
+        approval: buildRequest().approval,
+      } as never),
+      context,
+    );
+
+    const recorded = `${JSON.stringify(evidence.diagnostics)} ${[...artifacts.values()]
+      .map((bytes) => new TextDecoder().decode(bytes))
+      .join(" ")}`;
+    expect(evidence.outcome).toBe("failed");
+    expect(recorded).toContain("type-text failed: keyboard-layout-unsupported (text redacted)");
+    // Only the code is kept: the words after it are the host's, and on another
+    // host they can quote what was typed.
+    expect(recorded).not.toContain("QWERTY");
+    expect(recorded).not.toContain("hunter2");
+  });
+
+  it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {
+    // Observed 2026-09-19 under the packaged app: osascript exited 1 with
+    // "Connection Invalid error for service com.apple.hiservices-xpcservice."
+    // and the person saw "Apple key-press interrupted." with an empty log.
+    const discovery = discoveryExecutor();
+    const execute = vi.fn(async (input: { readonly argv: readonly string[] }) =>
+      input.argv[0] === "osascript"
+        ? processResult("", {
+            exitCode: 1,
+            stderr:
+              "2026-09-19 16:30:07.225 osascript[11087:11470129] Error received in message reply handler: Connection invalid\n" +
+              "2026-09-19 16:30:07.225 osascript[11087:11470132] Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
+              `2026-09-19 16:30:07.226 osascript[11087:11470129] script at ${context.checkoutRoot}/run.scpt`,
+          })
+        : discovery(input as never),
+    );
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      // The osascript fallback is Darwin-only; CI runs this suite on Linux too.
+      platform: "darwin",
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "key-press",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        key: "return",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("failed");
+    expect(JSON.stringify(evidence.diagnostics)).toContain("com.apple.hiservices-xpcservice");
+    // The refusal is named without carrying the host's checkout path with it.
+    expect(JSON.stringify(evidence.diagnostics)).not.toContain(context.checkoutRoot);
+    const log = evidence.artifacts.find(
+      (artifact: { readonly kind: string }) => artifact.kind === "log",
+    );
+    expect(new TextDecoder().decode(artifacts.get(log!.reference))).toContain(
+      "com.apple.hiservices-xpcservice",
+    );
   });
 
   it("refuses to re-inject interrupted input under the same actionId", async () => {

@@ -1536,6 +1536,7 @@ function LaunchedShell(
       : {
           threadId: activeCodeThreadView.thread.id,
           checkoutId: activeCodeThreadView.checkout.id,
+          checkoutAvailability: activeCodeThreadView.checkout.availability,
         }),
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,

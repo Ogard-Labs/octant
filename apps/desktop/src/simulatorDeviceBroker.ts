@@ -69,10 +69,19 @@ function createScreenLookup(helpers: SimulatorDeviceHelpers) {
 
 export function createSimulatorInputDelivery(
   helpers: SimulatorDeviceHelpers,
-  screenOf = createScreenLookup(helpers),
+  options: {
+    readonly now?: () => number;
+    readonly screenOf?: ReturnType<typeof createScreenLookup>;
+  } = {},
 ) {
+  const now = options.now ?? Date.now;
+  const screenOf = options.screenOf ?? createScreenLookup(helpers);
   return async (command: SimulatorDeviceInput): Promise<SimulatorDeviceInputResult> => {
     const budgetMs = Math.max(command.budgetMs - ANSWER_MARGIN_MS, 1_000);
+    // One deadline for everything this input needs. A tap first asks for the
+    // screen; giving the tap a fresh budget after that let it land after the
+    // server had already given the action up, and a retried action tapped twice.
+    const deadline = now() + budgetMs;
     if (command.kind === "type-text") {
       return result(await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs));
     }
@@ -89,6 +98,14 @@ export function createSimulatorInputDelivery(
     const looked = await screenOf(command.udid, budgetMs);
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
+    const remainingMs = deadline - now();
+    if (remainingMs < 1_000) {
+      return {
+        kind: "unavailable",
+        reason: "deadline-passed",
+        message: "Getting the Simulator ready used the action's time; nothing was tapped.",
+      };
+    }
     const x = command.point.x / screen.width;
     const y = command.point.y / screen.height;
     if (x > 1 || y > 1) {
@@ -98,7 +115,7 @@ export function createSimulatorInputDelivery(
         message: `The point is outside the ${screen.width}×${screen.height} screen.`,
       };
     }
-    return result(await helpers.send(command.udid, { op: "tap", x, y }, budgetMs));
+    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs));
   };
 }
 
@@ -241,7 +258,7 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
   const token = randomBytes(32).toString("base64url");
   const screenOf = createScreenLookup(helpers);
   const handle = simulatorDeviceBrokerHandler(
-    createSimulatorInputDelivery(helpers, screenOf),
+    createSimulatorInputDelivery(helpers, { screenOf }),
     token,
   );
   const stream = createSimulatorScreenStream(helpers, screenOf);

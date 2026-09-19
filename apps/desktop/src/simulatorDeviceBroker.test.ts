@@ -64,6 +64,40 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("gives a first tap one deadline, not a fresh one for each step", async () => {
+    let clock = 0;
+    const { fake, send } = helpers((sent) => {
+      // Asking a cold Simulator service for the screen takes most of the budget.
+      if (sent.op === "hello") {
+        clock += 20_000;
+        return { status: "delivered", screen: { width: 1206, height: 2622 } };
+      }
+      return { status: "delivered" };
+    });
+    const deliver = createSimulatorInputDelivery(fake, { now: () => clock });
+
+    await deliver({ kind: "tap", udid, budgetMs: 30_000, point: { x: 10, y: 10 } });
+
+    expect(send.mock.calls.map(([, sent, timeoutMs]) => [sent.op, timeoutMs])).toEqual([
+      ["hello", 28_000],
+      ["tap", 8_000],
+    ]);
+  });
+
+  it("does not tap at all once the deadline has passed while it was getting ready", async () => {
+    let clock = 0;
+    const { fake, send } = helpers((sent) => {
+      if (sent.op === "hello") clock += 29_000;
+      return { status: "delivered", screen: { width: 1206, height: 2622 } };
+    });
+    const deliver = createSimulatorInputDelivery(fake, { now: () => clock });
+
+    await expect(
+      deliver({ kind: "tap", udid, budgetMs: 30_000, point: { x: 10, y: 10 } }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "deadline-passed" });
+    expect(send.mock.calls.map(([, sent]) => sent.op)).toEqual(["hello"]);
+  });
+
   it("refuses a point that is not on the screen instead of tapping its edge", async () => {
     const { fake, send } = helpers(() => ({
       status: "delivered",
