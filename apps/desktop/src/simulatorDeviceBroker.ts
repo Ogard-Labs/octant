@@ -69,10 +69,19 @@ function createScreenLookup(helpers: SimulatorDeviceHelpers) {
 
 export function createSimulatorInputDelivery(
   helpers: SimulatorDeviceHelpers,
-  screenOf = createScreenLookup(helpers),
+  options: {
+    readonly now?: () => number;
+    readonly screenOf?: ReturnType<typeof createScreenLookup>;
+  } = {},
 ) {
+  const now = options.now ?? Date.now;
+  const screenOf = options.screenOf ?? createScreenLookup(helpers);
   return async (command: SimulatorDeviceInput): Promise<SimulatorDeviceInputResult> => {
     const budgetMs = Math.max(command.budgetMs - ANSWER_MARGIN_MS, 1_000);
+    // One deadline for everything this input needs. A tap first asks for the
+    // screen; giving the tap a fresh budget after that let it land after the
+    // server had already given the action up, and a retried action tapped twice.
+    const deadline = now() + budgetMs;
     if (command.kind === "type-text") {
       return result(await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs));
     }
@@ -89,6 +98,14 @@ export function createSimulatorInputDelivery(
     const looked = await screenOf(command.udid, budgetMs);
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
+    const remainingMs = deadline - now();
+    if (remainingMs < 1_000) {
+      return {
+        kind: "unavailable",
+        reason: "deadline-passed",
+        message: "Getting the Simulator ready used the action's time; nothing was sent.",
+      };
+    }
     const fraction = (point: { readonly x: number; readonly y: number }) => ({
       x: point.x / screen.width,
       y: point.y / screen.height,
@@ -113,13 +130,13 @@ export function createSimulatorInputDelivery(
             toY: to.y,
             durationMs: command.durationMs,
           },
-          budgetMs,
+          remainingMs,
         ),
       );
     }
     const { x, y } = fraction(command.point);
     if (x > 1 || y > 1) return offScreen;
-    return result(await helpers.send(command.udid, { op: "tap", x, y }, budgetMs));
+    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs));
   };
 }
 
@@ -262,7 +279,7 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
   const token = randomBytes(32).toString("base64url");
   const screenOf = createScreenLookup(helpers);
   const handle = simulatorDeviceBrokerHandler(
-    createSimulatorInputDelivery(helpers, screenOf),
+    createSimulatorInputDelivery(helpers, { screenOf }),
     token,
   );
   const stream = createSimulatorScreenStream(helpers, screenOf);

@@ -117,6 +117,19 @@ describe.skipIf(!shouldBuildDeviceHelper())("device helper protocol", () => {
     // Typed text never reaches a log, so a refusal must not quote it.
     expect(JSON.stringify(refusedText)).not.toContain("a@b");
 
+    // Key positions are letters only on a QWERTY Simulator keyboard.
+    const typed = async (id: number, identifier: string) => {
+      child.stdin.write(frame({ id, op: "keyboard", identifier }));
+      return (await read()).typed;
+    };
+    expect(await typed(10, "en_US@sw=QWERTY;hw=Automatic")).toBe(true);
+    expect(await typed(11, "nb_NO@sw=QWERTY-Norwegian;hw=Automatic")).toBe(true);
+    expect(await typed(12, "nb-NO")).toBe(true);
+    expect(await typed(13, "fr_FR@sw=AZERTY-French;hw=Automatic")).toBe(false);
+    expect(await typed(14, "de_DE@sw=QWERTZ-German;hw=Automatic")).toBe(false);
+    expect(await typed(15, "en_US@sw=QWERTY;hw=French")).toBe(false);
+    expect(await typed(16, "ja_JP@sw=Kana;hw=Automatic")).toBe(false);
+
     child.stdin.write(frame({ id: 3, op: "key", key: "nope" }));
     expect(await read()).toMatchObject({ id: 3, ok: false, code: "unsupported-key" });
 
