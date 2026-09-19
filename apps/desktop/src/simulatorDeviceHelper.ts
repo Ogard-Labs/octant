@@ -138,6 +138,15 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     helper.child.kill();
   }
 
+  /** Starts the idle clock: nothing is waiting on this helper any more. */
+  function restIdle(simulatorId: string, helper: RunningHelper): void {
+    if (helper.idle !== undefined) clearTimeout(helper.idle);
+    helper.idle = setTimeout(
+      () => stop(simulatorId, helper, "The device helper was stopped while idle."),
+      idleMs,
+    );
+  }
+
   function start(simulatorId: string): RunningHelper {
     const helper: RunningHelper = {
       child: spawn(options.helperPath, simulatorId),
@@ -169,6 +178,7 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         if (waiting === undefined || typeof id !== "number") continue;
         helper.pending.delete(id);
         clearTimeout(waiting.timer);
+        if (helper.pending.size === 0) restIdle(simulatorId, helper);
         waiting.settle(replyFrom(value));
       }
     });
@@ -213,11 +223,10 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
           message: "The device helper could not be started.",
         });
       }
+      // A helper with a request in hand is not idle, however long the request
+      // takes; the clock starts again when the last answer arrives.
       if (helper.idle !== undefined) clearTimeout(helper.idle);
-      helper.idle = setTimeout(
-        () => stop(simulatorId, helper, "The device helper was stopped while idle."),
-        idleMs,
-      );
+      helper.idle = undefined;
       const id = helper.nextId;
       helper.nextId += 1;
       return new Promise<DeviceHelperReply>((settle) => {
