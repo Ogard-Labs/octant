@@ -773,6 +773,53 @@ describe("AppleToolchainService Simulator input", () => {
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 
+  it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {
+    // Observed 2026-09-19 under the packaged app: osascript exited 1 with
+    // "Connection Invalid error for service com.apple.hiservices-xpcservice."
+    // and the person saw "Apple key-press interrupted." with an empty log.
+    const discovery = discoveryExecutor();
+    const execute = vi.fn(async (input: { readonly argv: readonly string[] }) =>
+      input.argv[0] === "osascript"
+        ? processResult("", {
+            exitCode: 1,
+            stderr:
+              "2026-09-19 16:30:07.225 osascript[11087:11470129] Error received in message reply handler: Connection invalid\n" +
+              "2026-09-19 16:30:07.225 osascript[11087:11470132] Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
+              "2026-09-19 16:30:07.226 osascript[11087:11470129] ",
+          })
+        : discovery(input as never),
+    );
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "key-press",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        key: "return",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("failed");
+    expect(JSON.stringify(evidence.diagnostics)).toContain("com.apple.hiservices-xpcservice");
+    const log = evidence.artifacts.find(
+      (artifact: { readonly kind: string }) => artifact.kind === "log",
+    );
+    expect(new TextDecoder().decode(artifacts.get(log!.reference))).toContain(
+      "com.apple.hiservices-xpcservice",
+    );
+  });
+
   it("refuses to re-inject interrupted input under the same actionId", async () => {
     const execute = discoveryExecutor();
     const injectSimulatorInput = vi.fn(async () =>
