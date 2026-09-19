@@ -773,6 +773,37 @@ describe("AppleToolchainService Simulator input", () => {
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 
+  it("replaces host paths in the reason an action recorded no evidence", async () => {
+    const discovery = discoveryExecutor();
+    const execute = vi.fn(async (input: { readonly argv: readonly string[] }) => {
+      if (input.argv.includes("screenshot"))
+        throw new Error(
+          `ENOENT: no such file or directory, realpath '${context.checkoutRoot}/Fixture.xcodeproj'`,
+        );
+      return discovery(input as never);
+    });
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+    const recorded = `${JSON.stringify(evidence.diagnostics)} ${[...artifacts.values()]
+      .map((bytes) => new TextDecoder().decode(bytes))
+      .join(" ")}`;
+    expect(recorded).toContain("[PROJECT]/Fixture.xcodeproj");
+    expect(recorded).not.toContain(context.checkoutRoot);
+  });
+
   it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {
     // Observed 2026-09-19 under the packaged app: osascript exited 1 with
     // "Connection Invalid error for service com.apple.hiservices-xpcservice."

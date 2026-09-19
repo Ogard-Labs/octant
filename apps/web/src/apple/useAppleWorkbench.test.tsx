@@ -82,7 +82,8 @@ describe("useAppleWorkbench", () => {
       toolchain: {},
       simulators: [{ simulatorId: "sim-1", state: "shutdown" }],
     };
-    const snapshot = { sequence: 1, active: [], recentEvidence: [] };
+    const booted = [{ simulatorId: "sim-1", state: "booted" }];
+    const snapshot = { sequence: 1, active: [], recentEvidence: [], simulators: booted };
     const discover = vi.fn(async () => before);
     const evidence = { outcome: "succeeded" };
     const client = {
@@ -105,7 +106,11 @@ describe("useAppleWorkbench", () => {
       evidence,
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    expect(result.current.discovery).toBe(before);
+    // The list takes the host's Simulator states from the snapshot instead of
+    // keeping "shutdown" until some later discovery happens to succeed.
+    await waitFor(() =>
+      expect(result.current.discovery).toEqual({ ...before, simulators: booted }),
+    );
   });
 
   it("exposes successful discovery even before the first action produces evidence", async () => {
