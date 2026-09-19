@@ -86,6 +86,50 @@ describe("useAppleWorkbench", () => {
     expect(discover).toHaveBeenCalledTimes(2);
   });
 
+  it("ignores a background re-discovery that answers after a newer action", async () => {
+    const list = (state: string) => ({
+      workspace: { schemes: ["Fixture"] },
+      toolchain: {},
+      simulators: [{ simulatorId: "sim-1", state }],
+    });
+    const initial = list("shutdown");
+    const afterBoot = list("booted");
+    const afterShutdown = list("shutdown");
+    let simulators = afterBoot.simulators;
+    const discover = vi.fn(async () => initial);
+    const client = {
+      discover,
+      snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
+      execute: vi.fn(async () => ({ outcome: "succeeded" })),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    // The boot's re-discovery is slow; the shutdown's answers first.
+    let finishBootDiscovery!: (value: typeof afterBoot) => void;
+    discover.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishBootDiscovery = resolve;
+      }) as never,
+    );
+    await result.current.execute({ kind: "boot", simulatorId: "sim-1" });
+    simulators = afterShutdown.simulators;
+    discover.mockResolvedValueOnce(afterShutdown as never);
+    await result.current.execute({ kind: "shutdown", simulatorId: "sim-1" });
+    await waitFor(() => expect(result.current.discovery).toBe(afterShutdown));
+
+    finishBootDiscovery(afterBoot);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.current.discovery).toBe(afterShutdown);
+  });
+
   it("returns a boot's evidence even when the follow-up discovery fails", async () => {
     const before = {
       workspace: { schemes: ["Fixture"] },

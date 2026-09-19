@@ -42,6 +42,10 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   const [attempt, setAttempt] = useState(0);
   const discoveryRequestRef = useRef(discoveryRequest);
   const snapshotRequestRef = useRef(snapshotRequest);
+  // Which discovery may still write the list. A background re-discovery that
+  // answers after a newer action, or after the hook was pointed at another
+  // project, must not put its older destinations back.
+  const discoveryGeneration = useRef(0);
   discoveryRequestRef.current = discoveryRequest;
   snapshotRequestRef.current = snapshotRequest;
   const discoveryRequestKey = JSON.stringify(discoveryRequest);
@@ -61,6 +65,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
+    discoveryGeneration.current += 1;
     setStatus("loading");
     setErrorMessage(undefined);
     void client
@@ -99,9 +104,12 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
         setDiscovery((previous) =>
           previous === undefined ? previous : { ...previous, simulators: snapshot.simulators },
         );
+        const generation = ++discoveryGeneration.current;
         void client
           .discover(discoveryRequestRef.current)
-          .then(setDiscovery)
+          .then((next) => {
+            if (generation === discoveryGeneration.current) setDiscovery(next);
+          })
           .catch(() => undefined);
       }
       setStatus("ready");
