@@ -89,23 +89,20 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
       const evidence = await client.execute(request);
       const snapshot = await refreshSnapshot();
       // A boot or shutdown changes the destination list itself, and that list
-      // lives in discovery, not the runtime snapshot. Without re-discovering,
-      // a passed boot still read "Shutdown" until the tool was re-opened.
+      // lives in discovery, not the runtime snapshot. Without it a passed boot
+      // still read "Shutdown" until the tool was re-opened. The snapshot just
+      // read already carries the host's Simulator states, so the list takes
+      // those at once; the full discovery — six probes, `xcodebuild -list`
+      // among them — follows in the background instead of holding the action's
+      // result and every control behind it, and a failure there changes nothing.
       if (request.kind === "boot" || request.kind === "shutdown") {
-        // The action already ran and its evidence is in hand. A discovery that
-        // fails afterwards must not turn that into "the service did not
-        // answer"; the snapshot above already carries the host's new state, and
-        // the list catches up on the next discovery.
-        try {
-          setDiscovery(await client.discover(discoveryRequestRef.current));
-        } catch {
-          // Keep the evidence, and keep the list honest: the snapshot just read
-          // carries the host's Simulator states, so the row that booted stops
-          // reading "Shutdown" even though the full discovery did not answer.
-          setDiscovery((previous) =>
-            previous === undefined ? previous : { ...previous, simulators: snapshot.simulators },
-          );
-        }
+        setDiscovery((previous) =>
+          previous === undefined ? previous : { ...previous, simulators: snapshot.simulators },
+        );
+        void client
+          .discover(discoveryRequestRef.current)
+          .then(setDiscovery)
+          .catch(() => undefined);
       }
       setStatus("ready");
       return evidence;

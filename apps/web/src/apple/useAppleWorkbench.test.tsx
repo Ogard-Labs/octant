@@ -52,7 +52,7 @@ describe("useAppleWorkbench", () => {
       toolchain: {},
       simulators: [{ simulatorId: "sim-1", state: "booted" }],
     };
-    const snapshot = { sequence: 1, active: [], recentEvidence: [] };
+    const snapshot = { sequence: 1, active: [], recentEvidence: [], simulators: after.simulators };
     const discover = vi.fn(async () => before);
     const client = {
       discover,
@@ -70,8 +70,18 @@ describe("useAppleWorkbench", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.discovery).toBe(before);
 
-    discover.mockResolvedValue(after);
+    // The full discovery is slow; the action's result must not wait for it.
+    let finishDiscovery!: (value: typeof after) => void;
+    discover.mockReturnValue(
+      new Promise((resolve) => {
+        finishDiscovery = resolve;
+      }) as never,
+    );
     await result.current.execute({ kind: "boot", simulatorId: "sim-1" });
+    await waitFor(() =>
+      expect(result.current.discovery).toEqual({ ...before, simulators: after.simulators }),
+    );
+    finishDiscovery(after);
     await waitFor(() => expect(result.current.discovery).toBe(after));
     expect(discover).toHaveBeenCalledTimes(2);
   });
