@@ -1,5 +1,6 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { SidebarThreadStatusInput } from "@octant/domain/sidebar-thread-status-policy";
 import type {
   SidebarDestinationCustomization,
   SidebarDestinationId,
@@ -189,6 +190,35 @@ export function threadRowActivity(thread: ChatThreadNavigationItem): ThreadRowAc
   if (thread.followUp === true) return "attention";
   if (thread.unread === true) return "unread";
   return "idle";
+}
+
+/**
+ * The status facts behind the states a row already renders.
+ *
+ * The row's mark and the Project heading above it both read these, so a folded
+ * Project cannot report a state the rows inside it would contradict once the
+ * reader opens it.
+ */
+export function sidebarThreadStatusInput(row: {
+  readonly activity: ThreadRowActivity;
+  readonly unread: boolean;
+  readonly woke: boolean;
+}): SidebarThreadStatusInput {
+  return {
+    working: row.activity === "working",
+    attention: row.activity === "attention",
+    woke: row.woke,
+    unread: row.unread,
+  };
+}
+
+/** The same facts for a navigation item the sidebar has not drawn yet. */
+export function threadRowStatusInput(thread: ChatThreadNavigationItem): SidebarThreadStatusInput {
+  return sidebarThreadStatusInput({
+    activity: threadRowActivity(thread),
+    unread: thread.unread === true,
+    woke: thread.woke === true,
+  });
 }
 
 export function buildChatThreadNavigation(
