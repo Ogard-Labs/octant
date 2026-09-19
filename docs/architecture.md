@@ -120,7 +120,12 @@ process-local client context on the loopback listener (internally still named
 carrying authenticated remote identity — and runs all mutations through
 services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
-server through `@octant/cli` (`octant server run`, `octant web`).
+server through `@octant/cli` (`octant server run`, `octant web`). For Code,
+verified remote requests carry their principal through an async request scope:
+the paired device may reach existing active Code Projects without a desktop
+workspace, while services retain thread, checkout, provider, and approval checks.
+This admission ends on cancellation or dispatch completion. Local windows retain
+their selected-Project restriction (ADR 0138).
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through

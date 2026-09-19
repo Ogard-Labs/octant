@@ -360,7 +360,7 @@ import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoute
 import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
-import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
+import { CodeProjectAccess } from "./codeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
 import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
 import { WorkProjectStatusReader, listWorkFolderTopLevel } from "./work/workProjectStatusReader";
@@ -2897,12 +2897,12 @@ export function startOctantServer(
     ) => Promise<ProviderProbeResult> = async () => {
       throw new Error("Provider probing is unavailable during server startup.");
     };
-    const canAccessCodeProject = (windowId: WindowId, projectId: ProjectId) =>
-      windowCanAccessCodeProject({
-        workspace: persistence.readWindowWorkspace(windowId)?.workspace,
-        projectId,
-        hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
-      });
+    const codeProjectAccess = new CodeProjectAccess({
+      readWorkspace: (scopeId) => persistence.readWindowWorkspace(scopeId)?.workspace,
+      hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
+    });
+    const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
+      codeProjectAccess.canAccessProject(scopeId, projectId);
     const isCodeProviderModelAllowed = (input: {
       readonly projectId: ProjectId;
       readonly providerInstanceId: ProviderInstance["id"];
@@ -7471,7 +7471,8 @@ export function startOctantServer(
       );
     }
     const authenticatedProductDispatch = createAuthenticatedProductDispatch({
-      dispatch: dispatchMeasuredProductRoutes,
+      dispatch: (request, context) =>
+        codeProjectAccess.run(context, () => dispatchMeasuredProductRoutes(request)),
     });
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;

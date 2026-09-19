@@ -149,6 +149,7 @@ distilled successor of the earlier long-form design specifications.
 | [0135](0135-confined-git-reads-its-worktree-s-metadata.md) | Confined Git reads its worktree's metadata | Accepted |
 | [0136](0136-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
 | [0137](0137-internal-testflight-carries-the-existing-remote-client.md) | Internal TestFlight carries the existing remote client | Accepted |
+| [0138](0138-paired-code-access-is-request-scoped.md) | Paired Code access is request-scoped | Accepted |
 
 ## Adding an ADR
 

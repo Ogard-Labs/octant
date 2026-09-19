@@ -112,19 +112,17 @@ token remains possible on a connected host. Device-integrity status remains
 unknown and does not block pairing. Installing a TestFlight build does not enable
 any of these missing adapters.
 
-## Code connection limitation
+## Code connection validation
 
-Code creation is not yet accepted against a live host. A paired mobile client can
-list the host's Code Projects, but `prepare-code-project-checkout` is refused
-because the device's service scope has no selected Code Project. The host's
-current Code authorization reads a persisted workspace binding, and the shell
-endpoint that changes that binding is local-only.
+A paired device uses authenticated request-scoped Code Project access (ADR 0138).
+The host checks active Projects and the thread's checkout, provider, and approval
+policy without creating a desktop workspace for the device. Code prompt evidence
+uses the route's bounded plain-text upload with the ordinary device proof.
 
-A supported remote Project-selection path must be designed and validated before
-claiming mobile Code creation or follow-through works. Keep the existing project
-boundary and the local-only shell endpoint intact; do not treat a listed Project
-as an implicit authorization grant. Chat and Work validation does not close this
-Code acceptance check.
+Validate creation, completed provider response, follow-up, and transcript reload
+against the intended host. A successful transport smoke does not replace the
+physical-device acceptance pass below. Root binding and desktop shell commands
+remain local-only.
 
 ## Device acceptance pass
 

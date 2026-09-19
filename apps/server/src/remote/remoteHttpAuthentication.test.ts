@@ -669,6 +669,44 @@ describe("remote HTTP authentication boundary", () => {
     connection.close();
   });
 
+  it("authenticates the declared plain-text Code evidence upload without allowing text on other routes", async () => {
+    const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const route: RemoteRouteDefinition = {
+      id: "code-evidence",
+      match: { kind: "exact", path: "/api/code/evidence" },
+      surface: "authenticated-product",
+      methods: ["PUT"],
+      allowedContentTypes: ["text/plain"],
+    };
+    const response = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        method: "PUT",
+        target: "/api/code/evidence",
+        body: "Explain this code",
+        contentType: "text/plain; charset=utf-8",
+        extraHeaders: { "x-octant-code-thread-id": "00000000-0000-4000-8000-00000000c004" },
+      }),
+      transport,
+      route,
+    );
+    expect(response.status).toBe(200);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.forwardedHeaders.get("x-octant-code-thread-id")).toBe(
+      "00000000-0000-4000-8000-00000000c004",
+    );
+    const refused = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        contentType: "text/plain",
+        nonce: "nonce_other_text_1234567",
+      }),
+      transport,
+    );
+    expect(refused.status).toBe(400);
+    expect(dispatched).toHaveLength(1);
+    connection.close();
+  });
+
   it("requires exact fetch metadata and a declared content type on every unsafe method", async () => {
     const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });
     const { session } = await issueSessionOverHttp(auth, privateKey);
