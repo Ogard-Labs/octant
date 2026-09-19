@@ -5,6 +5,7 @@ import {
   AppleDiscoveryRequest,
   AppleEvidenceReference,
   AppleRuntimeSnapshot,
+  AppleSimulatorId,
   AppleSimulatorRecord,
   AppleToolchainDiscovery,
   AppleToolchainFailure,
@@ -46,6 +47,20 @@ export const AppleArtifactRequest = Schema.Struct({
   reference: AppleEvidenceReference,
 }).annotations(strict);
 export type AppleArtifactRequest = typeof AppleArtifactRequest.Type;
+
+/**
+ * Asks to watch a booted Simulator's screen. The answer is not an envelope
+ * but a stream of length-prefixed JPEG frames; size, quality and rate are the
+ * host's to choose. Watching is a read, authorized like a screenshot.
+ */
+export const AppleScreenStreamRequest = Schema.Struct({
+  kind: Schema.Literal("apple-screen-stream-request"),
+  authority: ToolActionAuthority,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  simulatorId: AppleSimulatorId,
+}).annotations(strict);
+export type AppleScreenStreamRequest = typeof AppleScreenStreamRequest.Type;
 
 export const AppleDiscoverySnapshot = Schema.Struct({
   toolchain: AppleToolchainDiscovery,
@@ -94,5 +109,6 @@ export const decodeAppleAuthorityScopeRequest = Schema.decodeUnknownSync(
 export const decodeAppleCancelRequest = Schema.decodeUnknownSync(AppleCancelRequest);
 export const decodeAppleSnapshotRequest = Schema.decodeUnknownSync(AppleSnapshotRequest);
 export const decodeAppleArtifactRequest = Schema.decodeUnknownSync(AppleArtifactRequest);
+export const decodeAppleScreenStreamRequest = Schema.decodeUnknownSync(AppleScreenStreamRequest);
 export const decodeAppleDiscoverySnapshot = Schema.decodeUnknownSync(AppleDiscoverySnapshot);
 export const decodeAppleRpcEnvelope = Schema.decodeUnknownSync(AppleRpcEnvelope);
