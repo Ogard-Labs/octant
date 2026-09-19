@@ -108,7 +108,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot and shutdown control the selected Simulator; screenshot observes it. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot and shutdown control the selected Simulator; screenshot observes it. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -124,6 +124,7 @@ const appleDefinition = {
           "shutdown",
           "screenshot",
           "tap",
+          "swipe",
           "type-text",
           "key-press",
         ],
@@ -135,6 +136,9 @@ const appleDefinition = {
       target: { type: "string" },
       x: { type: "number" },
       y: { type: "number" },
+      toX: { type: "number" },
+      toY: { type: "number" },
+      durationMs: { type: "number" },
       text: { type: "string" },
       key: { type: "string" },
     },
@@ -811,10 +815,31 @@ function appleActionRequest(
       } as AppleActionRequest;
     }
     case "tap":
+    case "swipe":
     case "type-text":
     case "key-press": {
       if (input.simulatorId === undefined) return undefined;
       const requestedBy = agentEventActor(scope.authority, scope.threadId, uuid);
+      if (input.operation === "swipe") {
+        if (
+          input.x === undefined ||
+          input.y === undefined ||
+          input.toX === undefined ||
+          input.toY === undefined
+        ) {
+          return undefined;
+        }
+        return {
+          ...base,
+          kind: "swipe",
+          simulatorId: input.simulatorId as never,
+          requestedBy,
+          point: { x: input.x, y: input.y },
+          toPoint: { x: input.toX, y: input.toY },
+          ...(input.durationMs === undefined ? {} : { durationMs: Math.round(input.durationMs) }),
+          timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+        } as AppleActionRequest;
+      }
       if (input.operation === "tap") {
         if (input.target === undefined && (input.x === undefined || input.y === undefined)) {
           return undefined;
@@ -1094,6 +1119,7 @@ interface AppleToolInput {
     | "shutdown"
     | "screenshot"
     | "tap"
+    | "swipe"
     | "type-text"
     | "key-press";
   readonly projectPath?: string;
@@ -1103,6 +1129,9 @@ interface AppleToolInput {
   readonly target?: string;
   readonly x?: number;
   readonly y?: number;
+  readonly toX?: number;
+  readonly toY?: number;
+  readonly durationMs?: number;
   readonly text?: string;
   readonly key?: string;
 }
@@ -1253,6 +1282,9 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
       "target",
       "x",
       "y",
+      "toX",
+      "toY",
+      "durationMs",
       "text",
       "key",
     ]),
@@ -1269,6 +1301,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "shutdown" &&
     operation !== "screenshot" &&
     operation !== "tap" &&
+    operation !== "swipe" &&
     operation !== "type-text" &&
     operation !== "key-press"
   ) {
@@ -1285,7 +1318,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
   ] as const) {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
-  for (const field of ["x", "y"] as const) {
+  for (const field of ["x", "y", "toX", "toY", "durationMs"] as const) {
     if (parsed[field] !== undefined && typeof parsed[field] !== "number") return undefined;
   }
   if (
