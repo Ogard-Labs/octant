@@ -827,6 +827,8 @@ describe("AppleToolchainService Simulator input", () => {
     );
     const service = new AppleToolchainService({
       execute,
+      // The osascript fallback is Darwin-only; CI runs this suite on Linux too.
+      platform: "darwin",
       injectSimulatorInput,
       writeArtifact: async () => undefined,
       realpath: async (path: string) => path,
