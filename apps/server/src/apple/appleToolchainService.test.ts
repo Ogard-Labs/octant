@@ -933,6 +933,63 @@ describe("AppleToolchainService lifecycle", () => {
     }
   });
 
+  it("keeps coming back for a file when the host could not confirm the capture's process ended", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      let capturePath = "";
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        capturePath = input.argv.at(-1)!;
+        // It exited, but the host could not confirm its whole process group did.
+        return processResult("", { exitCode: 1, cleanupUncertain: true });
+      });
+
+      await service.execute(
+        simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+        context,
+      );
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      // Written after the first return visit already passed.
+      await writeFile(capturePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+
+      await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears captures a previous run left behind when the service starts", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const leftover = join(
+      captureDirectory,
+      "octant-apple-capture-30000000-0000-4000-8000-0000000000dd.png",
+    );
+    await writeFile(leftover, new Uint8Array([1]));
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(leftover, old, old);
+
+    new AppleToolchainService({
+      execute: discoveryExecutor(),
+      captureDirectory,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    await vi.waitFor(() => expect(existsSync(leftover)).toBe(false));
+  });
+
   it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();

@@ -191,6 +191,8 @@ export class AppleToolchainService {
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
     this.#captureDirectory = options.captureDirectory ?? defaultTemporaryDirectory();
+    // Whatever a previous run could not come back for is cleared now.
+    void sweepStaleCaptures(this.#captureDirectory, Date.now(), this.#capturesInProgress);
     this.#lastToolchain = unavailableToolchain(options.newId(), options.now());
   }
 
@@ -587,7 +589,7 @@ export class AppleToolchainService {
             request.timeoutMs,
             signal,
           );
-          exitedCleanly = terminal.termination === "exited";
+          exitedCleanly = terminal.termination === "exited" && !terminal.cleanupUncertain;
           if (succeeded(terminal)) {
             const bytes = await readCapture(capturePath);
             if (bytes === undefined) {
@@ -607,12 +609,15 @@ export class AppleToolchainService {
         } finally {
           this.#capturesInProgress.delete(capturePath);
           await rm(capturePath, { force: true });
-          // A command that did not end as a clean exit may still have a process
-          // out there, and it can write the file after the removal above. No
-          // later capture is promised, so this action comes back for its own
-          // file once; the timer never keeps the host alive.
+          // A command that did not end as a confirmed clean exit may still have
+          // a process out there, and it can write the file after the removal
+          // above. No later capture is promised, so this action comes back for
+          // its own file, later each time; the timers never keep the host alive.
+          // A host restart in between is covered by the sweep at start.
           if (!exitedCleanly) {
-            setTimeout(() => void rm(capturePath, { force: true }), STALE_CAPTURE_MS).unref();
+            for (const delayMs of CAPTURE_RETURN_VISITS_MS) {
+              setTimeout(() => void rm(capturePath, { force: true }), delayMs).unref();
+            }
           }
         }
       } else if (request.kind === "logs") {
@@ -1520,6 +1525,8 @@ function invalidFailure(message: string): AppleDiscoveryResult {
 
 const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
 const STALE_CAPTURE_MS = 60_000;
+/** When an action returns for a file its unconfirmed process may still write. */
+const CAPTURE_RETURN_VISITS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 
 /** Removes this service's capture files that no running action still owns. */
 async function sweepStaleCaptures(
