@@ -65,10 +65,17 @@ export type DeviceWatch =
 
 /** The part of a child process this module uses, so a test can stand one in. */
 export interface DeviceHelperChild {
-  readonly stdin: { write(chunk: Uint8Array): unknown; end(): unknown };
+  readonly stdin: {
+    write(chunk: Uint8Array): unknown;
+    end(): unknown;
+    on(event: "error", listener: () => void): unknown;
+  };
   readonly stdout: { on(event: "data", listener: (chunk: Uint8Array) => void): unknown };
   /** File descriptor 3: length-prefixed JPEG frames while a stream is running. */
-  readonly frames: { on(event: "data", listener: (chunk: Uint8Array) => void): unknown };
+  readonly frames: {
+    on(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    on(event: "error", listener: () => void): unknown;
+  };
   on(event: "exit" | "error", listener: () => void): unknown;
   kill(): unknown;
 }
@@ -244,6 +251,11 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     const gone = () => stop(simulatorId, helper, "The device helper stopped before it answered.");
     helper.child.on("exit", gone);
     helper.child.on("error", gone);
+    // A helper that dies under a write reports EPIPE on the stream, later, and
+    // not from `write`. With no listener that is an unhandled error event,
+    // which would take the desktop's main process down with the helper.
+    helper.child.stdin.on("error", gone);
+    helper.child.frames.on("error", gone);
     running.set(simulatorId, helper);
     return helper;
   }
