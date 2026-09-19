@@ -7,6 +7,35 @@ import {
 } from "./unlockAttemptGuard";
 
 describe("unlock attempt guard", () => {
+  it("defers authentication completed during prompt dismissal until the app is active", () => {
+    const guard = createUnlockAttemptGuard();
+    const attempt = guard.begin();
+    for (const resultStatus of ["unlocked", "locked"] as const) {
+      expect(
+        resolveUnlockCompletion({
+          appState: "inactive",
+          attemptCurrent: guard.isCurrent(attempt),
+          resultStatus,
+        }),
+      ).toBe("defer");
+      expect(
+        resolveUnlockCompletion({
+          appState: "active",
+          attemptCurrent: guard.isCurrent(attempt),
+          resultStatus,
+        }),
+      ).toBe(resultStatus === "unlocked" ? "unlock" : "lock");
+    }
+    guard.invalidate();
+    expect(
+      resolveUnlockCompletion({
+        appState: "active",
+        attemptCurrent: guard.isCurrent(attempt),
+        resultStatus: "unlocked",
+      }),
+    ).toBe("ignore");
+  });
+
   it("invalidates a pending biometric result when the app backgrounds", () => {
     const guard = createUnlockAttemptGuard();
     const attempt = guard.begin();

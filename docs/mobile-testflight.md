@@ -131,6 +131,13 @@ saved for the next unlock but cannot reconnect the closed session. Include
 locking immediately after launch or while polling pairing approval in the
 lifecycle acceptance pass.
 
+The Simulator supports biometric testing through Xcode's device tools. Enable
+simulated biometrics with `xcrun devicectl device settings biometrics --device
+<SIMULATOR_UDID> --enable`, launch Octant, then send a match with `xcrun devicectl
+device simulate biometrics --device <SIMULATOR_UDID> --success`. No personal
+passcode is needed. A successful result received while the authentication sheet
+is dismissing waits for the active transition; backgrounding invalidates it.
+
 ## Device acceptance pass
 
 - Install from TestFlight, cold launch, terminate, and relaunch.

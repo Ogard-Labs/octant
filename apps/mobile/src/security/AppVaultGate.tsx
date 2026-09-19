@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { GlassSurface, space, typography, useTheme } from "../../design-system";
-import { unlockAppVault, type DeviceAuthenticator } from "./AppVault";
+import { unlockAppVault, type AppVaultUnlockResult, type DeviceAuthenticator } from "./AppVault";
 import {
   createUnlockAttemptGuard,
   resolveUnlockCompletion,
   shouldPreserveVaultForAppState,
   shouldSuppressAutoUnlockAfterPrompt,
+  type UnlockAppState,
 } from "./unlockAttemptGuard";
 import { isMobileHighRiskPromptActive } from "./mobileAuthPromptState";
 
@@ -21,18 +22,23 @@ export function AppVaultGate(props: {
   const unlockInFlight = useRef(false);
   const suppressNextActiveUnlock = useRef(false);
 
-  const unlock = useCallback(async () => {
-    const attempt = unlockGuard.begin();
-    unlockInFlight.current = true;
-    setState("unlocking");
-    try {
-      const result = await unlockAppVault(props.authenticator);
+  const pendingCompletion = useRef<
+    { readonly attempt: number; readonly result: AppVaultUnlockResult } | undefined
+  >(undefined);
+
+  const completeUnlock = useCallback(
+    (attempt: number, result: AppVaultUnlockResult, appState: UnlockAppState) => {
       const completion = resolveUnlockCompletion({
-        appState: AppState.currentState,
+        appState,
         attemptCurrent: unlockGuard.isCurrent(attempt),
         resultStatus: result.status,
       });
       if (completion === "ignore") return;
+      if (completion === "defer") {
+        // iOS may resolve Face ID before emitting the active transition that dismisses it.
+        pendingCompletion.current = { attempt, result };
+        return;
+      }
       if (completion === "unlock") {
         setState("unlocked");
         return;
@@ -43,10 +49,22 @@ export function AppVaultGate(props: {
           : "Authenticate to load paired hosts and thread data.",
       );
       setState("locked");
+    },
+    [unlockGuard],
+  );
+
+  const unlock = useCallback(async () => {
+    const attempt = unlockGuard.begin();
+    pendingCompletion.current = undefined;
+    unlockInFlight.current = true;
+    setState("unlocking");
+    try {
+      const result = await unlockAppVault(props.authenticator);
+      completeUnlock(attempt, result, AppState.currentState);
     } finally {
       unlockInFlight.current = false;
     }
-  }, [props.authenticator]);
+  }, [props.authenticator, completeUnlock, unlockGuard]);
 
   useEffect(() => {
     void unlock();
@@ -55,11 +73,18 @@ export function AppVaultGate(props: {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
       if (next === "active") {
-        if (unlockInFlight.current) return;
+        const pending = pendingCompletion.current;
+        if (pending !== undefined) {
+          pendingCompletion.current = undefined;
+          suppressNextActiveUnlock.current = false;
+          completeUnlock(pending.attempt, pending.result, next);
+          return;
+        }
         if (suppressNextActiveUnlock.current) {
           suppressNextActiveUnlock.current = false;
           return;
         }
+        if (unlockInFlight.current) return;
         void unlock();
         return;
       }
@@ -70,21 +95,23 @@ export function AppVaultGate(props: {
           vaultUnlockInFlight: unlockInFlight.current,
         })
       ) {
-        suppressNextActiveUnlock.current = isMobileHighRiskPromptActive();
+        suppressNextActiveUnlock.current = true;
         return;
       }
       suppressNextActiveUnlock.current = shouldSuppressAutoUnlockAfterPrompt(
         unlockInFlight.current,
       );
+      pendingCompletion.current = undefined;
       unlockGuard.invalidate();
       setMessage("Authenticate to load paired hosts and thread data.");
       setState("locked");
     });
     return () => {
+      pendingCompletion.current = undefined;
       unlockGuard.invalidate();
       subscription.remove();
     };
-  }, [unlock, unlockGuard]);
+  }, [unlock, unlockGuard, completeUnlock]);
 
   const styles = useMemo(
     () =>

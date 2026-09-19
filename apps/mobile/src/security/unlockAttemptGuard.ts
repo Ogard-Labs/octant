@@ -25,8 +25,9 @@ export function resolveUnlockCompletion(input: {
   readonly appState: UnlockAppState;
   readonly attemptCurrent: boolean;
   readonly resultStatus: "unlocked" | "locked";
-}): "unlock" | "lock" | "ignore" {
+}): "unlock" | "lock" | "ignore" | "defer" {
   if (!input.attemptCurrent) return "ignore";
+  if (input.appState === "inactive") return "defer";
   if (input.appState === null) return "lock";
   if (input.appState !== "active") return "ignore";
   return input.resultStatus === "unlocked" ? "unlock" : "lock";
