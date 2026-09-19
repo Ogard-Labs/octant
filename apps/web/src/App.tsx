@@ -4063,6 +4063,7 @@ function LaunchedShell(
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     setRailPlaceholder(undefined);
+    let firstPromptAnnouncedFor: import("@octant/contracts").CodeThreadId | undefined;
     try {
       const destinationHostId = refuseUnlessCreatableDestination({
         action: "create-code-thread",
@@ -4191,6 +4192,11 @@ function LaunchedShell(
         );
         return false;
       }
+      // The thread opens before its first turn starts, so tell its own
+      // controller which prompt is coming. Otherwise the transcript reads the
+      // empty journal and calls the thread empty until the turn is durable.
+      codeThreadControllers.announceFirstPrompt(created.thread.id, input.prompt);
+      firstPromptAnnouncedFor = created.thread.id;
       // Open the durable thread before staging images so an upload failure
       // retries on this thread instead of creating another.
       await controller.openCodeThread(
@@ -4233,6 +4239,9 @@ function LaunchedShell(
         setDraftError(
           refusal ?? "The thread was created, but its first provider turn could not be started.",
         );
+        // The prompt was not sent after all; it goes back to the composer below
+        // rather than staying in the transcript as a message.
+        codeThreadControllers.announceFirstPrompt(created.thread.id, undefined);
         // The thread is already open on a different controller than the one
         // that started the turn, so restore the prompt onto that transcript.
         const threadController = codeThreadControllers.get(created.thread.id);
@@ -4251,6 +4260,11 @@ function LaunchedShell(
       codeThreadControllers.refreshConversation(created.thread.id);
       return true;
     } catch (error) {
+      // A staged image or the turn itself threw after the prompt was announced,
+      // so it was never sent and must not stay in the transcript as a message.
+      if (firstPromptAnnouncedFor !== undefined) {
+        codeThreadControllers.announceFirstPrompt(firstPromptAnnouncedFor, undefined);
+      }
       setDraftError(
         error instanceof Error && error.message !== ""
           ? error.message

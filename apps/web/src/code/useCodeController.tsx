@@ -437,6 +437,29 @@ export function useCodeController(options: CodeControllerOptions) {
     [setTurnError],
   );
 
+  /**
+   * The prompt a newly created thread is about to run.
+   *
+   * The window opens a new thread before starting its first turn, and that turn
+   * runs on the window's create controller. This controller therefore reads an
+   * honestly empty journal first and re-reads it once the turn is durable. In
+   * between it painted the empty-thread copy and the project setup offers, then
+   * a loading notice, then the message: four screens in half a second. Holding
+   * the prompt lets the transcript show the person's own message throughout.
+   * It is never cleared on activation, because React's development re-mount
+   * re-runs activation after the prompt has already been delivered.
+   */
+  const [firstPromptInFlight, setFirstPromptInFlight] = useState<string>();
+  const announceFirstPrompt = useCallback(
+    (prompt: string | undefined) => setFirstPromptInFlight(prompt),
+    [],
+  );
+  const conversationStarted = conversation.length > 0;
+  useEffect(() => {
+    // The journal speaks for the thread from its first message on.
+    if (conversationStarted) setFirstPromptInFlight(undefined);
+  }, [conversationStarted]);
+
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
@@ -2338,6 +2361,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   return {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
+    announceFirstPrompt,
     answerProviderRequest,
     archiveThread,
     completeThread,
@@ -2350,6 +2374,7 @@ export function useCodeController(options: CodeControllerOptions) {
     completeFollowUp,
     errorCategory,
     errorMessage,
+    firstPromptInFlight: conversationStarted ? undefined : firstPromptInFlight,
     followUps,
     forkThread,
     lastExecuteError,

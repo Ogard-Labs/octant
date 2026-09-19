@@ -119,6 +119,47 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
+  it("shows the prompt a new thread is about to run instead of calling the thread empty", () => {
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "loaded",
+          firstPromptInFlight: "Fix the failing test",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("article", { name: "Your message" })).toHaveTextContent(
+      "Fix the failing test",
+    );
+    expect(
+      screen.queryByText("No messages yet. Send a prompt to start this thread."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
+
+    // Starting the turn re-reads the transcript. The prompt stays where it is
+    // rather than giving way to a loading notice for a message already on screen.
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "loading",
+          firstPromptInFlight: "Fix the failing test",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("article", { name: "Your message" })).toHaveTextContent(
+      "Fix the failing test",
+    );
+    expect(screen.queryByRole("heading", { name: "Loading conversation" })).not.toBeInTheDocument();
+  });
+
   it("does not send a steered follow-up while the provider is waiting", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);

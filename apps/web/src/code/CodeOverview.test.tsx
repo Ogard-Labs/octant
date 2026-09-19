@@ -521,6 +521,7 @@ function controller(): CodeController {
   } as const;
   return {
     activeView: { checkout, lastSequence: 1, thread } as never,
+    announceFirstPrompt: vi.fn(),
     answerProviderRequest: vi.fn(async () => true),
     archiveThread: vi.fn(async () => true),
     completeThread: vi.fn(async () => ({ status: "ok" }) as const),
@@ -547,6 +548,7 @@ function controller(): CodeController {
     },
     errorCategory: undefined,
     errorMessage: undefined,
+    firstPromptInFlight: undefined,
     conversation: [],
     conversationHistory: "loaded" as const,
     completeFollowUp: vi.fn(async () => true),
