@@ -84,6 +84,29 @@ Use this initial “What to Test” text:
 
 Do not create an external group or public TestFlight link in this phase.
 
+## Native connection preflight
+
+Before queuing a TestFlight build, use a native Simulator build against an
+isolated Octant host with its own `OCTANT_DATA_DIR` and a private HTTPS listener.
+Trust the test certificate only in that Simulator; never disable TLS verification.
+
+1. Cold-launch the app and unlock the vault. A build alone does not prove launch.
+2. Pair through a fresh ticket and host approval, then read the real inbox.
+3. Create Chat, send a prompt, and verify the response in both mobile and the
+   host's thread API. A deterministic local provider is sufficient to isolate
+   transport and journal behavior; real-provider behavior remains a separate check.
+4. Verify NDJSON event replay, terminate/relaunch, and resume with the saved
+   device key. Confirm host-only routes are refused to the remote principal.
+5. Revoke that test device on the host and verify that resumption is refused.
+6. Test background/foreground and network loss through the ordinary app UI;
+   native transport probes do not replace vault or device UX acceptance.
+
+The mobile Vitest suite runs in Node. It cannot validate Hermes cryptography,
+SecureStore, URLSession cookie handling, or UIKit launch behavior. The existing
+key-store and remote-client tests complement this native pass. Screenshot
+capture protection, push notifications, and device-integrity detection currently
+have unavailable native adapters and must not be recorded as passing checks.
+
 ## Device acceptance pass
 
 - Install from TestFlight, cold launch, terminate, and relaunch.

@@ -34,6 +34,7 @@ const config: ExpoConfig = {
     package: "app.octant.mobile",
   },
   plugins: [
+    ["expo-build-properties", { ios: { enableSceneSupport: true } }],
     "expo-secure-store",
     "expo-local-authentication",
     "expo-font",

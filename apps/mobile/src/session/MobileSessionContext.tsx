@@ -1,3 +1,4 @@
+import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
 import {
   createContext,
   useCallback,
@@ -96,7 +97,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const hub = useMemo(
     () =>
       createMobileHostSessionHub({
-        fetch: globalThis.fetch.bind(globalThis),
+        fetch: mobileRemoteFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       }),
@@ -106,7 +107,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const bridge = useMemo(
     () =>
       createRemoteSessionBridge({
-        fetch: globalThis.fetch.bind(globalThis),
+        fetch: mobileRemoteFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       }),

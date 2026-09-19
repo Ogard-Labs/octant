@@ -139,7 +139,11 @@ phone creates Chat, Work, and Code threads, reads their transcripts, and sends
 follow-up turns under each thread's own authority (`start-work-thread-turn`
 with the thread's binding; `start-provider-turn` on the thread's checkout).
 Approvals, folder binding, file edits, and shell remain host-only and the
-composer says so.
+composer says so. Native startup supplies WebCrypto for the shared pairing and
+request-proof clients; keys persist in platform secure storage. Native remote
+fetch sends the proof-bound session cookie explicitly and disables the shared
+cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
+unchanged, and native remote requests refuse redirects.
 
 **Local client context.** Opening the canonical host URL directly creates a
 process-local client context through `/api/shell/local-session`; no launcher

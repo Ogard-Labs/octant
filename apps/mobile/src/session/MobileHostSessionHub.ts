@@ -1,3 +1,4 @@
+import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
 import {
   createConnectionSupervisor,
   createRemoteSessionBridge,
@@ -96,7 +97,7 @@ export function createMobileHostSessionHub(input: {
     const existing = bridges.get(registration.origin);
     if (existing !== undefined) return existing;
     const bridge = createRemoteSessionBridge({
-      fetch: input.fetch ?? globalThis.fetch.bind(globalThis),
+      fetch: input.fetch ?? mobileRemoteFetch,
       webBuildVersion: input.webBuildVersion,
       deviceKeyStore: input.deviceKeyStore,
     });

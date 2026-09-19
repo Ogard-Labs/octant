@@ -1,3 +1,4 @@
+import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -157,7 +158,7 @@ export function PairingPanel(props: PairingPanelProps) {
     try {
       const client = createRemotePairingClient({
         baseUrl: `${origin}/`,
-        fetch: globalThis.fetch.bind(globalThis),
+        fetch: mobileRemoteFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       });
@@ -185,7 +186,7 @@ export function PairingPanel(props: PairingPanelProps) {
       const origin = phase.claim.origin;
       const client = createRemotePairingClient({
         baseUrl: `${origin}/`,
-        fetch: globalThis.fetch.bind(globalThis),
+        fetch: mobileRemoteFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       });
