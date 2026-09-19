@@ -77,7 +77,11 @@ small native helper it ships. Nothing comes to the foreground and no macOS
 Accessibility permission is needed. A tap lands on the point you click on the
 captured screen. **Type** sends letters, digits, spaces, and new lines; text
 with any other character is refused whole rather than typed wrong, because a
-Simulator maps key positions with its own keyboard language. **Return**,
+Simulator maps key positions with its own keyboard language. For the same
+reason typing works on a Simulator whose keyboard language uses a QWERTY
+layout — English, the Nordic languages, Dutch, Spanish, Portuguese — and is
+refused on others, such as French or German, with
+`keyboard-layout-unsupported` in the evidence. **Return**,
 **Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
 later. When the host cannot deliver an input action, the evidence names the
 host's refusal rather than reading as interrupted. Remote, Linux, and

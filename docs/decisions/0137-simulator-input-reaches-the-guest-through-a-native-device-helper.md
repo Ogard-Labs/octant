@@ -63,18 +63,29 @@ call.
   divides. A point outside that screen is refused, not clamped to an edge. A
   tap that names an element instead of a point is reported unavailable: the
   helper reads no accessibility tree.
-- **Typed text is sent as key positions, and only the ones that are safe.** A
-  keyboard usage names a position; the guest turns it into a character with
-  its own hardware layout, which follows the Simulator's keyboard language and
-  not the Mac's. Observed on a Norwegian Simulator: the usage that types "-"
-  on a US layout typed "+". Letters, digits, space and new line sit on the
-  same positions across the QWERTY family and are typed. Any other character
-  refuses the whole string before the first key, and the refusal does not
-  quote the text.
+- **Typed text is sent as key positions, and only where that is known to be
+  right.** A keyboard usage names a position; the guest turns it into a
+  character with its own hardware layout, which follows the Simulator's
+  keyboard language and not the Mac's. Observed on a Norwegian Simulator: the
+  usage that types "-" on a US layout typed "+". Two rules follow. Only
+  letters, digits, space and new line are typed; any other character refuses
+  the whole string before the first key, and the refusal does not quote the
+  text. And they are typed only on a Simulator whose keyboard keeps those keys
+  where a US keyboard has them: the helper reads the guest's own keyboard
+  record (`nb_NO@sw=QWERTY-Norwegian;hw=Automatic`), and types when the
+  language is one of a short list (English, the Nordic languages, Dutch,
+  Spanish, Portuguese), the software layout is QWERTY and the hardware layout
+  is Automatic. French is AZERTY with symbols on the unshifted digit row,
+  German swaps Y and Z, Turkish moves I: there, and wherever the record cannot
+  be read, typing is refused rather than typed wrong.
 - **Refusals are the helper's own.** No such device, not booted, toolchain
   missing, the guest vends no input service, the daemon did not answer its
   liveness probe (retried three times, because its start races the guest's
-  boot), unsupported character, unsupported key. The server records a refusal
+  boot), a send that was never seen leaving (the connection is dropped and the
+  input reported as not delivered, never as delivered), unsupported character,
+  unsupported or unreadable keyboard layout, unsupported key. For typed text
+  the server keeps only the refusal's code in evidence, since a host's words
+  can quote what was typed. The server records a refusal
   as a failed action naming that reason, and a helper or desktop that never
   answered as unavailable.
 - **Private API is loaded at run time, never linked.** The helper `dlopen`s

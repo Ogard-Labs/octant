@@ -166,13 +166,27 @@ private final class Session {
             guard let text = request["text"] as? String, !text.isEmpty else {
                 throw Refusal(code: "malformed", message: "text is required")
             }
-            // Resolved before anything is sent, so a refused string types nothing.
+            // Resolved before anything is sent, so a refused string types nothing,
+            // and before the device is asked anything, so it costs nothing.
             guard let strokes = KeyUsages.strokes(for: text) else {
                 // The character is not named: a refusal can reach a log, and
                 // typed text never does.
                 throw Refusal(
                     code: "unsupported-character",
                     message: "only letters, digits, spaces and new lines can be typed")
+            }
+            // Key positions are only letters on a keyboard laid out like a US
+            // one. On any other layout the same keys type other characters, and
+            // nothing would report it, so the layout is checked before a key goes.
+            guard let keyboard = try bridge().keyboardIdentifier else {
+                throw Refusal(
+                    code: "keyboard-layout-unknown",
+                    message: "the Simulator's keyboard layout could not be read; show its keyboard once, then retry")
+            }
+            guard KeyUsages.typesAsUSPositions(keyboardIdentifier: keyboard) else {
+                throw Refusal(
+                    code: "keyboard-layout-unsupported",
+                    message: "typing needs a QWERTY Simulator keyboard; this one would type other characters")
             }
             let input = try connection()
             for stroke in strokes {
@@ -183,6 +197,13 @@ private final class Session {
             }
             input.settle()
             return ["keys": strokes.count]
+        case "keyboard":
+            // Whether text would be typed on a Simulator whose keyboard is
+            // recorded as `identifier`. Asks nothing of any device.
+            guard let identifier = request["identifier"] as? String, !identifier.isEmpty else {
+                throw Refusal(code: "malformed", message: "identifier is required")
+            }
+            return ["typed": KeyUsages.typesAsUSPositions(keyboardIdentifier: identifier)]
         case "button":
             guard let name = request["button"] as? String, let button = HardwareButton(rawValue: name)
             else { throw Refusal(code: "unsupported-key", message: "button must be home or lock") }
@@ -215,6 +236,10 @@ private func refusal(for error: Error) -> Refusal {
         return Refusal(code: "input-service-unavailable", message: "the input connection could not be built")
     case InputRefusal.daemonUnresponsive(let detail):
         return Refusal(code: "daemon-unresponsive", message: detail)
+    case InputRefusal.sendStalled:
+        return Refusal(
+            code: "send-stalled",
+            message: "the input was not seen leaving within 2 seconds; whether it arrived is unknown")
     default:
         return Refusal(code: "failed", message: String(describing: error))
     }

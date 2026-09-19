@@ -595,7 +595,7 @@ export class AppleToolchainService {
               severity: "note" as const,
               message:
                 request.kind === "type-text"
-                  ? `type-text ${outcomeFor(terminal)} (text redacted)`
+                  ? typedTextFailureNote(outcomeFor(terminal), text(terminal.stderr))
                   : inputFailureNote(
                       request.kind,
                       outcomeFor(terminal),
@@ -1266,6 +1266,19 @@ function parseBuildProduct(
  * builder into the blanket catch, which reported "interrupted" with an empty
  * log — the one thing a person needed to read was the one thing lost.
  */
+/**
+ * Why typed text failed, without the host's words. A host's message can quote
+ * the script that carried the text, so only a leading reason code is kept: a
+ * lowercase, hyphenated token before the first colon, which is how the device
+ * helper names a refusal and not a shape typed text or a script error takes.
+ */
+function typedTextFailureNote(outcome: AppleBuildEvidence["outcome"], stderr: string): string {
+  const code = /^([a-z][a-z-]{2,63}):/.exec(stderr.trimStart())?.[1];
+  return code === undefined
+    ? `type-text ${outcome} (text redacted)`
+    : `type-text ${outcome}: ${code} (text redacted)`;
+}
+
 function inputFailureNote(
   kind: AppleSimulatorRequest["kind"],
   outcome: AppleBuildEvidence["outcome"],

@@ -30,10 +30,18 @@ function result(reply: DeviceHelperReply): SimulatorDeviceInputResult {
  * the point is divided by the screen size the helper itself reports — the
  * capture and the device share that pixel space.
  */
-export function createSimulatorInputDelivery(helpers: SimulatorDeviceHelpers) {
+export function createSimulatorInputDelivery(
+  helpers: SimulatorDeviceHelpers,
+  options: { readonly now?: () => number } = {},
+) {
+  const now = options.now ?? Date.now;
   const screens = new Map<string, { readonly width: number; readonly height: number }>();
   return async (command: SimulatorDeviceInput): Promise<SimulatorDeviceInputResult> => {
     const budgetMs = Math.max(command.budgetMs - ANSWER_MARGIN_MS, 1_000);
+    // One deadline for everything this input needs. A tap first asks for the
+    // screen; giving the tap a fresh budget after that let it land after the
+    // server had already given the action up, and a retried action tapped twice.
+    const deadline = now() + budgetMs;
     if (command.kind === "type-text") {
       return result(await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs));
     }
@@ -61,6 +69,14 @@ export function createSimulatorInputDelivery(helpers: SimulatorDeviceHelpers) {
       screen = described.screen;
       screens.set(command.udid, screen);
     }
+    const remainingMs = deadline - now();
+    if (remainingMs < 1_000) {
+      return {
+        kind: "unavailable",
+        reason: "deadline-passed",
+        message: "Getting the Simulator ready used the action's time; nothing was tapped.",
+      };
+    }
     const x = command.point.x / screen.width;
     const y = command.point.y / screen.height;
     if (x > 1 || y > 1) {
@@ -70,7 +86,7 @@ export function createSimulatorInputDelivery(helpers: SimulatorDeviceHelpers) {
         message: `The point is outside the ${screen.width}×${screen.height} screen.`,
       };
     }
-    return result(await helpers.send(command.udid, { op: "tap", x, y }, budgetMs));
+    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs));
   };
 }
 
