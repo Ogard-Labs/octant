@@ -22,21 +22,34 @@ function decision(
   return authorizeCodeOperation({ actor, posture, operation }).decision;
 }
 
+// Every operation that is not a read, named exhaustively: the type refuses an
+// entry it does not know and demands one for an operation added later, so a
+// new mutation cannot reach Plan by being left off this list. Restoring a
+// checkpoint is on it because the host copies the checkout's index itself,
+// outside the Git sandbox, before the confined commands run.
+const MUTATIONS = {
+  edit: true,
+  terminal: true,
+  test: true,
+  stage: true,
+  unstage: true,
+  discard: true,
+  "restore-checkpoint": true,
+  commit: true,
+  push: true,
+  "create-pr": true,
+  "merge-run": true,
+  "managed-root": true,
+  "pr-mutation": true,
+} as const satisfies Record<Exclude<CodeOperation, "read">, true>;
+
 describe("Code authority policy", () => {
   it("keeps reads available while Plan denies every mutation", () => {
     for (const actor of actors) {
       expect(decision(actor, "plan", "read")).toBe("allow");
-      for (const operation of [
-        "edit",
-        "terminal",
-        "test",
-        "stage",
-        "commit",
-        "push",
-        "create-pr",
-        "managed-root",
-        "pr-mutation",
-      ] as const) {
+      for (const operation of Object.keys(MUTATIONS) as ReadonlyArray<
+        Exclude<CodeOperation, "read">
+      >) {
         expect(decision(actor, "plan", operation)).toBe("deny");
       }
     }

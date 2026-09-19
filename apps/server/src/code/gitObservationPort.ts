@@ -1,7 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpath } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -485,19 +485,60 @@ export class GitObservationPort {
     headOid: string,
     signal?: AbortSignal,
   ): Promise<"clean" | "conflicts" | "unknown"> {
-    const result = await this.#run(
-      ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
+    // `merge-tree --write-tree` is the one observation that writes: it puts the
+    // merged tree in the object database, which for a linked worktree lives
+    // outside the bound root. Asking the launch for that write would hand the
+    // authority to every caller of this port, none of which is policy-aware,
+    // so a Plan thread — read-only always under 0009 — could reach the parent
+    // repository's refs, objects and hooks. Quarantine the output in the
+    // launch's own temporary directory instead and read the real objects
+    // through an alternate, the way Git quarantines an incoming push, so
+    // observing mergeability writes nothing the caller owns.
+    const objects = await this.#run(
+      ["-C", checkoutRoot, "rev-parse", "--path-format=absolute", "--git-path", "objects"],
       signal,
     );
-    // `merge-tree --write-tree` exits 0 for a clean merge and 1 for conflicts.
-    // Anything else is a Git that could not answer — an older one, or a
-    // repository state it refused to read — and is reported as such.
-    if (result.exitCode === 0) return "clean";
-    if (result.exitCode === 1) return "conflicts";
-    return "unknown";
+    const objectDirectory = objects.stdout.trim();
+    if (objects.exitCode !== 0 || !isAbsolute(objectDirectory)) return "unknown";
+    let quarantine: string;
+    try {
+      quarantine = await mkdtemp(join(this.#confinement.temporaryDirectory, "octant-merge-"));
+    } catch {
+      return "unknown";
+    }
+    try {
+      // The real objects are named in the quarantine's own `info/alternates`
+      // rather than in GIT_ALTERNATE_OBJECT_DIRECTORIES, which is separated by
+      // colons and so cannot carry a checkout path that contains one.
+      await mkdir(join(quarantine, "info"), { recursive: true });
+      await writeFile(
+        join(quarantine, "info", "alternates"),
+        `${quotedAlternatesEntry(objectDirectory)}\n`,
+        "utf8",
+      );
+      const result = await this.#run(
+        ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
+        signal,
+        quarantine,
+      );
+      // `merge-tree --write-tree` exits 0 for a clean merge and 1 for conflicts.
+      // Anything else is a Git that could not answer — an older one, or a
+      // repository state it refused to read — and is reported as such.
+      if (result.exitCode === 0) return "clean";
+      if (result.exitCode === 1) return "conflicts";
+      return "unknown";
+    } catch {
+      return "unknown";
+    } finally {
+      await rm(quarantine, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
-  async #run(args: readonly string[], parentSignal?: AbortSignal): Promise<CommandResult> {
+  async #run(
+    args: readonly string[],
+    parentSignal?: AbortSignal,
+    quarantine?: string,
+  ): Promise<CommandResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
     parentSignal?.addEventListener("abort", abort, { once: true });
@@ -516,11 +557,21 @@ export class GitObservationPort {
         args,
         temporaryDirectory: this.#confinement.temporaryDirectory,
         networkEgress: this.#confinement.networkEgress,
+        // Every command this port runs is a read, so the launch keeps its
+        // read-only default and never receives the out-of-root write grant.
+        // The quarantined object database is the one thing it writes, and it
+        // has to be named: on Linux a shared host temporary root becomes a
+        // private tmpfs rather than a bind, so a directory created under it
+        // does not exist for the confined process unless the launch says so.
+        ...(quarantine === undefined ? {} : { additionalWriteRoots: [quarantine] }),
       });
       return await this.#dependencies.execFile(
         launch.command,
         launch.args,
-        createGitCommandEnvironment(process.env),
+        {
+          ...createGitCommandEnvironment(process.env),
+          ...(quarantine === undefined ? {} : { GIT_OBJECT_DIRECTORY: quarantine }),
+        },
         controller.signal,
       );
     } catch (error) {
@@ -560,6 +611,43 @@ async function readRemotes(
 }
 
 /** Shared with the environment port so one reading of `--numstat` is parsed one way. */
+const ALTERNATES_ESCAPES: ReadonlyMap<string, string> = new Map([
+  ["\u0007", "\\a"],
+  ["\b", "\\b"],
+  ["\f", "\\f"],
+  ["\n", "\\n"],
+  ["\r", "\\r"],
+  ["\t", "\\t"],
+  ["\v", "\\v"],
+]);
+
+/**
+ * A path as Git's alternates file spells it.
+ *
+ * Entries there are separated by newlines, and a newline is a legal character
+ * in a macOS path, so an unquoted entry for such a checkout reads as two
+ * directories that do not exist and the merge finds no commits. Git unquotes
+ * any entry that begins with a double quote, so every entry is written that
+ * way rather than only the ones that would otherwise break.
+ */
+function quotedAlternatesEntry(path: string): string {
+  let escaped = "";
+  for (const character of path) {
+    if (character === "\\" || character === '"') {
+      escaped += `\\${character}`;
+      continue;
+    }
+    const named = ALTERNATES_ESCAPES.get(character);
+    if (named !== undefined) {
+      escaped += named;
+      continue;
+    }
+    const code = character.codePointAt(0) ?? 0;
+    escaped += code < 0x20 || code === 0x7f ? `\\${code.toString(8).padStart(3, "0")}` : character;
+  }
+  return `"${escaped}"`;
+}
+
 export function parseNumstat(
   output: string,
 ): { readonly insertions: number; readonly deletions: number } | undefined {

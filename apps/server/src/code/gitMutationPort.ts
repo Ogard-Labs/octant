@@ -895,6 +895,10 @@ export class GitMutationPort {
         args,
         temporaryDirectory: this.#confinement.temporaryDirectory,
         networkEgress: this.#confinement.networkEgress,
+        // Plan is read-only, so it must not receive the out-of-root write
+        // grant either: `planGitMutationConfinement` clears `writeBoundRoot`,
+        // but the launch's own appended rules would otherwise outrank it.
+        writable: executionPolicy !== "plan",
       });
       return await this.#dependencies.execFile(
         launch.command,
