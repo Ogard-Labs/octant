@@ -126,13 +126,29 @@ export function gitShimExtraRules(
   return MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`);
 }
 
+export interface GitLinkedWorktreeMetadataOptions {
+  /**
+   * Whether the launch may write the out-of-root metadata. Staging, committing
+   * and checkpoint restore do; observing history does not. It defaults to
+   * false because these rules are appended last, and Seatbelt resolves by last
+   * matching rule: a write allow here overrides a caller's own write deny on
+   * the same path, so a launch that asked to stay read-only would silently
+   * receive write authority over the parent repository's entire .git — refs,
+   * objects and hooks included.
+   */
+  readonly writable?: boolean;
+}
+
 /**
  * A linked worktree's .git file points at the main repository's
  * .git/worktrees/<name>, outside the bound root. Allow that metadata and its
  * commondir so git can see it is a repository, without opening the parent
  * working tree.
  */
-export function gitLinkedWorktreeMetadataRules(checkoutRoot: string): ReadonlyArray<string> {
+export function gitLinkedWorktreeMetadataRules(
+  checkoutRoot: string,
+  options: GitLinkedWorktreeMetadataOptions = {},
+): ReadonlyArray<string> {
   let gitdir: string | undefined;
   try {
     const text = readFileSync(join(checkoutRoot, ".git"), "utf8");
@@ -152,7 +168,7 @@ export function gitLinkedWorktreeMetadataRules(checkoutRoot: string): ReadonlyAr
   }
   return roots.flatMap((path) => [
     seatbeltAllowRule("file-read*", path),
-    seatbeltAllowRule("file-write*", path),
+    ...(options.writable === true ? [seatbeltAllowRule("file-write*", path)] : []),
     ...ancestorMetadataRules(path),
   ]);
 }
@@ -253,7 +269,9 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
   const binaryDirectory = dirname(options.gitExecutable);
   const extraRules = [
     ...gitShimExtraRules(),
-    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot),
+    // This launch leaves the bound root writable, so staging, committing and
+    // checkpoint restore reach the worktree's own metadata here too.
+    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, { writable: true }),
   ];
   return options.confinement.prepare({
     executable: options.gitExecutable,

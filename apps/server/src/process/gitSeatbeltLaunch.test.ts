@@ -79,6 +79,14 @@ describe("git Seatbelt launch", () => {
       // components, so every ancestor needs metadata of its own — and only
       // metadata: the worktree root's contents stay unreadable.
       expect(rules).toContain(`(allow file-read-metadata (literal "${root}"))`);
+      // These rules are appended last and Seatbelt resolves by last matching
+      // rule, so a write allow here would override a read-only caller's own
+      // write deny on the same path. Observing history must not come with
+      // write authority over the parent repository's refs, objects and hooks.
+      expect(rules.some((rule) => rule.includes("file-write"))).toBe(false);
+      expect(gitLinkedWorktreeMetadataRules(worktree, { writable: true })).toContain(
+        `(allow file-write* (subpath "${common}"))`,
+      );
       expect(rules).not.toContain(`(allow file-read* (subpath "${root}"))`);
     } finally {
       rmSync(root, { recursive: true, force: true });
