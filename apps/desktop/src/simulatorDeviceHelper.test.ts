@@ -15,6 +15,7 @@ function frame(value: unknown): Buffer {
 function fakeChild() {
   const requests: Array<Record<string, unknown>> = [];
   let emitData: (chunk: Uint8Array) => void = () => undefined;
+  let emitFrames: (chunk: Uint8Array) => void = () => undefined;
   const listeners = new Map<string, () => void>();
   const child: DeviceHelperChild = {
     stdin: {
@@ -28,6 +29,11 @@ function fakeChild() {
     stdout: {
       on: (_event, listener) => {
         emitData = listener;
+      },
+    },
+    frames: {
+      on: (_event, listener) => {
+        emitFrames = listener;
       },
     },
     on: (event, listener) => {
@@ -45,6 +51,9 @@ function fakeChild() {
       emitData(bytes.subarray(3));
     },
     exit: () => listeners.get("exit")?.(),
+    frames: (...chunks: ReadonlyArray<Uint8Array>) => {
+      for (const chunk of chunks) emitFrames(chunk);
+    },
   };
 }
 
@@ -157,5 +166,100 @@ describe("Simulator device helpers", () => {
     await expect(
       helpers.send(simulator, { op: "tap", x: 0.1, y: 0.1 }, 500),
     ).resolves.toMatchObject({ status: "unavailable" });
+  });
+
+  it("shares one screen stream between viewers and stops it with the last one", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+
+    const first = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const firstWatch = await first;
+    const secondWatch = await helpers.watch(
+      simulator,
+      options,
+      { onFrame: vi.fn(), onEnd: vi.fn() },
+      5_000,
+    );
+    expect(firstWatch.status).toBe("watching");
+    expect(secondWatch.status).toBe("watching");
+    expect(fake.requests).toEqual([{ op: "stream-start", ...options, id: 1 }]);
+
+    if (firstWatch.status === "watching") firstWatch.stop();
+    expect(fake.requests).toHaveLength(1);
+    if (secondWatch.status === "watching") secondWatch.stop();
+    expect(fake.requests.at(-1)).toMatchObject({ op: "stream-stop" });
+    helpers.dispose();
+  });
+
+  it("hands every viewer each whole frame, however the bytes arrive", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const onFrame = vi.fn();
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame, onEnd: vi.fn() },
+      5_000,
+    );
+    fake.answer({ id: 1, ok: true });
+    await watching;
+
+    const jpeg = Buffer.from([0xff, 0xd8, 0x01, 0x02, 0x03, 0xff, 0xd9]);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(jpeg.length);
+    const wire = Buffer.concat([header, jpeg, header, jpeg]);
+    fake.frames(wire.subarray(0, 6), wire.subarray(6, 13), wire.subarray(13));
+
+    expect(onFrame).toHaveBeenCalledTimes(2);
+    expect(Buffer.from(onFrame.mock.calls[0]?.[0] as Uint8Array)).toEqual(jpeg);
+    helpers.dispose();
+  });
+
+  it("tells viewers when the helper stops, and keeps a watched helper past the idle window", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({
+      helperPath: "/h",
+      spawn: () => fake.child,
+      idleMs: 1_000,
+    });
+    const onEnd = vi.fn();
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd },
+      500,
+    );
+    fake.answer({ id: 1, ok: true });
+    await watching;
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.exit();
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the helper's refusal to stream and keeps no viewer", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const onEnd = vi.fn();
+
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd },
+      5_000,
+    );
+    fake.answer({ id: 1, ok: false, code: "not-booted", message: "the Simulator is Shutdown" });
+
+    await expect(watching).resolves.toEqual({
+      status: "refused",
+      code: "not-booted",
+      message: "the Simulator is Shutdown",
+    });
+    fake.exit();
+    expect(onEnd).not.toHaveBeenCalled();
   });
 });

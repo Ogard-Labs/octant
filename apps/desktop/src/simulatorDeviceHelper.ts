@@ -23,6 +23,13 @@ export type DeviceHelperRequest =
       readonly x: number;
       readonly y: number;
     }
+  | {
+      readonly op: "stream-start";
+      readonly maxHeight: number;
+      readonly quality: number;
+      readonly framesPerSecond: number;
+    }
+  | { readonly op: "stream-stop" }
   | { readonly op: "text"; readonly text: string }
   | { readonly op: "key"; readonly key: string }
   | { readonly op: "button"; readonly button: "home" | "lock" };
@@ -38,10 +45,30 @@ export type DeviceHelperReply =
   /** No answer came: the helper is missing, died, or outlived its budget. */
   | { readonly status: "unavailable"; readonly message: string };
 
+export interface DeviceWatchOptions {
+  readonly maxHeight: number;
+  readonly quality: number;
+  readonly framesPerSecond: number;
+}
+
+export interface DeviceViewer {
+  /** One whole JPEG of the Simulator's screen. */
+  readonly onFrame: (jpeg: Uint8Array) => void;
+  /** The helper stopped; no more frames will come. Not called after `stop()`. */
+  readonly onEnd: () => void;
+}
+
+export type DeviceWatch =
+  | { readonly status: "watching"; readonly stop: () => void }
+  | { readonly status: "refused"; readonly code: string; readonly message: string }
+  | { readonly status: "unavailable"; readonly message: string };
+
 /** The part of a child process this module uses, so a test can stand one in. */
 export interface DeviceHelperChild {
   readonly stdin: { write(chunk: Uint8Array): unknown; end(): unknown };
   readonly stdout: { on(event: "data", listener: (chunk: Uint8Array) => void): unknown };
+  /** File descriptor 3: length-prefixed JPEG frames while a stream is running. */
+  readonly frames: { on(event: "data", listener: (chunk: Uint8Array) => void): unknown };
   on(event: "exit" | "error", listener: () => void): unknown;
   kill(): unknown;
 }
@@ -61,13 +88,18 @@ interface PendingReply {
 interface RunningHelper {
   readonly child: DeviceHelperChild;
   readonly pending: Map<number, PendingReply>;
+  readonly viewers: Set<DeviceViewer>;
   buffered: Buffer;
+  bufferedFrames: Buffer;
   nextId: number;
   idle: ReturnType<typeof setTimeout> | undefined;
+  /** Settles once the helper has answered the viewers' shared `stream-start`. */
+  streaming: Promise<DeviceHelperReply> | undefined;
 }
 
 const SIMULATOR_ID = /^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/;
 const MAXIMUM_REPLY_BYTES = 262_144;
+const MAXIMUM_FRAME_BYTES = 8 * 1024 * 1024;
 const DEFAULT_IDLE_MS = 120_000;
 
 function frame(value: Record<string, unknown>): Buffer {
@@ -112,8 +144,28 @@ function replyFrom(value: unknown): DeviceHelperReply {
 export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOptions) {
   const spawn =
     options.spawn ??
-    ((helperPath: string, simulatorId: string): DeviceHelperChild =>
-      spawnProcess(helperPath, [simulatorId], { stdio: ["pipe", "pipe", "ignore"] }));
+    ((helperPath: string, simulatorId: string): DeviceHelperChild => {
+      const child = spawnProcess(helperPath, [simulatorId], {
+        stdio: ["pipe", "pipe", "ignore", "pipe"],
+      });
+      const frames = child.stdio[3];
+      if (
+        child.stdin === null ||
+        child.stdout === null ||
+        frames === null ||
+        frames === undefined
+      ) {
+        child.kill();
+        throw new Error("The device helper started without its pipes.");
+      }
+      return {
+        stdin: child.stdin,
+        stdout: child.stdout,
+        frames,
+        on: (event, listener) => child.on(event, listener),
+        kill: () => child.kill(),
+      };
+    });
   const idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
   const running = new Map<string, RunningHelper>();
   let disposed = false;
@@ -126,6 +178,9 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       waiting.settle({ status: "unavailable", message });
     }
     helper.pending.clear();
+    const viewers = [...helper.viewers];
+    helper.viewers.clear();
+    for (const viewer of viewers) viewer.onEnd();
     try {
       helper.child.stdin.end();
     } catch {
@@ -138,10 +193,28 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     const helper: RunningHelper = {
       child: spawn(options.helperPath, simulatorId),
       pending: new Map(),
+      viewers: new Set(),
       buffered: Buffer.alloc(0),
+      bufferedFrames: Buffer.alloc(0),
       nextId: 1,
       idle: undefined,
+      streaming: undefined,
     };
+    helper.child.frames.on("data", (chunk) => {
+      helper.bufferedFrames = Buffer.concat([helper.bufferedFrames, chunk]);
+      while (helper.bufferedFrames.length >= 4) {
+        const length = helper.bufferedFrames.readUInt32BE(0);
+        if (length > MAXIMUM_FRAME_BYTES) {
+          stop(simulatorId, helper, "The device helper sent an oversized frame.");
+          return;
+        }
+        if (helper.bufferedFrames.length < length + 4) return;
+        // Copied: the viewers keep the frame after this buffer moves on.
+        const jpeg = Uint8Array.from(helper.bufferedFrames.subarray(4, length + 4));
+        helper.bufferedFrames = helper.bufferedFrames.subarray(length + 4);
+        for (const viewer of helper.viewers) viewer.onFrame(jpeg);
+      }
+    });
     helper.child.stdout.on("data", (chunk) => {
       helper.buffered = Buffer.concat([helper.buffered, chunk]);
       while (helper.buffered.length >= 4) {
@@ -175,6 +248,38 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     return helper;
   }
 
+  function ask(
+    simulatorId: string,
+    helper: RunningHelper,
+    request: DeviceHelperRequest,
+    timeoutMs: number,
+  ): Promise<DeviceHelperReply> {
+    if (helper.idle !== undefined) clearTimeout(helper.idle);
+    // A helper someone is watching is in use even when no input arrives.
+    helper.idle =
+      helper.viewers.size > 0
+        ? undefined
+        : setTimeout(() => {
+            if (helper.viewers.size === 0) {
+              stop(simulatorId, helper, "The device helper was stopped while idle.");
+            }
+          }, idleMs);
+    const id = helper.nextId;
+    helper.nextId += 1;
+    return new Promise<DeviceHelperReply>((settle) => {
+      const timer = setTimeout(
+        () => stop(simulatorId, helper, "The device helper did not answer in time."),
+        timeoutMs,
+      );
+      helper.pending.set(id, { settle, timer });
+      try {
+        helper.child.stdin.write(frame({ ...request, id }));
+      } catch {
+        stop(simulatorId, helper, "The device helper stopped before it answered.");
+      }
+    });
+  }
+
   return {
     /**
      * Delivers one input and resolves when the helper says it landed, refused,
@@ -205,25 +310,60 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
           message: "The device helper could not be started.",
         });
       }
-      if (helper.idle !== undefined) clearTimeout(helper.idle);
-      helper.idle = setTimeout(
-        () => stop(simulatorId, helper, "The device helper was stopped while idle."),
-        idleMs,
+      return ask(simulatorId, helper, request, timeoutMs);
+    },
+
+    /**
+     * Shows a viewer the Simulator's screen as it changes. Viewers of one
+     * Simulator share a single stream, started with the first viewer's options
+     * and stopped with the last viewer; a watched helper is never idle.
+     */
+    async watch(
+      simulatorId: string,
+      watchOptions: DeviceWatchOptions,
+      viewer: DeviceViewer,
+      timeoutMs: number,
+    ): Promise<DeviceWatch> {
+      if (disposed) return { status: "unavailable", message: "The desktop is shutting down." };
+      if (!SIMULATOR_ID.test(simulatorId)) {
+        return {
+          status: "refused",
+          code: "no-such-device",
+          message: "That is not a Simulator identifier.",
+        };
+      }
+      let helper: RunningHelper;
+      try {
+        helper = running.get(simulatorId) ?? start(simulatorId);
+      } catch {
+        return { status: "unavailable", message: "The device helper could not be started." };
+      }
+      helper.streaming ??= ask(
+        simulatorId,
+        helper,
+        { op: "stream-start", ...watchOptions },
+        timeoutMs,
       );
-      const id = helper.nextId;
-      helper.nextId += 1;
-      return new Promise<DeviceHelperReply>((settle) => {
-        const timer = setTimeout(
-          () => stop(simulatorId, helper, "The device helper did not answer in time."),
-          timeoutMs,
-        );
-        helper.pending.set(id, { settle, timer });
-        try {
-          helper.child.stdin.write(frame({ ...request, id }));
-        } catch {
-          stop(simulatorId, helper, "The device helper stopped before it answered.");
-        }
-      });
+      const started = await helper.streaming;
+      if (started.status !== "delivered") {
+        if (running.get(simulatorId) === helper) helper.streaming = undefined;
+        return started;
+      }
+      if (running.get(simulatorId) !== helper) {
+        return { status: "unavailable", message: "The device helper stopped before it answered." };
+      }
+      helper.viewers.add(viewer);
+      if (helper.idle !== undefined) clearTimeout(helper.idle);
+      return {
+        status: "watching",
+        stop: () => {
+          if (!helper.viewers.delete(viewer) || helper.viewers.size > 0) return;
+          helper.streaming = undefined;
+          if (running.get(simulatorId) === helper) {
+            void ask(simulatorId, helper, { op: "stream-stop" }, 5_000);
+          }
+        },
+      };
     },
 
     /** True while any input is still waiting for its answer. */

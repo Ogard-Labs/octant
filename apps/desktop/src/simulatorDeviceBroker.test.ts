@@ -1,12 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
 import {
   createSimulatorInputDelivery,
+  createSimulatorScreenStream,
   simulatorDeviceBrokerHandler,
 } from "./simulatorDeviceBroker";
 import type {
   DeviceHelperReply,
   DeviceHelperRequest,
+  DeviceViewer,
+  DeviceWatch,
   SimulatorDeviceHelpers,
 } from "./simulatorDeviceHelper";
 
@@ -18,7 +23,14 @@ function helpers(answer: (request: DeviceHelperRequest) => DeviceHelperReply) {
     async (_simulatorId: string, request: DeviceHelperRequest, _timeoutMs: number) =>
       answer(request),
   );
-  const fake: SimulatorDeviceHelpers = { send, busy: () => false, dispose: vi.fn() };
+  const fake: SimulatorDeviceHelpers = {
+    send,
+    watch: vi.fn(
+      async (): Promise<DeviceWatch> => ({ status: "unavailable", message: "not under test" }),
+    ),
+    busy: () => false,
+    dispose: vi.fn(),
+  };
   return { fake, send };
 }
 
@@ -168,5 +180,133 @@ describe("private Simulator device broker", () => {
       budgetMs: 30_000,
       key: "home",
     });
+  });
+});
+
+describe("the Simulator screen stream", () => {
+  const servers: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.closeAllConnections();
+            server.close(() => resolve());
+          }),
+      ),
+    );
+  });
+
+  async function serve(fake: SimulatorDeviceHelpers) {
+    const stream = createSimulatorScreenStream(fake);
+    const server = createServer((incoming, outgoing) => {
+      const chunks: Buffer[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", () => {
+        void stream(JSON.parse(Buffer.concat(chunks).toString("utf8")), outgoing);
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  }
+
+  function watchable() {
+    let viewer: DeviceViewer | undefined;
+    const stop = vi.fn();
+    const { fake } = helpers(() => ({
+      status: "delivered",
+      screen: { width: 1206, height: 2622 },
+    }));
+    const watching: SimulatorDeviceHelpers = {
+      ...fake,
+      watch: vi.fn(async (_udid, _options, next): Promise<DeviceWatch> => {
+        viewer = next;
+        // The helper's first frame arrives before the answer's headers exist.
+        next.onFrame(Uint8Array.from([0xff, 0xd8, 0x01, 0xff, 0xd9]));
+        return { status: "watching", stop };
+      }),
+    };
+    return { watching, stop, frame: (bytes: number[]) => viewer?.onFrame(Uint8Array.from(bytes)) };
+  }
+
+  const watch = { udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+
+  async function readBytes(reader: ReadableStreamDefaultReader<Uint8Array>, count: number) {
+    let bytes = Buffer.alloc(0);
+    while (bytes.length < count) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes = Buffer.concat([bytes, next.value]);
+    }
+    return [...bytes];
+  }
+
+  it("names the screen's size, sends the first screen at once, then each frame behind its length", async () => {
+    const { watching, frame } = watchable();
+    const url = await serve(watching);
+    const abort = new AbortController();
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-octant-simulator-screen")).toBe("1206x2622");
+    const reader = response.body!.getReader();
+    expect(await readBytes(reader, 9)).toEqual([0, 0, 0, 5, 0xff, 0xd8, 0x01, 0xff, 0xd9]);
+
+    frame([0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]);
+    expect(await readBytes(reader, 10)).toEqual([0, 0, 0, 6, 0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]);
+    abort.abort();
+  });
+
+  it("stops watching when the viewer hangs up", async () => {
+    const { watching, stop } = watchable();
+    const url = await serve(watching);
+    const abort = new AbortController();
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    });
+    await response.body!.getReader().read();
+
+    abort.abort();
+
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+  });
+
+  it("answers a Simulator that cannot be watched with the helper's reason, not an empty stream", async () => {
+    const { fake } = helpers((sent) =>
+      sent.op === "hello"
+        ? { status: "refused", code: "not-booted", message: "the Simulator is Shutdown" }
+        : { status: "delivered" },
+    );
+    const url = await serve(fake);
+
+    const response = await fetch(url, { method: "POST", body: JSON.stringify({ watch }) });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      kind: "refused",
+      reason: "not-booted",
+      message: "the Simulator is Shutdown",
+    });
+    expect(fake.watch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed watch request", async () => {
+    const { watching } = watchable();
+    const url = await serve(watching);
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch: { ...watch, framesPerSecond: 1_000 } }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(watching.watch).not.toHaveBeenCalled();
   });
 });

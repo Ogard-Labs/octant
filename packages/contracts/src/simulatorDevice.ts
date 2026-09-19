@@ -54,7 +54,25 @@ export const SimulatorDeviceInputResult = Schema.Union(
 );
 export type SimulatorDeviceInputResult = typeof SimulatorDeviceInputResult.Type;
 
+/**
+ * A request to watch one Simulator's screen. The answer is a stream of JPEG
+ * frames, each behind a 4-byte big-endian length, sent only when the screen
+ * changes. Watching is a read: it changes nothing on the device.
+ */
+export const SimulatorDeviceWatch = Schema.Struct({
+  udid: destination.udid,
+  /** Frames are scaled down to this height; a pane never needs device pixels. */
+  maxHeight: Schema.Int.pipe(Schema.between(240, 4_096)),
+  quality: Schema.Number.pipe(Schema.between(0.3, 0.95)),
+  framesPerSecond: Schema.Int.pipe(Schema.between(1, 60)),
+}).annotations(strict);
+export type SimulatorDeviceWatch = typeof SimulatorDeviceWatch.Type;
+
+/** Response header naming the device's screen in pixels, as `1206x2622`. */
+export const SIMULATOR_SCREEN_HEADER = "x-octant-simulator-screen";
+
 export const decodeSimulatorDeviceInput = Schema.decodeUnknownSync(SimulatorDeviceInput);
+export const decodeSimulatorDeviceWatch = Schema.decodeUnknownSync(SimulatorDeviceWatch);
 export const decodeSimulatorDeviceInputResult = Schema.decodeUnknownSync(
   SimulatorDeviceInputResult,
 );
