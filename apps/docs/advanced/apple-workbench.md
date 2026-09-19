@@ -72,8 +72,14 @@ erase, or transfer the destination.
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
-requests; the host injects XCTest-less input behind that channel. Remote,
-Linux, and headless clients stay read-only. Typed characters never land in
+requests, and the Octant desktop app delivers them to the Simulator through a
+small native helper it ships. Nothing comes to the foreground and no macOS
+Accessibility permission is needed. A tap lands on the point you click on the
+captured screen. **Type** sends letters, digits, spaces, and new lines; text
+with any other character is refused whole rather than typed wrong, because a
+Simulator maps key positions with its own keyboard language. **Return**,
+**Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
+later. Remote, Linux, and headless clients stay read-only. Typed characters never land in
 durable evidence. Destination actions remain on the workbench list: each
 Simulator offers only what its reported state can perform.
 

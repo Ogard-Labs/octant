@@ -148,6 +148,7 @@ distilled successor of the earlier long-form design specifications.
 | [0134](0134-a-folded-project-reports-its-strongest-thread.md) | A folded Project reports its strongest thread | Accepted |
 | [0135](0135-confined-git-reads-its-worktree-s-metadata.md) | Confined Git reads its worktree's metadata | Accepted |
 | [0136](0136-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
+| [0137](0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md) | Simulator input reaches the guest through a native device helper | Accepted |
 
 ## Adding an ADR
 
