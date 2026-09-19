@@ -88,5 +88,5 @@ credential boundary, setup checklist, and device acceptance pass.
 ## Design
 
 - Decision record: `docs/decisions/0013-remote-access-and-mobile.md`
-- Distribution decision: `docs/decisions/0136-internal-testflight-carries-the-existing-remote-client.md`
+- Distribution decision: `docs/decisions/0137-internal-testflight-carries-the-existing-remote-client.md`
 - Threat model: `docs/security/mobile-remote-control-threat-model.md`

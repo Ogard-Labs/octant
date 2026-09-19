@@ -147,7 +147,7 @@ distilled successor of the earlier long-form design specifications.
 | [0133](0133-confined-discovery-reads-open-named-nodes.md) | Confined discovery reads open named nodes, never trees | Accepted |
 | [0134](0134-a-folded-project-reports-its-strongest-thread.md) | A folded Project reports its strongest thread | Accepted |
 | [0135](0135-confined-git-reads-its-worktree-s-metadata.md) | Confined Git reads its worktree's metadata | Accepted |
-| [0136](0136-internal-testflight-carries-the-existing-remote-client.md) | Internal TestFlight carries the existing remote client | Accepted |
+| [0137](0137-internal-testflight-carries-the-existing-remote-client.md) | Internal TestFlight carries the existing remote client | Accepted |
 
 ## Adding an ADR
 

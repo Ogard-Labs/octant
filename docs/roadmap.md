@@ -58,7 +58,7 @@ Hardening in progress for the preview:
 - Dogfood-driven fixes as they surface.
 - Internal TestFlight packaging for the existing mobile remote client: signing,
   protected CI, Apple processing, and real-device acceptance are separate
-  gates under [0136](decisions/0136-internal-testflight-carries-the-existing-remote-client.md).
+  gates under [0137](decisions/0137-internal-testflight-carries-the-existing-remote-client.md).
 
 ## Next
 
@@ -138,8 +138,8 @@ starts.
   handoff remain primary; a full IDE would run as a separately launched
   companion. Start gates:
   [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
-- **Apple devices and distribution** — physical devices, provisioning,
-  TestFlight, and App Store submission on top of the Simulator loop. Design:
+- **Apple devices and public distribution** — deeper physical-device tooling
+  and App Store submission beyond the internal TestFlight remote-client track. Design:
   [apple-devices-distribution.md](apple-devices-distribution.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
