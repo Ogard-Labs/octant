@@ -94,7 +94,12 @@ whose platform matches the first discovered Simulator. Anything already
 running can be **Cancel**led from **Current progress**.
 
 An approval-gated Code thread asks for confirmation before each of these, the
-same confirmation the rest of Code uses. **Capture screen** does not: reading
+same confirmation the rest of Code uses. Input to the device is the exception
+to "each": the first tap, typed text or key to a Simulator asks once, and that
+approval keeps the Simulator open to input from that thread for fifteen
+minutes after each input, so driving the live frame is not a dialog per touch.
+Shutting the Simulator down, or restarting Octant, ends it. **Capture screen**
+asks for nothing: reading
 a booted Simulator's screen changes nothing, so it works under Plan mode too.
 A capture is recorded as a **screenshot** artifact in **Validation evidence**
 — a durable reference to a local file, never image bytes copied into the

@@ -2,8 +2,9 @@ import type {
   AppleBuildEvidence,
   AppleBuildRequest,
   ApplePlatform,
-  AppleSimulatorRequest,
+  AppleRuntimeSnapshot,
   AppleSimulatorRecord,
+  AppleSimulatorRequest,
   AppleToolchainDiscovery,
   ToolActionAuthority,
 } from "@octant/contracts";
@@ -24,6 +25,25 @@ export interface AppleExecutionScope {
 }
 
 const SIMULATOR_INPUT_KINDS = new Set(["tap", "type-text", "key-press"]);
+
+/**
+ * How long one approved input keeps a Simulator open to further input on its
+ * thread. Confirming every tap made the live device unusable, so an approval
+ * covers the Simulator for this long after each delivered input instead of
+ * covering one action.
+ */
+export const APPLE_INPUT_GRANT_MS = 15 * 60_000;
+
+/** Whether the host's snapshot says this Simulator is open to input right now. */
+export function appleInputGrantIsLive(
+  snapshot: Pick<AppleRuntimeSnapshot, "inputGrants"> | undefined,
+  simulatorId: string,
+  nowMs: number,
+): boolean {
+  return (snapshot?.inputGrants ?? []).some(
+    (grant) => String(grant.simulatorId) === simulatorId && Date.parse(grant.expiresAt) > nowMs,
+  );
+}
 
 export function isAppleSimulatorInputKind(
   kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],

@@ -489,3 +489,21 @@ describe("isToolchainAvailable", () => {
     expect(isToolchainAvailable(unavailableToolchain)).toBe(false);
   });
 });
+
+describe("Simulator input grant", () => {
+  it("reads a live grant for one Simulator from the host's snapshot and nothing from an expired or absent one", async () => {
+    const { appleInputGrantIsLive } = await import("./appleToolchainPolicy");
+    const now = Date.parse("2026-09-19T20:00:00.000Z");
+    const snapshot = {
+      inputGrants: [
+        { simulatorId: "sim-live", expiresAt: "2026-09-19T20:10:00.000Z" },
+        { simulatorId: "sim-expired", expiresAt: "2026-09-19T19:59:59.000Z" },
+      ],
+    } as never;
+    expect(appleInputGrantIsLive(snapshot, "sim-live", now)).toBe(true);
+    expect(appleInputGrantIsLive(snapshot, "sim-expired", now)).toBe(false);
+    expect(appleInputGrantIsLive(snapshot, "sim-other", now)).toBe(false);
+    expect(appleInputGrantIsLive(undefined, "sim-live", now)).toBe(false);
+    expect(appleInputGrantIsLive({} as never, "sim-live", now)).toBe(false);
+  });
+});

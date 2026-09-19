@@ -9,8 +9,10 @@ import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-d
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
 import {
+  appleInputGrantIsLive,
   appleLiveFrameIsStaleAfterRestart,
   decidesCodeEffectsByApproval,
+  isAppleSimulatorInputKind,
   latestAppleScreenshotEvidence,
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
@@ -517,7 +519,14 @@ function AppleWorkbenchSurface(props: {
         // the bound checkout and goes through the same native confirmation the
         // rest of Code uses.
         let request = base;
-        if (approvalGated && intent.kind !== "screenshot") {
+        // One approved input opens its Simulator to this thread for a while;
+        // the host says so in the snapshot, and asking again for every tap
+        // would raise a confirmation the host no longer requires.
+        const inputGranted =
+          isAppleSimulatorInputKind(intent.kind) &&
+          "simulatorId" in intent &&
+          appleInputGrantIsLive(controller.runtime, String(intent.simulatorId), Date.now());
+        if (approvalGated && intent.kind !== "screenshot" && !inputGranted) {
           if (requestApproval === undefined) {
             setActionMessage(
               "This window cannot confirm Apple actions. Approve from the desktop app.",

@@ -1,6 +1,7 @@
 import {
   decodeAppleArtifactRequest,
   decodeAppleRpcEnvelope,
+  decodeAppleRuntimeSnapshot,
   type AppleAuthorityScopeRequest,
   type AppleRpcEnvelope,
   type WindowId,
@@ -23,6 +24,10 @@ export interface AppleToolchainRouteDependencies {
     scope: AppleAuthorityScopeRequest,
     envelope: AppleRpcEnvelope,
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
+  /** Simulators the thread may send input to without a new approval. */
+  readonly inputGrants?: (
+    threadId: AppleExecutionContext["threadId"],
+  ) => ReadonlyArray<{ readonly simulatorId: string; readonly expiresAt: string }>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
   readonly nowIso?: () => string;
@@ -163,12 +168,25 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
             200,
             origin,
           );
-        case "apple-snapshot-request":
+        case "apple-snapshot-request": {
+          const inputGrants = dependencies.inputGrants?.(context.threadId) ?? [];
           return encoded(
-            { kind: "apple-runtime-snapshot", snapshot: dependencies.service.snapshot(context) },
+            {
+              kind: "apple-runtime-snapshot",
+              // Decoded, not cast: the grants arrive as plain host strings and
+              // leave as the contract's branded identifiers or not at all.
+              snapshot:
+                inputGrants.length === 0
+                  ? dependencies.service.snapshot(context)
+                  : decodeAppleRuntimeSnapshot({
+                      ...dependencies.service.snapshot(context),
+                      inputGrants,
+                    }),
+            },
             200,
             origin,
           );
+        }
         default:
           return failure("invalid", "Apple toolchain request is invalid.", 400, origin);
       }

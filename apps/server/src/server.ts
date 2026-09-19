@@ -623,6 +623,7 @@ import {
   type AppleRuntimeReceipt,
   APPLE_TOOLCHAIN_HOST_READ_PATHS,
 } from "./apple/appleToolchainService";
+import { SimulatorInputGrants } from "./apple/simulatorInputGrants";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -661,6 +662,7 @@ import {
   canonicalizeWorkRelativePath,
   chatTurnAnsweredAttempt,
   decidesCodeEffectsByApproval,
+  isAppleSimulatorInputKind,
   defaultShellSettings,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
@@ -4205,6 +4207,7 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
+    const simulatorInputGrants = new SimulatorInputGrants();
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
       realpath,
@@ -4280,15 +4283,32 @@ export function startOctantServer(
         return undefined;
       }
       const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
-      const approvalValid =
-        envelope.kind !== "apple-action-request"
-          ? true
-          : effectiveThread.executionPolicy === "full-access"
-            ? true
-            : decidesCodeEffectsByApproval(effectiveThread.executionPolicy)
-              ? ((await codeOperationRuntime?.validateAppleApproval(windowId, envelope.request)) ??
-                false)
-              : false;
+      const action = envelope.kind === "apple-action-request" ? envelope.request : undefined;
+      // A Simulator that shuts down is closed to input for every thread: the
+      // next boot is a different session of that device.
+      if (action?.kind === "shutdown") simulatorInputGrants.revokeSimulator(action.simulatorId);
+      const inputSimulatorId =
+        action !== undefined && isAppleSimulatorInputKind(action.kind) && "simulatorId" in action
+          ? action.simulatorId
+          : undefined;
+      let approvalValid: boolean;
+      if (action === undefined || effectiveThread.executionPolicy === "full-access") {
+        approvalValid = true;
+      } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
+        approvalValid = false;
+      } else if (
+        inputSimulatorId !== undefined &&
+        simulatorInputGrants.use(String(thread.id), String(inputSimulatorId))
+      ) {
+        // One approved input opened this Simulator to the thread; confirming
+        // every tap made the live device unusable.
+        approvalValid = true;
+      } else {
+        approvalValid =
+          (await codeOperationRuntime?.validateAppleApproval(windowId, action)) ?? false;
+        if (approvalValid && inputSimulatorId !== undefined)
+          simulatorInputGrants.open(String(thread.id), String(inputSimulatorId));
+      }
       return {
         authority: scope.authority,
         threadId: thread.id,
@@ -4304,6 +4324,7 @@ export function startOctantServer(
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
+      inputGrants: (threadId) => simulatorInputGrants.list(String(threadId)),
       recordEvidence: recordAppleEvidence,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
