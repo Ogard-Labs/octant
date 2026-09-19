@@ -816,7 +816,7 @@ describe("AppleToolchainService Simulator input", () => {
             stderr:
               "2026-09-19 16:30:07.225 osascript[11087:11470129] Error received in message reply handler: Connection invalid\n" +
               "2026-09-19 16:30:07.225 osascript[11087:11470132] Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
-              "2026-09-19 16:30:07.226 osascript[11087:11470129] ",
+              `2026-09-19 16:30:07.226 osascript[11087:11470129] script at ${context.checkoutRoot}/run.scpt`,
           })
         : discovery(input as never),
     );
@@ -845,6 +845,8 @@ describe("AppleToolchainService Simulator input", () => {
     );
     expect(evidence.outcome).toBe("failed");
     expect(JSON.stringify(evidence.diagnostics)).toContain("com.apple.hiservices-xpcservice");
+    // The refusal is named without carrying the host's checkout path with it.
+    expect(JSON.stringify(evidence.diagnostics)).not.toContain(context.checkoutRoot);
     const log = evidence.artifacts.find(
       (artifact: { readonly kind: string }) => artifact.kind === "log",
     );

@@ -557,7 +557,12 @@ export class AppleToolchainService {
               message:
                 request.kind === "type-text"
                   ? `type-text ${outcomeFor(terminal)} (text redacted)`
-                  : inputFailureNote(request.kind, outcomeFor(terminal), text(terminal.stderr)),
+                  : inputFailureNote(
+                      request.kind,
+                      outcomeFor(terminal),
+                      text(terminal.stderr),
+                      context,
+                    ),
             };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
@@ -1225,8 +1230,13 @@ function inputFailureNote(
   kind: AppleSimulatorRequest["kind"],
   outcome: AppleBuildEvidence["outcome"],
   stderr: string,
+  context: AppleExecutionContext,
 ): string {
+  // The host's words are journaled, so they cross the same boundary as any
+  // other command output: host roots are replaced before anything is kept.
   const detail = stderr
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]")
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((line) => line.trim())
