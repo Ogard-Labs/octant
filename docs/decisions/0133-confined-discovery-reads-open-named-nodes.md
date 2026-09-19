@@ -88,12 +88,13 @@ sanitized environment, the write scoping, and Plan and Chat process denial.
   linked-worktree metadata that points into a repository outside the bound
   root. Both are wider than an existence check on a named node — one is a
   person's configuration content, the other reaches outside the bound root, and
-  this record excludes each by name. Both still need a record of their own.
-  Saying so here is what keeps a later change from reading this record as their
-  authority.
+  this record excludes each by name. 0134 covers them, so a later change reads
+  its boundary rather than stretching this one.
 
 ## Related
 
 - 0009 Sandbox confinement, approvals, and Plan mode (two rules scoped)
 - 0115 Terminal cache ancestors expose only directory metadata
 - 0126 Seatbelt opens trust evaluation and launcher symlink metadata
+- 0134 Confined Git reads the user's config and its worktree's metadata (the
+  two cases this record excludes)
