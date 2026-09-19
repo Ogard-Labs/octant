@@ -17,7 +17,6 @@ import {
   Folder,
   FolderOpen,
   FolderGit,
-  GitPullRequest,
   Layers,
   ListFilter,
   ListTree,
@@ -1169,9 +1168,6 @@ function ActivityThreadButton(props: {
   // As in the Project tree, a rested row keeps its wake time even when Last
   // updated is hidden.
   const age = threadRowAgeFact(props.thread, shows.lastUpdated);
-  // Where the row offers its own pull request control, that control names the
-  // request, so the row does not name it a second time.
-  const rowPullRequest = props.actions.onOpenPullRequest === undefined ? pullRequest : undefined;
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
   const row = (
@@ -1189,7 +1185,7 @@ function ActivityThreadButton(props: {
         {...(checkout === undefined ? {} : { checkout })}
         {...(shows.project ? { projectName: props.thread.projectName } : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
-        {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
+        {...(pullRequest === undefined ? {} : { pullRequest })}
         status={
           shows.status ? (
             <ThreadStatusMark
@@ -1227,28 +1223,6 @@ function ActivityThreadButton(props: {
       >
         {row}
       </ThreadRowInfoPopup>
-      {pullRequest === undefined || props.actions.onOpenPullRequest === undefined ? null : (
-        <OctantButton
-          aria-label={`Open pull request #${String(pullRequest.identity.number)}`}
-          className="activity-nav__pr"
-          data-state={pullRequest.state}
-          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-          onClick={(event) => {
-            if (event.metaKey || event.ctrlKey) {
-              props.actions.onOpenPullRequestOnGithub?.(pullRequest.identity);
-              return;
-            }
-            props.actions.onOpenPullRequest?.(pullRequest.identity);
-          }}
-          variant="ghost"
-          type="button"
-        >
-          <span className="sidebar-navigation__thread-pr-mark" data-state={pullRequest.state}>
-            <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
-            {String(pullRequest.identity.number)}
-          </span>
-        </OctantButton>
-      )}
     </div>
   );
 }

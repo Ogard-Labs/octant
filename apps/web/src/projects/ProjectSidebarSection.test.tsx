@@ -1859,6 +1859,10 @@ describe("ProjectSidebarSection row property visibility", () => {
     await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
     const row = screen.getByRole("button", { name: /Planning/ });
     expect(within(row).getByText("feature/sidebar")).toBeVisible();
+    // The row names the request whether or not it can also open it. It used to
+    // leave the number to a separate control that never rendered once the row
+    // had a menu, so a feed with GitHub authority showed no pull requests.
+    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toBeVisible();
     await user.hover(row);
     const details = await screen.findByRole("group", { name: "Thread details" });
     expect(details).toHaveTextContent("Planning");

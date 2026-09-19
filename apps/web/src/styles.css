@@ -9855,11 +9855,6 @@ ul.board-col-body {
   flex: 1 1 auto;
   min-width: 0;
 }
-.activity-nav__pr {
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 4px;
-}
 
 .projects-page-layer {
   position: absolute;

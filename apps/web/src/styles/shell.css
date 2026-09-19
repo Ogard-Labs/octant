@@ -922,14 +922,61 @@ html[data-octant-native-host="true"]
   min-width: 0;
 }
 
-/* Fork mark sits beside the status dot as its own control. Sizing only:
-   colour, focus, and hover stay on the ghost-icon recipe. */
+/* Fork mark sits beside the status dot as its own control. It is a sibling of
+   the row's button, because a button cannot hold another, and as a flex item
+   in front of that button it pushed the button in: a forked thread's fill
+   began 28px from the sidebar's edge while every other row's began 8px from
+   it. It now floats over the row's end, in room the status makes for it.
+   Sizing only otherwise: colour, focus, and hover stay on the ghost-icon
+   recipe. */
 .sidebar-navigation__thread-lineage {
-  flex: none;
+  position: absolute;
+  top: 50%;
+  right: calc(var(--oct-nav-inset) + 18px);
+  z-index: 1;
   width: 18px;
   height: 18px;
   min-height: 18px;
   padding: 0;
+  transform: translateY(-50%);
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
+  .sidebar-navigation__thread-status {
+  margin-inline-start: 22px;
+}
+
+/* A view that hides the status leaves no slot to stand beside, so the room is
+   kept at the row's end instead. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
+  > .sidebar-navigation__thread:not(:has(.sidebar-navigation__thread-status)) {
+  padding-inline-end: calc(var(--oct-nav-inset) + 22px);
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage):not(
+    :has(.sidebar-navigation__thread-status)
+  )
+  .sidebar-navigation__thread-lineage {
+  right: var(--oct-nav-inset);
+}
+
+/* While the row's actions show, the mark steps left of them rather than
+   sitting under them, and the row makes that much more room. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+    .sidebar-navigation__thread-lineage
+  ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+  > .sidebar-navigation__thread {
+  padding-inline-end: 78px;
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
+    :hover,
+    :focus-within,
+    :has([aria-expanded="true"]),
+    :has([data-popup-open])
+  )
+  .sidebar-navigation__thread-lineage {
+  right: 58px;
 }
 
 .thread-lineage {
