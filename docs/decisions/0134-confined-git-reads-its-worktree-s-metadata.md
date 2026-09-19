@@ -56,8 +56,12 @@ cover and Octant needs.
   posture the launch itself declared — including Plan's, which 0009 keeps
   read-only always. A caller that genuinely writes the metadata asks for it and
   says why; a caller that forgets is confined rather than widened.
-- The grant tracks **the policy in force, not the helper the caller reached
-  for**, so a Plan mutation is refused it even though it runs the writable path.
+- **Only a non-Plan mutation launch may emit that allow.** Because the appended
+  rule outranks the posture, Plan cannot be protected by the confinement it
+  declares; the caller withholds the grant instead, asking for write only when
+  the policy in force is not Plan. The grant tracks **the policy in force, not
+  the helper the caller reached for**, so a Plan mutation is refused it even
+  though it runs the writable path.
 - A port that is not policy-aware may not ask for it at all, because the grant
   would reach every caller it has. Observing mergeability runs
   `merge-tree --write-tree`, which writes the merged tree into the object
