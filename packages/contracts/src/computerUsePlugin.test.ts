@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decodeComputerControlCommand, decodeComputerUseSettings } from "./computerUsePlugin";
+import {
+  decodeComputerControlCommand,
+  decodeComputerUseSettings,
+  decodeSimulatorInputCommand,
+} from "./computerUsePlugin";
 
 describe("Computer use plugin commands", () => {
   it("requires an observed element for control and refuses arbitrary driver commands", () => {
@@ -28,5 +32,36 @@ describe("Computer use plugin commands", () => {
       text: "  indented\n",
     });
     expect(decodeComputerControlCommand({ ...base, text: "" })).toMatchObject({ text: "" });
+  });
+});
+
+describe("Simulator input through the desktop broker", () => {
+  it("names the device window and refuses a coordinate tap without its frame", () => {
+    const destination = { udid: "348B3796-90BE-4B03-ADC1-46D7468C9D43", name: "iPhone 17 Pro" };
+    expect(
+      decodeSimulatorInputCommand({ kind: "type-text", ...destination, text: " spaced " }),
+    ).toMatchObject({ text: " spaced " });
+    expect(
+      decodeSimulatorInputCommand({
+        kind: "tap",
+        ...destination,
+        point: { x: 562, y: 1221 },
+        frame: { width: 1206, height: 2622 },
+      }),
+    ).toMatchObject({ point: { x: 562, y: 1221 } });
+    expect(() =>
+      decodeSimulatorInputCommand({ kind: "tap", ...destination, point: { x: 1, y: 1 } }),
+    ).toThrow();
+    expect(() =>
+      decodeSimulatorInputCommand({
+        kind: "key-press",
+        udid: "../x",
+        name: "iPhone",
+        key: "return",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeSimulatorInputCommand({ kind: "type-text", ...destination, text: "x", appId: "*" }),
+    ).toThrow();
   });
 });

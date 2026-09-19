@@ -5,7 +5,15 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export type AppleSimulatorFrameInputIntent =
-  | { readonly kind: "tap"; readonly point: { readonly x: number; readonly y: number } }
+  | {
+      readonly kind: "tap";
+      readonly point: {
+        readonly x: number;
+        readonly y: number;
+        readonly frameWidth: number;
+        readonly frameHeight: number;
+      };
+    }
   | { readonly kind: "type-text"; readonly text: string }
   | { readonly kind: "key-press"; readonly key: string };
 
@@ -103,7 +111,12 @@ function LiveScreen(props: {
         const y = ((event.clientY - rect.top) / rect.height) * image.naturalHeight;
         props.onInput({
           kind: "tap",
-          point: { x: Math.round(x), y: Math.round(y) },
+          point: {
+            x: Math.round(x),
+            y: Math.round(y),
+            frameWidth: image.naturalWidth,
+            frameHeight: image.naturalHeight,
+          },
         });
       }}
       type="button"

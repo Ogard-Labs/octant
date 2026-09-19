@@ -5,6 +5,7 @@ import {
   type ComputerUseOwner,
   type ComputerUseSettings,
   type ComputerUseStatus,
+  type SimulatorInputCommand,
 } from "@octant/contracts/computer-use-plugin";
 import { computerUseBrokerHandler } from "./computerUseBroker";
 
@@ -39,6 +40,10 @@ function fixture() {
         _signal?: AbortSignal,
       ) => ({ kind: "stopped" as const }),
     ),
+    simulatorInput: vi.fn(async (_command: SimulatorInputCommand, _signal?: AbortSignal) => ({
+      kind: "delivered" as const,
+      detail: "pressed «Generelt» (AXButton)",
+    })),
     requestPermissions: status,
     openPermissionSettings: async () => {},
     checkUpdates: status,
@@ -95,5 +100,31 @@ describe("Private computer-use broker", () => {
     expect(service.execute).toHaveBeenCalledWith(owner, { operation: "stop" }, sent.signal);
     abort.abort();
     expect(service.execute.mock.calls[0]?.[2]?.aborted).toBe(true);
+  });
+});
+
+describe("Private computer-use broker: Simulator input", () => {
+  it("routes a Simulator input command to the desktop without an owner and refuses a malformed one", async () => {
+    const { service, handle } = fixture();
+    const command = {
+      kind: "tap",
+      udid: "348B3796-90BE-4B03-ADC1-46D7468C9D43",
+      name: "iPhone 17 Pro",
+      target: "Generelt",
+    };
+    const response = await handle(request({ operation: "simulator-input", command }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      kind: "delivered",
+      detail: "pressed «Generelt» (AXButton)",
+    });
+    expect(service.simulatorInput).toHaveBeenCalledWith(command, expect.any(AbortSignal));
+    const malformed = await handle(
+      request({
+        operation: "simulator-input",
+        command: { ...command, target: undefined, socket: "/tmp/x" },
+      }),
+    );
+    expect(malformed.status).toBe(400);
   });
 });

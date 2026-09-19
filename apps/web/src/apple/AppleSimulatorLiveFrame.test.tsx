@@ -155,7 +155,10 @@ describe("AppleSimulatorLiveFrameView", () => {
       clientX: 10 + 100,
       clientY: 20 + 200,
     });
-    expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 300, y: 600 } });
+    expect(onInput).toHaveBeenCalledWith({
+      kind: "tap",
+      point: { x: 300, y: 600, frameWidth: 1179, frameHeight: 2556 },
+    });
   });
 
   it("drops a tap that lands before the screenshot has decoded", () => {

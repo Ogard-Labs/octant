@@ -1,11 +1,14 @@
 import {
   decodeComputerControlResult,
   decodeComputerUseStatus,
+  decodeSimulatorInputResult,
   type ComputerControlCommand,
   type ComputerControlResult,
   type ComputerUseOwner,
   type ComputerUseSettings,
   type ComputerUseStatus,
+  type SimulatorInputCommand,
+  type SimulatorInputResult,
 } from "@octant/contracts/computer-use-plugin";
 
 export interface DesktopComputerUsePort {
@@ -18,6 +21,11 @@ export interface DesktopComputerUsePort {
     signal?: AbortSignal,
   ) => Promise<ComputerControlResult>;
   readonly release: (owner: ComputerUseOwner) => Promise<void>;
+  /** Apple workbench input to a booted Simulator's Device Hub window; no session or grant. */
+  readonly simulatorInput: (
+    command: SimulatorInputCommand,
+    signal?: AbortSignal,
+  ) => Promise<SimulatorInputResult>;
 }
 
 export function createDesktopComputerUsePort(
@@ -98,5 +106,7 @@ export function createDesktopComputerUsePort(
     release: async (owner) => {
       await request({ operation: "release", owner });
     },
+    simulatorInput: async (command, signal) =>
+      decodeSimulatorInputResult(await request({ operation: "simulator-input", command }, signal)),
   };
 }

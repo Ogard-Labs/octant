@@ -4,8 +4,25 @@ import {
   type ComputerControlCommand,
   type ComputerControlResult,
   type ComputerUseOwner,
+  type SimulatorInputCommand,
+  type SimulatorInputResult,
 } from "@octant/contracts/computer-use-plugin";
 import type { ComputerDriverRuntime } from "./computerUseSdkRuntime";
+import {
+  DEVICE_HUB_APP_ID,
+  HOME_KEY,
+  chromeButtonIndex,
+  deviceElements,
+  deviceScreenRect,
+  deviceWindowUrl,
+  driverKeyFor,
+  elementAtPoint,
+  elementForTarget,
+  isDeviceHubWindow,
+  keyPressesFor,
+  windowPointFor,
+  type Rect,
+} from "./deviceHubInput";
 
 interface ObservedWindow {
   readonly id: string;
@@ -49,6 +66,40 @@ const refused = (reason: string, message: string): ComputerControlResult => ({
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+async function driverCall(
+  runtime: ComputerDriverRuntime,
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
+) {
+  const response = await runtime.call(name, args, signal);
+  if (response.isError) throw new Error("The driver refused the request.");
+  const data: unknown = JSON.parse(response.structuredJson ?? "{}");
+  if (!record(data)) throw new Error("Driver response is invalid.");
+  return { data, images: response.images };
+}
+type DriverCall = (
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+) => ReturnType<typeof driverCall>;
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new Error("Cancelled."));
+      },
+      { once: true },
+    );
+  });
+}
+const refusedInput = (reason: string, message: string): SimulatorInputResult => ({
+  kind: "refused",
+  reason,
+  message,
+});
 function key(owner: ComputerUseOwner): string {
   return `${owner.windowId}:${owner.threadId}`;
 }
@@ -143,13 +194,7 @@ export function createComputerUseControlHost(options: {
       if (combined.aborted) return refused("cancelled", "Computer use was cancelled.");
       try {
         const runtime = await options.runtime();
-        const call = async (name: string, args: Readonly<Record<string, unknown>>) => {
-          const response = await runtime.call(name, args, combined);
-          if (response.isError) throw new Error("The driver refused the request.");
-          const data: unknown = JSON.parse(response.structuredJson ?? "{}");
-          if (!record(data)) throw new Error("Driver response is invalid.");
-          return { data, images: response.images };
-        };
+        const call: DriverCall = (name, args) => driverCall(runtime, name, args, combined);
         const appProcess = async (appId: string): Promise<number | undefined> => {
           const { data } = await call("list_apps", {});
           if (!Array.isArray(data.apps)) return undefined;
@@ -401,10 +446,185 @@ export function createComputerUseControlHost(options: {
     }
   }
 
+  /**
+   * Device Hub is an agent app: the driver neither lists it nor launches it by
+   * bundle id alone, but LaunchServices opens the device's window for its URL
+   * without activating it. The window is matched by app and device name.
+   */
+  async function deviceWindow(
+    call: DriverCall,
+    command: SimulatorInputCommand,
+    signal?: AbortSignal,
+  ): Promise<
+    { readonly pid: number; readonly windowId: number; readonly bounds: Rect } | undefined
+  > {
+    const find = async () => {
+      const { data } = await call("list_windows", { on_screen_only: false });
+      if (!Array.isArray(data.windows)) throw new Error("Window list is invalid.");
+      const window = data.windows
+        .filter(record)
+        .find((candidate) => isDeviceHubWindow(candidate, command.name));
+      const bounds = window?.bounds;
+      if (
+        window === undefined ||
+        typeof window.pid !== "number" ||
+        typeof window.window_id !== "number" ||
+        !record(bounds) ||
+        typeof bounds.x !== "number" ||
+        typeof bounds.y !== "number" ||
+        typeof bounds.width !== "number" ||
+        typeof bounds.height !== "number"
+      )
+        return undefined;
+      return {
+        pid: window.pid,
+        windowId: window.window_id,
+        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+      };
+    };
+    const existing = await find();
+    if (existing !== undefined) return existing;
+    await call("launch_app", {
+      bundle_id: DEVICE_HUB_APP_ID,
+      urls: [deviceWindowUrl(command.udid)],
+    });
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      await delay(500, signal);
+      const window = await find();
+      if (window !== undefined) return window;
+    }
+    return undefined;
+  }
+
+  /**
+   * Apple workbench input to a booted Simulator. It shares the driver and its
+   * call order with the tasks above but owns no session, grants no
+   * application, and reaches only the named device's window; the Apple policy
+   * that admitted the request is the approval.
+   */
+  async function simulatorInput(
+    command: SimulatorInputCommand,
+    signal?: AbortSignal,
+  ): Promise<SimulatorInputResult> {
+    if (closed) return refusedInput("unavailable", "Computer use is closed.");
+    const pending = tail.then(async (): Promise<SimulatorInputResult> => {
+      if (signal?.aborted) return refusedInput("cancelled", "Simulator input was cancelled.");
+      try {
+        const runtime = await options.runtime();
+        const call: DriverCall = (name, args) => driverCall(runtime, name, args, signal);
+        const window = await deviceWindow(call, command, signal);
+        if (window === undefined)
+          return refusedInput(
+            "device-window-unavailable",
+            `Device Hub shows no window for ${command.name}. Open the device in Device Hub, then retry.`,
+          );
+        const { data } = await call("get_window_state", {
+          pid: window.pid,
+          window_id: window.windowId,
+          include_screenshot: false,
+          max_elements: 512,
+        });
+        if (typeof data.snapshot_id !== "string" || !Array.isArray(data.elements))
+          throw new Error("Driver snapshot is invalid.");
+        const press = async (key: string, modifiers?: ReadonlyArray<string>) => {
+          await call("press_key", {
+            pid: window.pid,
+            window_id: window.windowId,
+            key,
+            ...(modifiers === undefined ? {} : { modifiers }),
+            delivery_mode: "background",
+          });
+        };
+        const pressElement = async (index: number) => {
+          await call("click", {
+            pid: window.pid,
+            window_id: window.windowId,
+            element_index: index,
+            snapshot_id: data.snapshot_id,
+            delivery_mode: "background",
+          });
+        };
+        if (command.kind === "type-text") {
+          const keys = keyPressesFor(command.text);
+          if (keys.kind === "unsupported")
+            return refusedInput(
+              "unsupported-characters",
+              `Device Hub keyboard delivery covers letters, digits, space and newline; ${keys.characters
+                .map((character) => `«${character}»`)
+                .join(" ")} cannot be typed yet.`,
+            );
+          for (const key of keys.presses) await press(key.key, key.modifiers);
+          return {
+            kind: "delivered",
+            detail: `${keys.presses.length} key presses reached the ${command.name} window`,
+          };
+        }
+        if (command.kind === "key-press") {
+          if (command.key.trim().toLowerCase() === HOME_KEY) {
+            const home = chromeButtonIndex(data.elements, "Home");
+            if (home === undefined)
+              return refusedInput(
+                "unsupported-key",
+                "Device Hub shows no Home control for this window.",
+              );
+            await pressElement(home);
+            return { kind: "delivered", detail: "pressed Device Hub's Home control" };
+          }
+          const key = driverKeyFor(command.key);
+          if (key === undefined)
+            return refusedInput(
+              "unsupported-key",
+              `«${command.key}» is not a key Device Hub delivery understands.`,
+            );
+          await press(key);
+          return { kind: "delivered", detail: `pressed ${key}` };
+        }
+        const elements = deviceElements(data.elements, window.bounds);
+        const element =
+          "target" in command
+            ? elementForTarget(elements, command.target)
+            : elementAtPoint(
+                elements,
+                windowPointFor(
+                  command.point,
+                  command.frame,
+                  deviceScreenRect(window.bounds, command.frame),
+                ),
+              );
+        if (element === undefined)
+          return "target" in command
+            ? refusedInput(
+                "target-not-found",
+                `No accessible element on the ${command.name} screen is labelled «${command.target}».`,
+              )
+            : refusedInput(
+                "no-element-at-point",
+                "Nothing accessible sits under that point; tap a visible control or name a target.",
+              );
+        await pressElement(element.index);
+        return { kind: "delivered", detail: `pressed «${element.label}» (${element.role})` };
+      } catch {
+        return signal?.aborted
+          ? refusedInput("cancelled", "Simulator input was cancelled.")
+          : {
+              kind: "failed",
+              reason: "driver-unavailable",
+              message: "The computer-use driver could not deliver this input to Device Hub.",
+            };
+      }
+    });
+    tail = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
+  }
+
   return {
     reserve: async (owner: ComputerUseOwner) => (await reserve(owner)) !== undefined,
     execute,
     release,
+    simulatorInput,
     activeSessions: () => sessions.size,
     revokeAll: async () => {
       await Promise.all([...sessions.values()].map((session) => release(session.owner)));

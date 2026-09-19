@@ -4,6 +4,8 @@ import type {
   ComputerUseOwner,
   ComputerUseSettings,
   ComputerUseStatus,
+  SimulatorInputCommand,
+  SimulatorInputResult,
 } from "@octant/contracts/computer-use-plugin";
 import { createComputerUseControlHost } from "./computerUseControlHost";
 import {
@@ -236,6 +238,32 @@ export function createComputerUseDesktopService(options: {
       return controls.execute(owner, command, signal);
     },
     release: controls.release,
+    // Apple workbench input borrows the embedded driver without the plugin
+    // being enabled for agents: it grants no application and starts no
+    // session. It still needs Accessibility, which is Octant's own permission.
+    simulatorInput: async (
+      command: SimulatorInputCommand,
+      signal?: AbortSignal,
+    ): Promise<SimulatorInputResult> => {
+      await initialize();
+      if (closed || replacing || !supported || state === "unavailable")
+        return {
+          kind: "refused",
+          reason: "driver-unavailable",
+          message: "The bundled computer-use driver is unavailable on this host.",
+        };
+      const permissions = await computerUsePermissions().catch(() => ({
+        accessibility: false,
+        screenRecording: false,
+      }));
+      if (!permissions.accessibility)
+        return {
+          kind: "refused",
+          reason: "accessibility-permission-required",
+          message: "Allow Octant in macOS Accessibility (Settings › Computer use), then retry.",
+        };
+      return controls.simulatorInput(command, signal);
+    },
     requestPermissions: async () => {
       if (supported) await computerUsePermissions(true);
       return status();

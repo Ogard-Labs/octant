@@ -69,6 +69,63 @@ export const ComputerControlCommand = Schema.Union(
 );
 export type ComputerControlCommand = typeof ComputerControlCommand.Type;
 
+/**
+ * The Apple workbench delivering pane or tool input to a booted Simulator
+ * through Device Hub's device window. This is a host-only broker operation
+ * between the server and the desktop: it is never a provider tool argument,
+ * carries no application grant, and reaches only the window of the named
+ * device.
+ */
+const simulatorDestination = {
+  udid: text(64).pipe(Schema.pattern(/^[A-Fa-f0-9-]+$/)),
+  name: text(256),
+};
+const simulatorPoint = Schema.Struct({
+  x: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+  y: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+}).annotations(strict);
+/** The screenshot the point was read from, so the desktop can map it onto the window. */
+const simulatorFrame = Schema.Struct({
+  width: Schema.Int.pipe(Schema.positive()),
+  height: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export const SimulatorInputCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("type-text"),
+    ...simulatorDestination,
+    text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("key-press"),
+    ...simulatorDestination,
+    key: text(64),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("tap"),
+    ...simulatorDestination,
+    target: text(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("tap"),
+    ...simulatorDestination,
+    point: simulatorPoint,
+    frame: simulatorFrame,
+  }).annotations(strict),
+);
+export type SimulatorInputCommand = typeof SimulatorInputCommand.Type;
+export const SimulatorInputResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("delivered"),
+    detail: Schema.String.pipe(Schema.maxLength(1_024)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused", "failed"),
+    reason: text(128),
+    message: text(1_024),
+  }).annotations(strict),
+);
+export type SimulatorInputResult = typeof SimulatorInputResult.Type;
+
 /** Bound by the host at turn admission, never supplied as tool arguments. */
 export const ComputerUseOwner = Schema.Struct({
   windowId: WindowId,
@@ -149,3 +206,5 @@ export const decodeComputerControlCommand = Schema.decodeUnknownSync(ComputerCon
 export const decodeComputerControlResult = Schema.decodeUnknownSync(ComputerControlResult);
 export const decodeComputerUseOwner = Schema.decodeUnknownSync(ComputerUseOwner);
 export const decodeComputerUseStatus = Schema.decodeUnknownSync(ComputerUseStatus);
+export const decodeSimulatorInputCommand = Schema.decodeUnknownSync(SimulatorInputCommand);
+export const decodeSimulatorInputResult = Schema.decodeUnknownSync(SimulatorInputResult);

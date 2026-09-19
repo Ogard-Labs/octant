@@ -623,6 +623,7 @@ import {
   type AppleRuntimeReceipt,
   APPLE_TOOLCHAIN_HOST_READ_PATHS,
 } from "./apple/appleToolchainService";
+import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDesktop";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -4207,6 +4208,9 @@ export function startOctantServer(
     yield* Effect.promise(() => appleProcess.reconcile());
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
+      ...(computerUseDesktop === undefined
+        ? {}
+        : { injectSimulatorInput: simulatorInputThroughDesktop(computerUseDesktop) }),
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
       readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),

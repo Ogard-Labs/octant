@@ -72,7 +72,15 @@ erase, or transfer the destination.
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
-requests; the host injects XCTest-less input behind that channel. When the
+requests; the host injects XCTest-less input behind that channel. On the
+desktop app the host delivers that input through the device's **Device Hub**
+window — Xcode 27 shows a booted Simulator only there — using Octant's
+embedded computer-use driver in the background, so the app you are working in
+stays in front. That needs Octant's macOS Accessibility permission (Settings ›
+Computer use shows it) but not the Computer use plugin itself. A tap presses
+the accessible element under the point or the element named as a target;
+typed text goes as key presses for letters, digits, space and newline, and
+other characters are refused by name rather than typed wrongly. When the
 host cannot deliver an input action, the evidence names the host's refusal
 rather than reading as interrupted. Remote, Linux, and headless clients stay
 read-only. Typed characters never land in durable evidence, and neither does

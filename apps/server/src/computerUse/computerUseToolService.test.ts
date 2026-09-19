@@ -47,6 +47,11 @@ function fixture() {
       reserve: async () => true,
       execute,
       release,
+      simulatorInput: async () => ({
+        kind: "refused" as const,
+        reason: "unavailable",
+        message: "Simulator input is not part of this fixture.",
+      }),
     },
     settings: () => ({ enabled: true, automaticUpdates: true }),
     authority: () => authority,

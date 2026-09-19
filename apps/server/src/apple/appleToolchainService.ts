@@ -98,6 +98,7 @@ export interface AppleToolchainServiceOptions {
     context: AppleExecutionContext,
     timeoutMs: number,
     signal?: AbortSignal,
+    destination?: AppleSimulatorRecord,
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
@@ -764,8 +765,11 @@ export class AppleToolchainService {
   ): Promise<AppleProcessResult> {
     const inject = this.#options.injectSimulatorInput;
     if (inject !== undefined) {
+      const destination = this.#lastSimulators.find(
+        (simulator) => String(simulator.simulatorId) === String(request.simulatorId),
+      );
       return this.#runInjectedInput(
-        (bounded) => inject(request, context, request.timeoutMs, bounded),
+        (bounded) => inject(request, context, request.timeoutMs, bounded, destination),
         request.timeoutMs,
         signal,
       );

@@ -205,3 +205,165 @@ describe("Thread-owned computer control", () => {
     }
   });
 });
+
+describe("Apple workbench input through Device Hub", () => {
+  const command = { udid: "348B3796-90BE-4B03-ADC1-46D7468C9D43", name: "iPhone 17 Pro" };
+  const deviceWindow = {
+    window_id: 21487,
+    pid: 65317,
+    app_name: "Device Hub",
+    title: "iPhone 17 Pro",
+    bounds: { x: 1783, y: 774, width: 429, height: 929 },
+    is_on_screen: true,
+  };
+  function deviceHubFixture(windowsPerCall: ReadonlyArray<ReadonlyArray<unknown>>) {
+    let listing = 0;
+    const call = vi.fn(async (name: string) => {
+      const data =
+        name === "list_windows"
+          ? { windows: windowsPerCall[Math.min(listing++, windowsPerCall.length - 1)] }
+          : name === "get_window_state"
+            ? {
+                snapshot_id: "s00000001",
+                elements: [
+                  {
+                    element_index: 0,
+                    role: "AXWindow",
+                    label: "iPhone 17 Pro – iOS 27.0",
+                    actions: [],
+                  },
+                  {
+                    element_index: 4,
+                    role: "AXButton",
+                    label: "Generelt",
+                    actions: ["AXPress"],
+                    frame: { x: 1830.5, y: 1187.1, w: 335, h: 47.2 },
+                  },
+                  {
+                    element_index: 29,
+                    role: "AXButton",
+                    label: "Home",
+                    actions: ["AXPress"],
+                    frame: { x: 1926, y: 1663, w: 32, h: 28 },
+                  },
+                ],
+              }
+            : { ok: true };
+      return {
+        text: "",
+        images: [],
+        structuredJson: JSON.stringify(data),
+        rawJson: "{}",
+        isError: false,
+        degraded: false,
+      };
+    });
+    const host = createComputerUseControlHost({
+      runtime: async () => ({
+        generation: "generation-1",
+        version: "0.28.2",
+        call,
+        close: async () => {},
+      }),
+    });
+    return { host, call };
+  }
+  const calls = (call: ReturnType<typeof vi.fn>) =>
+    call.mock.calls.map(([name, args]) => [name, args] as const);
+
+  it("types into the device window as key presses without opening a session or granting an app", async () => {
+    const { host, call } = deviceHubFixture([[deviceWindow]]);
+    try {
+      const result = await host.simulatorInput({ kind: "type-text", ...command, text: "Hi 4" });
+      expect(result).toEqual({
+        kind: "delivered",
+        detail: "4 key presses reached the iPhone 17 Pro window",
+      });
+      expect(
+        calls(call)
+          .filter(([name]) => name === "press_key")
+          .map(([, args]) => args),
+      ).toEqual([
+        {
+          pid: 65317,
+          window_id: 21487,
+          key: "h",
+          modifiers: ["shift"],
+          delivery_mode: "background",
+        },
+        { pid: 65317, window_id: 21487, key: "i", delivery_mode: "background" },
+        { pid: 65317, window_id: 21487, key: "space", delivery_mode: "background" },
+        { pid: 65317, window_id: 21487, key: "4", delivery_mode: "background" },
+      ]);
+      expect(calls(call).some(([name]) => name === "start_session" || name === "launch_app")).toBe(
+        false,
+      );
+      expect(host.activeSessions()).toBe(0);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("opens the device window through its URL when Device Hub shows none, then taps the element under a screenshot point", async () => {
+    const { host, call } = deviceHubFixture([[], [], [deviceWindow]]);
+    try {
+      const result = await host.simulatorInput({
+        kind: "tap",
+        ...command,
+        point: { x: 562, y: 1221 },
+        frame: { width: 1206, height: 2622 },
+      });
+      expect(result).toEqual({ kind: "delivered", detail: "pressed «Generelt» (AXButton)" });
+      expect(calls(call)).toContainEqual([
+        "launch_app",
+        {
+          bundle_id: "com.apple.dt.Devices",
+          urls: ["devices://device/open?id=348B3796-90BE-4B03-ADC1-46D7468C9D43"],
+        },
+      ]);
+      expect(calls(call)).toContainEqual([
+        "click",
+        {
+          pid: 65317,
+          window_id: 21487,
+          element_index: 4,
+          snapshot_id: "s00000001",
+          delivery_mode: "background",
+        },
+      ]);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("refuses by name what Device Hub cannot deliver: unsupported characters, unknown keys, missing targets", async () => {
+    const { host, call } = deviceHubFixture([[deviceWindow]]);
+    try {
+      expect(
+        await host.simulatorInput({ kind: "type-text", ...command, text: "a@b" }),
+      ).toMatchObject({
+        kind: "refused",
+        reason: "unsupported-characters",
+      });
+      expect(
+        await host.simulatorInput({ kind: "key-press", ...command, key: "f13" }),
+      ).toMatchObject({
+        kind: "refused",
+        reason: "unsupported-key",
+      });
+      expect(
+        await host.simulatorInput({ kind: "tap", ...command, target: "Record" }),
+      ).toMatchObject({
+        kind: "refused",
+        reason: "target-not-found",
+      });
+      expect(await host.simulatorInput({ kind: "key-press", ...command, key: "home" })).toEqual({
+        kind: "delivered",
+        detail: "pressed Device Hub's Home control",
+      });
+      expect(calls(call).filter(([name]) => name === "press_key")).toHaveLength(0);
+    } finally {
+      await host.close();
+    }
+  });
+});

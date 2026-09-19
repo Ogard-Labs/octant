@@ -119,6 +119,13 @@ export type AppleActionKind = typeof AppleActionKind.Type;
 export const AppleSimulatorPoint = Schema.Struct({
   x: Schema.Number.pipe(Schema.finite()),
   y: Schema.Number.pipe(Schema.finite()),
+  /**
+   * The pixel size of the screenshot the point was read from. A point is
+   * meaningless without it: the host maps it onto the device window, and a
+   * tap that omits the frame is refused rather than guessed.
+   */
+  frameWidth: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  frameHeight: Schema.optional(Schema.Int.pipe(Schema.positive())),
 }).annotations(strict);
 export type AppleSimulatorPoint = typeof AppleSimulatorPoint.Type;
 

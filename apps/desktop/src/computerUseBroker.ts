@@ -5,6 +5,7 @@ import {
   decodeComputerControlCommand,
   decodeComputerUseOwner,
   decodeComputerUseSettings,
+  decodeSimulatorInputCommand,
 } from "@octant/contracts/computer-use-plugin";
 import type { ComputerUseDesktopService } from "./computerUseDesktopService";
 
@@ -37,6 +38,10 @@ export function computerUseBrokerHandler(service: ComputerUseDesktopService, tok
         await service.configure(decodeComputerUseSettings(body.settings));
         return Response.json({ ok: true });
       }
+      if (body.operation === "simulator-input" && "command" in body)
+        return Response.json(
+          await service.simulatorInput(decodeSimulatorInputCommand(body.command), request.signal),
+        );
       if (!("owner" in body)) return failure(400);
       const owner = decodeComputerUseOwner(body.owner);
       if (body.operation === "reserve")

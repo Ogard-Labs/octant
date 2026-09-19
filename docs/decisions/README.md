@@ -147,6 +147,7 @@ distilled successor of the earlier long-form design specifications.
 | [0133](0133-confined-discovery-reads-open-named-nodes.md) | Confined discovery reads open named nodes, never trees | Accepted |
 | [0134](0134-a-folded-project-reports-its-strongest-thread.md) | A folded Project reports its strongest thread | Accepted |
 | [0135](0135-confined-git-reads-its-worktree-s-metadata.md) | Confined Git reads its worktree's metadata | Accepted |
+| [0136](0136-simulator-input-reaches-the-device-through-device-hub.md) | Simulator input reaches the device through Device Hub | Accepted |
 
 ## Adding an ADR
 

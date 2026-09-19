@@ -35,7 +35,12 @@ export type AppleWorkbenchIntent =
   | {
       readonly kind: "tap";
       readonly simulatorId: AppleSimulatorId;
-      readonly point: { readonly x: number; readonly y: number };
+      readonly point: {
+        readonly x: number;
+        readonly y: number;
+        readonly frameWidth: number;
+        readonly frameHeight: number;
+      };
       readonly target?: string;
     }
   | {
