@@ -65,6 +65,16 @@ export function simulatorDeviceInput(
       },
     };
   }
+  // A named element comes first. A tap that names one and also carries a point
+  // asked for the element; tapping the point would record a tap on the element
+  // while something else received it.
+  if (request.kind === "tap" && request.target !== undefined) {
+    return {
+      kind: "unavailable",
+      message:
+        "The device helper taps a point on a captured screen; it cannot find an element by name yet.",
+    };
+  }
   if (request.kind === "tap" && request.point !== undefined) {
     if (request.point.x < 0 || request.point.y < 0) {
       return { kind: "unavailable", message: "The tap point is off the captured screen." };
@@ -72,13 +82,6 @@ export function simulatorDeviceInput(
     return {
       kind: "input",
       input: { kind: "tap", ...destination, point: { x: request.point.x, y: request.point.y } },
-    };
-  }
-  if (request.kind === "tap" && request.target !== undefined) {
-    return {
-      kind: "unavailable",
-      message:
-        "The device helper taps a point on a captured screen; it cannot find an element by name yet.",
     };
   }
   return { kind: "unavailable", message: "Simulator input request is incomplete." };

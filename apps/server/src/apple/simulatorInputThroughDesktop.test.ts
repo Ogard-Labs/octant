@@ -108,6 +108,16 @@ describe("Simulator input through the desktop's device helper", () => {
     expect(result.termination).toBe("unavailable");
     expect(text(result.stderr)).toContain("cannot find an element by name");
     expect(deliver).not.toHaveBeenCalled();
+
+    // Naming an element and a point is still a request for the element: tapping
+    // the point would record evidence of a tap on something else.
+    const both = await inject(
+      request({ kind: "tap", target: "Sign in", point: { x: 40, y: 80 } }),
+      context,
+      30_000,
+    );
+    expect(both.termination).toBe("unavailable");
+    expect(deliver).not.toHaveBeenCalled();
   });
 });
 
