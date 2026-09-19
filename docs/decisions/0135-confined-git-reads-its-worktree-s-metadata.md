@@ -20,7 +20,8 @@ confined launch runs with `GIT_CONFIG_GLOBAL=/dev/null` and
 `GIT_CONFIG_NOSYSTEM=1`, and a commit the checkout's own config cannot name
 takes its author from the host's own profile. The profile still emits a read
 allowance for those paths, left over from the approach that was replaced; Git
-never opens them, so it grants nothing and is reach to remove.
+never opens them, so it grants nothing, and it is reach that should be
+removed in its own change.
 
 Both fixes shipped without a record, so the boundary they draw was never stated
 and never reviewed. 0133 says in its consequences that confined Git is left
@@ -73,8 +74,10 @@ cover and Octant needs.
   a private tmpfs rather than bound, so an unnamed directory under it does not
   exist for the confined process at all.
 - A rule emitted through `extraRules` is **authority the caller granted**, not a
-  detail of how the command is spelled. Where a launch declares a posture, the
-  appended rules honor it rather than outrank it.
+  detail of how the command is spelled. These rules are appended last, so they
+  outrank the posture rather than yield to it, and a launch cannot rely on its
+  own denials to hold against one. The contract is therefore on the caller: do
+  not emit a grant that contradicts the posture the launch declared.
 
 Confined Git reads no configuration from the user's home. Every remaining rule
 of 0009 stands: deny-default, the sanitized environment, the write scoping of
