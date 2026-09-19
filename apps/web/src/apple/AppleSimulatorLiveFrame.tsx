@@ -3,6 +3,7 @@ import { canOfferAppleSimulatorFrameInput } from "@octant/domain";
 import { useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 
 export type AppleSimulatorFrameInputIntent =
   | { readonly kind: "tap"; readonly point: { readonly x: number; readonly y: number } }
@@ -12,6 +13,11 @@ export type AppleSimulatorFrameInputIntent =
 export interface AppleSimulatorLiveFrameProps {
   readonly frame: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
+  /**
+   * The Simulator's screen as it changes. When the host streams one it replaces
+   * the captured still; without one the still is what the frame shows.
+   */
+  readonly liveScreen?: AppleSimulatorLiveScreen;
   /**
    * When true and the frame is live, tap/type/key controls are offered. Remote
    * and headless clients leave this false so the surface stays read-only.
@@ -34,6 +40,8 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
     props.inputEnabled === true &&
     props.onInput !== undefined &&
     canOfferAppleSimulatorFrameInput(frame);
+  const streamed =
+    frame.status === "live" && props.liveScreen?.status === "live" ? props.liveScreen : undefined;
   return (
     <figure
       aria-label="iOS Simulator live frame"
@@ -41,7 +49,16 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
       data-status={frame.status}
     >
       <figcaption>{frame.title}</figcaption>
-      {frame.status === "live" && props.screenUrl !== undefined ? (
+      {frame.status === "live" && streamed !== undefined ? (
+        <StreamedScreen
+          attach={streamed.attach}
+          busy={props.busy === true}
+          name={frame.name}
+          offerInput={offerInput}
+          {...(props.onInput === undefined ? {} : { onInput: props.onInput })}
+          screen={streamed.screen}
+        />
+      ) : frame.status === "live" && props.screenUrl !== undefined ? (
         <LiveScreen
           busy={props.busy === true}
           name={frame.name}
@@ -109,6 +126,55 @@ function LiveScreen(props: {
       type="button"
     >
       <img alt={`${props.name} screen`} draggable={false} ref={imageRef} src={props.screenUrl} />
+    </button>
+  );
+}
+
+function StreamedScreen(props: {
+  readonly name: string;
+  readonly screen: { readonly width: number; readonly height: number };
+  readonly attach: (canvas: HTMLCanvasElement | null) => void;
+  readonly offerInput: boolean;
+  readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
+  readonly busy: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const { attach } = props;
+  return (
+    // The same coordinate hit region as the captured still: the recipe's fixed
+    // height and padding would distort the mapped geometry.
+    /* ui-boundary-exception: specialized-editor-surface */
+    <button
+      aria-label={
+        props.offerInput
+          ? `Tap on ${props.name} Simulator screen`
+          : `${props.name} Simulator screen`
+      }
+      className="apple-simulator-frame__screen"
+      disabled={!props.offerInput || props.busy || props.onInput === undefined}
+      onClick={(event) => {
+        if (!props.offerInput || props.onInput === undefined || props.busy) return;
+        const canvas = canvasRef.current;
+        if (canvas === null) return;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        // Frames are scaled down for the pane, so the canvas's own pixels are
+        // not the device's. A tap is a point on the device's screen, whose size
+        // the host named when the view began.
+        const x = ((event.clientX - rect.left) / rect.width) * props.screen.width;
+        const y = ((event.clientY - rect.top) / rect.height) * props.screen.height;
+        props.onInput({ kind: "tap", point: { x: Math.round(x), y: Math.round(y) } });
+      }}
+      type="button"
+    >
+      <canvas
+        aria-label={`${props.name} live screen`}
+        ref={(canvas) => {
+          canvasRef.current = canvas;
+          attach(canvas);
+        }}
+        role="img"
+      />
     </button>
   );
 }

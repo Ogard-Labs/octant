@@ -26,11 +26,13 @@
 }
 
 .apple-simulator-frame p,
-.apple-simulator-frame img {
+.apple-simulator-frame img,
+.apple-simulator-frame canvas {
   margin: 0;
 }
 
-.apple-simulator-frame img {
+.apple-simulator-frame img,
+.apple-simulator-frame canvas {
   display: block;
   width: 100%;
   height: auto;
