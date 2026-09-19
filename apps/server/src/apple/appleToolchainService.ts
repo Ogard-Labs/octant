@@ -151,6 +151,20 @@ const MAX_RECENT_EVIDENCE = 64;
 export const APPLE_INPUT_MUST_REISSUE_NOTE =
   "Interrupted or unknown Simulator input cannot be retried under the same action id. Issue a new actionId.";
 
+function withSimulatorState(
+  records: ReadonlyArray<AppleSimulatorRecord>,
+  change: {
+    readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+    readonly state: AppleSimulatorRecord["state"];
+  },
+): ReadonlyArray<AppleSimulatorRecord> {
+  return records.map((record) =>
+    record.simulatorId === change.simulatorId
+      ? decodeAppleSimulatorRecord({ ...record, state: change.state })
+      : record,
+  );
+}
+
 export class AppleToolchainService {
   readonly #options: AppleToolchainServiceOptions;
   readonly #discovery = new Map<string, DiscoveryCacheEntry>();
@@ -161,6 +175,15 @@ export class AppleToolchainService {
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
   readonly #captureDirectory: string;
+  // States an action set while a discovery was reading. A discovery lists the
+  // devices and then probes the project, which can take seconds; a boot or
+  // shutdown that finishes in between is newer than that list and must not be
+  // put back by it.
+  #stateChangesDuringDiscovery: Array<{
+    readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+    readonly state: AppleSimulatorRecord["state"];
+  }> = [];
+  #discoveriesReading = 0;
 
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
@@ -169,6 +192,19 @@ export class AppleToolchainService {
   }
 
   async discover(
+    request: AppleDiscoveryRequest,
+    context: AppleExecutionContext,
+  ): Promise<AppleDiscoveryResult> {
+    if (this.#discoveriesReading === 0) this.#stateChangesDuringDiscovery = [];
+    this.#discoveriesReading += 1;
+    try {
+      return await this.#discover(request, context);
+    } finally {
+      this.#discoveriesReading -= 1;
+    }
+  }
+
+  async #discover(
     request: AppleDiscoveryRequest,
     context: AppleExecutionContext,
   ): Promise<AppleDiscoveryResult> {
@@ -196,6 +232,7 @@ export class AppleToolchainService {
     const version = await this.#command(["xcodebuild", "-version"], context, DISCOVERY_TIMEOUT_MS);
     const swift = await this.#command(["swift", "--version"], context, DISCOVERY_TIMEOUT_MS);
     const sdks = await this.#command(["xcodebuild", "-showsdks"], context, DISCOVERY_TIMEOUT_MS);
+    const changesBeforeDeviceList = this.#stateChangesDuringDiscovery.length;
     const devices = await this.#command(
       ["xcrun", "simctl", "list", "devices", "available", "--json"],
       context,
@@ -226,7 +263,9 @@ export class AppleToolchainService {
       available: true,
       discoveredAt: this.#options.now(),
     });
-    const simulators = parseSimulators(text(devices.stdout));
+    const simulators = this.#stateChangesDuringDiscovery
+      .slice(changesBeforeDeviceList)
+      .reduce(withSimulatorState, parseSimulators(text(devices.stdout)));
     let metadata: ReturnType<typeof parseProjectMetadata>;
     try {
       metadata = parseProjectMetadata(text(project.stdout));
@@ -599,7 +638,12 @@ export class AppleToolchainService {
               message:
                 request.kind === "type-text"
                   ? `type-text ${outcomeFor(terminal)} (text redacted)`
-                  : `${request.kind} ${outcomeFor(terminal)}: ${text(terminal.stderr).slice(0, MAX_DIAGNOSTIC_LENGTH)}`,
+                  : inputFailureNote(
+                      request.kind,
+                      outcomeFor(terminal),
+                      text(terminal.stderr),
+                      context,
+                    ),
             };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
@@ -709,7 +753,19 @@ export class AppleToolchainService {
         artifacts,
         cleanup,
       );
-    } catch {
+    } catch (error) {
+      // Whatever threw is the reason this action has no evidence; dropping it
+      // left the person with "interrupted" and an empty log. Typed text never
+      // enters the note: an error raised on a type-text path can quote the
+      // script, so that kind records the fact without the detail.
+      const note = unrecordedActionNote(request, error, context);
+      // Read before the note joins the log: with no other output the note
+      // would be picked up as the log's last line and listed twice.
+      const diagnostics = [
+        ...diagnosticsFor(outputs, context).slice(0, MAX_DIAGNOSTICS - 1),
+        { severity: "note" as const, message: note },
+      ];
+      outputs.push(new TextEncoder().encode(`${note}\n`));
       const logReference = `apple-log-${request.actionId}`;
       await this.#writeArtifact(logReference, outputs);
       return evidence(
@@ -717,7 +773,7 @@ export class AppleToolchainService {
         signal.aborted ? "cancelled" : "interrupted",
         startedAt,
         this.#options.now(),
-        diagnosticsFor(outputs, context),
+        diagnostics,
         [{ kind: "log", reference: logReference }],
         "uncertain",
       );
@@ -935,11 +991,10 @@ export class AppleToolchainService {
     state: AppleSimulatorRecord["state"],
   ): void {
     const update = (records: ReadonlyArray<AppleSimulatorRecord>) =>
-      records.map((record) =>
-        record.simulatorId === simulatorId
-          ? decodeAppleSimulatorRecord({ ...record, state })
-          : record,
-      );
+      withSimulatorState(records, { simulatorId, state });
+    if (this.#discoveriesReading > 0) {
+      this.#stateChangesDuringDiscovery.push({ simulatorId, state });
+    }
     this.#lastSimulators = update(this.#lastSimulators);
     for (const [key, entry] of this.#discovery) {
       this.#discovery.set(key, { ...entry, simulators: update(entry.simulators) });
@@ -1244,6 +1299,54 @@ function parseBuildProduct(
     throw new Error("build product outside artifact root");
   }
   return { applicationPath, bundleIdentifier };
+}
+
+/**
+ * A host refusal in the form the diagnostic schema accepts: trimmed, non-empty,
+ * bounded. `osascript` ends its stderr with a bare `osascript[pid] ` line and a
+ * trailing space, and a message the schema refuses threw past the evidence
+ * builder into the blanket catch, which reported "interrupted" with an empty
+ * log — the one thing a person needed to read was the one thing lost.
+ */
+function inputFailureNote(
+  kind: AppleSimulatorRequest["kind"],
+  outcome: AppleBuildEvidence["outcome"],
+  stderr: string,
+  context: AppleExecutionContext,
+): string {
+  // The host's words are journaled, so they cross the same boundary as any
+  // other command output: host roots are replaced before anything is kept.
+  const detail = stderr
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)
+    .trim();
+  return detail.length === 0 ? `${kind} ${outcome}` : `${kind} ${outcome}: ${detail}`;
+}
+
+function unrecordedActionNote(
+  request: AppleActionRequest,
+  error: unknown,
+  context: AppleExecutionContext,
+): string {
+  if (request.kind === "type-text") return "type-text did not record evidence (detail redacted)";
+  // A filesystem error names absolute host paths; they leave the host the same
+  // way command output does, with the checkout and artifact roots replaced.
+  const reason = (error instanceof Error ? error.message : String(error))
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)
+    .trim();
+  return reason.length === 0
+    ? `${request.kind} did not record evidence`
+    : `${request.kind} did not record evidence: ${reason}`;
 }
 
 function outcomeFor(result: AppleProcessResult): AppleBuildEvidence["outcome"] {
