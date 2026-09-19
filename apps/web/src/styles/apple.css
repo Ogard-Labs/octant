@@ -213,11 +213,15 @@
   background: var(--oct-bg);
 }
 
+/* The hit region is the drawn screen, not the row it sits in: it shrinks to
+   the image and is centred, so the crosshair and the focus outline show where
+   a tap will land. */
 .apple-simulator-frame__screen {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  margin: 0;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  justify-self: center;
+  margin: 0 auto;
   padding: 0;
   border: 0;
   background: transparent;
