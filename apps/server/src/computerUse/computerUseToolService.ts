@@ -63,9 +63,17 @@ export function createComputerUseToolService(options: {
     { readonly owner: ComputerUseOwner; readonly appId: string }
   >();
   const grants = new Map<string, number>();
-  function admitted(owner: ComputerUseOwner, approved: boolean): boolean {
+  /**
+   * Why the tool-call authority gate refuses this owner, or undefined when it
+   * admits it. `approved` says a one-time approval for this very action was
+   * just recorded by the runtime, which is the "fresh confirmation" the
+   * taint rule asks for: the rule exists so a standing grant cannot carry an
+   * irreversible action once the thread has ingested external content, and
+   * `execute` below never lets a standing grant reach here under taint.
+   */
+  function admissionRefusal(owner: ComputerUseOwner, approved: boolean): string | undefined {
     const authority = options.authority(owner);
-    if (authority === undefined || !options.ownerIsCurrent(owner)) return false;
+    if (authority === undefined || !options.ownerIsCurrent(owner)) return "owner-changed";
     const gate = new ToolCallAuthorityService({
       resolveGrantedAuthority: () => options.authority(owner),
       resolveLiveFacts: () => ({
@@ -95,8 +103,15 @@ export function createComputerUseToolService(options: {
         processOwnershipRequired: true,
       },
     });
-    return decision.kind === "allow" || (!approved && decision.kind === "prompt");
+    if (decision.kind === "allow") return undefined;
+    if (decision.kind === "prompt") {
+      if (!approved) return undefined;
+      if (decision.reason === "taint-requires-fresh-confirmation") return undefined;
+    }
+    return decision.reason;
   }
+  const admitted = (owner: ComputerUseOwner, approved: boolean): boolean =>
+    admissionRefusal(owner, approved) === undefined;
   const runtime = createComputerUseRuntime({
     destination: { status: "available", kind: "macos-host" },
     approvalScope: "application-session",
@@ -133,10 +148,13 @@ export function createComputerUseToolService(options: {
         if (
           action === undefined ||
           current === undefined ||
-          !sameToolActionAuthority(current, request.authority) ||
-          !admitted(action.owner, true)
+          !sameToolActionAuthority(current, request.authority)
         )
           return { refused: "owner-changed" };
+        // A policy refusal is not an owner change. Reporting it as one sent a
+        // person to look for a task-authority problem that did not exist.
+        const refusal = admissionRefusal(action.owner, true);
+        if (refusal !== undefined) return { refused: refusal };
         action.result = await options.desktop.execute(action.owner, action.command, signal);
         if (action.result.kind === "failed" || action.result.kind === "refused")
           return { refused: action.result.reason };
@@ -214,7 +232,12 @@ export function createComputerUseToolService(options: {
             ? command.operation
             : "observe-window";
     const grantKey = `${ownerKey(owner)}:${JSON.stringify(authority)}:${appId}`;
-    const requiresApproval = (grants.get(grantKey) ?? 0) <= Date.now();
+    // A five-minute app grant is a standing approval. Once the thread has
+    // ingested external content, standing approvals no longer carry an
+    // irreversible action (untrustedContentPolicy), so the runtime asks again
+    // and the person confirms this action freshly.
+    const requiresApproval =
+      (grants.get(grantKey) ?? 0) <= Date.now() || options.externalContentIngested(owner);
     const action = { owner, command, appId, sessionId, authority };
     pending.set(actionId, action);
     try {
