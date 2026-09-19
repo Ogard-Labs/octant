@@ -6468,7 +6468,10 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__level-slider {
   position: relative;
-  width: 100%;
+  /* The knob is centred on its stop, so half of it overhangs each end of the
+     track. At full width the first and last stops pushed it into the popover's
+     padding, where the rounded corner cut it off. */
+  width: calc(100% - 16px);
   height: 18px;
   cursor: pointer;
 }
@@ -6756,6 +6759,10 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__row {
   display: grid;
+  /* The list is a column flexbox inside a fixed-height scroller. A row that may
+     shrink gives up height before the list scrolls, and its two lines then
+     stand taller than the fill painted behind them. */
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) 30px;
   align-items: center;
   border-radius: var(--oct-radius-sm);
@@ -6776,13 +6783,17 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
+  /* The button recipe fixes a one-line control height. A model row holds a name
+     and a provider line, which measured 34px inside that 32px box, so the text
+     stood proud of the row's hover and selection fill. */
+  height: auto;
+  min-height: 40px;
   min-width: 0;
-  padding: 4px 4px 4px 9px;
+  padding: 5px 4px 5px 9px;
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-sm) 0 0 9px;
+  border-radius: var(--oct-radius-sm) 0 0 var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: var(--oct-text-sm);
@@ -7437,9 +7448,16 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .scaffolds__entry-button {
   display: flex;
   flex-direction: column;
+  /* The button recipe is a centred, one-line, fixed-height control. Left as it
+     was, each entry kept that 32px box while its name and summary ran to two
+     lines, so one entry's name printed over the summary above it. */
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 2px;
   width: 100%;
+  height: auto;
   padding: 8px;
+  white-space: normal;
   border: 1px solid var(--octant-border-subtle);
   border-radius: var(--oct-radius-sm);
   background: transparent;
