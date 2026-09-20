@@ -978,7 +978,7 @@ mechanisms are:
   thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
   Full access and the Codex app-server and the Claude Agent SDK launch are not;
   that set is named and pinned by
-  [decisions/0141-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0141-confinement-wraps-a-runtime-that-carries-one-thread.md),
+  [decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md),
   and the tools those threads reach stay confined either way.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor

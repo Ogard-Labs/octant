@@ -407,6 +407,55 @@ export class GitObservationPort {
   }
 
   /**
+   * What differs between two trees Git already holds, one row per path.
+   *
+   * Both sides are tree objects, not the working tree, so the answer does not
+   * move while it is being read and covers files Git was not yet tracking when
+   * the first tree was written. Renames are reported as the path that went and
+   * the path that came: a transcript names paths, and a rename score is a guess
+   * about intent the host has no business making.
+   */
+  async readTreeChanges(
+    input: { readonly checkoutRoot: string; readonly from: string; readonly to: string },
+    signal?: AbortSignal,
+  ): Promise<GitTreeChangesResult> {
+    // Object ids reach a command line, so anything that is not plainly one is
+    // refused rather than quoted.
+    if (!GIT_OBJECT_ID.test(input.from) || !GIT_OBJECT_ID.test(input.to))
+      return { status: "unavailable" };
+    let checkoutRoot: string;
+    try {
+      checkoutRoot = await this.#dependencies.realpath(input.checkoutRoot);
+    } catch {
+      return { status: "unavailable" };
+    }
+    try {
+      const result = await this.#run(
+        [
+          "-C",
+          checkoutRoot,
+          "diff-tree",
+          "-r",
+          "--numstat",
+          "-z",
+          "--no-renames",
+          "--no-ext-diff",
+          "--no-color",
+          input.from,
+          input.to,
+          "--",
+        ],
+        signal,
+      );
+      if (result.exitCode !== 0) return { status: "unavailable" };
+      const changes = parseTreeNumstat(result.stdout);
+      return changes === undefined ? { status: "unavailable" } : { status: "ready", changes };
+    } catch {
+      return { status: "unavailable" };
+    }
+  }
+
+  /**
    * Measure a run against the branch it targets: how far apart they are, and
    * whether the base could take it as it stands.
    *
@@ -647,6 +696,48 @@ function quotedAlternatesEntry(path: string): string {
     escaped += code < 0x20 || code === 0x7f ? `\\${code.toString(8).padStart(3, "0")}` : character;
   }
   return `"${escaped}"`;
+}
+
+const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+export interface GitTreeChange {
+  readonly path: string;
+  readonly insertions: number;
+  readonly deletions: number;
+  /** Git counts no lines in a binary file and prints `-` for both. */
+  readonly binary: boolean;
+}
+
+export type GitTreeChangesResult =
+  | { readonly status: "ready"; readonly changes: ReadonlyArray<GitTreeChange> }
+  | { readonly status: "unavailable" };
+
+/**
+ * One row per path from `--numstat -z --no-renames`: `added\tdeleted\tpath\0`.
+ *
+ * Kept apart from `parseNumstat`, which sums the same output into one total and
+ * is shared with the environment port. Anything that does not read as a row
+ * voids the whole answer rather than returning the rows before it as if they
+ * were everything.
+ */
+export function parseTreeNumstat(output: string): ReadonlyArray<GitTreeChange> | undefined {
+  if (output.length === 0) return [];
+  const rows = output.split("\0");
+  if (rows[rows.length - 1] === "") rows.pop();
+  const changes: GitTreeChange[] = [];
+  for (const row of rows) {
+    const firstTab = row.indexOf("\t");
+    const secondTab = firstTab <= 0 ? -1 : row.indexOf("\t", firstTab + 1);
+    if (secondTab === -1) return undefined;
+    const addedText = row.slice(0, firstTab);
+    const deletedText = row.slice(firstTab + 1, secondTab);
+    const path = row.slice(secondTab + 1);
+    const insertions = parseNumstatCount(addedText);
+    const deletions = parseNumstatCount(deletedText);
+    if (path.length === 0 || insertions === undefined || deletions === undefined) return undefined;
+    changes.push({ path, insertions, deletions, binary: addedText === "-" && deletedText === "-" });
+  }
+  return changes;
 }
 
 export function parseNumstat(
