@@ -277,6 +277,28 @@ describe("AppleSimulatorLiveFrameView", () => {
       expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 1311 } });
     });
 
+    it("ignores a click beside the streamed screen instead of sending a point that is not on it", () => {
+      const onInput = vi.fn();
+      render(
+        <AppleSimulatorLiveFrameView
+          frame={frame}
+          inputEnabled
+          liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
+          onInput={onInput}
+        />,
+      );
+      const canvas = screen.getByLabelText("iPhone 17 live screen");
+      // The pane's height cap binds: the canvas is centred with room either side.
+      vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 20, 402, 874));
+
+      fireEvent.click(screen.getByLabelText("Tap on iPhone 17 Simulator screen"), {
+        clientX: 40,
+        clientY: 20 + 437,
+      });
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
     it("falls back to the captured still when the host has no live view", () => {
       render(
         <AppleSimulatorLiveFrameView

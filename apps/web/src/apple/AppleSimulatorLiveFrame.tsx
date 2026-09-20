@@ -169,6 +169,16 @@ function StreamedScreen(props: {
         if (canvas === null) return;
         const rect = canvas.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
+        // As with the still: the hit region can be wider than the drawn screen,
+        // and a click in the room beside it is not on the device.
+        if (
+          event.clientX < rect.left ||
+          event.clientX > rect.right ||
+          event.clientY < rect.top ||
+          event.clientY > rect.bottom
+        ) {
+          return;
+        }
         // Frames are scaled down for the pane, so the canvas's own pixels are
         // not the device's. A tap is a point on the device's screen, whose size
         // the host named when the view began.
