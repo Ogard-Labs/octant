@@ -6427,12 +6427,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
-  /* A popup sits on the floating fill. This one took the workspace fill, so it
-     was the one darker popup beside menus that are all one step lighter. */
-  background: var(--octant-floating);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
+  /* Size and place only. The popover recipe paints the fill, the edge, and the
+     corner; this rule used to repaint all three, and its fill was the
+     workspace's, so it was the one darker popup beside the menus. */
 }
 
 /* The chosen model's effort/reasoning level, one tap from the list. The

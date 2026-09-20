@@ -488,9 +488,10 @@ describe("WindowChrome", () => {
     const branchMenu = cssRule(".code-branch-selector__menu");
     expect(branchMenu).not.toMatch(/(^|\s)border:/);
     expect(branchMenu).not.toContain("background:");
-    expect(cssRule(".composer-model-picker__menu")).toContain(
-      "background: var(--octant-floating);",
-    );
+    const modelMenu = cssRule(".composer-model-picker__menu");
+    expect(modelMenu).not.toMatch(/(^|\s)border:/);
+    expect(modelMenu).not.toContain("background:");
+    expect(modelMenu).not.toContain("box-shadow:");
   });
 
   it("keeps the opaque utility dock and accessibility fallbacks", () => {
