@@ -231,6 +231,30 @@ describe("Simulator device helpers", () => {
     helpers.dispose();
   });
 
+  it("shows a viewer the screen as it already is, even when nothing on it moves again", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const jpeg = Buffer.from([0xff, 0xd8, 0x07, 0xff, 0xd9]);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(jpeg.length);
+
+    const first = vi.fn();
+    const watching = helpers.watch(simulator, options, { onFrame: first, onEnd: vi.fn() }, 5_000);
+    // The helper sends the current screen before it answers the request.
+    fake.frames(Buffer.concat([header, jpeg]));
+    fake.answer({ id: 1, ok: true });
+    await watching;
+    expect(first).toHaveBeenCalledTimes(1);
+
+    // A second viewer joins a still device: no new frame will ever be presented.
+    const second = vi.fn();
+    await helpers.watch(simulator, options, { onFrame: second, onEnd: vi.fn() }, 5_000);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(Buffer.from(second.mock.calls[0]?.[0] as Uint8Array)).toEqual(jpeg);
+    helpers.dispose();
+  });
+
   it("hands every viewer each whole frame, however the bytes arrive", async () => {
     const fake = fakeChild();
     const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });

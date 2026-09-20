@@ -98,6 +98,8 @@ interface RunningHelper {
   readonly viewers: Set<DeviceViewer>;
   buffered: Buffer;
   bufferedFrames: Buffer;
+  /** The newest frame of the running stream, for a viewer who joins a still screen. */
+  latestFrame: Uint8Array | undefined;
   nextId: number;
   idle: ReturnType<typeof setTimeout> | undefined;
   /** Settles once the helper has answered the viewers' shared `stream-start`. */
@@ -215,6 +217,7 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       viewers: new Set(),
       buffered: Buffer.alloc(0),
       bufferedFrames: Buffer.alloc(0),
+      latestFrame: undefined,
       nextId: 1,
       idle: undefined,
       streaming: undefined,
@@ -231,6 +234,7 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         // Copied: the viewers keep the frame after this buffer moves on.
         const jpeg = Uint8Array.from(helper.bufferedFrames.subarray(4, length + 4));
         helper.bufferedFrames = helper.bufferedFrames.subarray(length + 4);
+        helper.latestFrame = jpeg;
         for (const viewer of helper.viewers) viewer.onFrame(jpeg);
       }
     });
@@ -373,11 +377,16 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       }
       helper.viewers.add(viewer);
       if (helper.idle !== undefined) clearTimeout(helper.idle);
+      // Frames come only when the screen changes, and the helper's first one
+      // arrives before its answer does. A viewer is shown the newest frame at
+      // once, or a still device would leave it with nothing to draw.
+      if (helper.latestFrame !== undefined) viewer.onFrame(helper.latestFrame);
       return {
         status: "watching",
         stop: () => {
           if (!helper.viewers.delete(viewer) || helper.viewers.size > 0) return;
           helper.streaming = undefined;
+          helper.latestFrame = undefined;
           if (running.get(simulatorId) === helper) {
             void ask(simulatorId, helper, { op: "stream-stop" }, 5_000);
           }
