@@ -1,10 +1,12 @@
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
 import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
+import { startSimulatorDeviceBroker, type SimulatorDeviceBroker } from "./simulatorDeviceBroker";
+import { createSimulatorDeviceHelpers } from "./simulatorDeviceHelper";
 import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
-import { CUA_DRIVER_FILENAME } from "./runtimePaths";
+import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -985,6 +987,7 @@ let server: ChildProcess | undefined;
 let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let computerUseBroker: ComputerUseBroker | undefined;
+let simulatorDeviceBroker: SimulatorDeviceBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
@@ -1449,6 +1452,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   await portReservation.close();
   let startingBrowserBroker: BrowserRuntimeBroker | undefined;
   let startingComputerBroker: ComputerUseBroker | undefined;
+  let startingDeviceBroker: SimulatorDeviceBroker | undefined;
   try {
     const instanceId = randomUUID();
     browserSurfaceHost ??= createBrowserSurfaceHost({
@@ -1474,6 +1478,24 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     });
     const nextComputerBroker = await startComputerUseBroker(nextComputerService);
     startingComputerBroker = nextComputerBroker;
+    const deviceHelperPath = resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      DEVICE_HELPER_FILENAME,
+    );
+    // Simulators exist on macOS only, and a development build may not have
+    // compiled the helper; without a broker the server reports input as
+    // unavailable instead of pointing at a helper that is not there.
+    const nextDeviceBroker =
+      process.platform === "darwin" && existsSync(deviceHelperPath)
+        ? await startSimulatorDeviceBroker(
+            createSimulatorDeviceHelpers({ helperPath: deviceHelperPath }),
+          )
+        : undefined;
+    startingDeviceBroker = nextDeviceBroker;
     const resources = await startManagedServerResources({
       startBroker: () => startDesktopCredentialBroker(),
       startServer: (broker) => {
@@ -1487,6 +1509,12 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           browserBrokerUrl: nextBrowserRuntimeBroker.url,
           computerUseBrokerUrl: nextComputerBroker.url,
           computerUseBrokerToken: nextComputerBroker.token,
+          ...(nextDeviceBroker === undefined
+            ? {}
+            : {
+                simulatorDeviceBrokerUrl: nextDeviceBroker.url,
+                simulatorDeviceBrokerToken: nextDeviceBroker.token,
+              }),
           ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
             ? { codeFileHelperPath }
             : {}),
@@ -1514,6 +1542,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     browserRuntimeBroker = nextBrowserRuntimeBroker;
     computerUseBroker = nextComputerBroker;
     computerUseService = nextComputerService;
+    simulatorDeviceBroker = nextDeviceBroker;
     server = resources.server;
     serverInstanceId = instanceId;
     activeServerUrl = serverUrl;
@@ -1546,8 +1575,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       });
       await nextBrowserRuntimeBroker.close();
       await nextComputerBroker.close();
+      await nextDeviceBroker?.close();
       computerUseBroker = undefined;
       computerUseService = undefined;
+      simulatorDeviceBroker = undefined;
       desktopBridgeSecret = winningAttachment.bridgeSecret;
       serverInstanceId = attached.instanceId;
       activeServerUrl = attached.url;
@@ -1563,8 +1594,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const broker = credentialBroker;
     const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
     const computerBroker = computerUseBroker ?? startingComputerBroker;
+    const deviceBroker = simulatorDeviceBroker ?? startingDeviceBroker;
     computerUseBroker = undefined;
     computerUseService = undefined;
+    simulatorDeviceBroker = undefined;
     server = undefined;
     credentialBroker = undefined;
     browserRuntimeBroker = undefined;
@@ -1577,6 +1610,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     }).catch(() => undefined);
     await browserBroker?.close().catch(() => undefined);
     await computerBroker?.close().catch(() => undefined);
+    await deviceBroker?.close().catch(() => undefined);
     throw error;
   }
 }
@@ -1592,8 +1626,10 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   const broker = credentialBroker;
   const browserBroker = browserRuntimeBroker;
   const computerBroker = computerUseBroker;
+  const deviceBroker = simulatorDeviceBroker;
   computerUseBroker = undefined;
   computerUseService = undefined;
+  simulatorDeviceBroker = undefined;
   server = undefined;
   credentialBroker = undefined;
   browserRuntimeBroker = undefined;
@@ -1606,6 +1642,7 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   });
   await browserBroker?.close();
   await computerBroker?.close();
+  await deviceBroker?.close();
 }
 
 const hostLifecycle = createHostLifecycleController({

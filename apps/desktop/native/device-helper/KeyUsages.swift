@@ -1,0 +1,97 @@
+import Foundation
+
+/// One key to press: a USB HID keyboard usage, held under Shift or not.
+struct KeyStroke: Equatable {
+    let usage: UInt64
+    let shifted: Bool
+}
+
+enum HardwareButton: String {
+    case home
+    case lock
+
+    /// Consumer-page usages the guest maps to its hardware buttons.
+    var usage: (page: UInt64, code: UInt64) {
+        switch self {
+        case .home: return (0x0C, 0x40)
+        case .lock: return (0x0C, 0x30)
+        }
+    }
+}
+
+enum KeyUsages {
+    static let leftShift: UInt64 = 225
+
+    /// Named keys a request may carry. Home and Lock are buttons, not keys.
+    static let named: [String: UInt64] = [
+        "return": 40, "enter": 40, "escape": 41, "delete": 42, "backspace": 42,
+        "tab": 43, "space": 44, "right": 79, "left": 80, "down": 81, "up": 82,
+    ]
+
+    /// Languages whose Apple hardware layout keeps A–Z and the unshifted digit
+    /// row where a US keyboard has them. Deliberately short: French is AZERTY
+    /// with symbols on the unshifted digit row, German swaps Y and Z, Turkish
+    /// moves I, and a wrong guess types the wrong text without any error.
+    private static let qwertyLanguages: Set<String> = [
+        "en", "nb", "nn", "no", "da", "sv", "fi", "nl", "es", "pt",
+    ]
+
+    /// Whether key positions mean the same letters and digits on this
+    /// Simulator as on a US keyboard. `identifier` is the guest's keyboard
+    /// record (`nb_NO@sw=QWERTY-Norwegian;hw=Automatic`) or a bare language
+    /// (`nb-NO`). An explicit hardware layout other than Automatic, a software
+    /// layout that is not QWERTY, or a language outside the list is not known
+    /// to be safe, and unknown is treated as unsafe.
+    static func typesAsUSPositions(keyboardIdentifier identifier: String) -> Bool {
+        // Empty pieces are kept, so a record that starts with "@" has an empty
+        // language rather than no first piece at all to index.
+        let parts = identifier.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+            .map(String.init)
+        guard let first = parts.first else { return false }
+        let language = first.prefix { $0 != "_" && $0 != "-" }.lowercased()
+        guard qwertyLanguages.contains(language) else { return false }
+        guard parts.count == 2 else { return true }
+        var software: String?
+        var hardware: String?
+        for setting in parts[1].split(separator: ";") {
+            if setting.hasPrefix("sw=") { software = String(setting.dropFirst(3)) }
+            if setting.hasPrefix("hw=") { hardware = String(setting.dropFirst(3)) }
+        }
+        if let hardware, hardware != "Automatic" { return false }
+        if let software, !software.hasPrefix("QWERTY") { return false }
+        return true
+    }
+
+    /// The keystrokes that type `text`, or nil when a character has none.
+    ///
+    /// A usage names a key position, and the guest turns it into a character
+    /// with its own hardware layout — which follows the Simulator's keyboard
+    /// language, not the Mac's. Observed on a Norwegian Simulator: usage 45
+    /// typed "+", not "-". Letters, digits, space and Return sit on the same
+    /// positions across the QWERTY family, so those are the characters typed;
+    /// anything else is refused rather than typed wrong.
+    static func strokes(for text: String) -> [KeyStroke]? {
+        var strokes: [KeyStroke] = []
+        for character in text {
+            guard let stroke = stroke(for: character) else { return nil }
+            strokes.append(stroke)
+        }
+        return strokes
+    }
+
+    private static func stroke(for character: Character) -> KeyStroke? {
+        guard let ascii = character.asciiValue else { return nil }
+        switch ascii {
+        case UInt8(ascii: "a")...UInt8(ascii: "z"):
+            return KeyStroke(usage: UInt64(ascii - UInt8(ascii: "a")) + 4, shifted: false)
+        case UInt8(ascii: "A")...UInt8(ascii: "Z"):
+            return KeyStroke(usage: UInt64(ascii - UInt8(ascii: "A")) + 4, shifted: true)
+        case UInt8(ascii: "1")...UInt8(ascii: "9"):
+            return KeyStroke(usage: UInt64(ascii - UInt8(ascii: "1")) + 30, shifted: false)
+        case UInt8(ascii: "0"): return KeyStroke(usage: 39, shifted: false)
+        case UInt8(ascii: " "): return KeyStroke(usage: 44, shifted: false)
+        case UInt8(ascii: "\n"): return KeyStroke(usage: 40, shifted: false)
+        default: return nil
+        }
+    }
+}
