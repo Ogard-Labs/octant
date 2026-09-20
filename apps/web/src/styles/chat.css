@@ -1047,7 +1047,7 @@
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-selection) 55%, transparent);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm, 4px);
+  border-radius: var(--oct-radius-sm);
   font-size: inherit;
   font-weight: 500;
   line-height: 1.35;

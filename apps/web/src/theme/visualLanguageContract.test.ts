@@ -38,6 +38,43 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("rounds every corner from a radius token", () => {
+    // One role, one number: a corner is a token, square, a circle, or the 1–4px
+    // of a mark. Rem literals rounded seven panels at seven sizes, and a rem
+    // corner also shrinks with the interface font size while a token does not.
+    const corner =
+      /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl))\))$/;
+    const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
+    const strays = cssFiles(webRoot).flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(declaration)]
+        .map((match) => (match[1] ?? "").trim())
+        .filter((value) => !value.split(/[\s/]+/).every((part) => corner.test(part)))
+        .map((value) => `${relative(webRoot, path)}: ${value}`),
+    );
+
+    expect(strays).toEqual([]);
+  });
+
+  it("gives a card, a menu, and a popover the same corner", () => {
+    // The recipes round cards, menus, and popovers at their `xl` step and the
+    // stylesheets round panels at the medium token. They were 14px and 16px, so
+    // a menu sat beside a popover with a different corner.
+    // The recipes' scale keeps its one root (0090), so the two numbers are
+    // read and compared rather than one aliased to the other.
+    const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
+    const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
+    const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const control = px(system, /--oct-radius-sm:\s*(\d+)px;/);
+    const card = px(system, /--oct-radius-md:\s*(\d+)px;/);
+    const rootStep = px(theme, /--radius:\s*calc\(var\(--oct-radius-sm\) - (\d+)px\);/);
+    const cardStep = px(tailwind, /--radius-xl:\s*calc\(var\(--radius\) \+ (\d+)px\);/);
+    expect(control - rootStep + cardStep).toBe(card);
+    // The radius scale has one definition; the second, unread set is gone.
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
+  });
+
   it("does not keep leftover .btn colour recipes beside the adapter", () => {
     const leftovers = cssFiles(webRoot)
       .map((path) => ({
@@ -62,6 +99,21 @@ describe("the public-block visual language", () => {
       .map((file) => file.path);
 
     expect(leftovers).toEqual([]);
+  });
+
+  it("keeps every recipe control on whole pixels at the default interface size", () => {
+    // Recipe heights are rem so a control grows with the interface size, and the
+    // root is 14px. A quarter-rem step is 3.5px there, so an odd step lands
+    // between pixels: `h-7` drew about a hundred 24.5px buttons. An odd step
+    // goes through `round(…, 2px)` instead.
+    const oddStep = /(?<![\w:-])(?:min-h|h|size)-(\d+)(?![\w.[-])/g;
+    const strays = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(oddStep)]
+        .filter((match) => Number(match[1]) >= 5 && Number(match[1]) % 2 === 1)
+        .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
+    );
+
+    expect(strays).toEqual([]);
   });
 
   it("does not leave leftover btn-icon or btn-group class names on product surfaces", () => {
@@ -328,6 +380,25 @@ describe("the public-block visual language", () => {
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
     expect(activePane).toMatch(/background:\s*var\(--octant-control\)/);
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
+  });
+
+  it("gives icon-only controls two sizes: the rail button and the row action", () => {
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    // A panel's icon control is the 28px rail button. The terminal's actions
+    // button was 26px and both Refresh buttons took a rem size from the recipe,
+    // which rendered 25px and 29px beside the 28px controls around them.
+    const terminal = code.match(/\.code-terminal-pane__actions-trigger\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(terminal).toContain("width: var(--oct-rail-button-h);");
+    expect(terminal).toContain("height: var(--oct-rail-button-h);");
+    for (const file of ["code/CodeFileExplorer.tsx", "work/WorkFilesPanel.tsx"]) {
+      const source = readFileSync(join(webRoot, file), "utf8");
+      expect(source).toMatch(/<OctantIconButton[^>]*label="Refresh files"/s);
+    }
+    // An action inside a row is a 24px square, on a Project row as on a thread row.
+    const projectAction = styles.match(/\.project-row__action--icon\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(projectAction).toContain("height: 24px;");
+    expect(projectAction).not.toContain("height: var(--oct-nav-row-h);");
   });
 
   it("retires the legacy underline tab paint from feature surfaces", () => {

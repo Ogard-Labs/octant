@@ -62,6 +62,28 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByText("Reviewer")).toBeNull();
   });
 
+  it("keeps the model beside send in a thread, apart from what the person attaches", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    // A new task's composer already reads attach, space, model, access, send.
+    // The thread's composer put the model beside attach, so it changed sides
+    // the moment a task became a thread.
+    const gap = screen.getByLabelText("Thread context").querySelector(".composer-gap");
+    const model = screen.getByRole("button", { name: "Provider and model" });
+    const access = screen.getByRole("button", { name: "Next turn access" });
+    expect(gap).not.toBeNull();
+    const follows = (before: Node, after: Node) =>
+      (before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(screen.getByRole("button", { name: "Add attachment" }), gap as Node)).toBe(true);
+    expect(follows(gap as Node, model)).toBe(true);
+    expect(follows(model, access)).toBe(true);
+  });
+
   it("renders the conversation center and sends follow-ups through the controller", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
