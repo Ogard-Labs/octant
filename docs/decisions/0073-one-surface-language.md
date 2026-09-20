@@ -1,6 +1,6 @@
 # 0073. One surface language across the renderer and the site
 
-**Status:** Superseded by 0142
+**Status:** Superseded by 0144
 
 ## Context
 

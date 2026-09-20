@@ -152,6 +152,37 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("says an input approval covers the Simulator for a while, not one tap", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: {
+        kind: "apple-action",
+        request: {
+          actionId: operationId(810) as never,
+          correlationId: operationId(811) as never,
+          authority: {
+            hostId: "90000000-0000-4000-8000-000000000010" as never,
+            mode: "code" as const,
+            projectId: thread().projectId,
+            providerInstanceId: thread().providerInstanceId,
+            extension: { kind: "core" as const },
+          },
+          threadId,
+          checkoutId,
+          kind: "tap" as const,
+          simulatorId: "90000000-0000-4000-8000-000000000011" as never,
+          requestedBy: { kind: "local-user" as const, actorId: operationId(812) as never },
+          point: { x: 10, y: 20 },
+          timeoutMs: 30_000,
+          approval: { kind: "pending" as const },
+        },
+      },
+    });
+    expect(challenge?.message).toBe("Allow input to this Simulator?");
+    expect(challenge?.detail).toContain("for 15 minutes after each input");
+    fixture.close();
+  });
+
   it("prepares and consumes one-shot approval for the exact core Apple action", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {

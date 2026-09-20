@@ -217,7 +217,7 @@
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
   --oct-nav-head-h: 40px;
-  --oct-nav-row-h: 30px;
+  --oct-nav-row-h: 32px;
   --oct-nav-inset: 12px;
   --oct-disabled-opacity: 0.45;
 
@@ -3794,7 +3794,9 @@ input.switch:checked::after {
   display: flex;
   min-height: 24px;
   align-items: center;
-  margin-top: var(--oct-space-3);
+  /* A group label needs more air above it than the rows beneath it have
+     between them, or the label reads as one more row. */
+  margin-top: var(--oct-space-5);
   padding: 0 var(--oct-nav-inset);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);

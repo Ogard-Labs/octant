@@ -1,4 +1,4 @@
-# 0142. System compact typography is the default
+# 0144. System compact typography is the default
 
 **Status:** Accepted
 

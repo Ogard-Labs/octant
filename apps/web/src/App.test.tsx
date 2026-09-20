@@ -1946,7 +1946,8 @@ describe("App", () => {
       setPointerCapture: vi.fn(),
     });
 
-    fireEvent.pointerDown(separator, { button: 0, clientX: 232, pointerId: 30 });
+    // The handle sits on the sidebar's edge, which is the default width.
+    fireEvent.pointerDown(separator, { button: 0, clientX: 280, pointerId: 30 });
     fireEvent.pointerMove(separator, { clientX: 300, pointerId: 30 });
     await waitFor(() =>
       expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "300px" }),
@@ -3133,7 +3134,7 @@ describe("App", () => {
       expect(await screen.findByRole("button", { name: "More window actions" })).toBeVisible();
       expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 960px)");
       expect(document.querySelector(".shell")).toHaveStyle({
-        "--octant-sidebar-width": "232px",
+        "--octant-sidebar-width": "280px",
       });
       expect(addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
     } finally {
@@ -3623,7 +3624,7 @@ describe("App", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     expect(document.querySelector(".shell")).toHaveStyle({
-      "--octant-sidebar-width": "232px",
+      "--octant-sidebar-width": "280px",
     });
     expect(document.querySelector(".shell")?.getAttribute("style")).not.toMatch(
       /grid-template-columns/i,

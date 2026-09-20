@@ -287,14 +287,65 @@ window, or approves an action class the host policy reserves for the local user.
   provider home, binary/runtime directories and temp; write scoped to provider home and temp, plus
   the root only for non-plan, non-chat sessions; deny rules enumerate the rest of the user's home.
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
-  `apps/server/src/providers/piProcess.ts`, `vibeProcess.ts`, `kiloProcess.ts`, `kimiProcess.ts`,
-  `devinProcess.ts`. Environments are allowlist-sanitized (`SAFE_ENVIRONMENT` plus declared
-  provider credentials), and `apps/server/src/childProcessEnvironment.ts` strips the broker URLs,
-  broker tokens, and desktop bridge secret from every child. `codexProcess.ts` applies the same
-  environment allowlist to its probe and long-lived app-server; that runtime is not itself wrapped
-  by Octant confinement, so the allowlist is the only boundary between a host secret and a
-  model-generated shell command. A model provider's own credential crosses (`OPENAI_API_KEY`, the
-  Bedrock bearer token); a general-purpose one (a GitHub token, AWS IAM access keys) never does.
+  `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts` — the runtimes
+  whose process carries exactly one thread's root, mode, and execution policy. On Full access,
+  0009's user-selected unrestricted posture, OpenCode and Pi return the binary unwrapped. ACP
+  drops the deny-default profile too, and a profile that carries 0006's static MCP, skills, and
+  hooks denials launches through an allow-default wrapper that adds only those.
+  `apps/server/src/childProcessEnvironment.ts` strips the broker URLs, broker tokens, and desktop
+  bridge secret from every child, and argv carrying a provider credential is refused.
+- **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
+  wrapped, a scoped exception recorded in
+  `docs/decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md`. The Claude Agent
+  SDK launch is not wrapped either, and that record does not except it: it carries one thread per
+  query and is a gap. Octant-owned tools those threads reach stay confined. What the runtime
+  process itself is left holding:
+  - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`: `read-only` on
+    Plan, approval-gated and auto-accept-edits, so an in-root write escalates to Octant, and
+    `danger-full-access` on the user-selected Full access. Claude sends sandbox settings only on
+    approval-gated and auto-accept-edits turns; `claudeSandboxSettings` returns nothing for Plan
+    and Full access, so a Claude Plan turn is read-only by `permissionMode` alone and not at any
+    sandbox — which 0009 requires and which therefore does not hold for that one path.
+  - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
+    Pi's also admits all fifteen variables in `PROVIDER_CREDENTIALS` — `OPENAI_API_KEY`,
+    `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and the rest — from the host whichever provider the
+    thread uses, so an unrelated key reaches a Pi process. Seatbelt confines a wrapped Pi
+    turn's files and network, not the environment it was started with, and Full access is
+    unwrapped, so a model-generated command reads those keys either way.
+    Codex's `sanitizeCodexEnvironment` is an allowlist too: host basics, locale, terminal and TLS
+    variables, proxy variables, Codex's own `CODEX_*` and `OPENAI_*` configuration, and the
+    credentials it names. A model provider's own credential crosses (`OPENAI_API_KEY`, the Bedrock
+    bearer token); a general-purpose one — a GitHub token, AWS IAM access keys — does not cross
+    _as a variable_. That is a statement about the environment only; see _Files_ below. Under
+    API-key authentication `ANTHROPIC_API_KEY` is written into Claude's
+    child environment at launch and deleted from the in-memory object when the scope closes.
+    0009 reads two ways on that: it says provider credentials are stripped from every child, and
+    that secrets reach a process only as named references resolved at launch. This record states
+    the mechanism rather than settling which clause governs.
+  - _Files._ 0009's wrapped profile enumerates the rest of the user's home as denied. An unwrapped
+    runtime gets none of that. Both forward `HOME`, and Codex also forwards the AWS locators
+    (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`). So `~/.aws/credentials`,
+    `~/.config/gh/hosts.yml`, `~/.ssh` and anything else the user can read is reachable by the
+    runtime process, limited only by what the provider's own sandbox blocks. That is nothing on
+    Full access for either runtime, and nothing on a Claude Plan turn. Keeping a token out of the
+    environment does not keep it from a model-generated command that reads its file.
+  - _Consequence._ A model-generated shell command inside either runtime reads that environment
+    and those files with no Octant-owned OS boundary in the way, and a write the runtime's own
+    sandbox permits without announcing is not one Octant's approvals can prompt for. Wrapping the
+    runtime is what closes both; 0143 names it as how the Codex exception ends and the Claude gap
+    closes.
+- **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
+  `inspectVersion`, `probeCodexBinary`, and `runProbe` in `claudeProcess.ts` — the last for both
+  `--version` and `auth status --json` — each spawn the user-configured binary before any
+  confined launch. `scanDescriptor` in `apps/server/src/providers/discoveryService.ts`
+  goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
+  found on `PATH` or in an approved directory, so the executable is not even one the user named.
+  Both bound the timeout and output and sanitize the environment, and neither is confined. This
+  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0143 does not
+  except it: it is a standing gap across every provider family and across discovery.
+  The Oh My Pi connection check in `ohMyPiProcess.ts` runs a version check and an RPC probe the
+  same way, against 0122, which exempts a probe from egress only and still requires it to launch
+  under chat-mode confinement.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
