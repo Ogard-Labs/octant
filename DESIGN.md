@@ -107,7 +107,7 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 Radius has one number per role, defined once as `--oct-radius-*` in
 `octant.css`: a compact control is 8px, a control or a row 10px, a card, panel,
 menu, or popover 16px. The recipes reach the same numbers through `--radius`,
-whose `lg` step is the control and whose `xl` step is the card token itself, so
+whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
 a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely

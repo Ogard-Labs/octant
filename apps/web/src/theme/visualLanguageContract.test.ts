@@ -59,8 +59,17 @@ describe("the public-block visual language", () => {
     // The recipes round cards, menus, and popovers at their `xl` step and the
     // stylesheets round panels at the medium token. They were 14px and 16px, so
     // a menu sat beside a popover with a different corner.
+    // The recipes' scale keeps its one root (0090), so the two numbers are
+    // read and compared rather than one aliased to the other.
+    const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
     const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
-    expect(tailwind).toContain("--radius-xl: var(--oct-radius-md);");
+    const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const control = px(system, /--oct-radius-sm:\s*(\d+)px;/);
+    const card = px(system, /--oct-radius-md:\s*(\d+)px;/);
+    const rootStep = px(theme, /--radius:\s*calc\(var\(--oct-radius-sm\) - (\d+)px\);/);
+    const cardStep = px(tailwind, /--radius-xl:\s*calc\(var\(--radius\) \+ (\d+)px\);/);
+    expect(control - rootStep + cardStep).toBe(card);
     // The radius scale has one definition; the second, unread set is gone.
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
     expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
