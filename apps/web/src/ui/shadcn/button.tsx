@@ -28,19 +28,20 @@ const buttonVariants = cva(
         link: "h-auto p-0 text-foreground underline-offset-4 hover:underline",
       },
       // Heights are rem so a control grows with the interface size. The root is
-      // 14px, not the 16px these steps assume, so the odd steps landed between
-      // pixels: 1.75rem was 24.5px and 2.25rem was 31.5px, and about a hundred
-      // small buttons drew a blurred edge. Each odd step rounds to a whole 2px,
+      // 13px, not the 16px these steps assume, so the odd steps landed between
+      // pixels: 1.75rem was 22.75px and 2.25rem was 29.25px, and about a hundred
+      // small buttons drew a blurred edge. Each step rounds to a whole 2px,
       // which gives 20, 24, 28, and 32 at the default size.
       size: {
         default:
-          "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-[round(down,1.5rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-[round(1.75rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-[round(2.25rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        icon: "size-8",
-        "icon-xs": "size-[round(down,1.5rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-[round(1.75rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3.5",
+          "h-[round(2.154rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-[round(2.462rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        icon: "size-[round(2.154rem,2px)]",
+        "icon-xs":
+          "size-[round(down,1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3.5",
       },
     },
     defaultVariants: {
