@@ -7,14 +7,41 @@ import { describe, expect, it } from "vitest";
  * Confinement gate for provider runtime launches.
  *
  * 0009 says every Octant-spawned subprocess that can execute arbitrary code
- * launches through the shared builder, and unit coverage cannot see when one
- * stops doing so: a driver that spawns its runtime directly is green, shipped,
- * and only visible to a grep. Three provider process modules had drifted out of
- * the rule that way with nothing recording it, which is what 0138 settles. This
- * gate keeps that record and the code in agreement in both directions — a
- * module that drops the builder fails until 0138 names its file, and a name
- * 0138 keeps after the module is wrapped again fails too.
+ * launches through the shared builder, and unit coverage cannot see a module
+ * that stops doing so: a driver that spawns its runtime directly is green,
+ * shipped, and visible only to a grep. Three provider process modules had
+ * drifted out of the rule that way with nothing recording it, which is what
+ * 0138 settles.
+ *
+ * What this proves: a provider process module either uses the shared builder or
+ * appears in {@link UNWRAPPED} with a reason, and 0138 names each one that does
+ * not. What it does not prove: that every launch inside a wrapped module goes
+ * through the builder. `acpProcess` and `openCodeProcess` both call `spawn`
+ * directly for their version probes, so a per-launch claim would need each
+ * module to declare its launches in a manifest this gate could read rather than
+ * a source scan. The observed failure was whole modules never adopting the
+ * builder, and that is the failure this catches.
+ *
+ * {@link UNWRAPPED}, not 0138, is the live set. An accepted record keeps its
+ * history — a later ADR supersedes it rather than editing it — so reading the
+ * live set out of 0138 would make confining Codex fail this suite until someone
+ * deleted that history. Confining a runtime deletes its entry here instead.
  */
+const UNWRAPPED: ReadonlyArray<{ readonly file: string; readonly reason: string }> = [
+  {
+    file: "claudeProcess.ts",
+    reason: "The Agent SDK composes the launch and passes no mode or execution policy.",
+  },
+  {
+    file: "codexProcess.ts",
+    reason: "One app-server carries every thread on a provider instance, so it has no one root.",
+  },
+  {
+    file: "ohMyPiProcess.ts",
+    reason: "A declaration-only probe in its managed home; its turns run on the Pi runtime.",
+  },
+];
+
 const here = dirname(fileURLToPath(import.meta.url));
 const providersDirectory = join(here, "..", "providers");
 const decisionPath = join(
@@ -28,16 +55,15 @@ const decisionPath = join(
   "0138-confinement-wraps-a-runtime-that-carries-one-thread.md",
 );
 
-const CONFINEMENT_MODULE = "../process/seatbeltProfile";
-
 function providerProcessModules(): ReadonlyArray<string> {
   return readdirSync(providersDirectory)
     .filter((entry) => entry.endsWith("Process.ts") && !entry.includes(".test."))
     .sort();
 }
 
-function preparesConfinedLaunch(fileName: string): boolean {
-  return readFileSync(join(providersDirectory, fileName), "utf8").includes(CONFINEMENT_MODULE);
+function usesConfinementBuilder(fileName: string): boolean {
+  const source = readFileSync(join(providersDirectory, fileName), "utf8");
+  return source.includes("../process/seatbeltProfile") && source.includes("confinement.prepare(");
 }
 
 describe("provider runtime confinement", () => {
@@ -45,19 +71,24 @@ describe("provider runtime confinement", () => {
     expect(providerProcessModules().length).toBeGreaterThan(0);
   });
 
-  it("names every provider runtime that launches without the shared confinement builder", () => {
-    const record = readFileSync(decisionPath, "utf8");
-    const unnamed = providerProcessModules()
-      .filter((fileName) => !preparesConfinedLaunch(fileName))
-      .filter((fileName) => !record.includes(`\`${fileName}\``));
-    expect(unnamed).toEqual([]);
+  it("refuses a provider runtime that launches without the shared confinement builder", () => {
+    const declared = new Set(UNWRAPPED.map(({ file }) => file));
+    const undeclared = providerProcessModules().filter(
+      (fileName) => !usesConfinementBuilder(fileName) && !declared.has(fileName),
+    );
+    expect(undeclared).toEqual([]);
   });
 
-  it("stops naming a provider runtime once it launches through the shared builder", () => {
-    const record = readFileSync(decisionPath, "utf8");
-    const stale = providerProcessModules()
-      .filter((fileName) => preparesConfinedLaunch(fileName))
-      .filter((fileName) => record.includes(`\`${fileName}\``));
+  it("drops a provider runtime from the exception set once it uses the shared builder", () => {
+    const stale = UNWRAPPED.map(({ file }) => file).filter((file) => usesConfinementBuilder(file));
     expect(stale).toEqual([]);
+  });
+
+  it("keeps the decision record naming every runtime the exception set still covers", () => {
+    const record = readFileSync(decisionPath, "utf8");
+    const unnamed = UNWRAPPED.map(({ file }) => file).filter(
+      (file) => !record.includes(`\`${file}\``),
+    );
+    expect(unnamed).toEqual([]);
   });
 });
