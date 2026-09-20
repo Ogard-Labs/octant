@@ -805,11 +805,11 @@ describe("AppleToolchainService lifecycle", () => {
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
     const leftover = join(
       captureDirectory,
-      "octant-apple-capture-30000000-0000-4000-8000-0000000000aa.png",
+      "octant-apple-capture-local-30000000-0000-4000-8000-0000000000aa.png",
     );
     const recent = join(
       captureDirectory,
-      "octant-apple-capture-30000000-0000-4000-8000-0000000000bb.png",
+      "octant-apple-capture-local-30000000-0000-4000-8000-0000000000bb.png",
     );
     const unrelated = join(captureDirectory, "someone-elses.png");
     for (const path of [leftover, recent, unrelated]) await writeFile(path, new Uint8Array([1]));
@@ -1124,6 +1124,36 @@ describe("AppleToolchainService lifecycle", () => {
     ).toBe(true);
   });
 
+  it("sweeps only its own host's captures when two hosts share a temporary directory", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const mine = join(
+      captureDirectory,
+      "octant-apple-capture-hosta-30000000-0000-4000-8000-0000000000f1.png",
+    );
+    const theirs = join(
+      captureDirectory,
+      "octant-apple-capture-hostb-30000000-0000-4000-8000-0000000000f2.png",
+    );
+    const old = new Date(Date.now() - 5 * 60_000);
+    for (const path of [mine, theirs]) {
+      await writeFile(path, new Uint8Array([1]));
+      await utimes(path, old, old);
+    }
+
+    new AppleToolchainService({
+      execute: discoveryExecutor(),
+      captureDirectory,
+      captureOwner: "hosta",
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    await vi.waitFor(() => expect(existsSync(mine)).toBe(false));
+    // The other host's capture may still be running; its age proves nothing here.
+    expect(existsSync(theirs)).toBe(true);
+  });
+
   it("shrugs off a return visit that cannot remove what it finds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const rejections: unknown[] = [];
@@ -1168,7 +1198,7 @@ describe("AppleToolchainService lifecycle", () => {
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
     const leftover = join(
       captureDirectory,
-      "octant-apple-capture-30000000-0000-4000-8000-0000000000dd.png",
+      "octant-apple-capture-local-30000000-0000-4000-8000-0000000000dd.png",
     );
     await writeFile(leftover, new Uint8Array([1]));
     const old = new Date(Date.now() - 5 * 60_000);

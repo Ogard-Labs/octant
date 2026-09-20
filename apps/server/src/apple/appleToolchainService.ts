@@ -113,6 +113,13 @@ export interface AppleToolchainServiceOptions {
    * directory.
    */
   readonly captureDirectory?: string;
+  /**
+   * Names this host in its capture files. Hosts started with different data
+   * directories share one temporary directory, and a host may only sweep what
+   * is its own: another host's old file can belong to a capture still running.
+   * Stable across restarts, so a host clears what its last run left behind.
+   */
+  readonly captureOwner?: string;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
@@ -177,6 +184,7 @@ export class AppleToolchainService {
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
   readonly #captureDirectory: string;
+  readonly #capturePrefix: string;
   // Files a running capture owns. A capture may run for minutes, so its file's
   // age says nothing about whether it was abandoned; only this does.
   readonly #capturesInProgress = new Set<string>();
@@ -193,8 +201,15 @@ export class AppleToolchainService {
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
     this.#captureDirectory = options.captureDirectory ?? defaultTemporaryDirectory();
+    const owner = (options.captureOwner ?? "local").replace(/[^A-Za-z0-9]/g, "").slice(0, 32);
+    this.#capturePrefix = `${CAPTURE_FILE_PREFIX}${owner.length === 0 ? "local" : owner}-`;
     // Whatever a previous run could not come back for is cleared now.
-    void sweepStaleCaptures(this.#captureDirectory, Date.now(), this.#capturesInProgress);
+    void sweepStaleCaptures(
+      this.#captureDirectory,
+      this.#capturePrefix,
+      Date.now(),
+      this.#capturesInProgress,
+    );
     this.#lastToolchain = unavailableToolchain(options.newId(), options.now());
   }
 
@@ -566,13 +581,18 @@ export class AppleToolchainService {
         this.#advance(active, "capturing-screen");
         // A capture whose process outlived its timeout can write its file after
         // this action already removed it; the next capture clears what is left.
-        await sweepStaleCaptures(this.#captureDirectory, Date.now(), this.#capturesInProgress);
+        await sweepStaleCaptures(
+          this.#captureDirectory,
+          this.#capturePrefix,
+          Date.now(),
+          this.#capturesInProgress,
+        );
         // One file per attempt, not per action: a retry of a capture whose
         // first process is still alive would otherwise share its path, and the
         // two writers would race for the file the retry then reads.
         const capturePath = join(
           this.#captureDirectory,
-          `${CAPTURE_FILE_PREFIX}${request.actionId}-${randomUUID()}.png`,
+          `${this.#capturePrefix}${request.actionId}-${randomUUID()}.png`,
         );
         this.#capturesInProgress.add(capturePath);
         let exitedCleanly = false;
@@ -1545,9 +1565,10 @@ const STALE_CAPTURE_MS = 60_000;
 /** When an action returns for a file its unconfirmed process may still write. */
 const CAPTURE_RETURN_VISITS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 
-/** Removes this service's capture files that no running action still owns. */
+/** Removes this host's capture files that no running action still owns. */
 async function sweepStaleCaptures(
   directory: string,
+  prefix: string,
   nowMs: number,
   inProgress: ReadonlySet<string>,
 ): Promise<void> {
@@ -1559,7 +1580,7 @@ async function sweepStaleCaptures(
   }
   await Promise.all(
     names
-      .filter((name) => name.startsWith(CAPTURE_FILE_PREFIX) && name.endsWith(".png"))
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".png"))
       .map(async (name) => {
         const path = join(directory, name);
         if (inProgress.has(path)) return;
