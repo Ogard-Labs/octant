@@ -1,4 +1,4 @@
-# 0139. Confinement wraps a provider runtime that carries one thread's authority
+# 0141. Confinement wraps a provider runtime that carries one thread's authority
 
 **Status:** Accepted
 
@@ -35,7 +35,11 @@ are theirs and not a gap in the rule.
   family spawns the configured executable to read a version or an auth state
   before any confined launch, and discovery does the same to a candidate it
   found. That does not satisfy 0009 and is not excepted here: a standing gap,
-  inventoried in the threat model, closing in its own change.
+  inventoried in the threat model, closing in its own change. The Oh My Pi
+  connection check (`ohMyPiProcess.ts`) is the same gap and a sharper one: it
+  runs a version check and an RPC probe with no confinement, though 0122 exempts
+  a probe from egress only and still requires it to launch confined. The gate
+  holds that file so it stays visible; that is bookkeeping, not an exception.
 - Every provider process module that launches without the shared builder is
   named here rather than left to a grep. This is a scoped exception to one rule
   of 0009, that every such subprocess launches through that builder:
@@ -48,9 +52,6 @@ are theirs and not a gap in the rule.
   - **Claude** (`claudeProcess.ts`): it does spawn per query with that thread's
     `cwd`, but the Agent SDK composes the launch and hands Octant's spawn
     callback only command, args, cwd, env, and a signal.
-  - **Oh My Pi discovery** (`ohMyPiProcess.ts`): a declaration-only probe in its
-    managed home with sessions, tools, extensions, skills, and LSP off, in the
-    family 0122 carved out. Its turns run on the wrapped Pi runtime.
 - The exception covers the runtime process only. Octant-owned tools those
   threads reach — terminal, test runner, Git helpers, executable extension
   components, brokered tools — stay confined exactly as 0009 requires.

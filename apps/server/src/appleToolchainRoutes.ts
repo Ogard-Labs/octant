@@ -1,11 +1,14 @@
 import {
   decodeAppleArtifactRequest,
   decodeAppleRpcEnvelope,
+  decodeAppleScreenStreamRequest,
+  SIMULATOR_SCREEN_HEADER,
   type AppleAuthorityScopeRequest,
   type AppleRpcEnvelope,
   type WindowId,
 } from "@octant/contracts";
 import type { AppleExecutionContext, AppleToolchainService } from "./apple/appleToolchainService";
+import type { SimulatorScreenWatch } from "./apple/desktopSimulatorDevicePort";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -23,6 +26,14 @@ export interface AppleToolchainRouteDependencies {
     scope: AppleAuthorityScopeRequest,
     envelope: AppleRpcEnvelope,
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
+  /**
+   * Watches a Simulator's screen through the desktop's device helper. Absent on
+   * a host the desktop app did not start, where there is no live view.
+   */
+  readonly watchSimulator?: (
+    simulatorId: string,
+    signal: AbortSignal,
+  ) => Promise<SimulatorScreenWatch>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
   readonly nowIso?: () => string;
@@ -38,7 +49,11 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
   const bodyLimit = dependencies.maxRequestBodySize ?? DEFAULT_BODY_LIMIT;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/apple/toolchain" && url.pathname !== "/api/apple/artifacts") {
+    if (
+      url.pathname !== "/api/apple/toolchain" &&
+      url.pathname !== "/api/apple/artifacts" &&
+      url.pathname !== "/api/apple/screen-stream"
+    ) {
       return undefined;
     }
     const origin = request.headers.get("origin");
@@ -88,6 +103,16 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         body.kind === "too-large" ? 413 : 400,
         origin,
       );
+    }
+    if (url.pathname === "/api/apple/screen-stream") {
+      return await handleScreenStreamRequest({
+        body: body.value,
+        origin,
+        windowId,
+        signal: request.signal,
+        resolveContext: dependencies.resolveContext,
+        watchSimulator: dependencies.watchSimulator,
+      });
     }
     if (url.pathname === "/api/apple/artifacts") {
       return await handleArtifactRequest({
@@ -176,6 +201,68 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
       return failure("unavailable", "Apple toolchain service is unavailable.", 503, origin);
     }
   };
+}
+
+/**
+ * A live view is a read of the destination, authorized like a screenshot:
+ * the window must hold the thread and checkout, and no approval is asked.
+ */
+async function handleScreenStreamRequest(input: {
+  readonly body: unknown;
+  readonly origin: string | null;
+  readonly windowId: WindowId;
+  readonly signal: AbortSignal;
+  readonly resolveContext: AppleToolchainRouteDependencies["resolveContext"];
+  readonly watchSimulator: AppleToolchainRouteDependencies["watchSimulator"];
+}): Promise<Response> {
+  let request;
+  try {
+    request = decodeAppleScreenStreamRequest(input.body);
+  } catch {
+    return failure("invalid", "Apple toolchain request is invalid.", 400, input.origin);
+  }
+  const envelope: AppleRpcEnvelope = {
+    kind: "apple-snapshot-request",
+    authority: request.authority,
+    threadId: request.threadId,
+    checkoutId: request.checkoutId,
+  };
+  let context: AppleExecutionContext | undefined;
+  try {
+    context = await input.resolveContext(input.windowId, request, envelope);
+  } catch {
+    context = undefined;
+  }
+  if (context === undefined) {
+    return failure("unauthorized", "Apple toolchain request is unauthorized.", 403, input.origin);
+  }
+  if (input.watchSimulator === undefined) {
+    return failure(
+      "unavailable",
+      "A live Simulator view needs the Octant desktop app on the Mac that owns the destination.",
+      404,
+      input.origin,
+    );
+  }
+  let watch: SimulatorScreenWatch;
+  try {
+    watch = await input.watchSimulator(String(request.simulatorId), input.signal);
+  } catch {
+    return failure("unavailable", "The live Simulator view is unavailable.", 503, input.origin);
+  }
+  if (watch.kind !== "watching") {
+    return failure("unavailable", `${watch.reason}: ${watch.message}`, 409, input.origin);
+  }
+  return new Response(watch.frames, {
+    status: 200,
+    headers: {
+      ...corsHeaders(input.origin),
+      "access-control-expose-headers": SIMULATOR_SCREEN_HEADER,
+      "cache-control": "no-store",
+      "content-type": "application/octet-stream",
+      [SIMULATOR_SCREEN_HEADER]: `${watch.screen.width}x${watch.screen.height}`,
+    },
+  });
 }
 
 async function handleArtifactRequest(input: {

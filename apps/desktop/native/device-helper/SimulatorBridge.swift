@@ -78,7 +78,7 @@ struct SimulatorBridge {
             AnyObject, Selector, AutoreleasingUnsafeMutablePointer<NSError?>?
         ) -> AnyObject?
         var failure: NSError?
-        let context = try send(ContextFor.self)(
+        let context = try messageSend(ContextFor.self)(
             contextClass,
             NSSelectorFromString("sharedServiceContextForDeveloperDir:error:"),
             developerDirectory as NSString,
@@ -87,7 +87,7 @@ struct SimulatorBridge {
         guard let context else {
             throw BridgeRefusal.toolchainUnavailable(failure?.localizedDescription ?? "no service context")
         }
-        let deviceSet = try send(DeviceSetOf.self)(
+        let deviceSet = try messageSend(DeviceSetOf.self)(
             context, NSSelectorFromString("defaultDeviceSetWithError:"), &failure
         )
         guard let deviceSet = deviceSet as? NSObject,
@@ -112,7 +112,7 @@ struct SimulatorBridge {
             AnyObject, Selector, NSString, AutoreleasingUnsafeMutablePointer<NSError?>?
         ) -> mach_port_t
         var failure: NSError?
-        let port = try Self.send(Lookup.self)(
+        let port = try Self.messageSend(Lookup.self)(
             device, NSSelectorFromString("lookup:error:"), service as NSString, &failure
         )
         guard port != 0 else {
@@ -122,7 +122,7 @@ struct SimulatorBridge {
         return port
     }
 
-    private static func send<Signature>(_ signature: Signature.Type) throws -> Signature {
+    static func messageSend<Signature>(_ signature: Signature.Type) throws -> Signature {
         // RTLD_DEFAULT: search every image already loaded into the process.
         guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_msgSend") else {
             throw BridgeRefusal.toolchainUnavailable("objc_msgSend is missing")

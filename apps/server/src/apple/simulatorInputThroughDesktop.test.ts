@@ -38,6 +38,25 @@ describe("Simulator input through the desktop's device helper", () => {
     });
   });
 
+  it("sends a swipe with both ends and a default pace when none was asked for", async () => {
+    const { deliver, inject } = desktop({ kind: "delivered" });
+
+    await inject(
+      request({ kind: "swipe", point: { x: 600, y: 2_000 }, toPoint: { x: 600, y: 800 } }),
+      context,
+      30_000,
+    );
+
+    expect(deliver.mock.calls[0]?.[0]).toEqual({
+      kind: "swipe",
+      udid,
+      budgetMs: 30_000,
+      from: { x: 600, y: 2_000 },
+      to: { x: 600, y: 800 },
+      durationMs: 250,
+    });
+  });
+
   it("sends typed text and keys, and never echoes the text back", async () => {
     const { deliver, inject } = desktop({ kind: "delivered" });
 
@@ -144,6 +163,53 @@ describe("the server's port to the desktop device broker", () => {
     expect(new Headers(init?.headers).get("x-octant-simulator-device-token")).toBe(token);
     expect(JSON.parse(String(init?.body))).toEqual({
       input: { kind: "key-press", udid, budgetMs: 30_000, key: "home" },
+    });
+  });
+
+  it("opens the screen stream, reading the screen's size from the broker's header", async () => {
+    const fetchImpl = vi.fn(
+      async (_url: unknown, _init?: RequestInit) =>
+        new Response(Uint8Array.from([0, 0, 0, 1, 0xff]), {
+          status: 200,
+          headers: { "x-octant-simulator-screen": "1206x2622" },
+        }),
+    );
+    const port = createDesktopSimulatorDevicePort(
+      environment,
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    const watch = await port?.watch({ udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 });
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      `${environment.OCTANT_SIMULATOR_DEVICE_BROKER_URL}/stream`,
+    );
+    expect(watch?.kind).toBe("watching");
+    if (watch?.kind !== "watching") return;
+    expect(watch.screen).toEqual({ width: 1206, height: 2622 });
+    expect([...new Uint8Array(await new Response(watch.frames).arrayBuffer())]).toEqual([
+      0, 0, 0, 1, 0xff,
+    ]);
+  });
+
+  it("returns the helper's reason when a Simulator cannot be watched", async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json(
+        { kind: "refused", reason: "not-booted", message: "the Simulator is Shutdown" },
+        { status: 409 },
+      ),
+    );
+    const port = createDesktopSimulatorDevicePort(
+      environment,
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    await expect(
+      port?.watch({ udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 }),
+    ).resolves.toEqual({
+      kind: "refused",
+      reason: "not-booted",
+      message: "the Simulator is Shutdown",
     });
   });
 });

@@ -295,7 +295,7 @@ window, or approves an action class the host policy reserves for the local user.
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server and the
   Claude Agent SDK launch are not wrapped, a scoped exception recorded in
-  `docs/decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
+  `docs/decisions/0141-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
   those threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
@@ -320,8 +320,11 @@ window, or approves an action class the host policy reserves for the local user.
   confined launch. `scanDescriptor` in `apps/server/src/providers/discoveryService.ts`
   goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
   found on `PATH` or in an approved directory, so the executable is not even one the user named.
+  The Oh My Pi connection check in `ohMyPiProcess.ts` runs a version check and an RPC probe the
+  same way, against 0122, which exempts a probe from egress only and still requires it to launch
+  under chat-mode confinement.
   Both bound the timeout and output and sanitize the environment, and neither is confined. This
-  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0139 does not
+  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0141 does not
   except it: it is a standing gap across every provider family and across discovery.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under

@@ -17,6 +17,7 @@ export const DEVICE_HELPER_SOURCES = [
   "main.swift",
   "SimulatorBridge.swift",
   "GuestInputConnection.swift",
+  "DisplayStream.swift",
   "KeyUsages.swift",
   "vendor/simulator-hid/DTUHIDModels.swift",
   "vendor/simulator-hid/XPCEncoder.swift",

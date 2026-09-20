@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decodeSimulatorDeviceInput, decodeSimulatorDeviceInputResult } from "./simulatorDevice";
+import {
+  decodeSimulatorDeviceInput,
+  decodeSimulatorDeviceInputResult,
+  decodeSimulatorDeviceWatch,
+} from "./simulatorDevice";
 
 const udid = "7E29846E-F920-438E-8AB2-930C1A0F7FB7";
 
@@ -19,6 +23,16 @@ describe("Simulator device input", () => {
     expect(
       decodeSimulatorDeviceInput({ kind: "key-press", udid, budgetMs: 30_000, key: "home" }),
     ).toMatchObject({ kind: "key-press" });
+    expect(
+      decodeSimulatorDeviceInput({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 600, y: 2_000 },
+        to: { x: 600, y: 800 },
+        durationMs: 250,
+      }),
+    ).toMatchObject({ kind: "swipe" });
   });
 
   it("refuses a destination that is not a Simulator identifier", () => {
@@ -66,5 +80,13 @@ describe("Simulator device input", () => {
         message: "The device helper did not answer in time.",
       }).kind,
     ).toBe("unavailable");
+  });
+
+  it("bounds what a viewer may ask of the screen stream", () => {
+    const watch = { udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    expect(decodeSimulatorDeviceWatch(watch)).toEqual(watch);
+    expect(() => decodeSimulatorDeviceWatch({ ...watch, framesPerSecond: 240 })).toThrow();
+    expect(() => decodeSimulatorDeviceWatch({ ...watch, maxHeight: 16 })).toThrow();
+    expect(() => decodeSimulatorDeviceWatch({ ...watch, udid: "booted" })).toThrow();
   });
 });
