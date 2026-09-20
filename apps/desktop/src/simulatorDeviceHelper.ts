@@ -89,11 +89,14 @@ export interface SimulatorDeviceHelpersOptions {
 
 interface PendingReply {
   readonly settle: (reply: DeviceHelperReply) => void;
-  /** Unset while the deadline has not begun: stream control waiting behind an input. */
+  /** Unset while the deadline has not begun: a request that waits behind an input. */
   timer: ReturnType<typeof setTimeout> | undefined;
   readonly timeoutMs: number;
-  /** Starting or stopping the stream, as opposed to something sent to the device. */
-  readonly streamControl: boolean;
+  /**
+   * Sends something to the device. A screen lookup and starting or stopping
+   * the stream do not.
+   */
+  readonly delivers: boolean;
 }
 
 interface RunningHelper {
@@ -206,15 +209,16 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
 
   /**
    * The helper answers in order and cannot be asked to drop a request, and a
-   * deadline that passes stops it. A stream start or stop waiting behind an
-   * input would therefore stop the helper under that input, which may already
-   * have typed part of its text. So stream control begins its deadline only
-   * once nothing being delivered is ahead of it; the input's own deadline is
-   * what catches a helper that truly hangs.
+   * deadline that passes stops it. A live view's screen lookup, stream start
+   * or stream stop waiting behind an input would therefore stop the helper
+   * under that input, which may already have typed part of its text. So a
+   * request that sends nothing to the device begins its deadline only once
+   * nothing being delivered is ahead of it; the input's own deadline is what
+   * catches a helper that truly hangs.
    */
   function beginDeadlines(simulatorId: string, helper: RunningHelper): void {
     for (const waiting of helper.pending.values()) {
-      if (!waiting.streamControl) return;
+      if (waiting.delivers) return;
       waiting.timer ??= setTimeout(
         () => stop(simulatorId, helper, "The device helper did not answer in time."),
         waiting.timeoutMs,
@@ -319,7 +323,8 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     helper.idle = undefined;
     const id = helper.nextId;
     helper.nextId += 1;
-    const streamControl = request.op === "stream-start" || request.op === "stream-stop";
+    const delivers =
+      request.op !== "hello" && request.op !== "stream-start" && request.op !== "stream-stop";
     return new Promise<DeviceHelperReply>((resolve) => {
       // The helper works through one request at a time and cannot be asked to
       // drop one. A cancel that arrives before its answer therefore stops the
@@ -335,16 +340,16 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       };
       helper.pending.set(id, {
         settle,
-        // An input's deadline begins now. Stream control's begins in
+        // An input's deadline begins now. Any other request's begins in
         // `beginDeadlines`, once no input is ahead of it.
-        timer: streamControl
-          ? undefined
-          : setTimeout(
+        timer: delivers
+          ? setTimeout(
               () => stop(simulatorId, helper, "The device helper did not answer in time."),
               timeoutMs,
-            ),
+            )
+          : undefined,
         timeoutMs,
-        streamControl,
+        delivers,
       });
       beginDeadlines(simulatorId, helper);
       try {

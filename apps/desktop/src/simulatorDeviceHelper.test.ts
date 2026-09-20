@@ -377,6 +377,25 @@ describe("Simulator device helpers", () => {
     helpers.dispose();
   });
 
+  it("does not stop a helper that is still typing because a screen lookup had to wait behind it", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+
+    // A live view opens and first asks how big the screen is. That sends
+    // nothing to the device, and it waits behind the text.
+    const lookup = helpers.send(simulator, { op: "hello" }, 5_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 1, ok: true });
+    fake.answer({ id: 2, ok: true, screen: { width: 1206, height: 2622 } });
+
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+    await expect(lookup).resolves.toMatchObject({ status: "delivered" });
+    helpers.dispose();
+  });
+
   it("does not show a returning viewer a frame the stopping stream sent after everyone had left", async () => {
     const fake = fakeChild();
     const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
