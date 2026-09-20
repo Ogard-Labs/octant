@@ -155,7 +155,8 @@ distilled successor of the earlier long-form design specifications.
 | [0141](0141-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
 | [0142](0142-one-approval-opens-a-simulator-to-input.md) | One approval opens a Simulator to input | Accepted |
 | [0143](0143-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
-| [0144](0144-the-agent-opens-the-in-app-simulator-pane.md) | The agent opens the in-app Simulator pane | Accepted |
+| [0144](0144-system-compact-typography-is-the-default.md) | System compact typography is the default | Accepted |
+| [0145](0145-the-agent-opens-the-in-app-simulator-pane.md) | The agent opens the in-app Simulator pane | Accepted |
 
 ## Adding an ADR
 

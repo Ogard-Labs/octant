@@ -125,16 +125,19 @@
   --octant-palette-blue: #74b0f3;
   --octant-palette-purple: #ab98f2;
   --octant-palette-pink: #f4809a;
-  --octant-ui-font-family:
-    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --octant-ui-font-size: 14px;
+  --octant-ui-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
-  --octant-editor-font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --octant-editor-font-family:
+    "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Menlo, Consolas,
+    "Liberation Mono", monospace;
   --octant-editor-font-size: 13px;
   --octant-editor-font-weight: 400;
   --octant-editor-line-height: 1.5;
   --octant-editor-font-ligatures: common-ligatures;
-  --octant-terminal-font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --octant-terminal-font-family:
+    "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", Menlo, "Symbols Nerd Font Mono",
+    monospace;
   --octant-terminal-font-size: 12px;
   --octant-terminal-font-weight: 400;
   --octant-terminal-line-height: 1.4;

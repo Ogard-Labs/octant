@@ -496,7 +496,7 @@ export const ShellSettings = Schema.Struct({
     default: () => [...DEFAULT_OPEN_IN_APPLICATIONS],
   }),
   transcriptTextSize: Schema.optionalWith(TranscriptTextSize, {
-    default: () => "medium" as const,
+    default: () => "small" as const,
   }),
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
     default: () => "narrow" as const,

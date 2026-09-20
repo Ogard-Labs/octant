@@ -410,7 +410,7 @@ honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app (see
-[decisions/0144-the-agent-opens-the-in-app-simulator-pane.md](decisions/0144-the-agent-opens-the-in-app-simulator-pane.md)). Tap, typed text,
+[decisions/0145-the-agent-opens-the-in-app-simulator-pane.md](decisions/0145-the-agent-opens-the-in-app-simulator-pane.md)). Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed

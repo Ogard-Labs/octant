@@ -161,7 +161,7 @@ describe("shell settings policy", () => {
       workspaceMaterial: "opaque",
       modeSwitcherPresentation: "dropdown",
       projectViewSwitcherPresentation: "dropdown",
-      transcriptTextSize: "medium",
+      transcriptTextSize: "small",
       transcriptWidth: "narrow",
       showThreadProviderIcons: true,
       // Each view starts showing exactly what its rows already carried; the

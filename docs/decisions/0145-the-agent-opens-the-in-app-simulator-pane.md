@@ -1,4 +1,4 @@
-# 0144. The agent opens the in-app Simulator pane
+# 0145. The agent opens the in-app Simulator pane
 
 **Status:** Accepted
 
