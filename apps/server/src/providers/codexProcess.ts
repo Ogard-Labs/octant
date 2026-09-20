@@ -64,10 +64,10 @@ const PROBE_OUTPUT_BYTES = 4_096;
 // is readable by the model. A denylist here let a host `GITHUB_TOKEN` or
 // `AWS_SECRET_ACCESS_KEY` cross with no OS boundary behind it; the allowlist
 // below carries only what the Codex CLI itself reads, as `codex doctor`
-// reports for auth, custom CA, and proxy configuration. A credential for a
-// service other than the model provider — a GitHub personal access token, AWS
-// keys for Bedrock — is not on the list: those reach the CLI through its own
-// `codex login`, not through an ambient host variable.
+// reports for auth, custom CA, and proxy configuration. A general-purpose
+// credential — a GitHub token, AWS IAM access keys — is not on the list: it
+// grants far more than model access, and everything on the list is readable by
+// the model. A model provider's own credential is on it.
 const SAFE_ENVIRONMENT = new Set([
   "COLORTERM",
   "HOME",
@@ -112,12 +112,32 @@ const CODEX_NATIVE_VARIABLES = new Set([
   "OPENAI_ORGANIZATION",
   "OPENAI_PROJECT",
 ]);
-// The three auth variables the CLI itself names when no stored credential is
-// found. A `config.toml` model provider may declare any other variable as its
+// The auth variables the CLI itself names when no stored credential is found,
+// plus the bearer token its built-in Bedrock provider takes: scoped to model
+// access, so the same class as `OPENAI_API_KEY`. `codex login` has no Bedrock
+// flow, so without it a Bedrock configuration authenticates by nothing. A
+// `config.toml` model provider may declare any other variable as its
 // `env_key`; that variable does not cross, and `codex doctor` names the
 // refusal ("active model provider auth env var is missing") rather than
 // failing obscurely.
-const CODEX_CREDENTIALS = new Set(["CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"]);
+const CODEX_CREDENTIALS = new Set([
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "CODEX_ACCESS_TOKEN",
+  "CODEX_API_KEY",
+  "OPENAI_API_KEY",
+]);
+// Where the Bedrock provider looks for its credential, not the credential:
+// the region Bedrock bearer authentication requires, and the profile and file
+// locations of the AWS shared config the CLI reads keys from under `HOME`.
+// Static IAM keys exported into the host environment do not cross; a profile
+// carries them to the CLI without putting them in every command's environment.
+const AWS_CONFIGURATION = new Set([
+  "AWS_CONFIG_FILE",
+  "AWS_DEFAULT_REGION",
+  "AWS_PROFILE",
+  "AWS_REGION",
+  "AWS_SHARED_CREDENTIALS_FILE",
+]);
 
 interface ManagedCodexConnection {
   readonly connection: CodexAppServerConnection;
@@ -211,6 +231,7 @@ export function sanitizeCodexEnvironment(environment: NodeJS.ProcessEnv): NodeJS
           PROXY_VARIABLES.has(key) ||
           CODEX_NATIVE_VARIABLES.has(key) ||
           CODEX_CREDENTIALS.has(key) ||
+          AWS_CONFIGURATION.has(key) ||
           key.startsWith("LC_")),
     ),
   );

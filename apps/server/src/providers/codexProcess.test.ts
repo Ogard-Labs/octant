@@ -128,6 +128,9 @@ describe("sanitizeCodexEnvironment", () => {
         OPENAI_BASE_URL: "https://api.openai.com/v1",
         OPENAI_API_KEY: "provider-owned",
         CODEX_ACCESS_TOKEN: "provider-owned-too",
+        AWS_BEARER_TOKEN_BEDROCK: "bedrock-provider-owned",
+        AWS_REGION: "us-east-1",
+        AWS_PROFILE: "work",
         OCTANT_DESKTOP_BRIDGE_SECRET: "must-not-cross",
         OCTANT_ANOTHER_VALUE: "remove-me",
         ELECTRON_RUN_AS_NODE: "1",
@@ -148,18 +151,23 @@ describe("sanitizeCodexEnvironment", () => {
       OPENAI_BASE_URL: "https://api.openai.com/v1",
       OPENAI_API_KEY: "provider-owned",
       CODEX_ACCESS_TOKEN: "provider-owned-too",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-provider-owned",
+      AWS_REGION: "us-east-1",
+      AWS_PROFILE: "work",
     });
   });
 
-  it("refuses to hand the app-server a secret for a service Codex does not authenticate", () => {
+  it("keeps general-purpose cloud and source-host credentials out of the app-server", () => {
     // The app-server runs model-generated shell commands without confinement,
-    // so a host credential that crosses is readable by the model.
+    // so a host credential that crosses is readable by the model. IAM keys
+    // grant far more than the Bedrock access a bearer token or profile does.
     expect(
       sanitizeCodexEnvironment({
         PATH: "/usr/bin",
         GITHUB_TOKEN: "must-not-cross",
         GH_TOKEN: "must-not-cross",
         CODEX_GITHUB_PERSONAL_ACCESS_TOKEN: "must-not-cross",
+        AWS_ACCESS_KEY_ID: "must-not-cross",
         AWS_SECRET_ACCESS_KEY: "must-not-cross",
         AWS_SESSION_TOKEN: "must-not-cross",
         ANTHROPIC_API_KEY: "another-provider",
