@@ -280,7 +280,7 @@
    still a tap on the device, not a miss on padding. */
 .apple-simulator-frame--device .apple-simulator-frame__screen {
   padding: 0;
-  border-radius: 28px;
+  border-radius: var(--oct-radius-device);
   background: color-mix(in srgb, var(--oct-bg) 20%, black);
   box-shadow:
     0 0 0 10px color-mix(in srgb, var(--oct-bg) 20%, black),
@@ -290,7 +290,7 @@
 .apple-simulator-frame--device img,
 .apple-simulator-frame--device canvas {
   max-height: min(72vh, 820px);
-  border-radius: 18px;
+  border-radius: var(--oct-radius-sheet);
 }
 
 .apple-workbench--device .apple-workbench__section {
