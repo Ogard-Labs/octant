@@ -77,7 +77,6 @@
   --octant-accent: #f0f0f0;
   --octant-accent-foreground: #171717;
   --octant-accent-text: #f0f0f0;
-  --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 16%, transparent);
   --octant-divider-strong: #808080;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
@@ -202,7 +201,6 @@ html[data-octant-theme-mode="light"] {
   --octant-text-primary-high-contrast: #0e0f11;
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
-  --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
   --octant-scrim: #000000;
   --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
   --octant-shadow-sm:
@@ -806,8 +804,11 @@ h6 {
   white-space: normal;
 }
 
+/* A check mark says which item is chosen; it is not a focus cue, and the
+   default look spends no hue on it. It used to take the focus colour, which
+   put the only blue on the page into every radio and checkbox menu. */
 .octant-menu__indicator {
-  color: var(--octant-focus-ring);
+  color: var(--octant-text-primary);
 }
 
 .new-project {
@@ -1057,6 +1058,42 @@ h6 {
   gap: 2px;
 }
 
+/* The fold is the group's own heading made pressable. The link variant
+   already has no fill and no height of its own; this only keeps the heading's
+   type and sets the label, count, and chevron at glyph spacing. */
+.activity-nav__fold {
+  /* The recipe's default size still brings a control's height and side
+     padding, which set the word 10px to the right of the group labels above
+     it. */
+  height: auto;
+  min-height: 0;
+  gap: var(--oct-space-1);
+  /* The recipe keeps a 1px transparent border for its outlined variants; the
+     margin takes that pixel back so the word starts where the labels do. */
+  margin-inline-start: -1px;
+  padding: 0;
+  font: inherit;
+}
+
+.activity-nav__fold-count {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-nav__fold > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.activity-nav__fold[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-nav__fold > svg {
+    transition: none;
+  }
+}
+
 .activity-nav__threads {
   display: grid;
   gap: 2px;
@@ -1225,6 +1262,10 @@ h6 {
   transition: opacity var(--oct-motion-fast) ease;
 }
 
+/* Hover-only while there are Projects to look at. An empty section has one
+   next step, adding a Project, and hiding it behind a hover left a new Code
+   or Work sidebar with no visible way to start. */
+.project-section[data-empty="true"] .project-section__header-actions,
 .project-section:hover .project-section__header-actions,
 .project-section:focus-within .project-section__header-actions,
 .project-section__header-actions:has([aria-expanded="true"]),
@@ -6589,7 +6630,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__rail-item--active {
   color: var(--octant-text-primary);
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
   box-shadow: none;
 }
 
@@ -6723,7 +6764,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__catalog--on {
   color: var(--octant-text-primary);
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
   border-color: var(--octant-border-strong);
 }
 
@@ -6774,7 +6815,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__row--selected {
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
 }
 
 .composer-model-picker__model {
@@ -8289,6 +8330,19 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-sm);
   color: var(--octant-text-secondary);
   user-select: none;
+}
+
+/* Above a start screen's composer the host sits in a row of tray controls,
+   which are 12px at weight 500. At its own 14px it was the one larger word in
+   the row on every start screen. */
+.composer-tray .host-selector,
+.draft-thread__context-strip .host-selector,
+/* With more than one host the name is a select, which sets its own size, so
+   the ancestor alone left the multi-host row at the larger size. */
+.composer-tray .host-selector__select,
+.draft-thread__context-strip .host-selector__select {
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 .host-selector__dot {

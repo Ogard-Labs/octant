@@ -42,6 +42,13 @@ export interface ProfileEditorProps {
   readonly nameRef?: RefObject<HTMLInputElement | null>;
   /** Makes the shared name field required for flows that cannot continue unnamed. */
   readonly requiredNameMessage?: string;
+  /**
+   * The flow has been asked to go on without the required name. Until then the
+   * requirement reads as help under the field, not as an error: a field that
+   * opens already marked invalid tells a reader they did something wrong
+   * before they have done anything.
+   */
+  readonly requiredNameAsked?: boolean;
 }
 
 const ACCENT_NAMES: Record<AvatarAccent, string> = {
@@ -101,11 +108,14 @@ export function ProfileEditor(props: ProfileEditorProps) {
   }
 
   const disabled = props.disabled === true || busy !== undefined;
-  const nameProblem =
-    nameValidationMessage(nameDraft) ??
-    (props.requiredNameMessage !== undefined && nameDraft.trim() === ""
+  const nameInvalidMessage = nameValidationMessage(nameDraft);
+  const nameRequirement =
+    props.requiredNameMessage !== undefined && nameDraft.trim() === ""
       ? props.requiredNameMessage
-      : undefined);
+      : undefined;
+  const nameProblem =
+    nameInvalidMessage ?? (props.requiredNameAsked === true ? nameRequirement : undefined);
+  const nameMessage = nameProblem ?? nameRequirement;
   const emailProblem = emailValidationMessage(emailDraft);
   const gravatarReady = emailProblem === undefined && canImportGravatar({ email: emailDraft });
 
@@ -275,7 +285,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
           Name
         </label>
         <OctantInput
-          aria-describedby={nameProblem === undefined ? undefined : `${nameId}-problem`}
+          aria-describedby={nameMessage === undefined ? undefined : `${nameId}-problem`}
           aria-invalid={nameProblem !== undefined}
           autoComplete="name"
           disabled={props.disabled === true}
@@ -287,9 +297,13 @@ export function ProfileEditor(props: ProfileEditorProps) {
           {...(props.nameRef === undefined ? {} : { ref: props.nameRef })}
           value={nameDraft}
         />
-        {nameProblem === undefined ? null : (
-          <p className="profile-editor__hint" id={`${nameId}-problem`} role="alert">
-            {nameProblem}
+        {nameMessage === undefined ? null : (
+          <p
+            className="profile-editor__hint"
+            id={`${nameId}-problem`}
+            role={nameProblem === undefined ? undefined : "alert"}
+          >
+            {nameMessage}
           </p>
         )}
       </div>

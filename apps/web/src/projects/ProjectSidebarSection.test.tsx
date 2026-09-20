@@ -41,10 +41,34 @@ describe("ProjectSidebarSection chat thread nesting", () => {
 
     expect(screen.getByRole("heading", { name: "Projects" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Add folder" })).toBeVisible();
+    // jsdom reports the button visible either way, because it does not apply
+    // the hover-only rule. What keeps it on screen in the app is this mark: an
+    // empty section shows its add control at rest, since adding a Project is
+    // the only thing to do there.
+    expect(screen.getByRole("region", { name: "Projects" })).toHaveAttribute("data-empty", "true");
     // The heading is not left hanging over nothing: one quiet line says so.
     expect(screen.getByText("No Projects yet.")).toBeVisible();
     expect(screen.queryByText("No Projects in this mode.")).toBeNull();
     expect(screen.queryByText("Archive")).toBeNull();
+  });
+
+  it("keeps an empty section's header quiet when it has no add control to show", () => {
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    // A fresh Chat sidebar offers no add control. Marking it empty revealed the
+    // organization menu at rest instead, which is not a way to start anything.
+    expect(screen.getByRole("region", { name: "Projects" })).not.toHaveAttribute("data-empty");
   });
 
   it("nests chat threads under their Project and keeps Unfiled for threads with none", async () => {
@@ -1868,6 +1892,65 @@ describe("ProjectSidebarSection row property visibility", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Open pull request #12" }));
     expect(onOpenPullRequest).toHaveBeenCalledWith(codeThread.pullRequests.items[0].identity);
     expect(props.onSelectThread).not.toHaveBeenCalled();
+  });
+
+  it("folds threads older than a week behind Earlier, and keeps the open thread in view", async () => {
+    const user = userEvent.setup();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+    const props = sidebarProps();
+    render(
+      <ProjectSidebarSection
+        {...props}
+        activeThreadId="thread-old-open"
+        threads={[
+          codeThread,
+          { ...codeThread, threadId: "thread-old", title: "Old spike", updatedAt: monthAgo },
+          {
+            ...codeThread,
+            threadId: "thread-old-open",
+            title: "Old but open",
+            updatedAt: monthAgo,
+          },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+    const fold = screen.getByRole("button", { name: /^Earlier/ });
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(fold).toHaveTextContent("2");
+    expect(screen.getByRole("button", { name: /Planning/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Old spike/ })).not.toBeInTheDocument();
+    // The thread the workspace is showing never hides behind the fold.
+    expect(screen.getByRole("button", { name: /Old but open/ })).toBeVisible();
+
+    await user.click(fold);
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
+  });
+
+  it("never hides a search result behind the Earlier fold", async () => {
+    const user = userEvent.setup();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+    const props = sidebarProps();
+    render(
+      <ProjectSidebarSection
+        {...props}
+        searchQuery="spike"
+        threads={[
+          codeThread,
+          { ...codeThread, threadId: "thread-old", title: "Old spike", updatedAt: monthAgo },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+    // Folded, the only match sat under a heading that showed a count and no row.
+    expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Earlier/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it("offers the same pin and archive row actions as Project rows", async () => {
