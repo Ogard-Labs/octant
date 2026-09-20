@@ -4207,6 +4207,9 @@ export function startOctantServer(
     yield* Effect.promise(() => appleProcess.reconcile());
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
+      // Two hosts on one Mac share a temporary directory; each sweeps only the
+      // captures named for its own data directory.
+      captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
       readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),

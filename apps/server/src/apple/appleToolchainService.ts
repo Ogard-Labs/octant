@@ -1,5 +1,7 @@
-import { createHash } from "node:crypto";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAppleBuildEvidence,
   decodeAppleRuntimeSnapshot,
@@ -28,6 +30,8 @@ import {
   redactedAppleInputDiagnostic,
   type AppleExecutionScope,
 } from "@octant/domain";
+import { defaultTemporaryDirectory } from "../code/repositoryTestProcessPort";
+import { MAX_APPLE_ARTIFACT_BYTES } from "./appleRuntimeStore";
 
 /**
  * Host link state `xcode-select` reads to answer where the developer directory
@@ -100,6 +104,22 @@ export interface AppleToolchainServiceOptions {
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
+  /**
+   * Where a screen capture lands before it becomes an artifact. Xcode 27's
+   * `simctl io … screenshot -` no longer means stdout: it writes a file named
+   * `-` into the working directory — the checkout — and reports nothing, so
+   * the capture names a file here instead. It must be a directory the confined
+   * command may write; by default that is the process port's own temporary
+   * directory.
+   */
+  readonly captureDirectory?: string;
+  /**
+   * Names this host in its capture files. Hosts started with different data
+   * directories share one temporary directory, and a host may only sweep what
+   * is its own: another host's old file can belong to a capture still running.
+   * Stable across restarts, so a host clears what its last run left behind.
+   */
+  readonly captureOwner?: string;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
@@ -163,6 +183,13 @@ export class AppleToolchainService {
   #sequence = 0;
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
+  readonly #captureDirectory: string;
+  readonly #capturePrefix: string;
+  // Files a running capture owns. A capture may run for minutes, so its file's
+  // age says nothing about whether it was abandoned; only this does. Shared by
+  // every service in the process: a replaced service's later sweeps would
+  // otherwise judge the new service's running capture by age alone.
+  readonly #capturesInProgress = capturesInProgress;
   // States an action set while a discovery was reading. A discovery lists the
   // devices and then probes the project, which can take seconds; a boot or
   // shutdown that finishes in between is newer than that list and must not be
@@ -175,6 +202,22 @@ export class AppleToolchainService {
 
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
+    this.#captureDirectory = options.captureDirectory ?? defaultTemporaryDirectory();
+    const owner = (options.captureOwner ?? "local").replace(/[^A-Za-z0-9]/g, "").slice(0, 32);
+    this.#capturePrefix = `${CAPTURE_FILE_PREFIX}${owner.length === 0 ? "local" : owner}-`;
+    // Whatever a previous run could not come back for is cleared now, and
+    // again later: a leftover seconds old at start is too young to judge, the
+    // run that made it is gone with its timers, and no capture is promised.
+    for (const delayMs of [0, ...CAPTURE_RETURN_VISITS_MS]) {
+      setTimeout(() => {
+        void sweepStaleCaptures(
+          this.#captureDirectory,
+          this.#capturePrefix,
+          Date.now(),
+          this.#capturesInProgress,
+        );
+      }, delayMs).unref();
+    }
     this.#lastToolchain = unavailableToolchain(options.newId(), options.now());
   }
 
@@ -544,20 +587,83 @@ export class AppleToolchainService {
         );
       } else if (request.kind === "screenshot") {
         this.#advance(active, "capturing-screen");
-        terminal = await this.#command(
-          ["xcrun", "simctl", "io", request.simulatorId, "screenshot", "--type", "png", "-"],
-          context,
-          request.timeoutMs,
-          signal,
+        // A capture whose process outlived its timeout can write its file after
+        // this action already removed it; the next capture clears what is left.
+        await sweepStaleCaptures(
+          this.#captureDirectory,
+          this.#capturePrefix,
+          Date.now(),
+          this.#capturesInProgress,
         );
-        if (succeeded(terminal)) {
-          const screenshotReference = `apple-screenshot-${request.actionId}`;
-          await this.#writeArtifact(screenshotReference, [terminal.stdout]);
-          artifacts = [{ kind: "screenshot", reference: screenshotReference }];
-          // The captured screen is PNG bytes on stdout. They belong to the
-          // screenshot artifact; folding them into the log would make the log
-          // unreadable and tell a reader nothing.
-          terminal = { ...terminal, stdout: new Uint8Array() };
+        // One file per attempt, not per action: a retry of a capture whose
+        // first process is still alive would otherwise share its path, and the
+        // two writers would race for the file the retry then reads.
+        const capturePath = join(
+          this.#captureDirectory,
+          `${this.#capturePrefix}${request.actionId}-${randomUUID()}.png`,
+        );
+        this.#capturesInProgress.add(capturePath);
+        let exitedCleanly = false;
+        // Whatever happens to the command, the read or the artifact write, the
+        // raw screen must not stay behind in the temporary directory.
+        try {
+          terminal = await this.#command(
+            [
+              "xcrun",
+              "simctl",
+              "io",
+              request.simulatorId,
+              "screenshot",
+              "--type",
+              "png",
+              capturePath,
+            ],
+            context,
+            request.timeoutMs,
+            signal,
+          );
+          exitedCleanly = terminal.termination === "exited" && !terminal.cleanupUncertain;
+          if (succeeded(terminal)) {
+            const bytes = await readCapture(capturePath);
+            if (bytes === undefined) {
+              // simctl exited 0 without the file it was asked for: an empty
+              // frame would render as nothing and taps on it would be dropped.
+              terminal = {
+                ...terminal,
+                exitCode: 1,
+                stderr: appendLine(terminal.stderr, "simctl reported a capture but wrote no PNG."),
+              };
+            } else {
+              const screenshotReference = `apple-screenshot-${request.actionId}`;
+              await this.#writeArtifact(screenshotReference, [bytes]);
+              artifacts = [{ kind: "screenshot", reference: screenshotReference }];
+            }
+          }
+        } finally {
+          this.#capturesInProgress.delete(capturePath);
+          // A removal that fails must not throw past this action: that turned a
+          // known result into "interrupted". It counts as unconfirmed instead,
+          // so the return visits below still come back for the path.
+          await rm(capturePath, { force: true }).catch(() => {
+            exitedCleanly = false;
+          });
+          // A command that did not end as a confirmed clean exit may still have
+          // a process out there, and it can write the file after the removal
+          // above. No later capture is promised, so this action comes back for
+          // its own file, later each time; the timers never keep the host alive.
+          // A host restart in between is covered by the sweep at start.
+          if (!exitedCleanly) {
+            for (const delayMs of CAPTURE_RETURN_VISITS_MS) {
+              setTimeout(() => {
+                // A retry under the same action id reuses this path; while it
+                // runs the file is its own, and its `finally` removes it.
+                if (this.#capturesInProgress.has(capturePath)) return;
+                // Nothing awaits this; a path that cannot be removed is left to
+                // the next sweep instead of becoming an unhandled rejection.
+                void rm(capturePath, { force: true }).catch(() => undefined);
+              }, delayMs).unref();
+            }
+          }
         }
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
@@ -1460,6 +1566,104 @@ function unauthorizedFailure(): AppleDiscoveryResult {
 
 function invalidFailure(message: string): AppleDiscoveryResult {
   return { kind: "failure", failure: { category: "invalid", message } };
+}
+
+const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
+/** Every attempt has its own path, so one set serves all services in the process. */
+const capturesInProgress = new Set<string>();
+const STALE_CAPTURE_MS = 60_000;
+/** When an action returns for a file its unconfirmed process may still write. */
+const CAPTURE_RETURN_VISITS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+
+/** Removes this host's capture files that no running action still owns. */
+async function sweepStaleCaptures(
+  directory: string,
+  prefix: string,
+  nowMs: number,
+  inProgress: ReadonlySet<string>,
+): Promise<void> {
+  let names: ReadonlyArray<string>;
+  try {
+    names = await readdir(directory);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".png"))
+      .map(async (name) => {
+        const path = join(directory, name);
+        if (inProgress.has(path)) return;
+        try {
+          if (nowMs - (await stat(path)).mtimeMs > STALE_CAPTURE_MS)
+            await rm(path, { force: true });
+        } catch {
+          // Already gone, or not ours to remove; neither blocks a capture.
+        }
+      }),
+  );
+}
+
+/**
+ * A Simulator screen is a few megabytes. The bound is the artifact store's own:
+ * a capture it would refuse is refused here, as a failed capture with a reason,
+ * rather than thrown past the action as "interrupted".
+ */
+const MAX_CAPTURE_BYTES = MAX_APPLE_ARTIFACT_BYTES;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/**
+ * The capture `simctl` wrote, or nothing. The file sits in a temporary root
+ * that code from the checkout can also write to, under a name it can guess, and
+ * this read happens in the host process with the host's reach. So the path is
+ * opened without following a link, the opened file must be one ordinary file
+ * with no second name, of a plausible size, and it is read from that same
+ * descriptor; and only a PNG is kept. A link to a host file, a second name for
+ * someone else's file, or any other content reads as no capture at all.
+ */
+async function readCapture(path: string): Promise<Uint8Array | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat();
+    if (
+      !opened.isFile() ||
+      opened.nlink !== 1 ||
+      opened.size < PNG_SIGNATURE.length ||
+      opened.size > MAX_CAPTURE_BYTES
+    ) {
+      return undefined;
+    }
+    // The size above is a snapshot, and whoever shares the directory can grow
+    // the file after it. Exactly that many bytes are read into a buffer of that
+    // size, and one more byte is asked for: if it is there the file changed
+    // under the read and the capture is refused, so the host never allocates
+    // more than the limit however large the file becomes.
+    const bytes = new Uint8Array(opened.size);
+    let filled = 0;
+    while (filled < bytes.byteLength) {
+      const { bytesRead } = await handle.read(bytes, filled, bytes.byteLength - filled, filled);
+      if (bytesRead === 0) return undefined;
+      filled += bytesRead;
+    }
+    const beyond = await handle.read(new Uint8Array(1), 0, 1, filled);
+    if (beyond.bytesRead > 0) return undefined;
+    return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte) ? bytes : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+function appendLine(existing: Uint8Array, line: string): Uint8Array {
+  const suffix = new TextEncoder().encode(
+    `${existing.byteLength === 0 || existing.at(-1) === 0x0a ? "" : "\n"}${line}\n`,
+  );
+  const merged = new Uint8Array(existing.byteLength + suffix.byteLength);
+  merged.set(existing);
+  merged.set(suffix, existing.byteLength);
+  return merged;
 }
 
 function unavailableInputResult(message: string): AppleProcessResult {

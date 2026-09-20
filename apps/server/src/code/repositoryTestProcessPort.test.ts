@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
+import { defaultTemporaryDirectory, RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 
 const directories: string[] = [];
 
@@ -111,6 +111,30 @@ describe("RepositoryTestProcessPort", () => {
       arg: "; touch should-not-run",
     });
     expect(new TextDecoder().decode(result.stderr)).toBe("stderr");
+  });
+
+  it("hands the child the launch's temporary root when the host's TMPDIR is unusable", async () => {
+    // Fixtures first: they are made under the real temporary directory.
+    const cwd = temporaryDirectory();
+    const options = confinedOptions();
+    const port = new RepositoryTestProcessPort(options);
+    vi.stubEnv("TMPDIR", "relative/tmp");
+    vi.stubEnv("TEMP", "");
+    const result = await port.execute({
+      argv: [
+        process.execPath,
+        "-e",
+        "process.stdout.write(JSON.stringify({tmpdir:process.env.TMPDIR,temp:process.env.TEMP??null}))",
+      ],
+      cwd: realpathSync(cwd),
+      environment: {},
+      timeoutMs: 5_000,
+    });
+    expect(result).toMatchObject({ termination: "exited", exitCode: 0 });
+    expect(JSON.parse(new TextDecoder().decode(result.stdout))).toEqual({
+      tmpdir: options.temporaryDirectory,
+      temp: null,
+    });
   });
 
   it("launches through Seatbelt and fails closed when sandbox-exec is unavailable", async () => {
@@ -656,6 +680,19 @@ describe("RepositoryTestProcessPort", () => {
     await expect(
       port.readArtifact({ checkoutRoot: root, relativePath: "artifacts", maximumBytes: 3 }),
     ).rejects.toThrow();
+  });
+});
+
+describe("defaultTemporaryDirectory", () => {
+  it("passes over an empty or relative TMPDIR to the first absolute value, else /tmp", () => {
+    expect(defaultTemporaryDirectory({ TMPDIR: "", TMP: "/var/tmp/usable" })).toBe(
+      "/var/tmp/usable",
+    );
+    expect(defaultTemporaryDirectory({ TMPDIR: "relative/tmp", TEMP: "/private/tmp" })).toBe(
+      "/private/tmp",
+    );
+    expect(defaultTemporaryDirectory({ TMPDIR: "/var/folders/x/T/" })).toBe("/var/folders/x/T/");
+    expect(defaultTemporaryDirectory({})).toBe("/tmp");
   });
 });
 

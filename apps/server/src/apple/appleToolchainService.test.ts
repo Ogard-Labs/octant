@@ -5,6 +5,10 @@ import type {
   ToolActionAuthority,
   ToolActionCancellation,
 } from "@octant/contracts";
+import { existsSync } from "node:fs";
+import { link, mkdir, mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 type ServiceConstructor = new (options: Record<string, unknown>) => {
@@ -692,14 +696,16 @@ describe("AppleToolchainService lifecycle", () => {
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
 
-  it("captures the Simulator screen as its own evidence artifact, keeping the log readable", async () => {
+  it("captures the Simulator screen into a file it reads back and removes, never onto the checkout", async () => {
     const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
     const writeArtifact = vi.fn(async (reference: string, bytes: Uint8Array) => {
       artifacts.set(reference, bytes);
     });
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
     const service = new AppleToolchainService({
       execute,
+      captureDirectory,
       writeArtifact,
       readArtifact: async (reference: string) => artifacts.get(reference),
       realpath: async (path: string) => path,
@@ -708,13 +714,12 @@ describe("AppleToolchainService lifecycle", () => {
     });
     await service.discover(discoveryRequest, context);
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
-    execute.mockResolvedValue({
-      termination: "exited" as const,
-      exitCode: 0,
-      stdout: png,
-      stderr: new TextEncoder().encode(""),
-      parserFailed: false,
-      cleanupUncertain: false,
+    // Xcode 27's simctl writes the PNG to the path it is given and reports
+    // that path on stdout; a `-` would become a file named `-` in the cwd.
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const target = input.argv.at(-1)!;
+      await writeFile(target, png);
+      return processResult(`Wrote screenshot to: ${target}\n`);
     });
 
     const evidence = await service.execute(
@@ -730,7 +735,7 @@ describe("AppleToolchainService lifecycle", () => {
     expect(screenshot).toBeDefined();
     expect(artifacts.get(screenshot!.reference)).toEqual(png);
     const command = execute.mock.calls.at(-1)?.[0] as { readonly argv: ReadonlyArray<string> };
-    expect(command.argv).toEqual([
+    expect(command.argv.slice(0, 7)).toEqual([
       "xcrun",
       "simctl",
       "io",
@@ -738,14 +743,18 @@ describe("AppleToolchainService lifecycle", () => {
       "screenshot",
       "--type",
       "png",
-      "-",
     ]);
-    // The screen is bytes, not text: putting it in the log would make the log
-    // unreadable and would say nothing a reader could act on.
+    const capturePath = command.argv[7]!;
+    expect(dirname(capturePath)).toBe(captureDirectory);
+    expect(capturePath).not.toBe("-");
+    expect(existsSync(capturePath)).toBe(false);
+    // The capture path is host-private; the log keeps simctl's own line.
     const log = evidence.artifacts.find(
       (artifact: { readonly kind: string }) => artifact.kind === "log",
     );
-    expect(artifacts.get(log!.reference)).toEqual(new Uint8Array());
+    expect(new TextDecoder().decode(artifacts.get(log!.reference))).toContain(
+      "Wrote screenshot to:",
+    );
 
     const readBack = await service.readScreenshotArtifact(screenshot!.reference, context);
     expect(readBack).toEqual({ kind: "found", bytes: png });
@@ -755,6 +764,650 @@ describe("AppleToolchainService lifecycle", () => {
       kind: "unauthorized",
       message: "Apple screenshot evidence is not available for this thread.",
     });
+  });
+
+  it("removes the captured file even when the screenshot artifact cannot be stored", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (reference: string) => {
+        if (reference.startsWith("apple-screenshot-")) throw new Error("ENOSPC: no space left");
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    let capturePath: string | undefined;
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      capturePath = input.argv.at(-1)!;
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      return processResult(`Wrote screenshot to: ${capturePath}\n`);
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).not.toBe("succeeded");
+    expect(capturePath).toBeDefined();
+    expect(existsSync(capturePath!)).toBe(false);
+  });
+
+  it("clears a capture left behind by a process that outlived its action before taking the next one", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const leftover = join(
+      captureDirectory,
+      "octant-apple-capture-local-30000000-0000-4000-8000-0000000000aa.png",
+    );
+    const recent = join(
+      captureDirectory,
+      "octant-apple-capture-local-30000000-0000-4000-8000-0000000000bb.png",
+    );
+    const unrelated = join(captureDirectory, "someone-elses.png");
+    for (const path of [leftover, recent, unrelated]) await writeFile(path, new Uint8Array([1]));
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(leftover, old, old);
+    await utimes(unrelated, old, old);
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      await writeFile(
+        input.argv.at(-1)!,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      return processResult("");
+    });
+
+    await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(existsSync(leftover)).toBe(false);
+    // A capture another action may still be writing, and files that are not ours, stay.
+    expect(existsSync(recent)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
+  });
+
+  it("leaves the file of a capture that is still running, however long it has been", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    let releaseSlowCapture!: () => void;
+    const slowCaptureHeld = new Promise<void>((resolve) => {
+      releaseSlowCapture = resolve;
+    });
+    let slowPath = "";
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const path = input.argv.at(-1)!;
+      await writeFile(path, png);
+      if (slowPath === "") {
+        // The first capture wrote its file long ago and its process is still going.
+        slowPath = path;
+        const old = new Date(Date.now() - 5 * 60_000);
+        await utimes(path, old, old);
+        await slowCaptureHeld;
+      }
+      return processResult("");
+    });
+    const slowAction = "30000000-0000-4000-8000-0000000000c1";
+    const quickAction = "30000000-0000-4000-8000-0000000000c2";
+
+    const slow = service.execute(
+      simulatorRequest({
+        kind: "screenshot",
+        bundleIdentifier: undefined,
+        actionId: slowAction as never,
+      }),
+      context,
+    );
+    await vi.waitFor(() => expect(slowPath).not.toBe(""));
+    await service.execute(
+      simulatorRequest({
+        kind: "screenshot",
+        bundleIdentifier: undefined,
+        actionId: quickAction as never,
+      }),
+      context,
+    );
+    expect(existsSync(slowPath)).toBe(true);
+    releaseSlowCapture();
+
+    expect((await slow).outcome).toBe("succeeded");
+    expect(artifacts.get(`apple-screenshot-${slowAction}`)).toEqual(png);
+  });
+
+  it("removes a file written after the capture that asked for it was given up on", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      let capturePath = "";
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        capturePath = input.argv.at(-1)!;
+        // The command is given up on; its process is still out there.
+        return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+      });
+
+      await service.execute(
+        simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+        context,
+      );
+      // The abandoned process writes its file after the action already cleaned up.
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps coming back for a file when the host could not confirm the capture's process ended", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      let capturePath = "";
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        capturePath = input.argv.at(-1)!;
+        // It exited, but the host could not confirm its whole process group did.
+        return processResult("", { exitCode: 1, cleanupUncertain: true });
+      });
+
+      await service.execute(
+        simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+        context,
+      );
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      // Written after the first return visit already passed.
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+
+      await vi.waitFor(() => expect(existsSync(capturePath)).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a retried capture's file alone when an earlier attempt's return visit comes round", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      let attempt = 0;
+      let capturePath = "";
+      let releaseRetry!: () => void;
+      const retryHeld = new Promise<void>((resolve) => {
+        releaseRetry = resolve;
+      });
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        attempt += 1;
+        capturePath = input.argv.at(-1)!;
+        if (attempt === 1) {
+          return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+        }
+        await writeFile(capturePath, png);
+        await retryHeld;
+        return processResult("");
+      });
+      const request = simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined });
+
+      await service.execute(request, context);
+      // The same action is asked for again and is still capturing a minute later.
+      const retried = service.execute(request, context);
+      await vi.waitFor(() => expect(attempt).toBe(2));
+      await vi.advanceTimersByTimeAsync(61_000);
+      // A removal runs off the event loop; give it real time to have happened.
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(existsSync(capturePath)).toBe(true);
+      releaseRetry();
+
+      expect((await retried).outcome).toBe("succeeded");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the capture's own result when its file cannot be cleaned up", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      // Something else in the shared temporary root put a full directory there.
+      await mkdir(join(input.argv.at(-1)!, "inside"), { recursive: true });
+      return processResult("", { exitCode: 1, stderr: "Invalid device state" });
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    // The command failed, and that is what is recorded — not "interrupted"
+    // because a directory could not be removed afterwards.
+    expect(evidence.outcome).toBe("failed");
+  });
+
+  it("gives every attempt at a capture its own file, so an abandoned writer cannot touch a retry", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const paths: string[] = [];
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      paths.push(input.argv.at(-1)!);
+      return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+    });
+    const request = simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined });
+
+    await service.execute(request, context);
+    await service.execute(request, context);
+
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).not.toBe(paths[1]);
+    for (const path of paths)
+      expect(path.startsWith(join(captureDirectory, "octant-apple-capture-"))).toBe(true);
+  });
+
+  it("reports a capture too large to keep as failed, with the reason, not as interrupted", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const writeArtifact = vi.fn(async (_reference: string, bytes: Uint8Array) => {
+      // The production store refuses anything above 16 MiB.
+      if (bytes.byteLength > 16 * 1024 * 1024) throw new Error("Apple artifact is invalid.");
+    });
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const oversized = new Uint8Array(17 * 1024 * 1024);
+      oversized.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      await writeFile(input.argv.at(-1)!, oversized);
+      return processResult("");
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(
+      writeArtifact.mock.calls.every(([reference]) => !reference.startsWith("apple-screenshot-")),
+    ).toBe(true);
+  });
+
+  it("comes back for a leftover that was too young to judge when the service started", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const young = join(
+        captureDirectory,
+        "octant-apple-capture-local-30000000-0000-4000-8000-0000000000ee.png",
+      );
+      await writeFile(young, new Uint8Array([1]));
+
+      new AppleToolchainService({
+        execute: discoveryExecutor(),
+        captureDirectory,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      // Seconds old at start, so the first pass leaves it; no capture follows.
+      // The pass runs off the event loop, so it is given real time to finish
+      // before the file is aged — otherwise the pass itself would see it as old.
+      const firstPassDone = Date.now() + 200;
+      while (Date.now() < firstPassDone) await new Promise((resolve) => setImmediate(resolve));
+      expect(existsSync(young)).toBe(true);
+      const old = new Date(Date.now() - 5 * 60_000);
+      await utimes(young, old, old);
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await vi.waitFor(() => expect(existsSync(young)).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not let one service instance sweep a capture another instance is still taking", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const execute = discoveryExecutor();
+    const options = {
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    };
+    const running = new AppleToolchainService({ execute, ...options });
+    await running.discover(discoveryRequest, context);
+    let capturePath = "";
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      capturePath = input.argv.at(-1)!;
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      const old = new Date(Date.now() - 5 * 60_000);
+      await utimes(capturePath, old, old);
+      await held;
+      return processResult("");
+    });
+    const capture = running.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+    await vi.waitFor(() => expect(capturePath).not.toBe(""));
+
+    // A replacement service in the same process sweeps as it starts.
+    new AppleToolchainService({ execute: discoveryExecutor(), ...options });
+    const sweepDone = Date.now() + 200;
+    while (Date.now() < sweepDone) await new Promise((resolve) => setImmediate(resolve));
+
+    expect(existsSync(capturePath)).toBe(true);
+    release();
+    expect((await capture).outcome).toBe("succeeded");
+  });
+
+  it("reads no more of a capture than it agreed to, even if the file grows under it", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const execute = discoveryExecutor();
+    const stored: number[] = [];
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (_reference: string, bytes: Uint8Array) => {
+        stored.push(bytes.byteLength);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      // Just over the limit: the size check and the read must agree it is too big.
+      const grown = new Uint8Array(16 * 1024 * 1024 + 1);
+      grown.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      await writeFile(input.argv.at(-1)!, grown);
+      return processResult("");
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(stored.every((size) => size <= 16 * 1024 * 1024)).toBe(true);
+  });
+
+  it("sweeps only its own host's captures when two hosts share a temporary directory", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const mine = join(
+      captureDirectory,
+      "octant-apple-capture-hosta-30000000-0000-4000-8000-0000000000f1.png",
+    );
+    const theirs = join(
+      captureDirectory,
+      "octant-apple-capture-hostb-30000000-0000-4000-8000-0000000000f2.png",
+    );
+    const old = new Date(Date.now() - 5 * 60_000);
+    for (const path of [mine, theirs]) {
+      await writeFile(path, new Uint8Array([1]));
+      await utimes(path, old, old);
+    }
+
+    new AppleToolchainService({
+      execute: discoveryExecutor(),
+      captureDirectory,
+      captureOwner: "hosta",
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    await vi.waitFor(() => expect(existsSync(mine)).toBe(false));
+    // The other host's capture may still be running; its age proves nothing here.
+    expect(existsSync(theirs)).toBe(true);
+  });
+
+  it("shrugs off a return visit that cannot remove what it finds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      const execute = discoveryExecutor();
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      let capturePath = "";
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        capturePath = input.argv.at(-1)!;
+        return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+      });
+      await service.execute(
+        simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+        context,
+      );
+      // Something else in the shared temporary root put a directory there.
+      await mkdir(join(capturePath, "inside"), { recursive: true });
+
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(rejections).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
+  it("clears captures a previous run left behind when the service starts", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const leftover = join(
+      captureDirectory,
+      "octant-apple-capture-local-30000000-0000-4000-8000-0000000000dd.png",
+    );
+    await writeFile(leftover, new Uint8Array([1]));
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(leftover, old, old);
+
+    new AppleToolchainService({
+      execute: discoveryExecutor(),
+      captureDirectory,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    await vi.waitFor(() => expect(existsSync(leftover)).toBe(false));
+  });
+
+  it("never reads through a link planted where the capture should be, or keeps what is not a PNG", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const secret = join(captureDirectory, "host-secret.txt");
+    const pngElsewhere = join(captureDirectory, "someone-elses.png");
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+    await writeFile(secret, "AWS_SECRET_ACCESS_KEY=do-not-leak");
+    await writeFile(pngElsewhere, png);
+    // Code from the checkout shares this temporary root and knows the file's name.
+    const plants: Array<(capturePath: string) => Promise<void>> = [
+      (capturePath) => symlink(secret, capturePath),
+      (capturePath) => symlink(pngElsewhere, capturePath),
+      (capturePath) => link(pngElsewhere, capturePath),
+      (capturePath) => writeFile(capturePath, "AWS_SECRET_ACCESS_KEY=do-not-leak"),
+    ];
+    for (const [index, plant] of plants.entries()) {
+      const execute = discoveryExecutor();
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AppleToolchainService({
+        execute,
+        captureDirectory,
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        await plant(input.argv.at(-1)!);
+        return processResult("");
+      });
+
+      const evidence = await service.execute(
+        simulatorRequest({
+          kind: "screenshot",
+          bundleIdentifier: undefined,
+          actionId: `30000000-0000-4000-8000-0000000000e${index}` as never,
+        }),
+        context,
+      );
+
+      expect(evidence.outcome).toBe("failed");
+      expect(
+        evidence.artifacts.some(
+          (artifact: { readonly kind: string }) => artifact.kind === "screenshot",
+        ),
+      ).toBe(false);
+      const kept = [...artifacts.values()]
+        .map((bytes) => new TextDecoder().decode(bytes))
+        .join(" ");
+      expect(kept).not.toContain("do-not-leak");
+    }
+  });
+
+  it("reports a capture that produced no file as failed instead of recording an empty screen", async () => {
+    const execute = discoveryExecutor();
+    const artifacts = new Map<string, Uint8Array>();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockResolvedValue(processResult("Wrote screenshot to: somewhere-else\n"));
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.artifacts.map((artifact: { readonly kind: string }) => artifact.kind)).toEqual([
+      "log",
+    ]);
+    expect(
+      evidence.diagnostics.map((item: { readonly message: string }) => item.message),
+    ).toContainEqual(expect.stringContaining("no PNG"));
   });
 
   it("records a failed capture without inventing a screenshot artifact", async () => {
