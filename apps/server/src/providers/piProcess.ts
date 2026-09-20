@@ -121,7 +121,10 @@ const SAFE_ENVIRONMENT = new Set([
 // so a thread is handed those and no other provider's: with every key passed, a
 // model-generated command in an Anthropic thread could read `OPENAI_API_KEY`. A
 // provider missing here (an OAuth login kept in `auth.json`, for one) gets no
-// host variable and authenticates from its linked `auth.json`. A Map, because
+// host variable and authenticates from its linked `auth.json`. That includes a
+// custom `models.json` provider whose `apiKey` is `$SOME_VARIABLE`: Pi 0.85.1
+// leaves such a provider's models out of the list when the variable is unset,
+// so it needs a literal `apiKey` or a `/login` to be selectable. A Map, because
 // the key is text from a model ID and must never resolve on the prototype.
 const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
   ["airouter", ["AIROUTER_API_KEY"]],
