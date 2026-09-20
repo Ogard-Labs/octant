@@ -150,6 +150,28 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("does not start a swipe that the deadline would cut off part-way", async () => {
+    let clock = 0;
+    const { fake, send } = helpers((sent) => {
+      // Finding the screen leaves three seconds; the swipe itself takes five.
+      if (sent.op === "hello") clock += 25_000;
+      return { status: "delivered", screen: { width: 1206, height: 2622 } };
+    });
+    const deliver = createSimulatorInputDelivery(fake, { now: () => clock });
+
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 2_000 },
+        to: { x: 603, y: 500 },
+        durationMs: 5_000,
+      }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "deadline-passed" });
+    expect(send.mock.calls.map(([, sent]) => sent.op)).toEqual(["hello"]);
+  });
+
   it("presses Home and Lock as hardware buttons and every other name as a key", async () => {
     const { fake, send } = helpers(() => ({ status: "delivered" }));
     const deliver = createSimulatorInputDelivery(fake);

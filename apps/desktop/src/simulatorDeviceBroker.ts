@@ -117,7 +117,11 @@ export function createSimulatorInputDelivery(
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
     const remainingMs = deadline - now();
-    if (remainingMs < SHORTEST_USEFUL_BUDGET_MS) {
+    // A swipe holds the helper for its whole pace. Started with less time than
+    // that, it was stopped part-way with a finger already down on the screen.
+    const neededMs =
+      SHORTEST_USEFUL_BUDGET_MS + (command.kind === "swipe" ? command.durationMs : 0);
+    if (remainingMs < neededMs) {
       return {
         kind: "unavailable",
         reason: "deadline-passed",
