@@ -335,7 +335,13 @@ export function collectScriptedTokens(sources: Readonly<Record<string, string>>)
   for (const source of Object.values(sources)) {
     for (const match of source.matchAll(/["'`](--[\w-]+)["'`]/g)) names.add(match[1] ?? "");
     for (const match of source.matchAll(/(--[\w-]+)\s*:/g)) names.add(match[1] ?? "");
-    for (const match of source.matchAll(/["'`](--[\w-]+-)\$\{/g)) prefixes.add(match[1] ?? "");
+    for (const match of source.matchAll(/["'`](--[\w-]+-)\$\{/g)) {
+      const prefix = match[1] ?? "";
+      // `--octant-${role}` names a whole namespace, not a family. Accepting it
+      // would wave through every `--octant-*` typo, which is most of the tokens
+      // this check exists to guard; those roles are declared in the stylesheets.
+      if (!/^--[a-z]+-$/.test(prefix)) prefixes.add(prefix);
+    }
   }
   return { names, prefixes: [...prefixes] };
 }

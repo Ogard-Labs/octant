@@ -61,6 +61,22 @@ describe("UI stylesheet check", () => {
     ).toEqual([]);
   });
 
+  it("does not let a template that spans a whole namespace excuse a misspelled token", () => {
+    // The theme provider sets `--octant-${role}`. Read as a family, that prefix
+    // accepted every `--octant-*` name, so a typo in the namespace this check
+    // mostly guards passed without a finding.
+    const scripted = collectScriptedTokens({
+      "apps/web/src/theme/apply.ts": "root.style.setProperty(`--octant-${role}`, color);",
+    });
+    expect(scripted.prefixes).toEqual([]);
+    expect(
+      findUndefinedTokenFindings(
+        { [CSS]: ".card {\n  border-color: var(--octant-border-strnog);\n}" },
+        scripted,
+      ).map((finding) => finding.detail),
+    ).toEqual(["border-color reads --octant-border-strnog, which nothing defines"]);
+  });
+
   it("never baselines an undefined token", () => {
     const findings = findUndefinedTokenFindings({
       [CSS]: ".card {\n  background: var(--oct-surface-muted);\n}",
