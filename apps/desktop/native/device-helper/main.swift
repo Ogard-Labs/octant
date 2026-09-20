@@ -71,11 +71,19 @@ private func writeResponse(_ response: [String: Any]) {
     }
 }
 
+/// One writer at a time on the frame channel. A record is far larger than a
+/// pipe's atomic write, so two streams' encoders writing together — one still
+/// finishing as the next begins — would interleave their bytes and the reader
+/// would lose its place in the stream.
+private let frameWriting = NSLock()
+
 /// One frame to the viewer. False once the reader has gone away.
 private func writeFrame(_ jpeg: Data) -> Bool {
     var frame = Data(capacity: jpeg.count + 4)
     withUnsafeBytes(of: UInt32(jpeg.count).bigEndian) { frame.append(contentsOf: $0) }
     frame.append(jpeg)
+    frameWriting.lock()
+    defer { frameWriting.unlock() }
     return frame.withUnsafeBytes { bytes -> Bool in
         var offset = 0
         while offset < bytes.count {

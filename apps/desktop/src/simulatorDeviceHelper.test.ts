@@ -184,6 +184,34 @@ describe("Simulator device helpers", () => {
     expect(fake.child.kill).toHaveBeenCalled();
   });
 
+  it("stops a helper that has not answered when the action it serves is cancelled", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const cancelled = new AbortController();
+
+    const reply = helpers.send(simulator, { op: "tap", x: 0.5, y: 0.5 }, 30_000, cancelled.signal);
+    // The helper is still looking the device up or probing its input daemon.
+    cancelled.abort();
+
+    await expect(reply).resolves.toMatchObject({ status: "unavailable" });
+    // Stopped, so the tap it had not sent yet cannot land after the cancel.
+    expect(fake.child.kill).toHaveBeenCalled();
+  });
+
+  it("leaves a helper alone when a cancel arrives after it already answered", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const cancelled = new AbortController();
+
+    const reply = helpers.send(simulator, { op: "tap", x: 0.5, y: 0.5 }, 30_000, cancelled.signal);
+    fake.answer({ id: 1, ok: true });
+    await reply;
+    cancelled.abort();
+
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    helpers.dispose();
+  });
+
   it("stops an idle helper and every helper when the desktop quits", async () => {
     vi.useFakeTimers();
     const idle = fakeChild();

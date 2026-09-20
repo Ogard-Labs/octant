@@ -174,6 +174,13 @@ final class DisplayStream {
             if now < earliest { Thread.sleep(forTimeInterval: Double(earliest - now) / 1_000_000_000) }
             lastFrameAt = DispatchTime.now()
             guard let frame = encode(maximumHeight: height, quality: quality) else { continue }
+            // The stream may have been stopped while this frame was being
+            // paced or encoded; a frame of a view nobody has any more is not
+            // written into the next view's stream.
+            guard lock.withLock({ running }) else {
+                lock.withLock { encoding = false }
+                return
+            }
             if !write(frame) {
                 stop()
                 lock.withLock { encoding = false }

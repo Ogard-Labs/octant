@@ -43,13 +43,14 @@ function createScreenLookup(helpers: SimulatorDeviceHelpers) {
   return async (
     udid: string,
     budgetMs: number,
+    cancelled?: AbortSignal,
   ): Promise<
     | { readonly kind: "screen"; readonly screen: Screen }
     | Exclude<SimulatorDeviceInputResult, { readonly kind: "delivered" }>
   > => {
     const known = screens.get(udid);
     if (known !== undefined) return { kind: "screen", screen: known };
-    const described = await helpers.send(udid, { op: "hello" }, budgetMs);
+    const described = await helpers.send(udid, { op: "hello" }, budgetMs, cancelled);
     if (described.status === "refused") {
       return { kind: "refused", reason: described.code, message: described.message };
     }
@@ -77,7 +78,10 @@ export function createSimulatorInputDelivery(
 ) {
   const now = options.now ?? Date.now;
   const screenOf = options.screenOf ?? createScreenLookup(helpers);
-  return async (command: SimulatorDeviceInput): Promise<SimulatorDeviceInputResult> => {
+  return async (
+    command: SimulatorDeviceInput,
+    cancelled?: AbortSignal,
+  ): Promise<SimulatorDeviceInputResult> => {
     const budgetMs = command.budgetMs - ANSWER_MARGIN_MS;
     // The answer has to be back before the server gives the action up. A
     // deadline with no room for that is refused: stretching it would let the
@@ -94,7 +98,9 @@ export function createSimulatorInputDelivery(
     // server had already given the action up, and a retried action tapped twice.
     const deadline = now() + budgetMs;
     if (command.kind === "type-text") {
-      return result(await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs));
+      return result(
+        await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs, cancelled),
+      );
     }
     if (command.kind === "key-press") {
       const key = command.key.toLowerCase();
@@ -103,10 +109,11 @@ export function createSimulatorInputDelivery(
           command.udid,
           key === "home" || key === "lock" ? { op: "button", button: key } : { op: "key", key },
           budgetMs,
+          cancelled,
         ),
       );
     }
-    const looked = await screenOf(command.udid, budgetMs);
+    const looked = await screenOf(command.udid, budgetMs, cancelled);
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
     const remainingMs = deadline - now();
@@ -142,12 +149,13 @@ export function createSimulatorInputDelivery(
             durationMs: command.durationMs,
           },
           remainingMs,
+          cancelled,
         ),
       );
     }
     const { x, y } = fraction(command.point);
     if (x > 1 || y > 1) return offScreen;
-    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs));
+    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs, cancelled));
   };
 }
 
@@ -164,7 +172,10 @@ function admitted(headers: Headers, peer: string, token: string): boolean {
 }
 
 export function simulatorDeviceBrokerHandler(
-  deliver: (command: SimulatorDeviceInput) => Promise<SimulatorDeviceInputResult>,
+  deliver: (
+    command: SimulatorDeviceInput,
+    cancelled?: AbortSignal,
+  ) => Promise<SimulatorDeviceInputResult>,
   token: string,
 ) {
   return async (request: Request, peer = "127.0.0.1"): Promise<Response> => {
@@ -178,7 +189,7 @@ export function simulatorDeviceBrokerHandler(
       if (bytes.byteLength > MAX_BODY_BYTES) return failure(413);
       const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (typeof body !== "object" || body === null || !("input" in body)) return failure(400);
-      return Response.json(await deliver(decodeSimulatorDeviceInput(body.input)));
+      return Response.json(await deliver(decodeSimulatorDeviceInput(body.input), request.signal));
     } catch (error) {
       return failure(ParseResult.isParseError(error) || error instanceof SyntaxError ? 400 : 503);
     }
@@ -330,6 +341,14 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
         });
       return;
     }
+    // The server cancels an action by dropping this connection. That has to
+    // reach the helper, or a cold one would finish getting ready and deliver
+    // the input seconds after the action was recorded as cancelled.
+    const disconnected = new AbortController();
+    incoming.once("aborted", () => disconnected.abort());
+    outgoing.once("close", () => {
+      if (!outgoing.writableEnded) disconnected.abort();
+    });
     void (async () => {
       const body = await readBody(incoming);
       if (body === undefined) return failure(413);
@@ -342,6 +361,7 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
         new Request(`http://127.0.0.1${incoming.url ?? "/"}`, {
           method: incoming.method ?? "POST",
           headers,
+          signal: disconnected.signal,
           ...(incoming.method === "GET" || incoming.method === "HEAD"
             ? {}
             : { body: Buffer.from(body) }),
