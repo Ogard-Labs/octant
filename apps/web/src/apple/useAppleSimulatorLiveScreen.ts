@@ -43,27 +43,42 @@ export function useAppleSimulatorLiveScreen(options: {
   const { client, enabled, request } = options;
   const decode = options.decode ?? decodeJpeg;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const latestRef = useRef<DecodedFrame | undefined>(undefined);
-  const [state, setState] = useState<
-    | { readonly status: "off" | "connecting" }
-    | {
-        readonly status: "live";
-        readonly screen: { readonly width: number; readonly height: number };
-      }
-    | { readonly status: "unavailable"; readonly message: string }
-  >({ status: "off" });
+  const latestRef = useRef<{ readonly key: string; readonly frame: DecodedFrame } | undefined>(
+    undefined,
+  );
+  // What is known is known about one request. The state carries that request's
+  // key, and a render for any other request reads as not yet connected: an
+  // effect only runs after the render, and until it does the previous device's
+  // picture and size would sit under the new device's name and input.
+  const [known, setKnown] = useState<{
+    readonly key: string | undefined;
+    readonly state:
+      | { readonly status: "off" | "connecting" }
+      | {
+          readonly status: "live";
+          readonly screen: { readonly width: number; readonly height: number };
+        }
+      | { readonly status: "unavailable"; readonly message: string };
+  }>({ key: undefined, state: { status: "off" } });
   const requestKey = request === undefined ? undefined : JSON.stringify(request);
+  const requestKeyRef = useRef(requestKey);
+  requestKeyRef.current = requestKey;
 
   const attach = useCallback((canvas: HTMLCanvasElement | null) => {
     canvasRef.current = canvas;
-    if (canvas !== null && latestRef.current !== undefined) paint(canvas, latestRef.current);
+    const latest = latestRef.current;
+    if (canvas !== null && latest !== undefined && latest.key === requestKeyRef.current) {
+      paint(canvas, latest.frame);
+    }
   }, []);
 
   useEffect(() => {
-    if (!enabled || request === undefined) {
-      setState({ status: "off" });
+    if (!enabled || request === undefined || requestKey === undefined) {
+      setKnown({ key: requestKey, state: { status: "off" } });
       return;
     }
+    const key = requestKey;
+    const setState = (state: (typeof known)["state"]) => setKnown({ key, state });
     const controller = new AbortController();
     const signal = controller.signal;
     setState({ status: "connecting" });
@@ -93,8 +108,8 @@ export function useAppleSimulatorLiveScreen(options: {
             frame.close();
             return;
           }
-          latestRef.current?.close();
-          latestRef.current = frame;
+          latestRef.current?.frame.close();
+          latestRef.current = { key, frame };
           if (canvasRef.current !== null) paint(canvasRef.current, frame);
           if (!painted) {
             painted = true;
@@ -118,13 +133,17 @@ export function useAppleSimulatorLiveScreen(options: {
     })();
     return () => {
       controller.abort();
-      latestRef.current?.close();
+      latestRef.current?.frame.close();
       latestRef.current = undefined;
     };
     // `requestKey` stands in for `request`: callers rebuild the object each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, decode, enabled, requestKey]);
 
+  const state: (typeof known)["state"] =
+    known.key === requestKey
+      ? known.state
+      : { status: enabled && request !== undefined ? "connecting" : "off" };
   return state.status === "live" ? { ...state, attach } : state;
 }
 

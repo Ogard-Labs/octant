@@ -128,6 +128,55 @@ describe("the live Simulator screen", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("stops being live the moment it is pointed at another Simulator", async () => {
+    const first = feed();
+    const second = feed();
+    const watchScreen = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "watching",
+        screen: { width: 1206, height: 2622 },
+        frames: first.frames,
+      })
+      .mockResolvedValueOnce({
+        status: "watching",
+        screen: { width: 2064, height: 2752 },
+        frames: second.frames,
+      });
+    const client = clientWatching(watchScreen as AppleToolchainClient["watchScreen"]);
+    const other = {
+      kind: "apple-screen-stream-request",
+      simulatorId: "D1F82AC7-3B5F-455D-AFBF-93D12CBFCE6D",
+    } as unknown as AppleScreenStreamRequest;
+    const seen: string[] = [];
+    const { result, rerender } = renderHook(
+      ({ target }) => {
+        const live = useAppleSimulatorLiveScreen({
+          client,
+          request: target,
+          enabled: true,
+          decode,
+        });
+        seen.push(live.status === "live" ? `live ${live.screen.width}` : live.status);
+        return live;
+      },
+      { initialProps: { target: request } },
+    );
+    first.push(Uint8Array.from([1]));
+    await waitFor(() => expect(result.current.status).toBe("live"));
+
+    seen.length = 0;
+    rerender({ target: other });
+
+    // Not one render shows the first device's size under the second one's name.
+    expect(seen[0]).toBe("connecting");
+    second.push(Uint8Array.from([2]));
+    await waitFor(() =>
+      expect(result.current).toMatchObject({ status: "live", screen: { width: 2064 } }),
+    );
+    expect(seen).not.toContain("live 1206");
+  });
+
   it("says why there is no live view so the captured still can show instead", async () => {
     const watchScreen = vi.fn(async () => ({
       status: "failed" as const,
