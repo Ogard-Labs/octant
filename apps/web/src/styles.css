@@ -77,7 +77,6 @@
   --octant-accent: #f0f0f0;
   --octant-accent-foreground: #171717;
   --octant-accent-text: #f0f0f0;
-  --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 16%, transparent);
   --octant-divider-strong: #808080;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
@@ -202,7 +201,6 @@ html[data-octant-theme-mode="light"] {
   --octant-text-primary-high-contrast: #0e0f11;
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
-  --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
   --octant-scrim: #000000;
   --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
   --octant-shadow-sm:
@@ -806,8 +804,11 @@ h6 {
   white-space: normal;
 }
 
+/* A check mark says which item is chosen; it is not a focus cue, and the
+   default look spends no hue on it. It used to take the focus colour, which
+   put the only blue on the page into every radio and checkbox menu. */
 .octant-menu__indicator {
-  color: var(--octant-focus-ring);
+  color: var(--octant-text-primary);
 }
 
 .new-project {
@@ -6586,7 +6587,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__rail-item--active {
   color: var(--octant-text-primary);
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
   box-shadow: none;
 }
 
@@ -6720,7 +6721,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__catalog--on {
   color: var(--octant-text-primary);
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
   border-color: var(--octant-border-strong);
 }
 
@@ -6767,7 +6768,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__row--selected {
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
 }
 
 .composer-model-picker__model {
