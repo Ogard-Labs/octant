@@ -6,6 +6,8 @@ import type { DiscoveryCandidate, DiscoverySnapshot, ProviderDriverKind } from "
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery";
 import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
+import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
 
@@ -51,7 +53,13 @@ export interface DiscoveryExecPort {
   (
     file: string,
     args: ReadonlyArray<string>,
-    options: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv },
+    options: {
+      timeout: number;
+      maxBuffer: number;
+      env?: NodeJS.ProcessEnv;
+      /** A confined version read runs in its own scratch, not the host's cwd. */
+      cwd?: string;
+    },
   ): Promise<{ stdout: string; stderr: string }>;
 }
 
@@ -73,6 +81,8 @@ export interface DiscoveryFsPort {
 
 export interface DiscoveryServiceOptions {
   readonly exec?: DiscoveryExecPort;
+  /** Confinement for the version read of a candidate found on the host. */
+  readonly versionProbeConfinement?: SeatbeltConfinementPort;
   readonly fs?: DiscoveryFsPort;
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => number;
@@ -95,6 +105,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
   const hostId = options.hostId ?? "local";
   const environment = options.environment ?? process.env;
   const admittedDriverKinds = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
+  const versionProbeConfinement = options.versionProbeConfinement;
 
   let lastScanCandidates: DiscoveryCandidate[] = [];
 
@@ -148,6 +159,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
             environment,
             now,
             startTime,
+            versionProbeConfinement,
             signal,
           );
           candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
@@ -201,6 +213,7 @@ async function scanDescriptor(
   environment: NodeJS.ProcessEnv,
   now: () => number,
   startTime: number,
+  versionProbeConfinement: SeatbeltConfinementPort | undefined,
   signal?: AbortSignal,
 ): Promise<{
   readonly candidates: DiscoveryCandidate[];
@@ -240,20 +253,38 @@ async function scanDescriptor(
     if (seenPaths.has(validated.discoveredPath)) continue;
     seenPaths.add(validated.discoveredPath);
 
-    // Version probe
+    // Version probe. The candidate is one the scan found on PATH or in an
+    // approved directory rather than one the user named, so it is confined
+    // before it runs; a host that cannot confine reports no version rather
+    // than running it anyway.
     let version: string | undefined;
-    try {
-      const { stdout } = await exec(validated.canonicalPath, [...descriptor.versionProbeArgs], {
-        timeout: MAX_PROBE_TIMEOUT_MS,
-        maxBuffer: MAX_PROBE_OUTPUT_BYTES,
-        env: sanitizeProbeEnvironment(environment),
-      });
-      version = extractVersion(stdout);
-    } catch {
-      // Version probe failed; continue without version
+    const probe = prepareConfinedVersionProbe({
+      binaryPath: validated.canonicalPath,
+      displayName: descriptor.displayName,
+      args: descriptor.versionProbeArgs,
+      environment: () => sanitizeProbeEnvironment(environment),
+      ...(versionProbeConfinement === undefined ? {} : { confinement: versionProbeConfinement }),
+    });
+    if (probe.status === "prepared") {
+      try {
+        const { stdout } = await exec(probe.launch.command, probe.launch.args, {
+          timeout: MAX_PROBE_TIMEOUT_MS,
+          maxBuffer: MAX_PROBE_OUTPUT_BYTES,
+          env: probe.launch.environment,
+          cwd: probe.launch.workingDirectory,
+        });
+        version = extractVersion(stdout);
+      } catch {
+        // Version probe failed; continue without version
+      } finally {
+        probe.launch.release();
+      }
     }
 
-    // Auth readiness probe
+    // Auth readiness probe. This one reads the provider's own credential state
+    // out of the user's home, so the confinement above would answer
+    // "unauthenticated" for every installed provider. Giving it a home it can
+    // read is a readiness-probe question under 0122, not a version read.
     let readiness: DiscoveryCandidate["readiness"] = "unknown";
     if (descriptor.authProbeArgs !== undefined) {
       try {
@@ -480,12 +511,8 @@ function sanitizeProbeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 // ── Default ports ───────────────────────────────────────────────────────────
 
-function defaultExec(
-  file: string,
-  args: ReadonlyArray<string>,
-  options: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv },
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolvePromise, rejectPromise) => {
+const defaultExec: DiscoveryExecPort = (file, args, options) =>
+  new Promise((resolvePromise, rejectPromise) => {
     execFile(
       file,
       [...args],
@@ -493,6 +520,7 @@ function defaultExec(
         timeout: options.timeout,
         maxBuffer: options.maxBuffer,
         env: options.env,
+        ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         shell: false,
       },
       (error, stdout, stderr) => {
@@ -501,7 +529,6 @@ function defaultExec(
       },
     );
   });
-}
 
 /**
  * Byte-bounded UTF-8 read for alias discovery. `readFile(path, "utf8")` then a

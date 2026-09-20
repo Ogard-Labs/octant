@@ -21,8 +21,10 @@ import {
   probeAcpBinary,
   sanitizeAcpEnvironment,
   type AcpConfinementPort,
+  type AcpProbeOptions,
   type AcpProcessOptions,
 } from "./acpProcess";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -157,9 +159,30 @@ const passthroughConfinement: AcpConfinementPort = {
     }),
 };
 
+/**
+ * These suites assert protocol and lifecycle, not the profile. The live builder
+ * refuses on a host without `sandbox-exec`, so the version launch is prepared
+ * with the confinement passed straight through.
+ */
+const passthroughVersionProbeConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
+
+function probeAcp(
+  profile: AcpProviderProfile,
+  binaryPath: string,
+  overrides: AcpProbeOptions = {},
+) {
+  return probeAcpBinary(profile, binaryPath, {
+    confinement: passthroughVersionProbeConfinement,
+    ...overrides,
+  });
+}
+
 function port(overrides: Partial<AcpProcessOptions> = {}) {
   return makeAcpProcessLive({
     confinement: passthroughConfinement,
+    versionProbeConfinement: passthroughVersionProbeConfinement,
     // The process suite runs profiles in parallel under the monorepo test
     // load. Keep fixture startup tolerant of scheduler contention; production
     // uses the separate 10s default in acpProcess.ts.
@@ -218,18 +241,18 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
 
   it("probes exact supported versions and rejects older or malformed output", async () => {
     const ready = fixture(profile);
-    await expect(Effect.runPromise(probeAcpBinary(profile, ready.binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeAcp(profile, ready.binaryPath))).resolves.toEqual({
       binaryPath: ready.binaryPath,
       version: readyVersions[profile.kind],
     });
     const old = fixture(profile, "version-old");
-    await expect(failureOf(probeAcpBinary(profile, old.binaryPath))).resolves.toEqual({
+    await expect(failureOf(probeAcp(profile, old.binaryPath))).resolves.toEqual({
       category: "incompatible",
       reason: "runtime-incompatible",
       message: `${profile.displayName} ${profile.process.minimumVersion.join(".")} or later is required.`,
     });
     const malformed = fixture(profile, "version-malformed");
-    await expect(failureOf(probeAcpBinary(profile, malformed.binaryPath))).resolves.toMatchObject({
+    await expect(failureOf(probeAcp(profile, malformed.binaryPath))).resolves.toMatchObject({
       category: "protocol",
     });
   }, 15_000);
@@ -372,7 +395,7 @@ describe("ACP process lifecycle", () => {
     const target = fixture(kilo);
     await expect(
       Effect.runPromise(
-        probeAcpBinary(kilo, target.binaryPath, {
+        probeAcp(kilo, target.binaryPath, {
           onProcessStarted: async () => {
             throw new Error("receipt raced process exit");
           },
@@ -1516,6 +1539,7 @@ describe("Kimi Code provider-owned profile", () => {
     const root = target.canonicalRoot;
     const processPort = makeAcpProcessLive({
       confinement: confinement(target, join(root, "sandbox-tmp")),
+      versionProbeConfinement: passthroughVersionProbeConfinement,
       startupTimeoutMs: 1_000,
       shutdownTimeoutMs: 200,
     });

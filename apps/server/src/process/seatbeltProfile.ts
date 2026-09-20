@@ -548,6 +548,12 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
         (path) => resolvedRootForms(path),
       ),
     ).map((path) => seatbeltAllowRule("file-read*", path)),
+    ...launchRootAncestorMetadataRules([
+      ...readRoots,
+      input.boundRoot,
+      input.temporaryDirectory,
+      ...additionalWriteRoots,
+    ]),
     ...(writeBoundRoot ? resolvedRootForms(input.boundRoot) : []).map((path) =>
       seatbeltAllowRule("file-write*", path),
     ),
@@ -719,6 +725,40 @@ function assertNotAncestorOfDeniedPath(path: string, label: string): void {
 
 function uniqueAbsolutePaths(paths: ReadonlyArray<string>): string[] {
   return [...new Set(paths)];
+}
+
+/**
+ * Stat for the directories on the way into a launch root that themselves sit
+ * beneath a denied subtree.
+ *
+ * Granting a root in full is not enough to reach it: the kernel judges every
+ * component of the path, and macOS resolves the temporary directory beneath
+ * `/private`, which this profile denies wholesale. A program that canonicalises
+ * a path inside the directory it was just granted — Node's ESM resolver does,
+ * on every import — then fails at the `/private` component with EPERM. Measured
+ * on macOS 27 as GitHub Copilot's npm loader reporting no version at all after
+ * unpacking its package into the launch's own home. Only stat opens here:
+ * neither the listing nor the contents of those ancestors become readable, and
+ * the ancestors are the ones of roots this profile already grants.
+ */
+function launchRootAncestorMetadataRules(roots: ReadonlyArray<string>): ReadonlyArray<string> {
+  const ancestors = new Set<string>();
+  for (const root of roots) {
+    for (const form of resolvedRootForms(root)) {
+      let current = dirname(form);
+      while (current !== dirname(current)) {
+        if (isBeneathDeniedPath(current)) ancestors.add(current);
+        current = dirname(current);
+      }
+    }
+  }
+  return [...ancestors].map(seatbeltAllowLiteralMetadataRule);
+}
+
+function isBeneathDeniedPath(path: string): boolean {
+  return DEFAULT_DENY_READ_PATHS.some(
+    (denied) => path === denied || path.startsWith(`${denied}${sep}`),
+  );
 }
 
 /**

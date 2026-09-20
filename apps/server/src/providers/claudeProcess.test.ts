@@ -10,9 +10,20 @@ import { Effect, Either, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { makeClaudeProcessLive, type ClaudeProcessOptions } from "./claudeProcess";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeClaudeCli.ts", import.meta.url));
 const directories: string[] = [];
+
+/**
+ * These suites assert probe lifecycle, not the profile. The live builder
+ * refuses on a host without `sandbox-exec`, and a real profile would deny the
+ * fixture the records file it writes beside itself, so the version launch is
+ * prepared with the confinement passed straight through.
+ */
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
 
 function fixture(mode = "ready"): {
   readonly binaryPath: string;
@@ -93,6 +104,7 @@ function makePort(
 ) {
   return makeClaudeProcessLive({
     inheritedEnvironment: target.environment,
+    versionProbeConfinement: passthroughConfinement,
     probeOutputBytes: 256,
     runtimeStderrBytes: 64,
     shutdownTimeoutMs: 50,

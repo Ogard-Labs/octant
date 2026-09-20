@@ -24,7 +24,15 @@ import { Effect, type Scope } from "effect";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
-import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
+import {
+  makeSeatbeltConfinementLive,
+  SeatbeltConfinementError,
+  type SeatbeltConfinementPort,
+} from "../process/seatbeltProfile";
+import {
+  prepareConfinedVersionProbe,
+  type ConfinedVersionProbeLaunch,
+} from "../process/confinedVersionProbe";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -88,6 +96,8 @@ export interface PiConfinementOptions {
 
 export interface PiProcessOptions {
   readonly confinement?: PiConfinementPort;
+  /** Confinement for the version read, which the runtime's port does not cover. */
+  readonly versionProbeConfinement?: SeatbeltConfinementPort;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly shutdownTimeoutMs?: number;
   readonly versionTimeoutMs?: number;
@@ -627,16 +637,17 @@ async function terminate(child: ChildProcess, timeoutMs: number): Promise<void> 
   signalGroup(child, "SIGKILL");
 }
 
-function inspectVersion(
-  binaryPath: string,
-  environment: NodeJS.ProcessEnv,
-  timeoutMs: number,
-): Promise<string> {
+function inspectVersion(launch: ConfinedVersionProbeLaunch, timeoutMs: number): Promise<string> {
   return new Promise((resolveVersion, reject) => {
     execFile(
-      binaryPath,
-      ["--version"],
-      { env: environment, timeout: timeoutMs, maxBuffer: 1024 },
+      launch.command,
+      [...launch.args],
+      {
+        cwd: launch.workingDirectory,
+        env: launch.environment,
+        timeout: timeoutMs,
+        maxBuffer: 1024,
+      },
       (error, stdout) => {
         const version = stdout.trim();
         if (error !== null || !/^\d+\.\d+\.\d+$/.test(version)) reject(new Error());
@@ -648,6 +659,7 @@ function inspectVersion(
 
 export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort {
   const confinement = options.confinement ?? makePiConfinementLive();
+  const versionProbeConfinement = options.versionProbeConfinement;
   const inherited = options.inheritedEnvironment ?? process.env;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2_000;
   const versionTimeoutMs = options.versionTimeoutMs ?? 5_000;
@@ -662,10 +674,21 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
           );
           const launch = yield* confinement.prepare({ ...input, environment: baseEnvironment });
-          const version = yield* Effect.tryPromise({
-            try: () => inspectVersion(input.binaryPath, launch.environment, versionTimeoutMs),
-            catch: () => failure("incompatible", "Pi version could not be verified."),
+          const versionProbe = prepareConfinedVersionProbe({
+            binaryPath: input.binaryPath,
+            displayName: "Pi",
+            environment: () => launch.environment,
+            ...(versionProbeConfinement === undefined
+              ? {}
+              : { confinement: versionProbeConfinement }),
           });
+          if (versionProbe.status === "refused") {
+            return yield* Effect.fail(failure(versionProbe.reason, versionProbe.message));
+          }
+          const version = yield* Effect.tryPromise({
+            try: () => inspectVersion(versionProbe.launch, versionTimeoutMs),
+            catch: () => failure("incompatible", "Pi version could not be verified."),
+          }).pipe(Effect.ensuring(Effect.sync(() => versionProbe.launch.release())));
           const child = yield* Effect.try({
             try: () =>
               spawn(launch.command, [...launch.args], {

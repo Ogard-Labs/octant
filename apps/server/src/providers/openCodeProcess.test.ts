@@ -41,6 +41,21 @@ const passthroughConfinement: SeatbeltConfinementPort = {
   }),
 };
 
+/**
+ * These suites assert process lifecycle, not the profile. The live builder
+ * refuses on a host without `sandbox-exec`, and a real profile would deny the
+ * fixture the mode and pid files it keeps beside itself, so the version launch
+ * is prepared with the confinement passed straight through.
+ */
+function probeOpenCode(
+  binaryPath: string,
+  onProcessStarted?: Parameters<typeof probeOpenCodeBinary>[1],
+) {
+  return probeOpenCodeBinary(binaryPath, onProcessStarted, {
+    confinement: passthroughConfinement,
+  });
+}
+
 function fixtureRoot(mode = "ready"): string {
   const directory = mkdtempSync(join(tmpdir(), "octant-opencode-"));
   directories.push(directory);
@@ -461,7 +476,7 @@ describe("probeOpenCodeBinary", () => {
   });
 
   it("rejects a relative binary path before spawning", async () => {
-    const failure = await failureOf(probeOpenCodeBinary("opencode"));
+    const failure = await failureOf(probeOpenCode("opencode"));
     expect(failure).toEqual({
       category: "invalid-configuration",
       message: "OpenCode binary path must be absolute.",
@@ -473,13 +488,13 @@ describe("probeOpenCodeBinary", () => {
     writeFileSync(path, "not executable");
     chmodSync(path, 0o644);
 
-    const failure = await failureOf(probeOpenCodeBinary(path));
+    const failure = await failureOf(probeOpenCode(path));
     expect(failure.category).toBe("invalid-configuration");
     expect(failure.message).toBe("OpenCode binary path must reference an executable file.");
   });
 
   it("parses the installed OpenCode semantic version", async () => {
-    await expect(Effect.runPromise(probeOpenCodeBinary(fakeCliPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeOpenCode(fakeCliPath))).resolves.toEqual({
       binaryPath: fakeCliPath,
       version: "1.17.19",
     });
@@ -487,7 +502,7 @@ describe("probeOpenCodeBinary", () => {
 
   it("preserves the beta runtime label instead of parsing it as a v1 semantic version", async () => {
     const fixture = probeWrapper("probe-v2");
-    await expect(Effect.runPromise(probeOpenCodeBinary(fixture.binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeOpenCode(fixture.binaryPath))).resolves.toEqual({
       binaryPath: fixture.binaryPath,
       version: "opencode2 v0.0.0-beta-18721",
     });
@@ -496,7 +511,7 @@ describe("probeOpenCodeBinary", () => {
   it("preserves a successful fast probe when receipt persistence loses the exit race", async () => {
     await expect(
       Effect.runPromise(
-        probeOpenCodeBinary(fakeCliPath, async () => {
+        probeOpenCode(fakeCliPath, async () => {
           throw new Error("receipt raced process exit");
         }),
       ),
@@ -510,7 +525,7 @@ describe("probeOpenCodeBinary", () => {
     vi.stubEnv("OCTANT_DESKTOP_BRIDGE_SECRET", "desktop-secret");
     vi.stubEnv("OCTANT_TEST_ALLOWED_ENV", "allowed-value");
 
-    await Effect.runPromise(probeOpenCodeBinary(fixture.binaryPath));
+    await Effect.runPromise(probeOpenCode(fixture.binaryPath));
 
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
       "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=<unset>\nclaude=<unset>\nconfig=<unset>\n",
@@ -522,7 +537,7 @@ describe("probeOpenCodeBinary", () => {
 
   it("rejects output that merely contains a semantic version", async () => {
     const fixture = probeWrapper("probe-misleading-version");
-    const failure = await failureOf(probeOpenCodeBinary(fixture.binaryPath));
+    const failure = await failureOf(probeOpenCode(fixture.binaryPath));
     expect(failure).toEqual({
       category: "protocol",
       message: "OpenCode binary returned an unrecognized version.",
@@ -531,7 +546,7 @@ describe("probeOpenCodeBinary", () => {
 
   it("terminates probe descendants before returning a successful version", async () => {
     const fixture = probeWrapper("probe-success-descendant");
-    await expect(Effect.runPromise(probeOpenCodeBinary(fixture.binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeOpenCode(fixture.binaryPath))).resolves.toEqual({
       binaryPath: fixture.binaryPath,
       version: "1.17.19",
     });
@@ -540,7 +555,7 @@ describe("probeOpenCodeBinary", () => {
 
   it("terminates probe descendants before returning a non-zero exit failure", async () => {
     const fixture = probeWrapper("probe-failure-descendant");
-    const failure = await failureOf(probeOpenCodeBinary(fixture.binaryPath));
+    const failure = await failureOf(probeOpenCode(fixture.binaryPath));
     expect(failure).toEqual({
       category: "unavailable",
       message: "OpenCode binary probe did not succeed.",
@@ -836,7 +851,7 @@ describe("OpenCodeProcessPort", () => {
   // runtime contract behind it is the beta one, not the legacy v1 one.
   it("accepts the bare banner the 2.0.x CLI prints and keeps the beta runtime contract", async () => {
     const probe = probeWrapper("probe-v2-0-1");
-    await expect(Effect.runPromise(probeOpenCodeBinary(probe.binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeOpenCode(probe.binaryPath))).resolves.toEqual({
       binaryPath: probe.binaryPath,
       version: "opencode v2.0.1",
     });
