@@ -4340,12 +4340,12 @@ export function startOctantServer(
           String(context.threadId),
           {
             kind: request.kind,
-            actionId: String(request.actionId),
             ...("simulatorId" in request && request.simulatorId !== undefined
               ? { simulatorId: String(request.simulatorId) }
               : {}),
           },
           evidence.outcome,
+          context.inputGranted === true,
         ),
       inputGrants: (threadId) => simulatorInputGrants.list(String(threadId)),
       ...(simulatorDevice === undefined

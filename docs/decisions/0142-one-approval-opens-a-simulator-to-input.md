@@ -31,10 +31,12 @@ separate decision.
   approval a request would otherwise carry, for input only; a shutdown, a boot
   or any other effect still asks. Looking at a grant does not extend it: only
   an input that was delivered renews it, and only a shutdown that succeeded
-  closes the Simulator for every thread. An input authorized under the grant
-  that finishes just after it ran out still renews it, up to the longest an
-  action may run; a request answered again from what was stored renews
-  nothing. A restarted host has no grants and asks again.
+  closes the Simulator for every thread. An input the grant itself admitted
+  that finishes just after it ran out still renews it, within the longest an
+  action may run. Input admitted another way, full access or the first one
+  approved, never brings back a grant that ran out. A request answered again
+  from stored evidence delivered nothing and renews nothing. A restarted host
+  has no grants and asks again.
 - The pane learns of a grant only from the runtime snapshot, and uses it only
   to skip raising a confirmation the host would not require. A pane that skips
   wrongly is refused by the host as unauthorized; it cannot widen anything.

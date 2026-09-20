@@ -1142,7 +1142,9 @@ function approvalPrompt(
     message = input ? "Allow input to this Simulator?" : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
       ...(input
-        ? ["Covers taps, typing and keys on this Simulator for 15 minutes after each input."]
+        ? [
+            "Covers taps, swipes, typing and keys on this Simulator for 15 minutes after each input.",
+          ]
         : []),
       `Action: ${effect.request.kind}`,
       `Platform: ${"platform" in effect.request ? effect.request.platform : "Simulator"}`,

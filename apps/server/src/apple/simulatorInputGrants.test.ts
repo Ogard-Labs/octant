@@ -26,40 +26,29 @@ describe("Simulator input grants", () => {
     expect(grants.isOpen(thread, iphone)).toBe(false);
   });
 
-  it("keeps a grant open for an input that finished just after it ran out, and not for one that finished long after", () => {
+  it("keeps a grant open for an input the grant admitted that finished just after it ran out", () => {
     let now = 0;
     const grants = new SimulatorInputGrants(() => now);
     const tap = { kind: "tap" as const, simulatorId: iphone };
-
-    // Authorized under the live grant, delivered a little past its deadline.
     grants.open(thread, iphone);
+
+    // Admitted under the live grant, delivered a little past its deadline.
     now = minutes(16);
     expect(grants.isOpen(thread, iphone)).toBe(false);
-    grants.afterAction(thread, { ...tap, actionId: "a1" }, "succeeded");
+    grants.afterAction(thread, tap, "succeeded", true);
     now = minutes(30);
     expect(grants.isOpen(thread, iphone)).toBe(true);
-
-    // No input runs longer than ten minutes, so nothing that finishes later
-    // than that after the deadline was authorized under it.
-    grants.open(otherThread, iphone);
-    now = minutes(30) + minutes(15) + minutes(11);
-    grants.afterAction(otherThread, { ...tap, actionId: "a2" }, "succeeded");
-    expect(grants.isOpen(otherThread, iphone)).toBe(false);
   });
 
-  it("renews nothing when the same request is answered again from what was stored", () => {
+  it("does not revive a grant that ran out for an input that was admitted some other way", () => {
     let now = 0;
     const grants = new SimulatorInputGrants(() => now);
-    const tap = { kind: "tap" as const, simulatorId: iphone, actionId: "a1" };
     grants.open(thread, iphone);
 
-    now = minutes(10);
-    grants.afterAction(thread, tap, "succeeded");
-    // A client retries the finished request: the answer is the stored one and
-    // nothing was delivered, so it must not keep the grant alive.
-    now = minutes(20);
-    grants.afterAction(thread, tap, "succeeded");
-    now = minutes(26);
+    // A window with full access sends input: it needed no grant, so it must not make one.
+    now = minutes(16);
+    grants.afterAction(thread, { kind: "tap", simulatorId: iphone }, "succeeded", false);
+    now = minutes(17);
     expect(grants.isOpen(thread, iphone)).toBe(false);
   });
 
@@ -78,14 +67,14 @@ describe("Simulator input grants", () => {
   it("renews a grant only for an input that was delivered, and closes a Simulator only when it was shut down", () => {
     let now = 0;
     const grants = new SimulatorInputGrants(() => now);
-    const tap = { kind: "tap" as const, simulatorId: iphone, actionId: "t1" };
+    const tap = { kind: "tap" as const, simulatorId: iphone };
     grants.open(thread, iphone);
     grants.open(otherThread, iphone);
 
     // A failed input, or anything that is not input, does not keep it open.
     now = minutes(14);
     grants.afterAction(thread, tap, "failed");
-    grants.afterAction(thread, { kind: "boot", simulatorId: iphone, actionId: "b1" }, "succeeded");
+    grants.afterAction(thread, { kind: "boot", simulatorId: iphone }, "succeeded");
     now = minutes(16);
     expect(grants.isOpen(thread, iphone)).toBe(false);
 
@@ -93,19 +82,15 @@ describe("Simulator input grants", () => {
     now = minutes(20);
     grants.open(thread, iphone);
     now = minutes(30);
-    grants.afterAction(thread, { ...tap, actionId: "t2" }, "succeeded");
+    grants.afterAction(thread, { ...tap }, "succeeded");
     now = minutes(44);
     expect(grants.isOpen(thread, iphone)).toBe(true);
 
     // A shutdown that failed leaves the session as it was; one that worked ends it for everyone.
-    grants.afterAction(thread, { kind: "shutdown", simulatorId: iphone, actionId: "s1" }, "failed");
+    grants.afterAction(thread, { kind: "shutdown", simulatorId: iphone }, "failed");
     expect(grants.isOpen(thread, iphone)).toBe(true);
     grants.open(otherThread, iphone);
-    grants.afterAction(
-      thread,
-      { kind: "shutdown", simulatorId: iphone, actionId: "s2" },
-      "succeeded",
-    );
+    grants.afterAction(thread, { kind: "shutdown", simulatorId: iphone }, "succeeded");
     expect(grants.isOpen(thread, iphone)).toBe(false);
     expect(grants.isOpen(otherThread, iphone)).toBe(false);
   });

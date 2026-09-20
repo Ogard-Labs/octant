@@ -198,6 +198,7 @@ describe("Apple toolchain routes", () => {
       service,
       afterAction,
       now: () => 2,
+      nowIso: () => "2026-09-19T20:00:00.000Z",
     });
     const action = {
       actionId: "60000000-0000-4000-8000-000000000008",
@@ -221,6 +222,21 @@ describe("Apple toolchain routes", () => {
       evidence,
       context,
     );
+
+    // The same request asked again is answered from what was stored: its
+    // evidence is older than the request, and nothing was delivered.
+    afterAction.mockClear();
+    const replaying = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: async () => context,
+      service,
+      afterAction,
+      now: () => 2,
+      nowIso: () => "2026-09-19T20:05:00.000Z",
+    });
+    const again = await replaying(request({ kind: "apple-action-request", request: action }));
+    expect(again?.status).toBe(200);
+    expect(afterAction).not.toHaveBeenCalled();
   });
 
   it("fails closed before service access for invalid window authority", async () => {

@@ -31,7 +31,8 @@ export interface AppleToolchainRouteDependencies {
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
   /**
    * Called with what an action came to, after it ran. The host's input grants
-   * follow what was delivered rather than what was asked.
+   * follow what was delivered rather than what was asked. A request answered
+   * again from stored evidence delivered nothing, and does not call it.
    */
   readonly afterAction?: (
     request: AppleActionRequest,
@@ -185,7 +186,10 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         case "apple-action-request": {
           const startedAt = nowIso();
           const evidence = await dependencies.service.execute(envelope.request, context);
-          dependencies.afterAction?.(envelope.request, evidence, context);
+          // Evidence older than the request is a replay of an earlier answer.
+          if (Date.parse(evidence.completedAt) >= Date.parse(startedAt)) {
+            dependencies.afterAction?.(envelope.request, evidence, context);
+          }
           await dependencies.recordEvidence?.(evidence, startedAt);
           return encoded(
             {

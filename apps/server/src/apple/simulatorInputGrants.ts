@@ -1,13 +1,11 @@
 import { APPLE_INPUT_GRANT_MS, isAppleSimulatorInputKind } from "@octant/domain";
 
 /**
- * The longest an action may run: its own timeout allows ten minutes. An input
- * that finishes later than that after a grant ran out was not authorized under
- * it, so it does not renew it.
+ * The longest an action may run: its own timeout allows ten minutes. An
+ * expired grant is kept that long, so an input it admitted just before it ran
+ * out can still renew it when it finishes.
  */
 const LONGEST_ACTION_MS = 10 * 60_000;
-/** How many finished actions are remembered, so a replayed one is recognized. */
-const REMEMBERED_ACTIONS = 256;
 
 export interface SimulatorInputGrant {
   readonly simulatorId: string;
@@ -25,7 +23,6 @@ export interface SimulatorInputGrant {
 export class SimulatorInputGrants {
   readonly #now: () => number;
   readonly #expiry = new Map<string, number>();
-  readonly #settled = new Set<string>();
 
   constructor(now: () => number = Date.now) {
     this.#now = now;
@@ -48,15 +45,16 @@ export class SimulatorInputGrants {
   }
 
   /**
-   * Keeps a grant open another fifteen minutes. An input authorized under the
-   * grant can finish just after it ran out, and still counts; a grant that was
-   * closed, or ran out long ago, stays closed.
+   * Keeps a grant open another fifteen minutes. An input the grant itself
+   * admitted can finish just after it ran out, and still counts. Any other
+   * input, full access or the first one approved, renews only a grant that is
+   * live: it never needed the grant, so it must not bring one back. A grant
+   * that was closed by a shutdown or by the thread is gone and stays gone.
    */
-  renew(threadId: string, simulatorId: string): void {
+  renew(threadId: string, simulatorId: string, admittedByGrant = false): void {
     const expiresAt = this.#expiry.get(key(threadId, simulatorId));
-    if (expiresAt !== undefined && expiresAt + LONGEST_ACTION_MS > this.#now()) {
-      this.open(threadId, simulatorId);
-    }
+    if (expiresAt === undefined) return;
+    if (admittedByGrant || expiresAt > this.#now()) this.open(threadId, simulatorId);
   }
 
   /**
@@ -64,24 +62,17 @@ export class SimulatorInputGrants {
    * not what was asked: a delivered input keeps its Simulator open, and a
    * Simulator that was shut down is closed to every thread. A failed input or
    * a failed shutdown changes nothing, since the device session carries on.
-   * A request answered again from what was stored delivers nothing new, so
-   * the same action renews only once.
    */
   afterAction(
     threadId: string,
-    action: { readonly kind: string; readonly simulatorId?: string; readonly actionId: string },
+    action: { readonly kind: string; readonly simulatorId?: string },
     outcome: string,
+    admittedByGrant = false,
   ): void {
     if (outcome !== "succeeded" || action.simulatorId === undefined) return;
-    if (this.#settled.has(action.actionId)) return;
-    this.#settled.add(action.actionId);
-    if (this.#settled.size > REMEMBERED_ACTIONS) {
-      const oldest = this.#settled.values().next().value;
-      if (oldest !== undefined) this.#settled.delete(oldest);
-    }
     if (action.kind === "shutdown") this.revokeSimulator(action.simulatorId);
     else if (isAppleSimulatorInputKind(action.kind as never)) {
-      this.renew(threadId, action.simulatorId);
+      this.renew(threadId, action.simulatorId, admittedByGrant);
     }
   }
 
