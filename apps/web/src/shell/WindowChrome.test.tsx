@@ -351,6 +351,27 @@ describe("WindowChrome", () => {
     );
   });
 
+  it("gives every popup one thin edge and the floating fill", () => {
+    // The overlay shadow carries the popup's edge, and it is a hairline in both
+    // themes. In dark it used the strong border, so menus and popovers had a
+    // heavier edge than dialogs, and a popup that also set a border showed two.
+    const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
+      (match) => match[1] ?? "",
+    );
+    expect(overlays.length).toBeGreaterThanOrEqual(2);
+    for (const overlay of overlays) {
+      expect(overlay).toContain("0 0 0 1px var(--octant-border)");
+      expect(overlay).not.toContain("--octant-border-strong");
+    }
+    // A feature stylesheet sizes and places a popup; it does not repaint it.
+    const branchMenu = cssRule(".code-branch-selector__menu");
+    expect(branchMenu).not.toMatch(/(^|\s)border:/);
+    expect(branchMenu).not.toContain("background:");
+    expect(cssRule(".composer-model-picker__menu")).toContain(
+      "background: var(--octant-floating);",
+    );
+  });
+
   it("parts one Project from the next by more than it parts two threads", () => {
     // Three levels, ordered: rows inside a Project, then Projects, then the
     // sections a hairline divides. A Project block used the same 2px step as

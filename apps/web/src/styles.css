@@ -91,8 +91,11 @@
   --octant-shadow-lg:
     0 0 0 1px var(--octant-border), 0 10px 18px -8px rgb(0 0 0 / 50%),
     0 22px 46px -16px rgb(0 0 0 / 68%);
-  --octant-shadow-overlay:
-    0 0 0 1px var(--octant-border-strong), 0 18px 48px -16px rgb(0 0 0 / 72%);
+  /* The overlay's own edge is a hairline, as the popover recipe says and as the
+     light theme already draws it. In dark it used the strong border, so every
+     menu and popover had a heavier edge than a dialog, and a popup that also
+     set a border showed two. */
+  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 18px 48px -16px rgb(0 0 0 / 72%);
   --octant-shadow-pop: 0 18px 48px -16px rgb(0 0 0 / 78%);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
@@ -6424,7 +6427,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
-  background: var(--octant-surface);
+  /* A popup sits on the floating fill. This one took the workspace fill, so it
+     was the one darker popup beside menus that are all one step lighter. */
+  background: var(--octant-floating);
   border: 0;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);

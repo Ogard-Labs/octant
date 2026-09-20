@@ -477,8 +477,11 @@ Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Select lists open beside their trigger
 without covering it with the selected item. The model picker anchors to the
 trigger's trailing edge, keeps its dimensions stable while filtering, and
-scrolls its model list internally. Popovers, menus, and dialogs use the floating
-surface and overlay shadow. Environment and inline Settings sections remain
+scrolls its model list internally. Popovers, menus, dialogs, and hover cards use
+the floating surface and the overlay shadow, and have exactly one 1px hairline
+edge: the overlay shadow carries it for menus and popovers, and the shared
+dialog draws it as a border. A feature stylesheet sizes and places a popup and
+never sets its fill, border, or shadow. Environment and inline Settings sections remain
 flat on their owning surface. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
