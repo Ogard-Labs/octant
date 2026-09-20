@@ -9,6 +9,7 @@ import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-d
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
 import {
+  APPLE_INPUT_GRANT_MS,
   appleInputGrantIsLive,
   appleLiveFrameIsStaleAfterRestart,
   decidesCodeEffectsByApproval,
@@ -435,6 +436,13 @@ function AppleWorkbenchSurface(props: {
   const scheme = controller.discovery?.workspace.schemes[0];
   const createUuid = props.createUuid;
   const requestApproval = props.requestApproval;
+  // The host opens a grant as soon as the first input is approved, but the
+  // snapshot the pane reads can lag. Observed 2026-09-19: every tap raised
+  // another native confirmation while that snapshot was still empty, so the
+  // live screen asked for permission in a loop. Remembering the Simulator
+  // here skips only what the host would already admit.
+  const rememberedInputGrants = useRef(new Map<string, number>());
+  const inputFlight = useRef(Promise.resolve());
   const [frameAttach, setFrameAttach] = useState<AppleSimulatorLiveFrameAttach>({
     kind: "not-attachable",
     reason:
@@ -525,6 +533,12 @@ function AppleWorkbenchSurface(props: {
 
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
+      const previous = inputFlight.current;
+      let release = () => {};
+      inputFlight.current = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
       setActionMessage(undefined);
       setBusy(true);
       try {
@@ -544,13 +558,17 @@ function AppleWorkbenchSurface(props: {
         // the bound checkout and goes through the same native confirmation the
         // rest of Code uses.
         let request = base;
+        const simulatorId = "simulatorId" in intent ? String(intent.simulatorId) : undefined;
+        const now = Date.now();
+        const rememberedUntil =
+          simulatorId === undefined ? 0 : (rememberedInputGrants.current.get(simulatorId) ?? 0);
         // One approved input opens its Simulator to this thread for a while;
         // the host says so in the snapshot, and asking again for every tap
         // would raise a confirmation the host no longer requires.
         const inputGranted =
           isAppleSimulatorInputKind(intent.kind) &&
-          "simulatorId" in intent &&
-          appleInputGrantIsLive(controller.runtime, String(intent.simulatorId), Date.now());
+          simulatorId !== undefined &&
+          (appleInputGrantIsLive(controller.runtime, simulatorId, now) || rememberedUntil > now);
         if (approvalGated && intent.kind !== "screenshot" && !inputGranted) {
           if (requestApproval === undefined) {
             setActionMessage(
@@ -564,8 +582,18 @@ function AppleWorkbenchSurface(props: {
             return;
           }
           request = { ...base, approval: { kind: "approved", approvalId: approvalId as never } };
+          if (simulatorId !== undefined && isAppleSimulatorInputKind(intent.kind)) {
+            rememberedInputGrants.current.set(simulatorId, Date.now() + APPLE_INPUT_GRANT_MS);
+          }
         }
         const evidence = await controller.execute(request);
+        if (
+          evidence.outcome === "succeeded" &&
+          intent.kind === "shutdown" &&
+          simulatorId !== undefined
+        ) {
+          rememberedInputGrants.current.delete(simulatorId);
+        }
         if (evidence.outcome !== "succeeded") {
           setActionMessage(`Apple ${intent.kind} ${evidence.outcome.replace("-", " ")}.`);
         }
@@ -573,6 +601,7 @@ function AppleWorkbenchSurface(props: {
         setActionMessage("The Apple toolchain service did not answer this action.");
       } finally {
         setBusy(false);
+        release();
       }
     },
     [

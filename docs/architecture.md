@@ -418,7 +418,10 @@ attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason. A swipe is a
+and new lines, and every refusal names the helper's own reason. Without that
+helper every input kind is unavailable; Octant does not script Simulator.app
+to inject a tap, swipe, typed text, or key
+([decisions/0145-the-agent-opens-the-in-app-simulator-pane.md](decisions/0145-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
 fourth input kind on the same channel, for the pane and for `octant_apple`
 alike, and the live screen is driven directly: a press and release is a tap, a
 drag is one swipe sent when it ends, keys typed on the focused screen go to

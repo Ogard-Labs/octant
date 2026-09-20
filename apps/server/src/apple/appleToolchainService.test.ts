@@ -1764,26 +1764,20 @@ describe("AppleToolchainService Simulator input", () => {
   });
 
   it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {
-    // Observed 2026-09-19 under the packaged app: osascript exited 1 with
-    // "Connection Invalid error for service com.apple.hiservices-xpcservice."
-    // and the person saw "Apple key-press interrupted." with an empty log.
-    const discovery = discoveryExecutor();
-    const execute = vi.fn(async (input: { readonly argv: readonly string[] }) =>
-      input.argv[0] === "osascript"
-        ? processResult("", {
-            exitCode: 1,
-            stderr:
-              "2026-09-19 16:30:07.225 osascript[11087:11470129] Error received in message reply handler: Connection invalid\n" +
-              "2026-09-19 16:30:07.225 osascript[11087:11470132] Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
-              `2026-09-19 16:30:07.226 osascript[11087:11470129] script at ${context.checkoutRoot}/run.scpt`,
-          })
-        : discovery(input as never),
-    );
+    // Observed 2026-09-19 under the packaged app: a failed inject used to
+    // surface as "Apple key-press interrupted." with an empty log.
+    const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
     const service = new AppleToolchainService({
-      execute: execute as never,
-      // The osascript fallback is Darwin-only; CI runs this suite on Linux too.
-      platform: "darwin",
+      execute,
+      injectSimulatorInput: async () =>
+        processResult("", {
+          exitCode: 1,
+          stderr:
+            "2026-09-19 16:30:07.225 helper: Connection invalid\n" +
+            "Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
+            `script at ${context.checkoutRoot}/run.scpt`,
+        }),
       writeArtifact: async (reference: string, bytes: Uint8Array) => {
         artifacts.set(reference, bytes);
       },
@@ -1902,7 +1896,7 @@ describe("AppleToolchainService Simulator input", () => {
     expect(evidence.diagnostics[0]?.message).toContain("Open the thread on the Mac");
   });
 
-  it("refuses Darwin coordinate taps without a reviewed injector or semantic target", async () => {
+  it("reports every input kind unavailable on Darwin when the host has no device helper, and never runs osascript", async () => {
     const execute = discoveryExecutor();
     const service = new AppleToolchainService({
       execute,
@@ -1913,18 +1907,61 @@ describe("AppleToolchainService Simulator input", () => {
       newId: () => "30000000-0000-4000-8000-000000000012",
     });
     await service.discover(discoveryRequest, context);
-    const evidence = await service.execute(
+    const kinds = [
       simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000021" as never,
         kind: "tap",
         bundleIdentifier: undefined,
         requestedBy: actor,
         point: { x: 10, y: 20 },
         approval: { kind: "approved", approvalId: ids.approval as never },
       }),
-      context,
-    );
-    expect(evidence.outcome).toBe("unavailable");
-    expect(JSON.stringify(evidence.diagnostics)).toContain("Coordinate taps require");
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000022" as never,
+        kind: "tap",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        target: "Login",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000023" as never,
+        kind: "type-text",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        text: "hello",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000024" as never,
+        kind: "key-press",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        key: "return",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000025" as never,
+        kind: "swipe",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        point: { x: 10, y: 200 },
+        toPoint: { x: 10, y: 40 },
+        durationMs: 250,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      } as never),
+    ];
+    for (const request of kinds) {
+      const evidence = await service.execute(request, context);
+      expect(evidence.outcome).toBe("unavailable");
+      if (request.kind === "type-text") {
+        expect(JSON.stringify(evidence.diagnostics)).toContain("text redacted");
+        expect(JSON.stringify(evidence.diagnostics)).not.toContain("hello");
+      } else {
+        expect(JSON.stringify(evidence.diagnostics)).toContain("device helper");
+        expect(JSON.stringify(evidence.diagnostics)).toContain("never activates Simulator.app");
+      }
+    }
     expect(execute).not.toHaveBeenCalledWith(
       expect.objectContaining({ argv: expect.arrayContaining(["osascript"]) }),
       expect.anything(),

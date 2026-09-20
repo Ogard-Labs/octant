@@ -93,9 +93,9 @@ export interface AppleToolchainServiceOptions {
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
   /**
-   * Optional XCTest-less Simulator input injector. Tests and reviewed host
-   * adapters supply this; when absent, Darwin hosts attempt Simulator.app
-   * Accessibility via osascript and other hosts report unavailable.
+   * Optional XCTest-less Simulator input injector. Tests and the desktop's
+   * device helper supply this. When it is absent, every input kind is
+   * unavailable: Octant does not script Simulator.app.
    */
   readonly injectSimulatorInput?: (
     request: AppleSimulatorRequest,
@@ -986,25 +986,13 @@ export class AppleToolchainService {
         "Simulator input injection is unavailable on this host. Open the thread on the Mac that owns the destination.",
       );
     }
-    const argv = darwinSimulatorInputArgv(request);
-    if (argv === undefined) {
-      if (request.kind === "tap" && request.point !== undefined && request.target === undefined) {
-        return unavailableInputResult(
-          "Coordinate taps require a reviewed injectSimulatorInput adapter or a semantic target. Darwin Accessibility fallback refuses guessed screen coordinates.",
-        );
-      }
-      if (request.kind === "swipe") {
-        return unavailableInputResult(
-          "A swipe needs the Octant desktop app's device helper; this host has none.",
-        );
-      }
-      return unavailableInputResult("Simulator input request is incomplete for host injection.");
-    }
-    return this.#command(argv, context, request.timeoutMs, signal);
+    return unavailableInputResult(
+      "Simulator input needs the Octant desktop app's device helper. This host has none, and input never activates Simulator.app.",
+    );
   }
 
   /**
-   * Bound a host adapter the same way `#command` bounds osascript: a
+   * Bound a host adapter the same way `#command` bounds a process: a
    * non-settling injector must not leave the action stuck in `#active`.
    */
   async #runInjectedInput(
@@ -1116,9 +1104,8 @@ export class AppleToolchainService {
   #simulatorState(
     simulatorId: AppleSimulatorRecord["simulatorId"],
   ): AppleSimulatorRecord["state"] | undefined {
-    return this.#lastSimulators.find(
-      (record) => String(record.simulatorId) === String(simulatorId),
-    )?.state;
+    return this.#lastSimulators.find((record) => String(record.simulatorId) === String(simulatorId))
+      ?.state;
   }
 
   /**
@@ -1814,90 +1801,4 @@ function unavailableInputResult(message: string): AppleProcessResult {
     parserFailed: false,
     cleanupUncertain: false,
   };
-}
-
-/**
- * XCTest-less Darwin injection via Simulator.app Accessibility. Typed text is
- * passed only as an osascript argument for execution — never mirrored into
- * durable logs by the caller. Prefer a reviewed injectSimulatorInput adapter
- * when one is configured on the host.
- *
- * Point taps are not emitted on this fallback: live-frame pixels are not
- * Simulator content coordinates, and a wrong `click at` can leave the
- * Simulator window. Prefer semantic `target`, or supply `injectSimulatorInput`
- * for accurate mapping.
- */
-function darwinSimulatorInputArgv(
-  request: AppleSimulatorRequest,
-): ReadonlyArray<string> | undefined {
-  if (request.kind === "tap") {
-    if (request.target !== undefined) {
-      const target = escapeAppleScriptString(request.target);
-      return [
-        "osascript",
-        "-e",
-        'tell application "Simulator" to activate',
-        "-e",
-        `tell application "System Events" to tell process "Simulator" to click UI element "${target}" of window 1`,
-      ];
-    }
-    if (request.point !== undefined) {
-      // Live-frame pixels are not Simulator content or screen coordinates.
-      // Without a reviewed adapter (or a semantic target), refuse rather than
-      // guessing chrome offsets and risking clicks outside Simulator.app.
-      return undefined;
-    }
-    return undefined;
-  }
-  if (request.kind === "type-text") {
-    if (request.text === undefined) return undefined;
-    const text = escapeAppleScriptString(request.text);
-    return [
-      "osascript",
-      "-e",
-      'tell application "Simulator" to activate',
-      "-e",
-      `tell application "System Events" to keystroke "${text}"`,
-    ];
-  }
-  if (request.kind === "key-press") {
-    if (request.key === undefined) return undefined;
-    const code = appleScriptKeyCode(request.key);
-    if (code === undefined) return undefined;
-    return [
-      "osascript",
-      "-e",
-      'tell application "Simulator" to activate',
-      "-e",
-      `tell application "System Events" to key code ${code}`,
-    ];
-  }
-  return undefined;
-}
-
-function escapeAppleScriptString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function appleScriptKeyCode(key: string): number | undefined {
-  switch (key.toLowerCase()) {
-    case "return":
-    case "enter":
-      return 36;
-    case "escape":
-    case "esc":
-      return 53;
-    case "tab":
-      return 48;
-    case "delete":
-    case "backspace":
-      return 51;
-    case "space":
-      return 49;
-    case "home":
-      // Hardware Home is not a keystroke; callers should prefer a reviewed injector.
-      return undefined;
-    default:
-      return undefined;
-  }
 }

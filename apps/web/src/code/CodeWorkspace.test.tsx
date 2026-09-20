@@ -501,6 +501,98 @@ describe("CodeWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Code overview" })).not.toBeInTheDocument();
   });
+
+  it("asks once to open a Simulator to input, then further keys run without another confirmation", async () => {
+    const simulatorId = "90000000-0000-4000-8000-000000000006";
+    let resolveApproval: ((id: string | undefined) => void) | undefined;
+    const requestApproval = vi.fn(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveApproval = resolve;
+        }),
+    );
+    const execute = vi.fn(async () => ({ outcome: "succeeded" }));
+    const simulators = [
+      {
+        simulatorId,
+        name: "iPhone 16",
+        platform: "ios",
+        runtimeVersion: "18.5",
+        state: "booted",
+        udid: simulatorId,
+      },
+    ];
+    const appleToolchainClient = {
+      discover: vi.fn(async () => ({
+        workspace: {
+          projectPath: "Fixture.xcodeproj",
+          projectKind: "xcode-project",
+          schemes: ["Fixture"],
+          configurations: ["Debug"],
+          targets: ["Fixture"],
+          sourceRevision: "a".repeat(40),
+        },
+        toolchain: {
+          available: true,
+          xcodeVersion: "16.4",
+          sdks: [
+            {
+              platform: "ios",
+              canonicalName: "iphonesimulator",
+              displayName: "iOS Simulator",
+              version: "18.5",
+            },
+          ],
+        },
+        simulators,
+      })),
+      // The host has already opened the grant; this snapshot still omits it,
+      // which is what made every tap raise another native confirmation.
+      snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
+      execute,
+      cancel: vi.fn(),
+      watchScreen: vi.fn(async () => ({
+        status: "failed",
+        message: "The live Simulator view is not available in this test.",
+      })),
+    };
+    render(
+      <CodeWorkspace
+        appleToolchainClient={appleToolchainClient as never}
+        approvals={{ apple: requestApproval }}
+        client={codeClient()}
+        controller={controller("approval-gated")}
+        createUuid={uuidFactory()}
+        hostBridge={
+          {
+            getHostCapabilities: () => ({
+              sidebarVibrancySupported: false,
+              liveSimulatorFrameSupported: true,
+            }),
+          } as never
+        }
+        tab={
+          {
+            id: TAB_ID,
+            kind: "apple-workbench",
+            mode: "code",
+            threadId: ids.thread,
+            title: "iOS Simulator",
+            pane: "device",
+            projectPath: "Fixture.xcodeproj",
+          } as never
+        }
+      />,
+    );
+
+    const home = await screen.findByRole("button", { name: "Home" });
+    fireEvent.click(home);
+    fireEvent.click(home);
+    await waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(1));
+    resolveApproval?.(ids.approval);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+  });
 });
 
 function controller(

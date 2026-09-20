@@ -14,12 +14,20 @@ launched Simulator.app, `open -a Simulator`, or serve-sim to "see" the
 device. And the dock tab still dumped scheme facts, Build/Test, and
 validation evidence under the screen, so it did not read as a device.
 
+Driving that pane still scripted Simulator.app through Accessibility when
+the desktop helper was missing: typed text, Return, and named taps ran
+`osascript` that activated Simulator.app. Observed 2026-09-19: that path
+failed with `com.apple.hiservices-xpcservice` Connection Invalid, asked for
+macOS permission in a loop, and brought Apple's window forward. Coordinate
+taps already refused that path; clicks then raised a native confirmation
+on every tap while the grant snapshot lagged.
+
 This record supersedes exactly one rule of 0043: that the iOS Simulator dock
-tab renders the existing Apple Development Workbench. Every other rule in
-0043 stands — thread-scoped, unmount does not shut down, the sidebar grants
-no authority, and opening the full workbench from its project command remains
-a separate main-workspace action. 0139 and 0140 are unchanged: follow-the-
-finger input stays a later decision.
+tab renders the existing Apple Development Workbench. It supersedes 0137's
+rule that the scripted Accessibility adapter remains the fallback, and
+0062's rule that Darwin's default Accessibility fallback accepts semantic
+`target`, typed text, and keys. Every other rule in those records stands.
+Follow-the-finger input stays a later decision (0140).
 
 ## Decision
 
@@ -43,10 +51,17 @@ finger input stays a later decision.
   in-flight progress. It does not show scheme facts, Build, Test, or the
   validation-evidence dump. Typed text still goes to the focused screen
   (0140); the Type field stays on the full workbench and on a still fallback.
+  The drawn screen is the hit region; bezel is not padding on that screen.
+- **Input never activates Simulator.app.** Delivery is the desktop's device
+  helper (0137). Without it, every input kind is unavailable. Octant does
+  not script Simulator.app, System Events, or Accessibility to inject a
+  tap, swipe, typed text, or key.
 - **Watching stays a read.** The pane learns of a request only from the
   snapshot the workbench already reads. The request lives in the server's
   memory, is scoped to the thread and checkout, and dies with the process.
-  It is never journaled.
+  It is never journaled. One input confirmation still opens the Simulator
+  for fifteen minutes (0142); the pane must not raise that confirmation
+  again for a grant the host already admitted.
 
 Non-goals: follow-the-finger input, Android, a live view on a remote client,
 and activating or quitting Simulator.app.
@@ -59,9 +74,14 @@ and activating or quitting Simulator.app.
   workbench command.
 - A person who closes the tab is not interrupted again until the agent asks
   to show the Simulator once more.
+- Clicks, typing, Home and Lock on a host without the helper fail closed
+  instead of asking for Accessibility or bringing Simulator.app forward.
 
 ## Related
 
 - 0043 Simulator follows the active thread (one rule superseded; the rest stands)
+- 0062 Simulator frame input transport (Accessibility fallback superseded)
+- 0137 Simulator input through a native device helper (fallback superseded)
 - 0139 The Simulator frame is a live view streamed through the host
 - 0140 The live Simulator screen is driven directly
+- 0142 One approval opens a Simulator to input

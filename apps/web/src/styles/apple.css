@@ -276,11 +276,15 @@
   color: var(--oct-muted);
 }
 
+/* Bezel is drawn outside the screen so a tap on the edge of the image is
+   still a tap on the device, not a miss on padding. */
 .apple-simulator-frame--device .apple-simulator-frame__screen {
-  padding: 10px;
+  padding: 0;
   border-radius: 28px;
   background: color-mix(in srgb, var(--oct-bg) 20%, black);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--oct-fg) 12%, transparent);
+  box-shadow:
+    0 0 0 10px color-mix(in srgb, var(--oct-bg) 20%, black),
+    0 0 0 11px color-mix(in srgb, var(--oct-fg) 12%, transparent);
 }
 
 .apple-simulator-frame--device img,

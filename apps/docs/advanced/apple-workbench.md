@@ -87,8 +87,12 @@ surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
 requests, and the Octant desktop app delivers them to the Simulator through a
 small native helper it ships. Nothing comes to the foreground and no macOS
-Accessibility permission is needed. A tap lands on the point you click on the
-captured screen. **Type** sends letters, digits, spaces, and new lines; text
+Accessibility permission is needed. Without that helper, tap, swipe, typing,
+and keys are unavailable — Octant does not launch or script Simulator.app to
+deliver them. A tap lands on the point you click on the
+captured screen. The first confirmation on an approval-gated thread covers
+input to that Simulator for fifteen minutes after each input; further taps
+do not raise another dialog. **Type** sends letters, digits, spaces, and new lines; text
 with any other character is refused whole rather than typed wrong, because a
 Simulator maps key positions with its own keyboard language. For the same
 reason typing works on a Simulator whose keyboard language uses a QWERTY
@@ -100,7 +104,7 @@ later. When the host cannot deliver an input action, the evidence names the
 host's refusal rather than reading as interrupted. Remote, Linux, and
 headless clients stay read-only. Typed characters never land in durable
 evidence, and neither does the reason a type-text action failed, since it can
-quote the script. Destination actions remain on the workbench list: each
+quote what was typed. Destination actions remain on the workbench list: each
 Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,
