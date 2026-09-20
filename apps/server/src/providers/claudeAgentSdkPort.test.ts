@@ -8,6 +8,7 @@ import {
   type ClaudeAgentSdkQueryInvocation,
   type ClaudeAgentSdkQueryLike,
 } from "./claudeAgentSdkPort";
+import type { ClaudeRuntimeConfinement } from "./claudeProcess";
 
 const initialization = {
   commands: [],
@@ -90,8 +91,14 @@ function makeHarness(output: readonly unknown[] = [safeRuntimeInitialization]) {
     },
     listSessions,
   };
-  const spawnClaudeCodeProcess = vi.fn(() => {
-    throw new Error("not called by fake SDK");
+  // The SDK's own `SpawnOptions` carry no root or posture, so the port binds
+  // this query's before handing the callback over; the fake SDK never calls it.
+  const spawnConfinements: ClaudeRuntimeConfinement[] = [];
+  const spawnClaudeCodeProcess = vi.fn((confinement: ClaudeRuntimeConfinement) => {
+    spawnConfinements.push(confinement);
+    return () => {
+      throw new Error("not called by fake SDK");
+    };
   });
   const port = makeClaudeAgentSdkPort({ sdk, spawnClaudeCodeProcess });
   return {
@@ -102,6 +109,7 @@ function makeHarness(output: readonly unknown[] = [safeRuntimeInitialization]) {
     port,
     query,
     spawnClaudeCodeProcess,
+    spawnConfinements,
   };
 }
 
@@ -215,8 +223,11 @@ describe("Claude Agent SDK port", () => {
             plugins: [],
             includePartialMessages: true,
             sandbox: openInput.sandbox,
-            spawnClaudeCodeProcess: harness.spawnClaudeCodeProcess,
+            spawnClaudeCodeProcess: expect.any(Function),
           });
+          expect(harness.spawnConfinements).toEqual([
+            { projectRoot: openInput.projectRoot, executionPolicy: openInput.executionPolicy },
+          ]);
           expect(harness.invocation?.options).not.toHaveProperty("continue");
           expect(harness.invocation?.options).not.toHaveProperty("allowedTools");
           expect(harness.invocation?.options.allowDangerouslySkipPermissions).toBeUndefined();

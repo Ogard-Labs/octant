@@ -615,7 +615,9 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(captured).toMatchObject({
       boundRoot: realpathSync(fixture.root),
-      networkEgress: "none",
+      // Plan withholds writing and running something, not the model call the
+      // agent makes to produce the plan (0140).
+      networkEgress: "allow",
       writeBoundRoot: false,
       allowProcessExec: false,
       allowProcessFork: false,

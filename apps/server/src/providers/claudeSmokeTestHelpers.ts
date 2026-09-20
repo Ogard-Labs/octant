@@ -133,7 +133,7 @@ export async function createClaudeSmokeHarness(
       subscriptionProbeCalls += 1;
       return liveProcess.probeSubscription(path, environment);
     },
-    spawn: (input) => {
+    spawn: (confinement) => (input) => {
       runtimeStarts += 1;
       if (authentication === "api-key") {
         const configDirectory = input.env.CLAUDE_CONFIG_DIR;
@@ -151,7 +151,7 @@ export async function createClaudeSmokeHarness(
           input.env.ANTHROPIC_AUTH_TOKEN === undefined &&
           input.env.CLAUDE_CODE_OAUTH_TOKEN === undefined;
       }
-      return liveProcess.spawn(input);
+      return liveProcess.spawn(confinement)(input);
     },
   };
   const liveSdk = makeClaudeAgentSdkPort({

@@ -59,13 +59,25 @@ describe("thread egress policy", () => {
     ).toBe("provider-endpoints-only");
   });
 
-  it("keeps Plan none and Full access unrestricted on a provider runtime", () => {
+  it("lets a Plan runtime reach its own control plane and nothing wider", () => {
+    // A Plan turn still has to ask the model for the plan. What Plan withholds
+    // is writing and running something, which the launch's filesystem and
+    // process rules withhold (0140).
     expect(
       resolveProviderRuntimeEgressPolicy({
         mode: "work",
         executionPolicy: "plan",
       }),
+    ).toBe("provider-endpoints-only");
+    expect(
+      resolveDefaultThreadEgressPolicy({
+        mode: "work",
+        executionPolicy: "plan",
+      }),
     ).toBe("none");
+  });
+
+  it("keeps Full access unrestricted on a provider runtime", () => {
     expect(
       resolveProviderRuntimeEgressPolicy({
         mode: "chat",

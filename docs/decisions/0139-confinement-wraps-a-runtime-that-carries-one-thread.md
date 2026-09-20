@@ -96,3 +96,4 @@ are theirs and not a gap in the rule.
 - 0104 Harness-delegated approvals as a per-thread pass-through
 - 0121 Provider-owned CLI runtimes, profiles, and updates
 - 0132 Provider runtimes reach provider endpoints on Chat and Work turns
+- 0140 A Plan turn is confined by Octant (the Claude rule superseded in scope)
