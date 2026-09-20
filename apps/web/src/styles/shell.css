@@ -685,6 +685,13 @@ html[data-octant-native-host="true"]
   text-align: left;
 }
 
+/* A row that carries a facts line is two lines of type, and at the one-line
+   row's 4px it sat 46px tall with the title and the facts pressed against the
+   fill's edges. It takes the room a two-line row needs. */
+.sidebar-navigation__thread:has(.sidebar-navigation__thread-facts) {
+  padding-block: var(--oct-space-2);
+}
+
 /* Hover-only actions take no width until their row is hovered or focused. The
    room for them used to be reserved at all times, which left 56px of nothing
    at the end of every row: the age and the status dot floated mid-row and a
