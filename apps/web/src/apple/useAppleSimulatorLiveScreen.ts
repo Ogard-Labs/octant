@@ -23,6 +23,8 @@ interface DecodedFrame {
 }
 
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+/** A view that lasted this long was working; one that ended sooner was not. */
+const HEALTHY_VIEW_MS = 10_000;
 
 /**
  * Watches a booted Simulator's screen for as long as the pane shows it. The
@@ -75,6 +77,7 @@ export function useAppleSimulatorLiveScreen(options: {
           return;
         }
         let painted = false;
+        const startedAt = Date.now();
         for await (const jpeg of watch.frames) {
           if (signal.aborted) return;
           let frame: DecodedFrame;
@@ -88,11 +91,14 @@ export function useAppleSimulatorLiveScreen(options: {
           if (canvasRef.current !== null) paint(canvasRef.current, frame);
           if (!painted) {
             painted = true;
-            failures = 0;
             setState({ status: "live", screen: watch.screen });
           }
         }
         if (signal.aborted) return;
+        // Every view sends a first frame, so a first frame proves nothing: a
+        // helper that dies right after it would be asked for again forever.
+        // Only a view that stayed up earns a fresh count.
+        if (Date.now() - startedAt >= HEALTHY_VIEW_MS) failures = 0;
         const delay = RECONNECT_DELAYS_MS[failures];
         if (delay === undefined) {
           setState({ status: "unavailable", message: "The live Simulator view stopped." });
