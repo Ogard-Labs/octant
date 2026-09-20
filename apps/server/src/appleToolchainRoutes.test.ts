@@ -289,4 +289,99 @@ describe("Apple toolchain routes", () => {
     expect(new Uint8Array(await response!.arrayBuffer())).toEqual(png);
     expect(service.readScreenshotArtifact).toHaveBeenCalledWith("apple-screenshot-1", context);
   });
+
+  describe("the live Simulator screen", () => {
+    const simulatorId = "7E29846E-F920-438E-8AB2-930C1A0F7FB7";
+    const streamRequest = (body: unknown, token = capability) =>
+      new Request("http://127.0.0.1:13773/api/apple/screen-stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": token,
+          origin: "http://127.0.0.1:5173",
+        },
+        body: JSON.stringify(body),
+      });
+    const body = { kind: "apple-screen-stream-request", authority, ...scope, simulatorId };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+
+    it("streams the desktop's frames to an authorized window and names the screen's size", async () => {
+      const frames = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from([0, 0, 0, 2, 0xff, 0xd8]));
+          controller.close();
+        },
+      });
+      const watchSimulator = vi.fn(async (_simulatorId: string, _signal: AbortSignal) => ({
+        kind: "watching" as const,
+        screen: { width: 1206, height: 2622 },
+        frames,
+      }));
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => context),
+        now: () => 2,
+        watchSimulator,
+      });
+
+      const response = await handler(streamRequest(body));
+
+      expect(response?.status).toBe(200);
+      expect(response?.headers.get("x-octant-simulator-screen")).toBe("1206x2622");
+      expect(response?.headers.get("access-control-expose-headers")).toContain(
+        "x-octant-simulator-screen",
+      );
+      expect([...new Uint8Array(await response!.arrayBuffer())]).toEqual([0, 0, 0, 2, 0xff, 0xd8]);
+      expect(watchSimulator.mock.calls[0]?.[0]).toBe(simulatorId);
+    });
+
+    it("refuses a window with no authority over the thread before the desktop is asked", async () => {
+      const watchSimulator = vi.fn();
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => undefined),
+        now: () => 2,
+        watchSimulator,
+      });
+
+      expect((await handler(streamRequest(body)))?.status).toBe(403);
+      expect((await handler(streamRequest(body, "B".repeat(43))))?.status).toBe(401);
+      expect(watchSimulator).not.toHaveBeenCalled();
+    });
+
+    it("says a host without the desktop app has no live view, and passes on the helper's refusal", async () => {
+      const headless = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => context),
+        now: () => 2,
+      });
+      const unavailable = await headless(streamRequest(body));
+      expect(unavailable?.status).toBe(404);
+      expect(JSON.stringify(await unavailable?.json())).toContain("desktop app");
+
+      const refusing = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => context),
+        now: () => 2,
+        watchSimulator: vi.fn(async () => ({
+          kind: "refused" as const,
+          reason: "not-booted",
+          message: "the Simulator is Shutdown",
+        })),
+      });
+      const refused = await refusing(streamRequest(body));
+      expect(refused?.status).toBe(409);
+      expect(JSON.stringify(await refused?.json())).toContain("the Simulator is Shutdown");
+    });
+  });
 });

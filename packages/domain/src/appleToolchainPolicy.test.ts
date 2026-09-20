@@ -429,6 +429,18 @@ describe("Simulator frame input", () => {
     ).toMatchObject({ kind: "denied", reason: "destination-not-booted" });
   });
 
+  it("treats a swipe as input like a tap, and records where it went without anything typed", () => {
+    const swipe = { ...tap, kind: "swipe" as const, toPoint: { x: 12, y: 300 } };
+    expect(isAppleSimulatorInputKind("swipe")).toBe(true);
+    expect(evaluateAppleSimulatorRequest(swipe, scope, [booted])).toEqual({ kind: "allowed" });
+    expect(
+      evaluateAppleSimulatorRequest(swipe, { ...scope, executionPolicy: "plan" }, [booted]),
+    ).toMatchObject({ kind: "denied", reason: "read-only-policy" });
+    expect(redactedAppleInputDiagnostic(swipe).message).toBe(
+      "swipe completed (x=12, y=34 to x=12, y=300)",
+    );
+  });
+
   it("refuses Plan mode and missing actor attribution for injected input", () => {
     expect(
       evaluateAppleSimulatorRequest(tap, { ...scope, executionPolicy: "plan" }, [booted]),

@@ -93,6 +93,7 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "logs",
   "screenshot",
   "tap",
+  "swipe",
   "type-text",
   "key-press",
 );
@@ -110,6 +111,7 @@ export const AppleActionKind = Schema.Literal(
   "logs",
   "screenshot",
   "tap",
+  "swipe",
   "type-text",
   "key-press",
 );
@@ -165,8 +167,15 @@ export const AppleSimulatorRequest = Schema.Struct({
   requestedBy: Schema.optional(EventActor),
   /** Prefer a stable accessibility identifier or role when the destination names one. */
   target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-  /** Coordinate tap in live-frame image pixels when no semantic target is named. */
+  /**
+   * Coordinate tap in live-frame image pixels when no semantic target is named;
+   * for a swipe, where the finger goes down.
+   */
   point: Schema.optional(AppleSimulatorPoint),
+  /** Where a swipe's finger comes up, in the same pixel space as `point`. */
+  toPoint: Schema.optional(AppleSimulatorPoint),
+  /** How long a swipe takes. A quick one flings; a slow one drags. */
+  durationMs: Schema.optional(Schema.Int.pipe(Schema.between(50, 5_000))),
   /** Typed text for `type-text`. Never copied into durable evidence verbatim.
    *  Leading/trailing whitespace is preserved (passwords and spaced values). */
   text: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096))),
@@ -188,6 +197,13 @@ export const AppleSimulatorRequest = Schema.Struct({
         return (
           request.requestedBy !== undefined &&
           (request.target !== undefined || request.point !== undefined)
+        );
+      }
+      if (request.kind === "swipe") {
+        return (
+          request.requestedBy !== undefined &&
+          request.point !== undefined &&
+          request.toPoint !== undefined
         );
       }
       if (request.kind === "type-text") {
@@ -286,6 +302,7 @@ export const AppleBuildEvidence = Schema.Struct({
     Schema.filter((evidence) => {
       if (
         evidence.kind === "tap" ||
+        evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
         evidence.kind === "key-press"
       ) {

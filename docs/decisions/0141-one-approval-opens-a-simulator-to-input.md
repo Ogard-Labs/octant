@@ -1,4 +1,4 @@
-# 0137. One approval opens a Simulator to input
+# 0141. One approval opens a Simulator to input
 
 **Status:** Accepted
 
@@ -23,7 +23,8 @@ separate decision.
   through the same native confirmation as before. That approval opens the
   Simulator to input **for that thread** for fifteen minutes, and each
   delivered input keeps it open another fifteen. While it is open, further
-  taps, text and keys to that Simulator run without a new confirmation.
+  taps, text and keys to that Simulator run without a new confirmation. A
+  swipe (0140) is input like a tap and is covered the same way.
 - The grant is the host's. It lives in the server's memory, is keyed by thread
   and Simulator, and is consulted where the approval is validated, before any
   side effect. A restarted host has no grants and asks again. Shutting a

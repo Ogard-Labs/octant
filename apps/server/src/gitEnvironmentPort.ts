@@ -286,6 +286,7 @@ export class GitEnvironmentPort {
         // read-only default and never receives the out-of-root write grant.
         const launch = prepareGitSeatbeltLaunch({
           confinement: this.#confinement.confinement,
+          platform: this.#confinement.platform,
           gitExecutable: this.#confinement.gitExecutable,
           checkoutRoot,
           args,

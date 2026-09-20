@@ -57,6 +57,9 @@ function fixture(
         GH_TOKEN: "secret",
         GITHUB_TOKEN: "secret-too",
         GH_ENTERPRISE_TOKEN: "secret-three",
+        OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN: "only-for-the-host",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "only-for-the-host",
+        OCTANT_DESKTOP_BRIDGE_SECRET: "only-for-the-host",
       },
     }),
   };
@@ -115,6 +118,11 @@ describe("GhPullRequestPort", () => {
     expect(environment).not.toHaveProperty("GH_TOKEN");
     expect(environment).not.toHaveProperty("GITHUB_TOKEN");
     expect(environment).not.toHaveProperty("GH_ENTERPRISE_TOKEN");
+    // `gh` runs extensions and credential helpers; the desktop's broker
+    // coordinates would let any of them act outside approval and evidence.
+    expect(environment).not.toHaveProperty("OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN");
+    expect(environment).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
+    expect(environment).not.toHaveProperty("OCTANT_DESKTOP_BRIDGE_SECRET");
   });
 
   it("creates once and then re-observes the exact PR for retry-safe identity", async () => {

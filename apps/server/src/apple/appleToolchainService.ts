@@ -1,5 +1,7 @@
-import { createHash } from "node:crypto";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAppleBuildEvidence,
   decodeAppleRuntimeSnapshot,
@@ -28,6 +30,8 @@ import {
   redactedAppleInputDiagnostic,
   type AppleExecutionScope,
 } from "@octant/domain";
+import { defaultTemporaryDirectory } from "../code/repositoryTestProcessPort";
+import { MAX_APPLE_ARTIFACT_BYTES } from "./appleRuntimeStore";
 
 /**
  * Host link state `xcode-select` reads to answer where the developer directory
@@ -100,6 +104,22 @@ export interface AppleToolchainServiceOptions {
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
+  /**
+   * Where a screen capture lands before it becomes an artifact. Xcode 27's
+   * `simctl io … screenshot -` no longer means stdout: it writes a file named
+   * `-` into the working directory — the checkout — and reports nothing, so
+   * the capture names a file here instead. It must be a directory the confined
+   * command may write; by default that is the process port's own temporary
+   * directory.
+   */
+  readonly captureDirectory?: string;
+  /**
+   * Names this host in its capture files. Hosts started with different data
+   * directories share one temporary directory, and a host may only sweep what
+   * is its own: another host's old file can belong to a capture still running.
+   * Stable across restarts, so a host clears what its last run left behind.
+   */
+  readonly captureOwner?: string;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
@@ -140,6 +160,20 @@ const MAX_RECENT_EVIDENCE = 64;
 export const APPLE_INPUT_MUST_REISSUE_NOTE =
   "Interrupted or unknown Simulator input cannot be retried under the same action id. Issue a new actionId.";
 
+function withSimulatorState(
+  records: ReadonlyArray<AppleSimulatorRecord>,
+  change: {
+    readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+    readonly state: AppleSimulatorRecord["state"];
+  },
+): ReadonlyArray<AppleSimulatorRecord> {
+  return records.map((record) =>
+    record.simulatorId === change.simulatorId
+      ? decodeAppleSimulatorRecord({ ...record, state: change.state })
+      : record,
+  );
+}
+
 export class AppleToolchainService {
   readonly #options: AppleToolchainServiceOptions;
   readonly #discovery = new Map<string, DiscoveryCacheEntry>();
@@ -149,13 +183,58 @@ export class AppleToolchainService {
   #sequence = 0;
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
+  readonly #captureDirectory: string;
+  readonly #capturePrefix: string;
+  // Files a running capture owns. A capture may run for minutes, so its file's
+  // age says nothing about whether it was abandoned; only this does. Shared by
+  // every service in the process: a replaced service's later sweeps would
+  // otherwise judge the new service's running capture by age alone.
+  readonly #capturesInProgress = capturesInProgress;
+  // States an action set while a discovery was reading. A discovery lists the
+  // devices and then probes the project, which can take seconds; a boot or
+  // shutdown that finishes in between is newer than that list and must not be
+  // put back by it.
+  #stateChangesDuringDiscovery: Array<{
+    readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+    readonly state: AppleSimulatorRecord["state"];
+  }> = [];
+  #discoveriesReading = 0;
 
   constructor(options: AppleToolchainServiceOptions) {
     this.#options = options;
+    this.#captureDirectory = options.captureDirectory ?? defaultTemporaryDirectory();
+    const owner = (options.captureOwner ?? "local").replace(/[^A-Za-z0-9]/g, "").slice(0, 32);
+    this.#capturePrefix = `${CAPTURE_FILE_PREFIX}${owner.length === 0 ? "local" : owner}-`;
+    // Whatever a previous run could not come back for is cleared now, and
+    // again later: a leftover seconds old at start is too young to judge, the
+    // run that made it is gone with its timers, and no capture is promised.
+    for (const delayMs of [0, ...CAPTURE_RETURN_VISITS_MS]) {
+      setTimeout(() => {
+        void sweepStaleCaptures(
+          this.#captureDirectory,
+          this.#capturePrefix,
+          Date.now(),
+          this.#capturesInProgress,
+        );
+      }, delayMs).unref();
+    }
     this.#lastToolchain = unavailableToolchain(options.newId(), options.now());
   }
 
   async discover(
+    request: AppleDiscoveryRequest,
+    context: AppleExecutionContext,
+  ): Promise<AppleDiscoveryResult> {
+    if (this.#discoveriesReading === 0) this.#stateChangesDuringDiscovery = [];
+    this.#discoveriesReading += 1;
+    try {
+      return await this.#discover(request, context);
+    } finally {
+      this.#discoveriesReading -= 1;
+    }
+  }
+
+  async #discover(
     request: AppleDiscoveryRequest,
     context: AppleExecutionContext,
   ): Promise<AppleDiscoveryResult> {
@@ -183,6 +262,7 @@ export class AppleToolchainService {
     const version = await this.#command(["xcodebuild", "-version"], context, DISCOVERY_TIMEOUT_MS);
     const swift = await this.#command(["swift", "--version"], context, DISCOVERY_TIMEOUT_MS);
     const sdks = await this.#command(["xcodebuild", "-showsdks"], context, DISCOVERY_TIMEOUT_MS);
+    const changesBeforeDeviceList = this.#stateChangesDuringDiscovery.length;
     const devices = await this.#command(
       ["xcrun", "simctl", "list", "devices", "available", "--json"],
       context,
@@ -213,7 +293,9 @@ export class AppleToolchainService {
       available: true,
       discoveredAt: this.#options.now(),
     });
-    const simulators = parseSimulators(text(devices.stdout));
+    const simulators = this.#stateChangesDuringDiscovery
+      .slice(changesBeforeDeviceList)
+      .reduce(withSimulatorState, parseSimulators(text(devices.stdout)));
     let metadata: ReturnType<typeof parseProjectMetadata>;
     try {
       metadata = parseProjectMetadata(text(project.stdout));
@@ -505,20 +587,83 @@ export class AppleToolchainService {
         );
       } else if (request.kind === "screenshot") {
         this.#advance(active, "capturing-screen");
-        terminal = await this.#command(
-          ["xcrun", "simctl", "io", request.simulatorId, "screenshot", "--type", "png", "-"],
-          context,
-          request.timeoutMs,
-          signal,
+        // A capture whose process outlived its timeout can write its file after
+        // this action already removed it; the next capture clears what is left.
+        await sweepStaleCaptures(
+          this.#captureDirectory,
+          this.#capturePrefix,
+          Date.now(),
+          this.#capturesInProgress,
         );
-        if (succeeded(terminal)) {
-          const screenshotReference = `apple-screenshot-${request.actionId}`;
-          await this.#writeArtifact(screenshotReference, [terminal.stdout]);
-          artifacts = [{ kind: "screenshot", reference: screenshotReference }];
-          // The captured screen is PNG bytes on stdout. They belong to the
-          // screenshot artifact; folding them into the log would make the log
-          // unreadable and tell a reader nothing.
-          terminal = { ...terminal, stdout: new Uint8Array() };
+        // One file per attempt, not per action: a retry of a capture whose
+        // first process is still alive would otherwise share its path, and the
+        // two writers would race for the file the retry then reads.
+        const capturePath = join(
+          this.#captureDirectory,
+          `${this.#capturePrefix}${request.actionId}-${randomUUID()}.png`,
+        );
+        this.#capturesInProgress.add(capturePath);
+        let exitedCleanly = false;
+        // Whatever happens to the command, the read or the artifact write, the
+        // raw screen must not stay behind in the temporary directory.
+        try {
+          terminal = await this.#command(
+            [
+              "xcrun",
+              "simctl",
+              "io",
+              request.simulatorId,
+              "screenshot",
+              "--type",
+              "png",
+              capturePath,
+            ],
+            context,
+            request.timeoutMs,
+            signal,
+          );
+          exitedCleanly = terminal.termination === "exited" && !terminal.cleanupUncertain;
+          if (succeeded(terminal)) {
+            const bytes = await readCapture(capturePath);
+            if (bytes === undefined) {
+              // simctl exited 0 without the file it was asked for: an empty
+              // frame would render as nothing and taps on it would be dropped.
+              terminal = {
+                ...terminal,
+                exitCode: 1,
+                stderr: appendLine(terminal.stderr, "simctl reported a capture but wrote no PNG."),
+              };
+            } else {
+              const screenshotReference = `apple-screenshot-${request.actionId}`;
+              await this.#writeArtifact(screenshotReference, [bytes]);
+              artifacts = [{ kind: "screenshot", reference: screenshotReference }];
+            }
+          }
+        } finally {
+          this.#capturesInProgress.delete(capturePath);
+          // A removal that fails must not throw past this action: that turned a
+          // known result into "interrupted". It counts as unconfirmed instead,
+          // so the return visits below still come back for the path.
+          await rm(capturePath, { force: true }).catch(() => {
+            exitedCleanly = false;
+          });
+          // A command that did not end as a confirmed clean exit may still have
+          // a process out there, and it can write the file after the removal
+          // above. No later capture is promised, so this action comes back for
+          // its own file, later each time; the timers never keep the host alive.
+          // A host restart in between is covered by the sweep at start.
+          if (!exitedCleanly) {
+            for (const delayMs of CAPTURE_RETURN_VISITS_MS) {
+              setTimeout(() => {
+                // A retry under the same action id reuses this path; while it
+                // runs the file is its own, and its `finally` removes it.
+                if (this.#capturesInProgress.has(capturePath)) return;
+                // Nothing awaits this; a path that cannot be removed is left to
+                // the next sweep instead of becoming an unhandled rejection.
+                void rm(capturePath, { force: true }).catch(() => undefined);
+              }, delayMs).unref();
+            }
+          }
         }
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
@@ -541,11 +686,7 @@ export class AppleToolchainService {
           request.timeoutMs,
           signal,
         );
-      } else if (
-        request.kind === "tap" ||
-        request.kind === "type-text" ||
-        request.kind === "key-press"
-      ) {
+      } else if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
         this.#advance(active, "injecting-input");
         terminal = await this.#injectInput(request, context, signal);
         // Typed text must never land in stdout/stderr artifacts or diagnostics.
@@ -556,8 +697,8 @@ export class AppleToolchainService {
               severity: "note" as const,
               message:
                 request.kind === "type-text"
-                  ? `type-text ${outcomeFor(terminal)} (text redacted)`
-                  : `${request.kind} ${outcomeFor(terminal)}: ${text(terminal.stderr).slice(0, MAX_DIAGNOSTIC_LENGTH)}`,
+                  ? typedTextFailureNote(outcomeFor(terminal), text(terminal.stderr))
+                  : inputFailureNote(request, outcomeFor(terminal), text(terminal.stderr), context),
             };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
@@ -667,7 +808,19 @@ export class AppleToolchainService {
         artifacts,
         cleanup,
       );
-    } catch {
+    } catch (error) {
+      // Whatever threw is the reason this action has no evidence; dropping it
+      // left the person with "interrupted" and an empty log. Typed text never
+      // enters the note: an error raised on a type-text path can quote the
+      // script, so that kind records the fact without the detail.
+      const note = unrecordedActionNote(request, error, context);
+      // Read before the note joins the log: with no other output the note
+      // would be picked up as the log's last line and listed twice.
+      const diagnostics = [
+        ...diagnosticsFor(outputs, context).slice(0, MAX_DIAGNOSTICS - 1),
+        { severity: "note" as const, message: note },
+      ];
+      outputs.push(new TextEncoder().encode(`${note}\n`));
       const logReference = `apple-log-${request.actionId}`;
       await this.#writeArtifact(logReference, outputs);
       return evidence(
@@ -675,7 +828,7 @@ export class AppleToolchainService {
         signal.aborted ? "cancelled" : "interrupted",
         startedAt,
         this.#options.now(),
-        diagnosticsFor(outputs, context),
+        diagnostics,
         [{ kind: "log", reference: logReference }],
         "uncertain",
       );
@@ -771,6 +924,11 @@ export class AppleToolchainService {
       if (request.kind === "tap" && request.point !== undefined && request.target === undefined) {
         return unavailableInputResult(
           "Coordinate taps require a reviewed injectSimulatorInput adapter or a semantic target. Darwin Accessibility fallback refuses guessed screen coordinates.",
+        );
+      }
+      if (request.kind === "swipe") {
+        return unavailableInputResult(
+          "A swipe needs the Octant desktop app's device helper; this host has none.",
         );
       }
       return unavailableInputResult("Simulator input request is incomplete for host injection.");
@@ -893,11 +1051,10 @@ export class AppleToolchainService {
     state: AppleSimulatorRecord["state"],
   ): void {
     const update = (records: ReadonlyArray<AppleSimulatorRecord>) =>
-      records.map((record) =>
-        record.simulatorId === simulatorId
-          ? decodeAppleSimulatorRecord({ ...record, state })
-          : record,
-      );
+      withSimulatorState(records, { simulatorId, state });
+    if (this.#discoveriesReading > 0) {
+      this.#stateChangesDuringDiscovery.push({ simulatorId, state });
+    }
     this.#lastSimulators = update(this.#lastSimulators);
     for (const [key, entry] of this.#discovery) {
       this.#discovery.set(key, { ...entry, simulators: update(entry.simulators) });
@@ -1204,6 +1361,91 @@ function parseBuildProduct(
   return { applicationPath, bundleIdentifier };
 }
 
+/**
+ * A host refusal in the form the diagnostic schema accepts: trimmed, non-empty,
+ * bounded. `osascript` ends its stderr with a bare `osascript[pid] ` line and a
+ * trailing space, and a message the schema refuses threw past the evidence
+ * builder into the blanket catch, which reported "interrupted" with an empty
+ * log — the one thing a person needed to read was the one thing lost.
+ */
+/**
+ * The refusals the desktop's device helper and its broker name. Only these may
+ * follow a failed typed text into evidence: a host's message can begin with
+ * what was typed, and a secret can look like a code.
+ */
+const TYPED_TEXT_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "unsupported-character",
+  "keyboard-layout-unsupported",
+  "keyboard-layout-unknown",
+  "not-booted",
+  "no-such-device",
+  "toolchain-unavailable",
+  "input-service-unavailable",
+  "daemon-unresponsive",
+  "send-stalled",
+  "helper-unavailable",
+  "deadline-too-short",
+  "deadline-passed",
+]);
+
+/**
+ * Why typed text failed, without the host's words: the leading reason code
+ * when it is one the device helper uses, and nothing otherwise.
+ */
+function typedTextFailureNote(outcome: AppleBuildEvidence["outcome"], stderr: string): string {
+  const code = /^([a-z][a-z-]{2,63}):/.exec(stderr.trimStart())?.[1];
+  return code === undefined || !TYPED_TEXT_REFUSAL_CODES.has(code)
+    ? `type-text ${outcome} (text redacted)`
+    : `type-text ${outcome}: ${code} (text redacted)`;
+}
+
+function inputFailureNote(
+  request: Pick<AppleSimulatorRequest, "kind" | "point" | "toPoint">,
+  outcome: AppleBuildEvidence["outcome"],
+  stderr: string,
+  context: AppleExecutionContext,
+): string {
+  // A swipe that did not happen still says where it was meant to go, the same
+  // as one that did: "off screen" alone does not tell a reader which end.
+  const attempted =
+    request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined
+      ? `swipe ${outcome} (x=${request.point.x}, y=${request.point.y} to x=${request.toPoint.x}, y=${request.toPoint.y})`
+      : `${request.kind} ${outcome}`;
+  // The host's words are journaled, so they cross the same boundary as any
+  // other command output: host roots are replaced before anything is kept.
+  const detail = stderr
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - attempted.length - 2)
+    .trim();
+  return detail.length === 0 ? attempted : `${attempted}: ${detail}`;
+}
+
+function unrecordedActionNote(
+  request: AppleActionRequest,
+  error: unknown,
+  context: AppleExecutionContext,
+): string {
+  if (request.kind === "type-text") return "type-text did not record evidence (detail redacted)";
+  // A filesystem error names absolute host paths; they leave the host the same
+  // way command output does, with the checkout and artifact roots replaced.
+  const reason = (error instanceof Error ? error.message : String(error))
+    .replaceAll(context.checkoutRoot, "[PROJECT]")
+    .replaceAll(context.artifactRoot, "[ARTIFACT]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)
+    .trim();
+  return reason.length === 0
+    ? `${request.kind} did not record evidence`
+    : `${request.kind} did not record evidence: ${reason}`;
+}
+
 function outcomeFor(result: AppleProcessResult): AppleBuildEvidence["outcome"] {
   if (result.cleanupUncertain) return "interrupted";
   if (result.termination === "cancelled") return "cancelled";
@@ -1357,6 +1599,104 @@ function unauthorizedFailure(): AppleDiscoveryResult {
 
 function invalidFailure(message: string): AppleDiscoveryResult {
   return { kind: "failure", failure: { category: "invalid", message } };
+}
+
+const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
+/** Every attempt has its own path, so one set serves all services in the process. */
+const capturesInProgress = new Set<string>();
+const STALE_CAPTURE_MS = 60_000;
+/** When an action returns for a file its unconfirmed process may still write. */
+const CAPTURE_RETURN_VISITS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+
+/** Removes this host's capture files that no running action still owns. */
+async function sweepStaleCaptures(
+  directory: string,
+  prefix: string,
+  nowMs: number,
+  inProgress: ReadonlySet<string>,
+): Promise<void> {
+  let names: ReadonlyArray<string>;
+  try {
+    names = await readdir(directory);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".png"))
+      .map(async (name) => {
+        const path = join(directory, name);
+        if (inProgress.has(path)) return;
+        try {
+          if (nowMs - (await stat(path)).mtimeMs > STALE_CAPTURE_MS)
+            await rm(path, { force: true });
+        } catch {
+          // Already gone, or not ours to remove; neither blocks a capture.
+        }
+      }),
+  );
+}
+
+/**
+ * A Simulator screen is a few megabytes. The bound is the artifact store's own:
+ * a capture it would refuse is refused here, as a failed capture with a reason,
+ * rather than thrown past the action as "interrupted".
+ */
+const MAX_CAPTURE_BYTES = MAX_APPLE_ARTIFACT_BYTES;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/**
+ * The capture `simctl` wrote, or nothing. The file sits in a temporary root
+ * that code from the checkout can also write to, under a name it can guess, and
+ * this read happens in the host process with the host's reach. So the path is
+ * opened without following a link, the opened file must be one ordinary file
+ * with no second name, of a plausible size, and it is read from that same
+ * descriptor; and only a PNG is kept. A link to a host file, a second name for
+ * someone else's file, or any other content reads as no capture at all.
+ */
+async function readCapture(path: string): Promise<Uint8Array | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat();
+    if (
+      !opened.isFile() ||
+      opened.nlink !== 1 ||
+      opened.size < PNG_SIGNATURE.length ||
+      opened.size > MAX_CAPTURE_BYTES
+    ) {
+      return undefined;
+    }
+    // The size above is a snapshot, and whoever shares the directory can grow
+    // the file after it. Exactly that many bytes are read into a buffer of that
+    // size, and one more byte is asked for: if it is there the file changed
+    // under the read and the capture is refused, so the host never allocates
+    // more than the limit however large the file becomes.
+    const bytes = new Uint8Array(opened.size);
+    let filled = 0;
+    while (filled < bytes.byteLength) {
+      const { bytesRead } = await handle.read(bytes, filled, bytes.byteLength - filled, filled);
+      if (bytesRead === 0) return undefined;
+      filled += bytesRead;
+    }
+    const beyond = await handle.read(new Uint8Array(1), 0, 1, filled);
+    if (beyond.bytesRead > 0) return undefined;
+    return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte) ? bytes : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+function appendLine(existing: Uint8Array, line: string): Uint8Array {
+  const suffix = new TextEncoder().encode(
+    `${existing.byteLength === 0 || existing.at(-1) === 0x0a ? "" : "\n"}${line}\n`,
+  );
+  const merged = new Uint8Array(existing.byteLength + suffix.byteLength);
+  merged.set(existing);
+  merged.set(suffix, existing.byteLength);
+  return merged;
 }
 
 function unavailableInputResult(message: string): AppleProcessResult {

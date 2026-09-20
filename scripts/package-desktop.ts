@@ -23,6 +23,7 @@ import {
   DESKTOP_PRELOAD_FILENAME,
 } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
+import { buildDeviceHelper } from "./build-device-helper";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import {
@@ -207,6 +208,7 @@ export const REQUIRED_DARWIN_PTY_HELPER_FILE =
 export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/native/octant-device-helper",
   "Octant.app/Contents/Resources/native/cua-driver",
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -222,6 +224,7 @@ export const REQUIRED_PACKAGED_FILES = [
 export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "native/octant-device-helper",
   "native/cua-driver",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
@@ -229,6 +232,7 @@ export const PACKAGED_LINUX_EXECUTABLE_FILES = [] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "native/octant-device-helper",
   "native/cua-driver",
   "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
   "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -242,11 +246,13 @@ export const PACKAGED_LINUX_NATIVE_FILES = [
 export const FORBIDDEN_PACKAGED_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
 ] as const;
 /** Darwin helpers must never appear inside a Linux portable tree or AppDir. */
 export const FORBIDDEN_LINUX_HELPER_PATTERNS = [
   /(?:^|\/)octant-keychain-helper$/,
   /(?:^|\/)octant-code-file-helper$/,
+  /(?:^|\/)octant-device-helper$/,
 ] as const;
 export const FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS = [
   /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
@@ -270,6 +276,7 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/native/octant-device-helper",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
@@ -778,6 +785,10 @@ async function packageDarwinDesktop(
   await buildCodeFileHelper(
     resolve(repositoryRoot, "apps/desktop/native/code-file-helper/OctantCodeFileHelper.swift"),
     codeFileHelper,
+  );
+  await buildDeviceHelper(
+    resolve(repositoryRoot, "apps/desktop/native/device-helper"),
+    join(nativeResources, "octant-device-helper"),
   );
   for (const relativePath of PACKAGED_EXECUTABLE_FILES) {
     await access(join(finalApp, "Contents/Resources", relativePath), 1);

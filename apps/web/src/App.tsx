@@ -1536,6 +1536,7 @@ function LaunchedShell(
       : {
           threadId: activeCodeThreadView.thread.id,
           checkoutId: activeCodeThreadView.checkout.id,
+          checkoutAvailability: activeCodeThreadView.checkout.availability,
         }),
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
@@ -5139,9 +5140,6 @@ function LaunchedShell(
               setNavigatorOpen(true);
             }}
             onOpenSettings={(deepLink) => void controller.openSettings(deepLink)}
-            onChangeSidebarDestinations={(sidebarDestinations) => {
-              void controller.updateSettings({ sidebarDestinations });
-            }}
             onOpenZen={() => void zen.enterZen()}
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
