@@ -18,9 +18,11 @@ let createAndroidToolchainClient: (options: Record<string, unknown>) => {
 };
 
 beforeAll(async () => {
-  const loaded = await import("./androidToolchainClient");
-  expect(loaded.createAndroidToolchainClient).toBeTypeOf("function");
-  createAndroidToolchainClient = loaded.createAndroidToolchainClient;
+  const path = "./androidToolchainClient";
+  const loaded = await import(path).catch(() => undefined);
+  expect(loaded).toBeDefined();
+  expect(loaded?.createAndroidToolchainClient).toBeTypeOf("function");
+  createAndroidToolchainClient = loaded!.createAndroidToolchainClient;
 });
 
 const authority = {

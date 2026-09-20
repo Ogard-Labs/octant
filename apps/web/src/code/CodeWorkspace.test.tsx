@@ -596,12 +596,15 @@ describe("CodeWorkspace", () => {
     resolveApproval?.(ids.approval);
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    expect(execute.mock.calls[0]?.[0]).toMatchObject({ kind: "open-input" });
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "open-input" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    expect(execute.mock.calls[1]?.[0]).toMatchObject({ kind: "key-press", key: "home" });
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ kind: "key-press", key: "home" }),
+    );
   });
 });
 

@@ -7,9 +7,11 @@ let createAndroidToolchainRouteHandler: (
 ) => (request: Request) => Promise<Response | undefined>;
 
 beforeAll(async () => {
-  const loaded = await import("./androidToolchainRoutes");
-  expect(loaded.createAndroidToolchainRouteHandler).toBeTypeOf("function");
-  createAndroidToolchainRouteHandler = loaded.createAndroidToolchainRouteHandler;
+  const path = "./androidToolchainRoutes";
+  const loaded = await import(path).catch(() => undefined);
+  expect(loaded).toBeDefined();
+  expect(loaded?.createAndroidToolchainRouteHandler).toBeTypeOf("function");
+  createAndroidToolchainRouteHandler = loaded!.createAndroidToolchainRouteHandler;
 });
 
 const capability = "A".repeat(43);

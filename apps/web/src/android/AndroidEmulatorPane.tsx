@@ -255,10 +255,17 @@ export function AndroidEmulatorPane(props: {
         liveScreen={liveScreen}
         name={liveEmulator?.name ?? "Android emulator"}
         offerInput={offerInput === true}
-        onInput={
-          liveEmulatorId === undefined
-            ? undefined
-            : (intent) => {
+        status={
+          liveEmulator?.state === "booting"
+            ? "booting"
+            : liveEmulator?.state === "booted"
+              ? "live"
+              : "idle"
+        }
+        {...(liveEmulatorId === undefined
+          ? {}
+          : {
+              onInput: (intent: AndroidFrameInputIntent) => {
                 if (intent.kind === "tap") {
                   void run({ kind: "tap", emulatorId: liveEmulatorId, point: intent.point });
                   return;
@@ -278,15 +285,8 @@ export function AndroidEmulatorPane(props: {
                   return;
                 }
                 void run({ kind: "key-press", emulatorId: liveEmulatorId, key: intent.key });
-              }
-        }
-        status={
-          liveEmulator?.state === "booting"
-            ? "booting"
-            : liveEmulator?.state === "booted"
-              ? "live"
-              : "idle"
-        }
+              },
+            })}
       />
       {needsAllowInput && liveEmulator?.state === "booted" ? (
         <p className="apple-workbench__action-message" role="status">

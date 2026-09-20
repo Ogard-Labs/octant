@@ -569,7 +569,7 @@ export class AndroidToolchainService {
       state: "running",
       step: stepFor(request.kind),
       sequence: 1,
-      updatedAt: this.#options.now(),
+      updatedAt: this.#options.now() as AndroidActionProgress["updatedAt"],
     };
     const active = { controller, progress };
     this.#active.set(String(request.actionId), active);

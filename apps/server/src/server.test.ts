@@ -1030,6 +1030,7 @@ describe("startOctantServer", () => {
       prepareApproval: vi.fn(async () => undefined),
       confirmApproval: vi.fn(async () => undefined),
       validateAppleApproval: vi.fn(async () => false),
+      validateAndroidApproval: vi.fn(async () => false),
       revokeApprovals: vi.fn(),
       execute: vi.fn(async () => result),
       inspectTerminal: vi.fn(),

@@ -17,10 +17,12 @@ let AndroidToolchainService: ServiceConstructor;
 let isReplayedAndroidEvidence: (value: unknown) => boolean;
 
 beforeAll(async () => {
-  const loaded = await import("./androidToolchainService");
-  expect(loaded.AndroidToolchainService).toBeTypeOf("function");
-  AndroidToolchainService = loaded.AndroidToolchainService as ServiceConstructor;
-  isReplayedAndroidEvidence = loaded.isReplayedAndroidEvidence as typeof isReplayedAndroidEvidence;
+  const path = "./androidToolchainService";
+  const loaded = await import(path).catch(() => undefined);
+  expect(loaded).toBeDefined();
+  expect(loaded?.AndroidToolchainService).toBeTypeOf("function");
+  AndroidToolchainService = loaded!.AndroidToolchainService as ServiceConstructor;
+  isReplayedAndroidEvidence = loaded!.isReplayedAndroidEvidence as typeof isReplayedAndroidEvidence;
 });
 
 const ids = {
