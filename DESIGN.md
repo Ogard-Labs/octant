@@ -104,8 +104,11 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 ### Shapes and depth
 
-Radius derives from one `--radius` root: a control is the `lg` step, a card or
-menu the `xl` step, and a compact control clamps below both. Welcome composers and
+Radius has one number per role, defined once as `--oct-radius-*` in
+`octant.css`: a compact control is 8px, a control or a row 10px, a card, panel,
+menu, or popover 16px. The recipes reach the same numbers through `--radius`,
+whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
+a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
@@ -238,13 +241,18 @@ between rows. A person's message is a right-aligned bubble (`turn-user`,
 `bubble`: control fill, hairline, 16px radius, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
-transcript size with 1.5 leading; markdown headings inside it are labels
+transcript size with 1.5 leading, with no card of its own: only the work a turn
+produced is boxed. The one exception is a workspace with no reading surface
+under it (the application ground behind everything, or a translucent
+workspace), where a reply carries a reading card. Running text keeps a 72ch
+measure; tables and code blocks run the column's width, ending on the same edge
+as the composer; markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". A turn paused on the person uses a neutral composer-adjacent request row with
+settled turn folds them behind "N tool calls". A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file (0141). A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. Long notices
@@ -310,16 +318,23 @@ for labels and the surface role for a background; never rely on hue alone:
 Routine Waiting, idle, and unselected states use neutral text and marks.
 Pending approval requests use a neutral surface and muted icon, without a
 warning stripe. Warning colour is reserved for an actionable warning, not
-every thread that can be resumed. Success, failure, diffs, provider marks,
+every thread that can be resumed. A state, empty, or error message draws its mark in neutral ink, whatever went
+wrong: its glyph and title carry the meaning, and the message recipe offers no
+coloured tone. Success, failure, diffs, provider marks,
 and categorical data may retain semantic colour alongside a label or shape.
 
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#342b0e` dark, `#f0dea8` light) | `--octant-warning-text` (`#edbc26` dark, `#6f5300` light); border `--octant-warning-border` |
+| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f0f0f0` dark, `#1b1b1b` light); border `--octant-warning-border` |
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
+
+The default preset is monochrome, so its warning role carries no hue: the
+control fill, a border that reads at 3:1 on it, and the primary ink. A warning
+is told apart by its mark and its words. A theme that wants an amber warning
+sets the three warning roles.
 
 The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
 `purple`, `pink`) are for Project View identity, chart marks, and provider or
@@ -394,12 +409,18 @@ for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
 welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
 controls. Product
-chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
-marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
+chrome uses those tokens and nothing else: a `border-radius` is a token, `0`,
+`50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
+bare pixel literal. A rem corner also shrinks with the interface font size,
+which a token does not. Leftover `.btn*` recipes are gone; adapters own
 button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 
-Controls are 44px by default and 34px compact. The shell frame runs on one
+Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
+toggles, comboboxes, badges) size in rem so they grow with the interface size;
+at the default 14px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
+3.5px at that root, so a recipe never uses an odd step bare: it rounds it to a
+whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
@@ -449,6 +470,11 @@ for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
+Every composer's control row is two groups with the row's free space between
+them, in one order on a new task and in the thread it becomes: what the person
+adds on the left (attach, dictation, a surface's own extras such as Web or Task
+actions), then how the turn runs on the right (model, access, the context
+meter, send). A control never changes sides between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
@@ -480,8 +506,11 @@ Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Select lists open beside their trigger
 without covering it with the selected item. The model picker anchors to the
 trigger's trailing edge, keeps its dimensions stable while filtering, and
-scrolls its model list internally. Popovers, menus, and dialogs use the floating
-surface and overlay shadow. Environment and inline Settings sections remain
+scrolls its model list internally. Popovers, menus, dialogs, and hover cards use
+the floating surface and the overlay shadow, and have exactly one 1px hairline
+edge: the overlay shadow carries it for menus and popovers, and the shared
+dialog draws it as a border. A feature stylesheet sizes and places a popup and
+never sets its fill, border, or shadow. Environment and inline Settings sections remain
 flat on their owning surface. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
@@ -768,6 +797,13 @@ and Tooltip. Composition rules:
   fill, not a solid one: a red slab reads as the page's subject rather than one
   action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
   Icon-only buttons always have an accessible label and tooltip/title.
+  A standalone icon-only control has two sizes and nothing between: the 28px
+  rail button (`OctantIconButton`, `--oct-rail-button-h`) in a title band,
+  panel head, or toolbar, and a 24px square for an action inside a row. The
+  recipe's `icon` sizes are rem and drift with the interface font size, so a
+  panel control takes `OctantIconButton` rather than a recipe size. Only a
+  control that floats over content, such as the terminal's actions button,
+  keeps a fill and an edge.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.

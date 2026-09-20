@@ -7,7 +7,6 @@ import {
   layoutSidebarDestinations,
   moveSidebarDestination,
   type NavigationAvailability,
-  setSidebarDestinationShown,
   setSidebarDestinationVisibility,
   sidebarDestinationOrder,
   sidebarDestinationVisibility,
@@ -58,6 +57,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: untouched,
     });
     expect(layout.rows).toEqual([
@@ -82,6 +82,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "inbox", visibility: "hidden" }] },
     });
     expect(layout.rows).toEqual([
@@ -98,6 +99,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "automations", visibility: "shown" }] },
     });
     expect(layout.rows).toContain("automations");
@@ -108,6 +110,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: ["board", "inbox"], visibility: [] },
     });
     expect(layout.rows.slice(0, 2)).toEqual(["thread-board", "inbox"]);
@@ -124,6 +127,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: { ...codeCapabilities, plugins: "unavailable", imageLibrary: "unavailable" },
+      moreEnabled: false,
       customization: {
         order: [],
         visibility: [
@@ -141,6 +145,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "plugins", visibility: "hidden" }] },
     });
     expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("plugins");
@@ -150,6 +155,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "chat",
       input: { ...codeCapabilities, activeMode: "chat", threadBoard: "unavailable" },
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "automations", visibility: "shown" }] },
     });
     expect(layout.rows).not.toContain("automations");
@@ -164,75 +170,66 @@ describe("layoutSidebarDestinations", () => {
       const layout = layoutSidebarDestinations({
         activeMode,
         input: { ...codeCapabilities, activeMode },
+        moreEnabled: false,
         customization: untouched,
       });
       expect(layout.rows[0]).toBe(descriptor);
     }
   });
 
-  it("waits with the menu-only destinations in the account menu, so the rail only carries promotions", () => {
+  it("waits with the menu-only destinations under More instead of the account menu", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: true,
       customization: untouched,
     });
-    expect(layout.menu.map((descriptor) => descriptor.id)).toEqual([
+    expect(layout.more.map((descriptor) => descriptor.id)).toEqual([
       "agents",
       "automations",
       "artifact-library",
       "image-library",
       "plugins",
     ]);
+    expect(layout.menu).toEqual([]);
   });
 
-  it("keeps an unavailable destination out of the account menu, however it is placed", () => {
+  it("keeps an unavailable destination out of More, however it is placed", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: { ...codeCapabilities, plugins: "unavailable", imageLibrary: "unavailable" },
+      moreEnabled: true,
       customization: untouched,
     });
-    expect(layout.menu.map((descriptor) => descriptor.id)).toEqual([
+    expect(layout.more.map((descriptor) => descriptor.id)).toEqual([
       "agents",
       "automations",
       "artifact-library",
     ]);
   });
 
-  it("keeps a Don't show destination out of the account menu too", () => {
+  it("keeps a Don't show destination out of More too", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: true,
       customization: { order: [], visibility: [{ id: "plugins", visibility: "hidden" }] },
     });
-    expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("plugins");
+    expect(layout.more.map((descriptor) => descriptor.id)).not.toContain("plugins");
   });
 
-  it("never offers Automations in Chat, where the center has no authority", () => {
+  it("never offers Automations under More in Chat, where the center has no authority", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "chat",
       input: { ...codeCapabilities, activeMode: "chat", threadBoard: "unavailable" },
+      moreEnabled: true,
       customization: untouched,
     });
-    expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("automations");
+    expect(layout.more.map((descriptor) => descriptor.id)).not.toContain("automations");
   });
 });
 
 describe("sidebar destination preference helpers", () => {
-  it("returns a destination to the rail or to where it waits, when the More control toggles it", () => {
-    const promoted = setSidebarDestinationShown(untouched, "plugins", true);
-    expect(sidebarDestinationVisibility(promoted, "plugins")).toBe("shown");
-
-    // A workspace destination goes back to the account menu it came from.
-    const demoted = setSidebarDestinationShown(promoted, "plugins", false);
-    expect(sidebarDestinationVisibility(demoted, "plugins")).toBe("menu");
-    expect(demoted.visibility).toEqual([]);
-
-    // A primary destination has no menu to return to, so unchecking hides it.
-    const hidden = setSidebarDestinationShown(untouched, "board", false);
-    expect(sidebarDestinationVisibility(hidden, "board")).toBe("hidden");
-    expect(setSidebarDestinationShown(hidden, "board", true).visibility).toEqual([]);
-  });
-
   it("records only deviations from the default visibility", () => {
     const hidden = setSidebarDestinationVisibility(untouched, "inbox", "hidden");
     expect(hidden.visibility).toEqual([{ id: "inbox", visibility: "hidden" }]);

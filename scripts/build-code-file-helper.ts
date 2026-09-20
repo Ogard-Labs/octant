@@ -14,7 +14,10 @@ const defaultDestination = resolve(
   "apps/desktop/dist/native/octant-code-file-helper",
 );
 
-export const codeFileHelperBuildArgs = (source: string, destination: string) => [
+export const codeFileHelperBuildArgs = (
+  source: string,
+  destination: string,
+): readonly [string, ...string[]] => [
   "swiftc",
   "-O",
   "-target",
@@ -45,7 +48,7 @@ export async function buildCodeFileHelper(
   await mkdir(dirname(resolvedDestination), { recursive: true });
   await mkdir(moduleCache, { recursive: true });
   const [command, ...args] = codeFileHelperBuildArgs(resolvedSource, resolvedDestination);
-  const child = spawn(command!, args, {
+  const child = spawn(command, args, {
     env: { ...process.env, CLANG_MODULE_CACHE_PATH: moduleCache },
     stdio: "inherit",
   });

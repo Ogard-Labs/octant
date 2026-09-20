@@ -120,8 +120,8 @@
   /* The fourth face, and the one exception to "three faces, three jobs".
      The body serif is right for a page you read once; a transcript is a
      working surface read for hours, interleaved with code and UI chrome,
-     and a serif fights that. This is the neutral UI sans both Claude Code
-     and Codex use. Set it to var(--oct-font-body) to go back to serif —
+     and a serif fights that. This is the neutral UI sans a terminal-born
+     agent transcript reads best in. Set it to var(--oct-font-body) to go back to serif —
      it is the single token that decides. */
   --oct-font-transcript:
     system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -354,8 +354,10 @@
      a 390px-wide panel reads as a hard corner; the phone's whole chrome
      is one continuous soft rectangle. */
   --oct-radius-bubble: 22px;
+  --oct-radius-bubble-tail: 8px;
   --oct-radius-card-m: 26px;
   --oct-radius-sheet: 30px;
+  --oct-radius-device: 44px;
 
   /* Touch. 44px is the floor for anything tappable, which is why the
      desktop control height is already 44px — one number, not two. */
@@ -877,9 +879,6 @@ h4 {
 .callout-danger {
   background: var(--oct-danger-soft);
   border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
-}
-.callout-danger svg {
-  color: var(--oct-danger-fg);
 }
 
 /* ─── thread column ─────────────────────────────────────────────────────
@@ -2031,7 +2030,8 @@ input.switch:checked::after {
 .octant-preview-card {
   max-width: min(320px, calc(100vw - 24px));
   padding: 10px 12px;
-  border: 1px solid var(--oct-border);
+  /* No border of its own: the overlay shadow already carries the hairline, and
+     the two together drew a double ring. */
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   color: var(--oct-fg);
@@ -2413,8 +2413,8 @@ input.switch:checked::after {
 /* ══════════════════════════════════════════════════════════════════════
    Agent transcript
 
-   The shape both Claude Code and Codex converge on, and the reason it
-   works: the agent's prose runs flush at full width like a document, the
+   The shape agent transcripts converge on, and the reason it works: the
+   agent's prose runs flush at full width like a document, the
    user's turns are small right-aligned bubbles, and everything the agent
    *did* collapses to a single quiet line. Reading a long session is then
    reading prose, with the machinery available but never in the way.
@@ -2494,17 +2494,32 @@ input.switch:checked::after {
 /* The agent's turn is the transcript's reading surface. The workspace ground
    stays visible around it, while one theme-owned card contains prose, tool
    output, and turn metadata without introducing a second glass material. */
+/* A reply is bare prose on the reading surface (DESIGN.md, Transcript). Only
+   the work a turn produced is boxed: code blocks, tool rows, requests. The
+   reading card below is for the one case that needs it; worn everywhere, it
+   made every answer read as a widget and left the reserved action row as a
+   dead band inside the card's bottom edge. */
 .turn-agent {
   min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
 }
+/* With the application ground behind everything, or a translucent workspace,
+   there is no reading surface under the prose: the workspace is transparent
+   over a photo or a moving pattern. There a reply carries its own card. */
+.shell--app-backdrop .turn-agent,
+.shell--workspace-material-translucent .turn-agent {
+  padding: 14px 16px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
 .turn-agent > p {
   margin: 0 0 var(--oct-space-3);
 }
@@ -7937,7 +7952,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   position: relative;
   width: var(--oct-phone-w);
   height: var(--oct-phone-h);
-  border-radius: 44px;
+  border-radius: var(--oct-radius-device);
   border: 1px solid var(--oct-border);
   background: var(--oct-bg);
   overflow: hidden;
@@ -8297,7 +8312,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   max-width: 88%;
   padding: 12px var(--oct-space-4);
   border-radius: var(--oct-radius-bubble);
-  border-bottom-right-radius: 8px;
+  border-bottom-right-radius: var(--oct-radius-bubble-tail);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-transcript);

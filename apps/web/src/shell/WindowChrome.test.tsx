@@ -318,9 +318,10 @@ describe("WindowChrome", () => {
       "flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);",
     );
     expect(cssRule(".sidebar__native-collapse")).toContain("top: 0;");
-    expect(cssRule(".window-chrome__new-thread")).toContain(
-      "background: var(--oct-surface-muted);",
-    );
+    // This used to pin `background: var(--oct-surface-muted)`, a token nothing
+    // defined, so the control has always drawn clear. It stays outlined.
+    expect(cssRule(".window-chrome__new-thread")).toContain("border-color: var(--oct-border);");
+    expect(cssRule(".window-chrome__new-thread")).not.toContain("--oct-surface-muted");
     expect(cssRule(".workspace-pane__provider")).toContain("width: 14px;");
   });
 
@@ -350,6 +351,21 @@ describe("WindowChrome", () => {
     expect(sectionLabel).not.toContain("mono");
     expect(cssRule(".sidebar-navigation__thread-status")).toContain(
       "color: var(--octant-text-secondary);",
+    );
+  });
+
+  it("shows an empty Project section's add control without waiting for a hover", () => {
+    const revealed = cssRule(
+      '.project-section[data-empty="true"] .project-section__header-actions',
+    );
+    expect(revealed).toContain("opacity: 1;");
+    expect(revealed).toContain("width: auto;");
+    // With Projects present the controls stay hover-only.
+    expect(cssRule(".project-section__header-actions")).toContain("opacity: 0;");
+    // The host is a select when there is more than one, and a select sets its
+    // own size, so the tray's size has to name it too.
+    expect(styles).toMatch(
+      /\.composer-tray \.host-selector__select,\s*\.draft-thread__context-strip \.host-selector__select \{\s*font-size: var\(--oct-text-xs\);/,
     );
   });
 
@@ -472,6 +488,28 @@ describe("WindowChrome", () => {
     expect(cssRule(".project-dialog")).toContain("width: min(100%, 380px)");
     expect(cssRule(".project-dialog")).toContain("padding: var(--oct-space-4)");
     expect(cssRule(".project-dialog h1")).toContain("font-size: var(--oct-text-base)");
+  });
+
+  it("gives every popup one thin edge and the floating fill", () => {
+    // The overlay shadow carries the popup's edge, and it is a hairline in both
+    // themes. In dark it used the strong border, so menus and popovers had a
+    // heavier edge than dialogs, and a popup that also set a border showed two.
+    const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
+      (match) => match[1] ?? "",
+    );
+    expect(overlays.length).toBeGreaterThanOrEqual(2);
+    for (const overlay of overlays) {
+      expect(overlay).toContain("0 0 0 1px var(--octant-border)");
+      expect(overlay).not.toContain("--octant-border-strong");
+    }
+    // A feature stylesheet sizes and places a popup; it does not repaint it.
+    const branchMenu = cssRule(".code-branch-selector__menu");
+    expect(branchMenu).not.toMatch(/(^|\s)border:/);
+    expect(branchMenu).not.toContain("background:");
+    const modelMenu = cssRule(".composer-model-picker__menu");
+    expect(modelMenu).not.toMatch(/(^|\s)border:/);
+    expect(modelMenu).not.toContain("background:");
+    expect(modelMenu).not.toContain("box-shadow:");
   });
 
   it("keeps the opaque utility dock and accessibility fallbacks", () => {

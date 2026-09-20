@@ -30,7 +30,7 @@ describe("keychainHelperBuildArgs", () => {
     ) as { readonly scripts: { readonly build: string } };
 
     expect(desktopPackage.scripts.build).toBe(
-      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts",
+      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-device-helper.ts",
     );
   });
 

@@ -42,6 +42,10 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   const [attempt, setAttempt] = useState(0);
   const discoveryRequestRef = useRef(discoveryRequest);
   const snapshotRequestRef = useRef(snapshotRequest);
+  // Which discovery may still write the list. A background re-discovery that
+  // answers after a newer action, or after the hook was pointed at another
+  // project, must not put its older destinations back.
+  const discoveryGeneration = useRef(0);
   discoveryRequestRef.current = discoveryRequest;
   snapshotRequestRef.current = snapshotRequest;
   const discoveryRequestKey = JSON.stringify(discoveryRequest);
@@ -61,6 +65,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
+    discoveryGeneration.current += 1;
     setStatus("loading");
     setErrorMessage(undefined);
     void client
@@ -86,8 +91,44 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
 
   const execute = useCallback(
     async (request: AppleActionRequest) => {
+      const changesDestinations = request.kind === "boot" || request.kind === "shutdown";
+      // Taken before the first wait: two overlapping actions can finish out of
+      // order, and only the one started last may write the destination list.
+      const generation = changesDestinations
+        ? ++discoveryGeneration.current
+        : discoveryGeneration.current;
       const evidence = await client.execute(request);
-      await refreshSnapshot();
+      const snapshot = await refreshSnapshot();
+      // A boot or shutdown changes the destination list itself, and that list
+      // lives in discovery, not the runtime snapshot. Without it a passed boot
+      // still read "Shutdown" until the tool was re-opened. The snapshot just
+      // read already carries the host's Simulator states, so the list takes
+      // those at once; the full discovery — six probes, `xcodebuild -list`
+      // among them — follows in the background instead of holding the action's
+      // result and every control behind it, and a failure there changes nothing.
+      if (changesDestinations && generation === discoveryGeneration.current) {
+        const acted =
+          evidence.outcome === "succeeded" && request.simulatorId !== undefined
+            ? {
+                simulatorId: String(request.simulatorId),
+                state: request.kind === "boot" ? ("booted" as const) : ("shutdown" as const),
+              }
+            : undefined;
+        setDiscovery((previous) =>
+          previous === undefined
+            ? previous
+            : {
+                ...previous,
+                simulators: withNewerStates(previous.simulators, snapshot.simulators, acted),
+              },
+        );
+        void client
+          .discover(discoveryRequestRef.current)
+          .then((next) => {
+            if (generation === discoveryGeneration.current) setDiscovery(next);
+          })
+          .catch(() => undefined);
+      }
       setStatus("ready");
       return evidence;
     },
@@ -112,6 +153,32 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     execute,
     cancel,
   };
+}
+
+type SimulatorRecords = AppleDiscoverySnapshot["simulators"];
+
+/**
+ * The listed destinations with the states the host now reports. States are
+ * merged into the records already shown rather than the list being replaced:
+ * a discovery that failed its first probe empties the host's runtime list, and
+ * replacing with that removed every destination until a later discovery
+ * succeeded. The action's own passed result is used only for a Simulator the
+ * host's list no longer names; where the host names it, the host's state is
+ * the newer one — someone else may have acted since the action passed.
+ */
+function withNewerStates(
+  listed: SimulatorRecords,
+  reported: SimulatorRecords,
+  acted: { readonly simulatorId: string; readonly state: "booted" | "shutdown" } | undefined,
+): SimulatorRecords {
+  const states = new Map(reported.map((record) => [String(record.simulatorId), record.state]));
+  if (acted !== undefined && !states.has(acted.simulatorId)) {
+    states.set(acted.simulatorId, acted.state);
+  }
+  return listed.map((record) => {
+    const state = states.get(String(record.simulatorId));
+    return state === undefined || state === record.state ? record : { ...record, state };
+  });
 }
 
 function classifyFailure(error: unknown): {

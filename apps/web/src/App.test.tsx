@@ -295,8 +295,7 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    // Plugins is a menu-only destination, so it waits in the account menu.
-    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(screen.getByRole("button", { name: "More destinations" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
 
     // Skills and extensions have a real Settings section, so the entry opens it
@@ -3666,7 +3665,7 @@ describe("App", () => {
     const projectsDestination = await screen.findByRole("button", { name: "Projects" });
     expect(projectsDestination).toBeVisible();
     expect(screen.getByRole("button", { name: "New task" })).toBeVisible();
-    await user.click(within(sidebar).getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(within(sidebar).getByRole("button", { name: "More destinations" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
     expect(within(sidebar).getByRole("button", { name: "Pull requests" })).toBeVisible();
@@ -4274,7 +4273,7 @@ describe("App", () => {
         number: 12,
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(screen.getByRole("button", { name: "More destinations" }));
     await user.click(await screen.findByRole("menuitem", { name: "Image generator" }));
     await waitFor(() =>
       expect(

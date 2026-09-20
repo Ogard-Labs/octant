@@ -102,9 +102,12 @@ in-app updater. It attaches to the canonical host at
 `http://127.0.0.1:13773`, or starts that independently runnable host when it is
 absent, then probes storage readiness before showing a window. It passes only
 native broker coordinates and the desktop bridge secret that native-only
-operations require. It also runs two loopback-only
+operations require. It also runs loopback-only
 brokers the server talks back to: the credential broker (Keychain access by
-opaque reference) and the browser runtime broker.
+opaque reference), the browser runtime broker, and on macOS the Simulator
+device broker, behind which one native device helper per Simulator delivers
+workbench input (see
+[decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md](decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md)).
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a
@@ -399,7 +402,10 @@ pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
-shows a thread-bound live frame from host-held screenshot evidence, with
+shows a thread-bound live frame — the Simulator's screen streamed through the
+host as it changes, authorized like a screenshot and never stored (see
+[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
+or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
@@ -407,6 +413,15 @@ and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed
 attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+Under the desktop app that injection is the native device helper of 0137: a
+tap is a point on the captured screen, typed text is letters, digits, spaces
+and new lines, and every refusal names the helper's own reason. A swipe is a
+fourth input kind on the same channel, for the pane and for `octant_apple`
+alike, and the live screen is driven directly: a press and release is a tap, a
+drag is one swipe sent when it ends, keys typed on the focused screen go to
+the device as one text per pause, Home and Lock are buttons, and what a person
+does while an action runs is kept and sent in order (see
+[decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a
 thread as a context-aware dock tab opened from the title-bar shortcut or Add
 tool. It may

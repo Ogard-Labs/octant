@@ -265,7 +265,9 @@ html[data-octant-native-host="true"]
   padding: 0 7px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-muted);
+  /* Outlined, not filled. The fill named here was a token nothing defined, so
+     this control has always drawn clear; the rule now says what is rendered. */
+  background: transparent;
   color: var(--oct-fg-2);
   cursor: pointer;
 }
@@ -299,7 +301,6 @@ html[data-octant-native-host="true"]
 
 .window-chrome__new-thread {
   color: var(--oct-fg-2);
-  background: var(--oct-surface-muted);
   border-color: var(--oct-border);
 }
 
@@ -2241,10 +2242,10 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   width: min(320px, calc(100vw - 32px));
   overflow: hidden;
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border-strong);
+  /* Fill and edge come from the popover recipe. Setting a workspace fill and a
+     strong border here on top of the overlay's own ring made this the one
+     popup with a darker face and a 2px edge. */
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .code-branch-selector__list {
@@ -2668,7 +2669,7 @@ form > .work-composer-adapter__attachments {
 
 .code-home__suggestions > button:hover:not(:disabled),
 .draft-thread__intent-cards > button:hover:not(:disabled) {
-  border-color: var(--oct-border-strong);
+  border-color: var(--octant-border-strong);
   background: var(--octant-card);
   box-shadow: var(--octant-shadow-xs);
   transform: translateY(-1px);
@@ -2805,7 +2806,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__card:hover:not(:disabled) {
-  border-color: var(--oct-border-strong);
+  border-color: var(--octant-border-strong);
   background: var(--octant-card);
 }
 

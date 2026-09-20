@@ -42,6 +42,7 @@ describe("useAppleSimulatorScreen", () => {
       cancel: vi.fn(),
       snapshot: vi.fn(),
       readScreenshot,
+      watchScreen: vi.fn(),
     };
     const firstRequest = request("apple-screenshot-1");
     const { result, rerender } = renderHook(

@@ -1055,7 +1055,9 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               <SliderField
                 aria-label="Sidebar width"
                 className="settings-view__range"
-                format={(value) => `${String(value)}px`}
+                // A width saved by dragging the sidebar's edge is fractional, and
+                // the read-out showed all of it: "357.890625px".
+                format={(value) => `${String(Math.round(value))}px`}
                 max={420}
                 min={220}
                 onChange={(event) =>
@@ -1081,7 +1083,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
           {isAvailable("sidebar-more") ? (
             <SettingRow
-              description="Show the sidebar element checkboxes under a More row at the end of the navigation. Off leaves them to Settings."
+              description="Reveal the menu-only destinations and Customize sidebar under a More row at the end of the sidebar navigation. Off keeps them in the account menu."
               focused={focusedSetting === settingId("sidebar-more")}
               label="More row in the sidebar"
               scope="app"

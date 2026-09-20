@@ -785,7 +785,7 @@ describe("DraftThreadWorkspace", () => {
     const workspace = screen.getByRole("button", { name: "Workspace" });
     expect(workspace).toHaveTextContent("Managed worktree");
     await user.click(workspace);
-    await user.click(screen.getByRole("option", { name: /Current checkout/ }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Current checkout" }));
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 

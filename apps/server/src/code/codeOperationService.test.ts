@@ -912,6 +912,293 @@ describe("CodeOperationService", () => {
     expect(events.append).not.toHaveBeenCalled();
   });
 
+  it("does not relaunch a cached running turn after it has already recorded what changed", async () => {
+    const providerOperation = decodeCodeOperationId("4a4a4a4a-4a4a-44a4-84a4-4a4a4a4a4a4a");
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "63636363-6363-4363-8363-636363636363",
+      digest: "a".repeat(64),
+      byteLength: 6,
+    });
+    const activeThread = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+    const turns = {
+      start: vi.fn(async () => ({ state: "running" as const })),
+      answerInput: vi.fn(),
+      answerApproval: vi.fn(),
+      cancel: vi.fn(),
+    };
+    const events = {
+      append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      replay: vi.fn(() => ({
+        status: "ok" as const,
+        frames: [
+          {
+            threadId: ids.thread,
+            operationId: providerOperation,
+            cursor: 0,
+            occurredAt: "2026-07-21T10:00:00.000Z",
+            event: {
+              kind: "conversation-turn-started",
+              providerInstanceId: activeThread.providerInstanceId,
+              modelId: activeThread.modelId,
+              sessionId: "60606060-6060-4060-8060-606060606060",
+              prompt,
+            },
+          },
+          {
+            threadId: ids.thread,
+            operationId: providerOperation,
+            cursor: 1,
+            occurredAt: "2026-07-21T10:00:02.000Z",
+            event: {
+              kind: "conversation-turn-changed-files",
+              changedFiles: {
+                files: [{ path: "src/app.ts", insertions: 1, deletions: 0 }],
+                total: 1,
+                truncated: false,
+              },
+            },
+          },
+          {
+            threadId: ids.thread,
+            operationId: providerOperation,
+            cursor: 2,
+            occurredAt: "2026-07-21T10:00:01.000Z",
+            event: {
+              kind: "operation-result",
+              result: {
+                kind: "provider-turn-state",
+                operationId: providerOperation,
+                state: "running",
+              },
+            },
+          },
+        ],
+        nextCursor: 3,
+      })),
+    };
+    const evidence = {
+      put: vi.fn(),
+      read: vi.fn(async () => "prompt"),
+    };
+    const authority = {
+      readThread: vi.fn(() => activeThread),
+      readCheckout: vi.fn(() =>
+        decodeCodeCheckoutIdentity({
+          id: ids.checkout,
+          repositoryId: activeThread.repositoryId,
+          kind: "existing-worktree",
+          availability: "available",
+          head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+          observedAt: "2026-07-21T10:00:00.000Z",
+        }),
+      ),
+      canAccessProject: vi.fn(async () => true),
+      resolveCheckoutRoot: vi.fn(async () => ({
+        checkoutRoot: "/tmp/repo",
+        credentialReferences: [],
+      })),
+    };
+    const service = new CodeOperationService({
+      authority: authority as never,
+      approvals: { validate: vi.fn(async () => true) },
+      terminals: {
+        launch: vi.fn(),
+        attach: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        terminate: vi.fn(),
+      },
+      repositoryTests: { run: vi.fn(), cancel: vi.fn() } as never,
+      git: {
+        observe: vi.fn(),
+        stage: vi.fn(),
+        commit: vi.fn(),
+        push: vi.fn(),
+      } as never,
+      pullRequests: {
+        createPullRequest: vi.fn(),
+        observePullRequest: vi.fn(),
+        mergePullRequest: vi.fn(),
+      } as never,
+      reviewFindings: {
+        createFinding: vi.fn(),
+        updateFinding: vi.fn(),
+      } as never,
+      turns: turns as never,
+      evidence: evidence as never,
+      events: events as never,
+    });
+
+    await expect(
+      service.execute(ids.window, {
+        kind: "start-provider-turn",
+        operationId: providerOperation,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        sessionId: "60606060-6060-4060-8060-606060606060",
+        prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    // The change list is settlement evidence: the turn had already begun to
+    // settle, so a crash before the terminal state must not launch it again.
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: { kind: "operation-state", state: "interrupted" },
+      }),
+    );
+  });
+
+  it("pages a long journal to find a change list written after the first 256 frames", async () => {
+    const providerOperation = decodeCodeOperationId("4b4b4b4b-4b4b-44b4-84b4-4b4b4b4b4b4b");
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "64646464-6464-4464-8464-646464646464",
+      digest: "b".repeat(64),
+      byteLength: 6,
+    });
+    const activeThread = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+    const turns = {
+      start: vi.fn(async () => ({ state: "running" as const })),
+      answerInput: vi.fn(),
+      answerApproval: vi.fn(),
+      cancel: vi.fn(),
+    };
+    const started = {
+      threadId: ids.thread,
+      operationId: providerOperation,
+      cursor: 0,
+      occurredAt: "2026-07-21T10:00:00.000Z",
+      event: {
+        kind: "conversation-turn-started" as const,
+        providerInstanceId: activeThread.providerInstanceId,
+        modelId: activeThread.modelId,
+        sessionId: "60606060-6060-4060-8060-606060606060",
+        prompt,
+      },
+    };
+    const running = {
+      threadId: ids.thread,
+      operationId: providerOperation,
+      cursor: 1,
+      occurredAt: "2026-07-21T10:00:01.000Z",
+      event: {
+        kind: "operation-result" as const,
+        result: {
+          kind: "provider-turn-state" as const,
+          operationId: providerOperation,
+          state: "running" as const,
+        },
+      },
+    };
+    const usage = (cursor: number) => ({
+      threadId: ids.thread,
+      operationId: providerOperation,
+      cursor,
+      occurredAt: "2026-07-21T10:00:02.000Z",
+      event: { kind: "usage" as const, inputTokens: 1, outputTokens: 1 },
+    });
+    const firstPage = [started, running, ...Array.from({ length: 254 }, (_, i) => usage(i + 2))];
+    const events = {
+      append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      replay: vi.fn((input: { readonly afterCursor: number }) =>
+        input.afterCursor === 0
+          ? { status: "ok" as const, frames: firstPage, nextCursor: 256 }
+          : {
+              status: "ok" as const,
+              frames: [
+                {
+                  threadId: ids.thread,
+                  operationId: providerOperation,
+                  cursor: 256,
+                  occurredAt: "2026-07-21T10:00:03.000Z",
+                  event: {
+                    kind: "conversation-turn-changed-files" as const,
+                    changedFiles: {
+                      files: [{ path: "src/app.ts", insertions: 1, deletions: 0 }],
+                      total: 1,
+                      truncated: false,
+                    },
+                  },
+                },
+              ],
+              nextCursor: 257,
+            },
+      ),
+    };
+    const evidence = {
+      put: vi.fn(),
+      read: vi.fn(async () => "prompt"),
+    };
+    const authority = {
+      readThread: vi.fn(() => activeThread),
+      readCheckout: vi.fn(() =>
+        decodeCodeCheckoutIdentity({
+          id: ids.checkout,
+          repositoryId: activeThread.repositoryId,
+          kind: "existing-worktree",
+          availability: "available",
+          head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+          observedAt: "2026-07-21T10:00:00.000Z",
+        }),
+      ),
+      canAccessProject: vi.fn(async () => true),
+      resolveCheckoutRoot: vi.fn(async () => ({
+        checkoutRoot: "/tmp/repo",
+        credentialReferences: [],
+      })),
+    };
+    const service = new CodeOperationService({
+      authority: authority as never,
+      approvals: { validate: vi.fn(async () => true) },
+      terminals: {
+        launch: vi.fn(),
+        attach: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        terminate: vi.fn(),
+      },
+      repositoryTests: { run: vi.fn(), cancel: vi.fn() } as never,
+      git: {
+        observe: vi.fn(),
+        stage: vi.fn(),
+        commit: vi.fn(),
+        push: vi.fn(),
+      } as never,
+      pullRequests: {
+        createPullRequest: vi.fn(),
+        observePullRequest: vi.fn(),
+        mergePullRequest: vi.fn(),
+      } as never,
+      reviewFindings: {
+        createFinding: vi.fn(),
+        updateFinding: vi.fn(),
+      } as never,
+      turns: turns as never,
+      evidence: evidence as never,
+      events: events as never,
+    });
+
+    await expect(
+      service.execute(ids.window, {
+        kind: "start-provider-turn",
+        operationId: providerOperation,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        sessionId: "60606060-6060-4060-8060-606060606060",
+        prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCursor: 257,
+        event: { kind: "operation-state", state: "interrupted" },
+      }),
+    );
+  });
+
   it("refuses to recover a stale provider turn the Project provider policy no longer accepts", async () => {
     const providerOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
     const prompt = decodeCodeEvidenceReference({

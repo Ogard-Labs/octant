@@ -62,9 +62,13 @@ destinations**, **Current progress**, and **Validation evidence**.
 
 The iOS Simulator dock tab shows a live frame bound to the owning Code thread
 and checkout. Its states are setup, unavailable, booting, live, interrupted,
-and stale after a host restart. A live frame is a still of the latest
-host-held screenshot evidence — never Simulator.app, never a video stream,
-and never image bytes in the journal. Remote, Linux, and headless clients
+and stale after a host restart. Under the Octant desktop app a live frame
+shows the Simulator's screen as it changes, so you see what a tap or an
+agent's action did without capturing in between. Frames are sent only when the
+screen changes, and they are never stored: nothing of the live view is written
+to disk, to the journal, or into a model's context. **Capture screen** is
+still how a screen becomes validation evidence. When the host has no live
+view, the frame shows the latest captured still instead. Remote, Linux, and headless clients
 say the native frame is not attachable instead of hanging or inventing a
 picture. Closing the tab unmounts the view only; it does not shut down,
 erase, or transfer the destination.
@@ -72,9 +76,22 @@ erase, or transfer the destination.
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
-requests; the host injects XCTest-less input behind that channel. Remote,
-Linux, and headless clients stay read-only. Typed characters never land in
-durable evidence. Destination actions remain on the workbench list: each
+requests, and the Octant desktop app delivers them to the Simulator through a
+small native helper it ships. Nothing comes to the foreground and no macOS
+Accessibility permission is needed. A tap lands on the point you click on the
+captured screen. **Type** sends letters, digits, spaces, and new lines; text
+with any other character is refused whole rather than typed wrong, because a
+Simulator maps key positions with its own keyboard language. For the same
+reason typing works on a Simulator whose keyboard language uses a QWERTY
+layout — English, the Nordic languages, Dutch, Spanish, Portuguese — and is
+refused on others, such as French or German, with
+`keyboard-layout-unsupported` in the evidence. **Return**,
+**Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
+later. When the host cannot deliver an input action, the evidence names the
+host's refusal rather than reading as interrupted. Remote, Linux, and
+headless clients stay read-only. Typed characters never land in durable
+evidence, and neither does the reason a type-text action failed, since it can
+quote the script. Destination actions remain on the workbench list: each
 Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,
@@ -88,8 +105,13 @@ and **Process died**.
 **Build** and **Test** run against the workspace scheme and name no
 Simulator. Each Simulator destination offers only what its reported state
 can do: a shut-down Simulator offers **Boot**; a booted one offers **Run**,
-**Capture screen**, and **Shut down**. A live attachable frame also accepts
-**tap**, typed text, and hardware keys. **Run** is limited to destinations
+**Capture screen**, and **Shut down**. A live attachable frame is driven
+directly: click to tap, drag to swipe — the swipe is sent when you let go and
+takes as long as your drag did — and, once you have clicked the screen, type
+on your keyboard. Typing is sent when you pause, Return, Delete, Escape and
+the arrow keys go to the device, and Command and Control shortcuts stay with
+Octant. **Home** and **Lock** are buttons under the screen. What you do while
+an action is still running is kept and sent in order. **Run** is limited to destinations
 whose platform matches the first discovered Simulator. Anything already
 running can be **Cancel**led from **Current progress**.
 
@@ -108,7 +130,7 @@ no such command. `Package.swift` is not listed.
 A Code thread on **Full access** also reaches these actions through the
 app-managed `octant_apple` tool, so an agent can discover the toolchain, read
 Simulator state, build, test, run, boot, shut down, capture the screen, and
-inject tap, typed text, and hardware keys. Pane-driven input journals as
+inject tap, swipe, typed text, and hardware keys. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`. The host binds both to
 the same thread and checkout and refuses them with the same policy; the tool
 is unavailable under Plan and approval-gated postures. The workbench never

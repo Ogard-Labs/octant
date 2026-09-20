@@ -19,7 +19,7 @@
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-2);
+  background: var(--oct-surface-warm);
 }
 
 /* The messaging bounds line: a quiet status row under the header, reading as
@@ -86,7 +86,7 @@
   padding: 0.75rem;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-1);
+  background: var(--oct-surface);
 }
 
 .agents-center-row__open {
@@ -130,11 +130,11 @@
   display: flex;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-1);
+  background: var(--oct-surface);
 }
 
 .agents-center-graph__card[data-kind="thread"] {
-  background: var(--oct-surface-2);
+  background: var(--oct-surface-warm);
 }
 
 .agents-center-graph__card[data-selected="true"] {

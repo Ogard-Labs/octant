@@ -24,6 +24,7 @@ import {
   decodeProviderSessionId,
   type CodeApprovalId,
   type CodeCheckpoint,
+  type CodeTurnChangedFiles,
   type CodeConversationTurn,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeProviderLimit,
@@ -135,6 +136,12 @@ export interface CodeConversationMessage {
    * message whose turn was journaled before the host started recording it.
    */
   readonly executionPolicy?: ProviderExecutionPolicy;
+  /**
+   * What changed in the checkout while this turn ran. Present on an assistant
+   * message whose turn the host observed; absent means "not observed", which is
+   * not the same as "nothing changed".
+   */
+  readonly changedFiles?: CodeTurnChangedFiles;
 }
 
 export interface CodeThreadNavigationItem {
@@ -436,6 +443,29 @@ export function useCodeController(options: CodeControllerOptions) {
     },
     [setTurnError],
   );
+
+  /**
+   * The prompt a newly created thread is about to run.
+   *
+   * The window opens a new thread before starting its first turn, and that turn
+   * runs on the window's create controller. This controller therefore reads an
+   * honestly empty journal first and re-reads it once the turn is durable. In
+   * between it painted the empty-thread copy and the project setup offers, then
+   * a loading notice, then the message: four screens in half a second. Holding
+   * the prompt lets the transcript show the person's own message throughout.
+   * It is never cleared on activation, because React's development re-mount
+   * re-runs activation after the prompt has already been delivered.
+   */
+  const [firstPromptInFlight, setFirstPromptInFlight] = useState<string>();
+  const announceFirstPrompt = useCallback(
+    (prompt: string | undefined) => setFirstPromptInFlight(prompt),
+    [],
+  );
+  const conversationStarted = conversation.length > 0;
+  useEffect(() => {
+    // The journal speaks for the thread from its first message on.
+    if (conversationStarted) setFirstPromptInFlight(undefined);
+  }, [conversationStarted]);
 
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
     const request = providerRequestFromEvent(event);
@@ -1010,6 +1040,16 @@ export function useCodeController(options: CodeControllerOptions) {
                   noteProviderRequest(event);
                   noteActivity(operationId, event);
                   noteUsage(operationId, event);
+                  if (event.kind === "conversation-turn-changed-files") {
+                    const changedFiles = event.changedFiles;
+                    setConversation((current) =>
+                      current.map((message) =>
+                        message.id === `${operationId}:assistant`
+                          ? { ...message, changedFiles }
+                          : message,
+                      ),
+                    );
+                  }
                   if (event.kind === "provider-content" && event.channel === "reasoning") {
                     const chunk =
                       frame.displayText ??
@@ -2180,6 +2220,16 @@ export function useCodeController(options: CodeControllerOptions) {
                 );
               }
             }
+            // The host journals the change list just before the turn settles,
+            // so the reply gains its files here rather than on the next reopen.
+            if (event.kind === "conversation-turn-changed-files") {
+              const changedFiles = event.changedFiles;
+              setConversation((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, changedFiles } : message,
+                ),
+              );
+            }
             if (event.kind === "provider-content" && event.channel === "reasoning") {
               const chunk =
                 frame.displayText ??
@@ -2338,6 +2388,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   return {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
+    announceFirstPrompt,
     answerProviderRequest,
     archiveThread,
     completeThread,
@@ -2350,6 +2401,7 @@ export function useCodeController(options: CodeControllerOptions) {
     completeFollowUp,
     errorCategory,
     errorMessage,
+    firstPromptInFlight: conversationStarted ? undefined : firstPromptInFlight,
     followUps,
     forkThread,
     lastExecuteError,
@@ -2648,6 +2700,7 @@ async function projectConversationTurns(
       modelId: turn.modelId,
       status: turn.status,
       at: String(turn.updatedAt),
+      ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
     });
     const steps = turn.steps ?? [];
     if (steps.length === 0 && turn.stepsTruncated !== true) continue;
