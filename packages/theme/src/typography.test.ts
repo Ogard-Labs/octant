@@ -8,6 +8,30 @@ import {
 } from "./typography";
 
 describe("typography projections", () => {
+  it("ships the compact system typography as the default", () => {
+    expect(DEFAULT_UI_TYPOGRAPHY).toEqual({
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      fontSize: 13,
+      fontWeight: 400,
+    });
+    expect(DEFAULT_EDITOR_TYPOGRAPHY).toMatchObject({
+      fontFamily:
+        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
+      fontSize: 13,
+      fontWeight: 400,
+      lineHeight: 1.5,
+      fontLigatures: true,
+    });
+    expect(DEFAULT_TERMINAL_TYPOGRAPHY).toMatchObject({
+      fontFamily:
+        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
+      fontSize: 12,
+      fontWeight: 400,
+      lineHeight: 1.4,
+      fontLigatures: false,
+    });
+  });
+
   it("resolves UI, editor, and terminal families independently", () => {
     const resolved = resolveTypographyProjection(
       {
@@ -100,7 +124,7 @@ describe("typography projections", () => {
 });
 
 describe("interface face migration", () => {
-  it("reads a saved pre-Inter system stack as the current default face", () => {
+  it("reads a saved system stack as the current default face", () => {
     const legacy: ThemeTypography = {
       ...DEFAULT_THEME_SETTINGS.typography,
       ui: {
@@ -112,7 +136,7 @@ describe("interface face migration", () => {
     const projection = resolveTypographyProjection(legacy, []);
 
     expect(projection.ui.fontFamily).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
-    expect(projection.ui.fontFamily).toContain("Inter Variable");
+    expect(projection.ui.fontFamily).toContain("-apple-system");
   });
 
   it("keeps a deliberately chosen system stack", () => {

@@ -275,13 +275,13 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   timestampFormat: "24h",
   typography: {
     ui: {
-      family:
-        "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-      size: 14,
+      family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      size: 13,
       weight: 400,
     },
     editor: {
-      family: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
+      family:
+        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
       size: 13,
       weight: 400,
       lineHeight: 1.5,
@@ -292,7 +292,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
       // powerlevel10k, lsd) resolve per character on machines that have one
       // installed, without changing how ordinary text renders.
       family:
-        "'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', 'MesloLGS NF', 'Hack Nerd Font Mono', monospace",
+        "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
       size: 12,
       weight: 400,
       lineHeight: 1.4,

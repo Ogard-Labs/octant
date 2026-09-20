@@ -152,6 +152,11 @@ const presentationState = {
 } as const;
 
 describe("shell bootstrap contracts", () => {
+  it("defaults transcript text to the compact reading size", () => {
+    const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
+    expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");
+  });
+
   it("preserves an explicit choice to wait for finished replies", () => {
     expect(decodeShellSettings({ ...settings, streamReplies: false }).streamReplies).toBe(false);
     expect(decodeShellSettings(settings).streamReplies).toBeUndefined();

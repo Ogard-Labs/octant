@@ -61,16 +61,15 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text is **Inter** (variable, optical sizes on) with the system face
-as fallback: `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-system-ui, sans-serif`. Code, paths, branches, identifiers, and terminal text
-are the monospace stack. The app ships the Latin subset with the renderer, so
-the face is the same on macOS, Linux, and Windows and on the marketing site.
-Antialiased, `text-rendering: optimizeLegibility`, no synthetic bold.
+Interface text uses the platform stack by default: `-apple-system,
+BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`. The bundled variable
+face remains available as an explicit Appearance choice. Code, paths, branches,
+identifiers, and terminal text use the monospace stack. Antialiased,
+`text-rendering: optimizeLegibility`, no synthetic bold.
 
 ### Scale
 
-Eight sizes at the default 14px setting. Everything scales together with the
+Eight sizes at the default 13px setting. Everything scales together with the
 Appearance interface size; nothing is authored at 11.5 or 12.5, and nothing
 essential sits under 12px at the default.
 
@@ -350,13 +349,13 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Typography has distinct jobs:
 
-| Job        | Default                                                                                  | Usage                                                                              |
-| ---------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
-| Display    | inherits Interface                                                                       | Wordmark, section headings, selected navigation labels                             |
-| Transcript | inherits Interface                                                                       | Long-running conversation and composer; readable at 13–16px, 14px by default       |
-| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                                          | Code, diffs, paths, identifiers, aligned technical values                          |
-| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                        | Terminal output and prompt glyphs                                                  |
+| Job        | Default                                                                                                                   | Usage                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface  | `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                                    | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Display    | inherits Interface                                                                                                        | Wordmark, section headings, selected navigation labels                             |
+| Transcript | inherits Interface                                                                                                        | Long-running conversation and composer; readable at 13–16px, 13px by default       |
+| Editor     | `'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
+| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                                                         | Terminal output and prompt glyphs                                                  |
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
@@ -396,8 +395,8 @@ Static type tokens in `octant.css` are:
 
 Transcript settings are explicit and centered on the body size: Small is
 13px, Medium 14px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A
-fresh install reads Medium and Narrow, so a question, its reply, and the
-composer under them all read at 14px, never under the chrome around them. The column uses
+fresh install reads Small and Narrow, so a question, its reply, and the
+composer under them all read at 13px, never under the chrome around them. The column uses
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
 reading-width preference. Canvas documents use a 62ch measure.
@@ -418,8 +417,8 @@ surfaces use the larger 22/26/30px mobile radii.
 
 Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
 toggles, comboboxes, badges) size in rem so they grow with the interface size;
-at the default 14px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
-3.5px at that root, so a recipe never uses an odd step bare: it rounds it to a
+at the default 13px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
+3.25px at that root, so a recipe never uses an odd step bare: it rounds it to a
 whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and

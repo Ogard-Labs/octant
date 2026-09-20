@@ -47,7 +47,8 @@ const UI_FONTS: ReadonlyArray<FontOption> = [
 const MONO_FONTS: ReadonlyArray<FontOption> = [
   {
     label: "Octant monospace",
-    family: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
+    family:
+      "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
   },
   { label: "JetBrains Mono", family: "'JetBrains Mono', ui-monospace, monospace" },
   { label: "SF Mono", family: "'SF Mono', ui-monospace, monospace" },
