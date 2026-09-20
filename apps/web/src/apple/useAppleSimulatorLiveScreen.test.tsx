@@ -1,6 +1,6 @@
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { AppleScreenStreamRequest } from "@octant/contracts/apple-toolchain-rpc";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 
@@ -143,5 +143,34 @@ describe("the live Simulator screen", () => {
     second.push(Uint8Array.from([2]));
 
     await waitFor(() => expect(result.current.status).toBe("live"));
+  });
+
+  it("gives up on a view that keeps dying right after its first frame, so the still can show", async () => {
+    vi.useFakeTimers();
+    async function* oneFrameThenGone() {
+      yield Uint8Array.from([1]);
+    }
+    const watchScreen = vi.fn(async () => ({
+      status: "watching" as const,
+      screen: { width: 1206, height: 2622 },
+      frames: oneFrameThenGone(),
+    }));
+    const client = clientWatching(watchScreen);
+    const { result } = renderHook(() =>
+      useAppleSimulatorLiveScreen({ client, request, enabled: true, decode }),
+    );
+
+    for (const delay of [1_000, 2_000, 4_000, 8_000]) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay + 50);
+      });
+    }
+
+    // The first try and three more; a first frame alone does not earn a fresh count.
+    expect(watchScreen).toHaveBeenCalledTimes(4);
+    expect(result.current).toEqual({
+      status: "unavailable",
+      message: "The live Simulator view stopped.",
+    });
   });
 });
