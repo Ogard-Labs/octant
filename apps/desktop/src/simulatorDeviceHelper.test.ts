@@ -332,6 +332,26 @@ describe("Simulator device helpers", () => {
     helpers.dispose();
   });
 
+  it("holds a returning viewer's start to its own deadline when only the old stream's stop is waiting", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const watching = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+    if (watch.status === "watching") watch.stop();
+
+    // The helper hangs while stopping, and the pane reopens. No input is being
+    // delivered, so nothing else would ever end this wait.
+    const again = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    await vi.advanceTimersByTimeAsync(5_100);
+
+    await expect(again).resolves.toMatchObject({ status: "unavailable" });
+    expect(fake.child.kill).toHaveBeenCalled();
+    helpers.dispose();
+  });
+
   it("does not show a returning viewer a frame the stopping stream sent after everyone had left", async () => {
     const fake = fakeChild();
     const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
