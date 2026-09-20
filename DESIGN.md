@@ -416,7 +416,11 @@ which a token does not. Leftover `.btn*` recipes are gone; adapters own
 button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 
-Controls are 44px by default and 34px compact. The shell frame runs on one
+Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
+toggles, comboboxes, badges) size in rem so they grow with the interface size;
+at the default 14px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
+3.5px at that root, so a recipe never uses an odd step bare: it rounds it to a
+whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
