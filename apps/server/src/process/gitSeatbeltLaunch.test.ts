@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -23,6 +23,7 @@ describe("git Seatbelt launch", () => {
     };
     prepareGitSeatbeltLaunch({
       confinement,
+      platform: "darwin",
       gitExecutable: "/opt/toolchain/usr/bin/git",
       checkoutRoot: "/repo",
       args: ["status"],
@@ -40,7 +41,14 @@ describe("git Seatbelt launch", () => {
     // than binding it, so a directory created under /tmp is invisible to the
     // confined process until the launch names it. Mounts are emitted
     // shallowest first, which is what puts the bind inside that tmpfs.
-    const directory = mkdtempSync(join(tmpdir(), "octant-write-root-"));
+    //
+    // The fixture lives under /tmp rather than os.tmpdir() because only /tmp
+    // and /var/tmp take that replacement. On macOS os.tmpdir() is a
+    // per-user directory under /var/folders, which is bound like any other
+    // write root, so a fixture there would never reach the branch this test
+    // is about.
+    const sharedTemporaryRoot = "/tmp";
+    const directory = mkdtempSync(join(sharedTemporaryRoot, "octant-write-root-"));
     const bwrap = join(directory, "bwrap");
     writeFileSync(bwrap, '#!/bin/sh\nexec "$@"\n', { mode: 0o700 });
     chmodSync(bwrap, 0o700);
@@ -49,19 +57,22 @@ describe("git Seatbelt launch", () => {
     try {
       const launch = prepareGitSeatbeltLaunch({
         confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrap }),
+        platform: "linux",
         gitExecutable: "/usr/bin/git",
         checkoutRoot: directory,
         args: ["-C", directory, "merge-tree", "--write-tree", "HEAD", "HEAD"],
-        temporaryDirectory: tmpdir(),
+        temporaryDirectory: sharedTemporaryRoot,
         networkEgress: "none",
         additionalWriteRoots: [quarantine],
       });
+      // A bind's target is the path the launch named, which is what the
+      // confined process sees; only its source is canonicalized for the host.
       const bind = launch.args.findIndex(
-        (argument, index) =>
-          argument === "--bind" && launch.args[index + 2] === realpathSync(quarantine),
+        (argument, index) => argument === "--bind" && launch.args[index + 2] === quarantine,
       );
       const tmpfs = launch.args.findIndex(
-        (argument, index) => argument === "--tmpfs" && launch.args[index + 1] === tmpdir(),
+        (argument, index) =>
+          argument === "--tmpfs" && launch.args[index + 1] === sharedTemporaryRoot,
       );
       expect(bind).toBeGreaterThan(-1);
       expect(tmpfs).toBeGreaterThan(-1);
@@ -76,25 +87,31 @@ describe("git Seatbelt launch", () => {
       MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`),
     );
     expect(gitShimExtraRules("linux")).toEqual([]);
-    if (process.platform !== "darwin") return;
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const prepared: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
     const confinement: SeatbeltConfinementPort = {
       prepare: (input) => {
-        captured = input;
+        prepared.push(input);
         return { command: "/usr/bin/sandbox-exec", args: [] };
       },
     };
-    prepareGitSeatbeltLaunch({
+    const launch = {
       confinement,
       gitExecutable: "/opt/toolchain/usr/bin/git",
       checkoutRoot: "/repo",
       args: ["status"],
       temporaryDirectory: "/tmp",
       networkEgress: "allow",
-    });
+    } as const;
+    prepareGitSeatbeltLaunch({ ...launch, platform: "darwin" });
+    prepareGitSeatbeltLaunch({ ...launch, platform: "linux" });
     for (const path of MACOS_GIT_SHIM_READ_PATHS) {
-      expect(captured?.extraRules).toContain(`(allow file-read* (literal "${path}"))`);
+      expect(prepared[0]?.extraRules).toContain(`(allow file-read* (literal "${path}"))`);
     }
+    // These literals are Seatbelt, and Bubblewrap refuses any rule it cannot
+    // express. The shape follows the platform the launch is confined for, not
+    // the platform this process runs on: otherwise an ordinary checkout
+    // prepared for Linux from a macOS host is refused before it runs.
+    expect(prepared[1]?.extraRules).toBeUndefined();
   });
 
   it("allows a linked worktree's gitdir and commondir outside the bound root", () => {
@@ -135,6 +152,7 @@ describe("git Seatbelt launch", () => {
             return { command: "/usr/bin/sandbox-exec", args: [] };
           },
         },
+        platform: "darwin",
         gitExecutable: "/usr/bin/git",
         checkoutRoot: worktree,
         args: ["status"],
@@ -173,6 +191,7 @@ describe("git Seatbelt launch", () => {
           homeDirectory: root,
           usersDirectory: root,
         }),
+        platform: "darwin",
         gitExecutable: "/opt/toolchain/usr/bin/git",
         checkoutRoot: worktree,
         args: ["-C", worktree, "status", "--short"],

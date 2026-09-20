@@ -44,7 +44,7 @@ Read the record that owns your change before editing, not all of them:
 | Native harness loop, role slots, advisor, follow-ups, overflow | `docs/decisions/0066`, `docs/decisions/0067`, `docs/decisions/0069`, `docs/decisions/0110`                                               |
 | Image generation jobs, adapters, and artifacts                 | `docs/decisions/0055`, `docs/decisions/0056`                                                                                             |
 | Work folder listing and what a turn changed                    | `docs/decisions/0083`                                                                                                                    |
-| What a Code turn changed in its checkout                       | `docs/decisions/0138`                                                                                                                    |
+| What a Code turn changed in its checkout                       | `docs/decisions/0139`                                                                                                                    |
 | Context limits, capacity, scheduling                           | `docs/decisions/0008`                                                                                                                    |
 | Usage spend ceilings (Project / thread)                        | `docs/decisions/0060`                                                                                                                    |
 | Pull-request snapshot persistence and refresh cadence          | `docs/decisions/0064`, `docs/decisions/0076`                                                                                             |

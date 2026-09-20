@@ -149,7 +149,8 @@ distilled successor of the earlier long-form design specifications.
 | [0135](0135-confined-git-reads-its-worktree-s-metadata.md) | Confined Git reads its worktree's metadata | Accepted |
 | [0136](0136-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
 | [0137](0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md) | Simulator input reaches the guest through a native device helper | Accepted |
-| [0138](0138-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
+| [0138](0138-codex-delegation-stops-at-the-edit-waiver.md) | Codex delegation stops at the edit waiver | Accepted |
+| [0139](0139-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
 
 ## Adding an ADR
 
