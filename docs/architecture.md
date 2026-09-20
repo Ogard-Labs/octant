@@ -415,7 +415,13 @@ attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason.
+and new lines, and every refusal names the helper's own reason. A swipe is a
+fourth input kind on the same channel, for the pane and for `octant_apple`
+alike, and the live screen is driven directly: a press and release is a tap, a
+drag is one swipe sent when it ends, keys typed on the focused screen go to
+the device as one text per pause, Home and Lock are buttons, and what a person
+does while an action runs is kept and sent in order (see
+[decisions/0139-the-live-simulator-screen-is-driven-directly.md](decisions/0139-the-live-simulator-screen-is-driven-directly.md)).
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a
 thread as a context-aware dock tab opened from the title-bar shortcut or Add
 tool. It may

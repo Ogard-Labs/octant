@@ -829,6 +829,13 @@ function appleActionRequest(
         ) {
           return undefined;
         }
+        const durationMs =
+          input.durationMs === undefined ? undefined : Math.round(input.durationMs);
+        // The contract's own range. Left to the desktop's decoder, a pace
+        // outside it came back as the desktop being unreachable.
+        if (durationMs !== undefined && !(durationMs >= 50 && durationMs <= 5_000)) {
+          return undefined;
+        }
         return {
           ...base,
           kind: "swipe",
@@ -836,7 +843,7 @@ function appleActionRequest(
           requestedBy,
           point: { x: input.x, y: input.y },
           toPoint: { x: input.toX, y: input.toY },
-          ...(input.durationMs === undefined ? {} : { durationMs: Math.round(input.durationMs) }),
+          ...(durationMs === undefined ? {} : { durationMs }),
           timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
         } as AppleActionRequest;
       }

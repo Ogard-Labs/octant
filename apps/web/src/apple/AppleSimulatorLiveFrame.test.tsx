@@ -442,12 +442,46 @@ describe("AppleSimulatorLiveFrameView", () => {
       expect(onInput).not.toHaveBeenCalled();
     });
 
-    it("offers Home and Lock as the device's buttons", () => {
+    it("sends Home after the text typed just before it, and takes it even while an action runs", () => {
+      vi.useFakeTimers();
       const onInput = vi.fn();
-      render(liveView({ onInput }));
+      const { rerender } = render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "h" });
+      fireEvent.keyDown(region, { key: "i" });
+      // Home is clicked before the typing pause has passed.
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+      ]);
+
+      rerender(liveView({ onInput, busy: true }));
+      // Still clickable while the typing is being delivered; it waits its turn.
+      fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+      rerender(liveView({ onInput, busy: false }));
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+        { kind: "key-press", key: "home" },
+        { kind: "key-press", key: "lock" },
+      ]);
+    });
+
+    it("offers Home and Lock as the device's buttons, one action at a time", () => {
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput }));
 
       fireEvent.click(screen.getByRole("button", { name: "Home" }));
       fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "home" },
+      ]);
+      // Home's action runs and finishes; Lock follows it.
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
 
       expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
         { kind: "key-press", key: "home" },

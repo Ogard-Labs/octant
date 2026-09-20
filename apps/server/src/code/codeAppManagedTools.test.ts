@@ -1210,6 +1210,25 @@ describe("the Apple capability as an agent tool", () => {
       durationMs: 300,
     });
     expect(oneEnded.isError).toBe(true);
+
+    // A pace outside what the channel carries is the caller's mistake, and is
+    // said so here rather than surfacing later as an unreachable desktop.
+    for (const durationMs of [10, 6_000, Number.NaN]) {
+      const refused = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify({
+          operation: "swipe",
+          simulatorId,
+          x: 600,
+          y: 2000,
+          toX: 600,
+          toY: 800,
+          durationMs,
+        }),
+      } as never);
+      expect(refused.isError).toBe(true);
+    }
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("refuses an action whose destination or project the caller did not name", async () => {

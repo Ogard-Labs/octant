@@ -57,8 +57,8 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
     >
       <figcaption>{frame.title}</figcaption>
       {frame.status === "live" && streamed !== undefined ? (
-        <StreamedScreen
-          // A screen's waiting input, pending press and typing timer belong to
+        <StreamedDevice
+          // A device's waiting input, pending press and typing timer belong to
           // one Simulator. When the frame moves to another they are dropped with
           // the component, so nothing typed on one device is sent to the next.
           key={String(frame.simulatorId)}
@@ -87,7 +87,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
           Evidence <code>{evidence}</code>
         </p>
       )}
-      {offerInput ? (
+      {offerInput && streamed === undefined ? (
         <FrameInputControls busy={props.busy === true} onInput={props.onInput!} />
       ) : null}
     </figure>
@@ -146,27 +146,26 @@ const TYPING_PAUSE_MS = 350;
 /** An input that has not made the pane busy by now never will; stop waiting for it. */
 const UNANSWERED_INPUT_MS = 1_000;
 
-function StreamedScreen(props: {
-  readonly name: string;
-  readonly screen: { readonly width: number; readonly height: number };
-  readonly attach: (canvas: HTMLCanvasElement | null) => void;
-  readonly offerInput: boolean;
-  readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
+/**
+ * Sends what a person does to a device one action at a time, in the order they
+ * did it. The host runs one Simulator action at a time; what happens meanwhile
+ * — more typing, a tap right after a swipe, Home clicked before the typing
+ * pause has passed — waits here instead of being lost or overtaking.
+ */
+function useOrderedSimulatorInput(options: {
   readonly busy: boolean;
+  readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pressRef = useRef<(PointerSample & { readonly pointerId: number }) | undefined>(undefined);
+  const { busy, onInput } = options;
   // The host runs one Simulator action at a time. What a person does meanwhile
   // is kept in order and sent as each action finishes, so fast typing and a tap
   // right after a swipe are not lost to a disabled control.
   const waitingRef = useRef<AppleSimulatorFrameInputIntent[]>([]);
   const sentRef = useRef(false);
-  const busyRef = useRef(props.busy);
-  busyRef.current = props.busy;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
   const unansweredRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const typingRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { attach, busy, offerInput, onInput } = props;
-  const active = offerInput && onInput !== undefined;
 
   const sendNext = useCallback(() => {
     if (onInput === undefined || busy || sentRef.current) return;
@@ -236,6 +235,50 @@ function StreamedScreen(props: {
     sendNext();
   };
 
+  return enqueue;
+}
+
+function StreamedDevice(props: {
+  readonly name: string;
+  readonly screen: { readonly width: number; readonly height: number };
+  readonly attach: (canvas: HTMLCanvasElement | null) => void;
+  readonly offerInput: boolean;
+  readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
+  readonly busy: boolean;
+}) {
+  const enqueue = useOrderedSimulatorInput({
+    busy: props.busy,
+    ...(props.onInput === undefined ? {} : { onInput: props.onInput }),
+  });
+  const active = props.offerInput && props.onInput !== undefined;
+  return (
+    <>
+      <StreamedScreen
+        active={active}
+        attach={props.attach}
+        enqueue={enqueue}
+        name={props.name}
+        screen={props.screen}
+      />
+      {active ? (
+        // Never disabled for being busy: the buttons wait their turn in the
+        // same queue as the screen, behind whatever was typed before them.
+        <FrameInputControls busy={false} onInput={(intent) => enqueue(intent, false)} />
+      ) : null}
+    </>
+  );
+}
+
+function StreamedScreen(props: {
+  readonly name: string;
+  readonly screen: { readonly width: number; readonly height: number };
+  readonly attach: (canvas: HTMLCanvasElement | null) => void;
+  readonly active: boolean;
+  readonly enqueue: (intent: AppleSimulatorFrameInputIntent, typing: boolean) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pressRef = useRef<(PointerSample & { readonly pointerId: number }) | undefined>(undefined);
+  const { active, attach, enqueue } = props;
   return (
     // The same coordinate hit region as the captured still: the recipe's fixed
     // height and padding would distort the mapped geometry. It is not disabled
@@ -244,9 +287,7 @@ function StreamedScreen(props: {
     /* ui-boundary-exception: specialized-editor-surface */
     <button
       aria-label={
-        props.offerInput
-          ? `Tap on ${props.name} Simulator screen`
-          : `${props.name} Simulator screen`
+        active ? `Tap on ${props.name} Simulator screen` : `${props.name} Simulator screen`
       }
       className="apple-simulator-frame__screen"
       disabled={!active}
