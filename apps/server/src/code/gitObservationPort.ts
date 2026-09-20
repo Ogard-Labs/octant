@@ -552,6 +552,7 @@ export class GitObservationPort {
       }
       const launch = prepareGitSeatbeltLaunch({
         confinement: this.#confinement.confinement,
+        platform: this.#confinement.platform,
         gitExecutable: this.#confinement.gitExecutable,
         checkoutRoot,
         args,

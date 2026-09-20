@@ -14,6 +14,15 @@ import type { OsNetworkEgress } from "./threadEgressPolicy";
 
 export interface GitSeatbeltLaunchOptions {
   readonly confinement: SeatbeltConfinementPort;
+  /**
+   * The platform `confinement` confines for, which is the dialect these rules
+   * have to be written in — not the platform this process happens to run on.
+   * Deriving it from the host emits Seatbelt literals into a Bubblewrap
+   * launch, which refuses any rule it cannot express, so the launch fails
+   * before it runs. Callers take it from `createGitSeatbeltConfinement`, which
+   * resolved it for the port it built.
+   */
+  readonly platform: NodeJS.Platform;
   readonly gitExecutable: string;
   readonly checkoutRoot: string;
   readonly args: ReadonlyArray<string>;
@@ -138,9 +147,7 @@ export const MACOS_GIT_SHIM_READ_PATHS = [
   "/private/var/db/xcode_select_link",
 ] as const;
 
-export function gitShimExtraRules(
-  platform: NodeJS.Platform = process.platform,
-): ReadonlyArray<string> {
+export function gitShimExtraRules(platform: NodeJS.Platform): ReadonlyArray<string> {
   if (platform !== "darwin") return [];
   return MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`);
 }
@@ -249,12 +256,14 @@ export function gitConfigIncludePaths(
 
 export function createGitSeatbeltConfinement(options: GitSeatbeltPortOptions = {}): {
   readonly confinement: SeatbeltConfinementPort;
+  readonly platform: NodeJS.Platform;
   readonly gitExecutable: string;
   readonly temporaryDirectory: string;
   readonly networkEgress: OsNetworkEgress;
 } {
   const platform = options.platform ?? process.platform;
   return {
+    platform,
     confinement:
       options.confinement ??
       makeSeatbeltConfinementLive({
@@ -287,7 +296,7 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
   }
   const binaryDirectory = dirname(options.gitExecutable);
   const extraRules = [
-    ...gitShimExtraRules(),
+    ...gitShimExtraRules(options.platform),
     ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, {
       writable: options.writable ?? false,
     }),
