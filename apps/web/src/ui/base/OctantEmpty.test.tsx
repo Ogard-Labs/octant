@@ -11,4 +11,22 @@ describe("OctantEmpty", () => {
     expect(state).toHaveClass("rounded-[var(--octant-radius-panel)]");
     expect(state).toHaveClass("shadow-[var(--octant-shadow-sm)]");
   });
+
+  it("draws a message's mark in neutral ink, whatever went wrong", () => {
+    render(
+      <OctantEmpty
+        icon={<svg data-testid="mark" />}
+        message="Local Machine access is unavailable."
+        role="alert"
+        title="Project authority is unavailable"
+      />,
+    );
+
+    // The mark's shape says what happened. A yellow or red glyph was the one
+    // coloured thing on a neutral screen, so the recipe offers no such tone.
+    const media = screen.getByTestId("mark").parentElement;
+    expect(media).toHaveAttribute("data-slot", "empty-media");
+    expect(media?.className).toContain("text-muted-foreground");
+    expect(media?.className).not.toMatch(/warning|danger|destructive/);
+  });
 });
