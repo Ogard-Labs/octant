@@ -237,6 +237,29 @@ describe("appleToolchainClient", () => {
       expect(JSON.parse(String(init?.body))).toEqual(watchRequest);
     });
 
+    it("answers at once when a stream opens without saying how big the screen is", async () => {
+      const cancelled = vi.fn();
+      // The body never ends, as a live stream's does not.
+      const open = new ReadableStream<Uint8Array>({ cancel: cancelled });
+      const client = createAppleToolchainClient({
+        baseUrl: "http://127.0.0.1:13773",
+        fetch: vi.fn(async () => new Response(open, { status: 200 })),
+        windowCapability: "A".repeat(43),
+      });
+
+      const answer = await Promise.race([
+        client.watchScreen(watchRequest),
+        new Promise((resolve) => setTimeout(() => resolve("still waiting"), 200)),
+      ]);
+
+      expect(answer).toEqual({
+        status: "failed",
+        kind: "protocol",
+        message: "Apple toolchain service returned an invalid response.",
+      });
+      expect(cancelled).toHaveBeenCalled();
+    });
+
     it("reports the host's reason when there is no live view", async () => {
       const fetch = vi.fn(async () =>
         Response.json(

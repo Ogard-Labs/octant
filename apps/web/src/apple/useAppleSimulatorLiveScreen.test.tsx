@@ -270,6 +270,42 @@ describe("the live Simulator screen", () => {
     expect(result.current.status).toBe("live");
   });
 
+  it("gives up on a view that never shows a first picture, so the still can show", async () => {
+    vi.useFakeTimers();
+    const unreadable = vi.fn(async () => {
+      throw new Error("not a picture");
+    });
+    const signals: AbortSignal[] = [];
+    const watchScreen = vi.fn(async (_request: unknown, signal?: AbortSignal) => {
+      if (signal !== undefined) signals.push(signal);
+      // One frame nothing can decode, then silence: a still screen sends no more.
+      async function* frames() {
+        yield Uint8Array.from([1]);
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+      }
+      return {
+        status: "watching" as const,
+        screen: { width: 1206, height: 2622 },
+        frames: frames(),
+      };
+    });
+    const client = clientWatching(watchScreen);
+    const { result } = renderHook(() =>
+      useAppleSimulatorLiveScreen({ client, request, enabled: true, decode: unreadable }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(watchScreen).toHaveBeenCalledTimes(4);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(result.current).toEqual({
+      status: "unavailable",
+      message: "The live Simulator view showed no picture.",
+    });
+  });
+
   it("gives up on a view that keeps dying right after its first frame, so the still can show", async () => {
     vi.useFakeTimers();
     async function* oneFrameThenGone() {
