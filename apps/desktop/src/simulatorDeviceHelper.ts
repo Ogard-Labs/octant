@@ -236,7 +236,11 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         // Copied: the viewers keep the frame after this buffer moves on.
         const jpeg = Uint8Array.from(helper.bufferedFrames.subarray(4, length + 4));
         helper.bufferedFrames = helper.bufferedFrames.subarray(length + 4);
-        helper.latestFrame = jpeg;
+        // Kept only for a stream somebody is watching or waiting for. A stop is
+        // queued, not instant, so the ending stream can present once more after
+        // the last viewer left; kept, that frame was the first thing the next
+        // viewer saw, however long ago it was taken.
+        if (helper.viewers.size > 0 || helper.streaming !== undefined) helper.latestFrame = jpeg;
         for (const viewer of helper.viewers) viewer.onFrame(jpeg);
       }
     });
@@ -380,11 +384,16 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       } catch {
         return { status: "unavailable", message: "The device helper could not be started." };
       }
+      // The helper answers in order, so a start asked for while an input is
+      // still being delivered waits behind it. Its own short deadline would
+      // then stop the helper under that input, which may already have typed
+      // part of its text; the input's deadline is what catches a helper that
+      // truly hangs.
       helper.streaming ??= ask(
         simulatorId,
         helper,
         { op: "stream-start", ...watchOptions },
-        timeoutMs,
+        helper.pending.size > 0 ? LONGEST_INPUT_MS : timeoutMs,
       );
       const started = await helper.streaming;
       if (started.status !== "delivered") {

@@ -308,6 +308,58 @@ describe("Simulator device helpers", () => {
     helpers.dispose();
   });
 
+  it("does not stop a helper that is still typing just because a viewer's start had to wait behind it", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+
+    // The pane opens while the text is still going in. The helper answers in
+    // order, so the stream cannot start until the typing is done.
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd: vi.fn() },
+      5_000,
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 1, ok: true });
+    fake.answer({ id: 2, ok: true });
+
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+    await expect(watching).resolves.toMatchObject({ status: "watching" });
+    helpers.dispose();
+  });
+
+  it("does not show a returning viewer a frame the stopping stream sent after everyone had left", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const framed = (...bytes: number[]) => {
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(bytes.length);
+      return Buffer.concat([header, Buffer.from(bytes)]);
+    };
+    const watching = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+    if (watch.status === "watching") watch.stop();
+    // The stop is only queued; the old stream presents once more before it ends.
+    fake.frames(framed(0xff, 0xd8, 0x01, 0xff, 0xd9));
+    fake.answer({ id: 2, ok: true });
+
+    const returning = vi.fn();
+    const again = helpers.watch(simulator, options, { onFrame: returning, onEnd: vi.fn() }, 5_000);
+    // This time the answer comes before the new stream's own first frame.
+    fake.answer({ id: 3, ok: true });
+    await again;
+    fake.frames(framed(0xff, 0xd8, 0x02, 0xff, 0xd9));
+
+    expect(returning.mock.calls.map(([jpeg]) => (jpeg as Uint8Array)[2])).toEqual([0x02]);
+    helpers.dispose();
+  });
+
   it("hands every viewer each whole frame, however the bytes arrive", async () => {
     const fake = fakeChild();
     const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
