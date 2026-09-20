@@ -224,6 +224,7 @@ export function execVersionRead(
       options.timeout,
     );
     const capture = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+      if (settled) return;
       if (stream === "stdout") stdout += chunk.toString("utf8");
       else stderr += chunk.toString("utf8");
       if (stdout.length > options.maxBuffer || stderr.length > options.maxBuffer) {
