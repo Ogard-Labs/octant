@@ -38,6 +38,25 @@ describe("Simulator input through the desktop's device helper", () => {
     });
   });
 
+  it("sends a swipe with both ends and a default pace when none was asked for", async () => {
+    const { deliver, inject } = desktop({ kind: "delivered" });
+
+    await inject(
+      request({ kind: "swipe", point: { x: 600, y: 2_000 }, toPoint: { x: 600, y: 800 } }),
+      context,
+      30_000,
+    );
+
+    expect(deliver.mock.calls[0]?.[0]).toEqual({
+      kind: "swipe",
+      udid,
+      budgetMs: 30_000,
+      from: { x: 600, y: 2_000 },
+      to: { x: 600, y: 800 },
+      durationMs: 250,
+    });
+  });
+
   it("sends typed text and keys, and never echoes the text back", async () => {
     const { deliver, inject } = desktop({ kind: "delivered" });
 

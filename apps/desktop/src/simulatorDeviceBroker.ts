@@ -117,22 +117,48 @@ export function createSimulatorInputDelivery(
     if (looked.kind !== "screen") return looked;
     const screen = looked.screen;
     const remainingMs = deadline - now();
-    if (remainingMs < SHORTEST_USEFUL_BUDGET_MS) {
+    // A swipe holds the helper for its whole pace. Started with less time than
+    // that, it was stopped part-way with a finger already down on the screen.
+    const neededMs =
+      SHORTEST_USEFUL_BUDGET_MS + (command.kind === "swipe" ? command.durationMs : 0);
+    if (remainingMs < neededMs) {
       return {
         kind: "unavailable",
         reason: "deadline-passed",
-        message: "Getting the Simulator ready used the action's time; nothing was tapped.",
+        message: "Getting the Simulator ready used the action's time; nothing was sent.",
       };
     }
-    const x = command.point.x / screen.width;
-    const y = command.point.y / screen.height;
-    if (x > 1 || y > 1) {
-      return {
-        kind: "refused",
-        reason: "point-off-screen",
-        message: `The point is outside the ${screen.width}×${screen.height} screen.`,
-      };
+    const fraction = (point: { readonly x: number; readonly y: number }) => ({
+      x: point.x / screen.width,
+      y: point.y / screen.height,
+    });
+    const offScreen: SimulatorDeviceInputResult = {
+      kind: "refused",
+      reason: "point-off-screen",
+      message: `The point is outside the ${screen.width}×${screen.height} screen.`,
+    };
+    if (command.kind === "swipe") {
+      const from = fraction(command.from);
+      const to = fraction(command.to);
+      if (from.x > 1 || from.y > 1 || to.x > 1 || to.y > 1) return offScreen;
+      return result(
+        await helpers.send(
+          command.udid,
+          {
+            op: "swipe",
+            fromX: from.x,
+            fromY: from.y,
+            toX: to.x,
+            toY: to.y,
+            durationMs: command.durationMs,
+          },
+          remainingMs,
+          cancelled,
+        ),
+      );
     }
+    const { x, y } = fraction(command.point);
+    if (x > 1 || y > 1) return offScreen;
     return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs, cancelled));
   };
 }
