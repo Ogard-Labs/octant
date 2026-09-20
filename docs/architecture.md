@@ -974,6 +974,14 @@ mechanisms are:
   Linux) fails closed. Provider runtimes that make their own API call resolve
   provider-endpoints-only on Chat and Work turns, a scoped exception to 0009
   recorded in [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md).
+  A provider runtime launch is wrapped when the process carries exactly one
+  thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
+  Full access. The Codex app-server carries every thread on a provider instance
+  and is a named exception; the Claude Agent SDK launch carries one thread per
+  query and is unwrapped anyway, a gap and not an exception. That set is named
+  and pinned by
+  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md),
+  and the tools those threads reach stay confined either way.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

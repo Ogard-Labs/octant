@@ -154,6 +154,7 @@ distilled successor of the earlier long-form design specifications.
 | [0140](0140-the-live-simulator-screen-is-driven-directly.md) | The live Simulator screen is driven directly | Accepted |
 | [0141](0141-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
 | [0142](0142-one-approval-opens-a-simulator-to-input.md) | One approval opens a Simulator to input | Accepted |
+| [0143](0143-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
 
 ## Adding an ADR
 
