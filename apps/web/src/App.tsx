@@ -5661,7 +5661,12 @@ function LaunchedShell(
                       workBoardOpen ||
                       archiveOpen ||
                       automationCenterVisible ||
-                      agentsCenterVisible
+                      agentsCenterVisible ||
+                      // These two cover the workspace like every page above, but
+                      // were left out of this list, so the thread underneath
+                      // stayed in the tab order and the page had two h1s.
+                      artifactLibraryOpen ||
+                      imageLibraryOpen
                     }
                     onActivatePane={(paneId) => void controller.activatePane(paneId)}
                     tabActivation={controller.tabActivation}
