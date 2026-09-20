@@ -116,6 +116,17 @@ function LiveScreen(props: {
         // sending a point the host adapter would map onto nothing.
         if (rect.width <= 0 || rect.height <= 0) return;
         if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+        // The hit region can be wider than the drawn screen: when the pane's
+        // height cap binds, the screen is centred with room either side. A
+        // click there is not on the device, so it is not a tap.
+        if (
+          event.clientX < rect.left ||
+          event.clientX > rect.right ||
+          event.clientY < rect.top ||
+          event.clientY > rect.bottom
+        ) {
+          return;
+        }
         const x = ((event.clientX - rect.left) / rect.width) * image.naturalWidth;
         const y = ((event.clientY - rect.top) / rect.height) * image.naturalHeight;
         props.onInput({
