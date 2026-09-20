@@ -27,8 +27,12 @@ separate decision.
   swipe (0140) is input like a tap and is covered the same way.
 - The grant is the host's. It lives in the server's memory, is keyed by thread
   and Simulator, and is consulted where the approval is validated, before any
-  side effect. A restarted host has no grants and asks again. Shutting a
-  Simulator down closes it for every thread.
+  side effect. The policy accepts a live grant in place of the one-shot
+  approval a request would otherwise carry, for input only; a shutdown, a boot
+  or any other effect still asks. Looking at a grant does not extend it: only
+  an input that was delivered renews it, and only a shutdown that succeeded
+  closes the Simulator for every thread. A restarted host has no grants and
+  asks again.
 - The pane learns of a grant only from the runtime snapshot, and uses it only
   to skip raising a confirmation the host would not require. A pane that skips
   wrongly is refused by the host as unauthorized; it cannot widen anything.

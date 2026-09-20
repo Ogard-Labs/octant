@@ -421,6 +421,33 @@ describe("Simulator frame input", () => {
     approvalValid: true,
   };
 
+  it("lets a Simulator the host holds open take input without a one-shot approval, and nothing else", () => {
+    const granted = { ...scope, inputGranted: true };
+    const withoutToken = { ...tap, approval: { kind: "not-required" as const } };
+    const decide = (request: unknown, scoped: unknown) =>
+      ApplePolicy.evaluateAppleSimulatorRequest(request as never, scoped as never, [booted]);
+
+    // The pane sends no approval when the host says the Simulator is open.
+    expect(decide(withoutToken, granted)).toEqual({ kind: "allowed" });
+    // Without the host's grant the same request is refused, as before.
+    expect(decide(withoutToken, scope)).toMatchObject({ reason: "approval-required" });
+    // The grant covers input. Shutting the Simulator down still asks.
+    const shutdown = {
+      ...withoutToken,
+      kind: "shutdown" as const,
+      point: undefined,
+      requestedBy: undefined,
+    };
+    expect(decide(shutdown, granted)).toMatchObject({ reason: "approval-required" });
+    // A denial still wins, and Plan mode is still read-only.
+    expect(
+      decide({ ...withoutToken, approval: { kind: "denied" as const } }, granted),
+    ).toMatchObject({ reason: "approval-denied" });
+    expect(decide(withoutToken, { ...granted, executionPolicy: "plan" as const })).toMatchObject({
+      reason: "read-only-policy",
+    });
+  });
+
   it("treats tap, type-text, and key-press as destination effects that need a booted Simulator", () => {
     expect(isAppleSimulatorInputKind("tap")).toBe(true);
     expect(evaluateAppleSimulatorRequest(tap, scope, [booted])).toEqual({ kind: "allowed" });

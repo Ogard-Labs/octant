@@ -4294,25 +4294,25 @@ export function startOctantServer(
       }
       const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
       const action = envelope.kind === "apple-action-request" ? envelope.request : undefined;
-      // A Simulator that shuts down is closed to input for every thread: the
-      // next boot is a different session of that device.
-      if (action?.kind === "shutdown") simulatorInputGrants.revokeSimulator(action.simulatorId);
       const inputSimulatorId =
         action !== undefined && isAppleSimulatorInputKind(action.kind) && "simulatorId" in action
           ? action.simulatorId
           : undefined;
       let approvalValid: boolean;
+      let inputGranted = false;
       if (action === undefined || effectiveThread.executionPolicy === "full-access") {
         approvalValid = true;
       } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
         approvalValid = false;
       } else if (
         inputSimulatorId !== undefined &&
-        simulatorInputGrants.use(String(thread.id), String(inputSimulatorId))
+        simulatorInputGrants.isOpen(String(thread.id), String(inputSimulatorId))
       ) {
         // One approved input opened this Simulator to the thread; confirming
-        // every tap made the live device unusable.
+        // every tap made the live device unusable. The policy accepts the
+        // grant in place of a one-shot approval on the request.
         approvalValid = true;
+        inputGranted = true;
       } else {
         approvalValid =
           (await codeOperationRuntime?.validateAppleApproval(windowId, action)) ?? false;
@@ -4328,12 +4328,24 @@ export function startOctantServer(
         sourceRevision: checkout.head.oid,
         executionPolicy: effectiveThread.executionPolicy,
         approvalValid,
+        ...(inputGranted ? { inputGranted } : {}),
       };
     };
     const appleToolchainRoutes = createAppleToolchainRouteHandler({
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
+      afterAction: (request, evidence, context) =>
+        simulatorInputGrants.afterAction(
+          String(context.threadId),
+          {
+            kind: request.kind,
+            ...("simulatorId" in request && request.simulatorId !== undefined
+              ? { simulatorId: String(request.simulatorId) }
+              : {}),
+          },
+          evidence.outcome,
+        ),
       inputGrants: (threadId) => simulatorInputGrants.list(String(threadId)),
       ...(simulatorDevice === undefined
         ? {}

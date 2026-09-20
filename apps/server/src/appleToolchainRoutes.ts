@@ -4,7 +4,9 @@ import {
   decodeAppleRuntimeSnapshot,
   decodeAppleScreenStreamRequest,
   SIMULATOR_SCREEN_HEADER,
+  type AppleActionRequest,
   type AppleAuthorityScopeRequest,
+  type AppleBuildEvidence,
   type AppleRpcEnvelope,
   type WindowId,
 } from "@octant/contracts";
@@ -27,6 +29,15 @@ export interface AppleToolchainRouteDependencies {
     scope: AppleAuthorityScopeRequest,
     envelope: AppleRpcEnvelope,
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
+  /**
+   * Called with what an action came to, after it ran. The host's input grants
+   * follow what was delivered rather than what was asked.
+   */
+  readonly afterAction?: (
+    request: AppleActionRequest,
+    evidence: AppleBuildEvidence,
+    context: AppleExecutionContext,
+  ) => void;
   /** Simulators the thread may send input to without a new approval. */
   readonly inputGrants?: (
     threadId: AppleExecutionContext["threadId"],
@@ -174,6 +185,7 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         case "apple-action-request": {
           const startedAt = nowIso();
           const evidence = await dependencies.service.execute(envelope.request, context);
+          dependencies.afterAction?.(envelope.request, evidence, context);
           await dependencies.recordEvidence?.(evidence, startedAt);
           return encoded(
             {

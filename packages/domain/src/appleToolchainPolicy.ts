@@ -22,6 +22,12 @@ export interface AppleExecutionScope {
   readonly checkoutId: CodeCheckoutId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvalValid: boolean;
+  /**
+   * The host holds this thread's Simulator open to input (0142). Input is then
+   * allowed without a one-shot approval on the request; the pane sends none,
+   * because it only ever learns of the grant, and cannot make one.
+   */
+  readonly inputGranted?: boolean;
 }
 
 const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
@@ -90,7 +96,12 @@ export function evaluateAppleSimulatorRequest(
   // terminating an app, and injecting tap/text/keys do change it, and go
   // through approval like any other Code effect.
   const readOnly = request.kind === "logs" || request.kind === "screenshot";
-  const scoped = evaluateScope(request, scope, !readOnly);
+  const scoped = evaluateScope(
+    request,
+    scope,
+    !readOnly,
+    isAppleSimulatorInputKind(request.kind) && scope.inputGranted === true,
+  );
   if (scoped.kind === "denied") return scoped;
   if (isAppleSimulatorInputKind(request.kind) && request.requestedBy === undefined) {
     return { kind: "denied", reason: "actor-required" };
@@ -123,6 +134,7 @@ function evaluateScope(
   >,
   scope: AppleExecutionScope,
   sideEffect: boolean,
+  coveredByGrant = false,
 ): AppleToolchainPolicyDecision {
   if (request.authority.extension.kind !== "core") {
     return { kind: "denied", reason: "core-capability-required" };
@@ -141,6 +153,7 @@ function evaluateScope(
   if (
     sideEffect &&
     decidesCodeEffectsByApproval(scope.executionPolicy) &&
+    !(coveredByGrant && scope.approvalValid) &&
     (request.approval.kind !== "approved" || !scope.approvalValid)
   ) {
     return { kind: "denied", reason: "approval-required" };

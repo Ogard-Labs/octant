@@ -169,6 +169,60 @@ describe("Apple toolchain routes", () => {
     expect(ungranted.snapshot.inputGrants).toBeUndefined();
   });
 
+  it("tells the host what an action came to, so a grant follows what was delivered rather than what was asked", async () => {
+    const evidence = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      kind: "tap",
+      outcome: "failed",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      diagnostics: [{ severity: "note", message: "tap failed" }],
+      artifacts: [],
+      cleanup: "not-required",
+      durationMs: 5,
+      completedAt: "2026-09-19T20:00:01.000Z",
+    };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(async () => evidence),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const afterAction = vi.fn();
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: async () => context,
+      service,
+      afterAction,
+      now: () => 2,
+    });
+    const action = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "tap",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      point: { x: 1, y: 2 },
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "not-required" },
+    };
+
+    const response = await handler(request({ kind: "apple-action-request", request: action }));
+
+    expect(response?.status).toBe(200);
+    expect(afterAction).toHaveBeenCalledTimes(1);
+    expect(afterAction).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "tap" }),
+      evidence,
+      context,
+    );
+  });
+
   it("fails closed before service access for invalid window authority", async () => {
     const service = {
       discover: vi.fn(),

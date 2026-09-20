@@ -1,4 +1,4 @@
-import { APPLE_INPUT_GRANT_MS } from "@octant/domain";
+import { APPLE_INPUT_GRANT_MS, isAppleSimulatorInputKind } from "@octant/domain";
 
 export interface SimulatorInputGrant {
   readonly simulatorId: string;
@@ -25,8 +25,11 @@ export class SimulatorInputGrants {
     this.#expiry.set(key(threadId, simulatorId), this.#now() + APPLE_INPUT_GRANT_MS);
   }
 
-  /** True while the grant is live; a live grant is renewed by being used. */
-  use(threadId: string, simulatorId: string): boolean {
+  /**
+   * True while the grant is live. Looking does not extend it: every request
+   * looks, including ones that fail, and only a delivered input renews.
+   */
+  isOpen(threadId: string, simulatorId: string): boolean {
     const scope = key(threadId, simulatorId);
     const expiresAt = this.#expiry.get(scope);
     if (expiresAt === undefined) return false;
@@ -34,8 +37,30 @@ export class SimulatorInputGrants {
       this.#expiry.delete(scope);
       return false;
     }
-    this.#expiry.set(scope, this.#now() + APPLE_INPUT_GRANT_MS);
     return true;
+  }
+
+  /** Keeps a live grant open another fifteen minutes; a grant that is gone stays gone. */
+  renew(threadId: string, simulatorId: string): void {
+    if (this.isOpen(threadId, simulatorId)) this.open(threadId, simulatorId);
+  }
+
+  /**
+   * What a finished action means for the grants. Only what happened counts,
+   * not what was asked: a delivered input keeps its Simulator open, and a
+   * Simulator that was shut down is closed to every thread. A failed input or
+   * a failed shutdown changes nothing, since the device session carries on.
+   */
+  afterAction(
+    threadId: string,
+    action: { readonly kind: string; readonly simulatorId?: string },
+    outcome: string,
+  ): void {
+    if (outcome !== "succeeded" || action.simulatorId === undefined) return;
+    if (action.kind === "shutdown") this.revokeSimulator(action.simulatorId);
+    else if (isAppleSimulatorInputKind(action.kind as never)) {
+      this.renew(threadId, action.simulatorId);
+    }
   }
 
   revokeSimulator(simulatorId: string): void {

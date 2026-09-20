@@ -1470,6 +1470,40 @@ describe("AppleToolchainService Simulator input", () => {
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 
+  it("delivers input to a Simulator the host holds open even though the request carries no approval", async () => {
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const gated = { ...context, executionPolicy: "approval-gated" as const };
+    await service.discover(discoveryRequest, gated);
+    const tap = simulatorRequest({
+      kind: "tap",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      point: { x: 10, y: 20 },
+      approval: { kind: "not-required" },
+    });
+
+    // Asked as the pane asks once the host has said the Simulator is open.
+    const granted = await service.execute(tap, { ...gated, inputGranted: true });
+    expect(granted.outcome).toBe("succeeded");
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+
+    // The same request without the host's grant is refused before anything is sent.
+    const ungranted = await service.execute(
+      { ...tap, actionId: "30000000-0000-4000-8000-000000000013" as never },
+      gated,
+    );
+    expect(ungranted.outcome).toBe("unauthorized");
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+  });
+
   it("replaces host paths in the reason an action recorded no evidence", async () => {
     const discovery = discoveryExecutor();
     const execute = vi.fn(async (input: { readonly argv: readonly string[] }) => {
