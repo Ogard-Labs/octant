@@ -113,11 +113,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
           onInput={(intent) => enqueue(intent, false)}
         />
       ) : device && streamed === undefined ? (
-        <FrameInputControls
-          busy={true}
-          keys="hardware"
-          onInput={() => undefined}
-        />
+        <FrameInputControls busy={true} keys="hardware" onInput={() => undefined} />
       ) : null}
     </figure>
   );

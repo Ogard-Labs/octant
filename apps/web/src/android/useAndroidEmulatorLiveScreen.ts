@@ -146,7 +146,7 @@ export function useAndroidEmulatorLiveScreen(options: {
       latestRef.current?.frame.close();
       latestRef.current = undefined;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `requestKey` stands in for `request`: callers rebuild the object each render.
   }, [client, decode, enabled, requestKey]);
 
   const state: (typeof known)["state"] =

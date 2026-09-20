@@ -1213,9 +1213,7 @@ function approvalPrompt(
     message = input ? "Allow input to this emulator?" : `Allow Android ${effect.request.kind}?`;
     effectDetail = [
       ...(input
-        ? [
-            "Covers taps, swipes, typing and keys on this emulator for 15 minutes after each input.",
-          ]
+        ? ["Covers taps, swipes, typing and keys on this emulator for 15 minutes after each input."]
         : []),
       `Action: ${effect.request.kind}`,
       `Emulator: ${effect.request.emulatorId}`,

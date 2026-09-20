@@ -4391,9 +4391,7 @@ export function startOctantServer(
           ? action.simulatorId
           : undefined;
       const grantDestinationId =
-        action !== undefined &&
-        appleActionOpensInputGrant(action.kind) &&
-        "simulatorId" in action
+        action !== undefined && appleActionOpensInputGrant(action.kind) && "simulatorId" in action
           ? action.simulatorId
           : undefined;
       let approvalValid: boolean;

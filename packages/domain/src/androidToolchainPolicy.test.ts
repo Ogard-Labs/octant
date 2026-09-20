@@ -90,8 +90,8 @@ describe("evaluateAndroidEmulatorRequest", () => {
     expect(redactedAndroidInputDiagnostic({ kind: "type-text", text: "secret" }).message).toBe(
       "type-text completed (length=6; redacted)",
     );
-    expect(redactedAndroidInputDiagnostic({ kind: "type-text", text: "secret" }).message).not.toContain(
-      "secret",
-    );
+    expect(
+      redactedAndroidInputDiagnostic({ kind: "type-text", text: "secret" }).message,
+    ).not.toContain("secret");
   });
 });

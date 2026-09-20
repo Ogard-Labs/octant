@@ -8,7 +8,9 @@ export function spawnDetachedProcess(input: {
   readonly argv: ReadonlyArray<string>;
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
-}): Promise<{ readonly kind: "spawned" } | { readonly kind: "unavailable"; readonly message: string }> {
+}): Promise<
+  { readonly kind: "spawned" } | { readonly kind: "unavailable"; readonly message: string }
+> {
   const command = input.argv[0];
   if (command === undefined) {
     return Promise.resolve({

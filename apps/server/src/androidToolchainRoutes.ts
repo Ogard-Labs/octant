@@ -48,7 +48,9 @@ export interface AndroidToolchainRouteDependencies {
   readonly now?: () => number;
 }
 
-export function createAndroidToolchainRouteHandler(dependencies: AndroidToolchainRouteDependencies) {
+export function createAndroidToolchainRouteHandler(
+  dependencies: AndroidToolchainRouteDependencies,
+) {
   const now = dependencies.now ?? Date.now;
   const bodyLimit = dependencies.maxRequestBodySize ?? DEFAULT_BODY_LIMIT;
   return async (request: Request): Promise<Response | undefined> => {
@@ -61,7 +63,10 @@ export function createAndroidToolchainRouteHandler(dependencies: AndroidToolchai
       return undefined;
     }
     const origin = request.headers.get("origin");
-    if (!isLoopbackHostname(url.hostname) || (origin !== null && !isAllowedRendererOrigin(origin))) {
+    if (
+      !isLoopbackHostname(url.hostname) ||
+      (origin !== null && !isAllowedRendererOrigin(origin))
+    ) {
       return failure(
         "invalid",
         "Android toolchain requests must use an allowed loopback origin.",
@@ -298,9 +303,7 @@ async function handleArtifactRequest(input: {
   }
 }
 
-function requestScope(
-  envelope: AndroidRpcEnvelope,
-):
+function requestScope(envelope: AndroidRpcEnvelope):
   | {
       readonly authority: AndroidEmulatorRequest["authority"];
       readonly threadId: AndroidEmulatorRequest["threadId"];

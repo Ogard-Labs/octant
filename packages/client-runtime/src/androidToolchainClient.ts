@@ -42,7 +42,10 @@ export type AndroidScreenWatchResult =
     };
 
 export interface AndroidToolchainClient {
-  discover(request: AndroidDiscoveryRequest, signal?: AbortSignal): Promise<AndroidDiscoverySnapshot>;
+  discover(
+    request: AndroidDiscoveryRequest,
+    signal?: AbortSignal,
+  ): Promise<AndroidDiscoverySnapshot>;
   execute(request: AndroidEmulatorRequest, signal?: AbortSignal): Promise<AndroidEmulatorEvidence>;
   cancel(request: AndroidCancelRequest, signal?: AbortSignal): Promise<boolean>;
   snapshot(request: AndroidSnapshotRequest, signal?: AbortSignal): Promise<AndroidRuntimeSnapshot>;

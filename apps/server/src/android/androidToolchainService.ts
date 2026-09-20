@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -72,7 +71,9 @@ export interface AndroidToolchainServiceOptions {
     readonly argv: ReadonlyArray<string>;
     readonly cwd: string;
     readonly environment: Readonly<Record<string, string>>;
-  }) => Promise<{ readonly kind: "spawned" } | { readonly kind: "unavailable"; readonly message: string }>;
+  }) => Promise<
+    { readonly kind: "spawned" } | { readonly kind: "unavailable"; readonly message: string }
+  >;
   readonly realpath: (path: string) => Promise<string>;
   readonly observeEmulators?: (emulators: ReadonlyArray<AndroidEmulatorRecord>) => void;
   readonly writeArtifact: (reference: string, bytes: Uint8Array) => Promise<void>;
@@ -111,7 +112,10 @@ export class AndroidToolchainService {
         readonly checkoutId: AndroidExecutionContext["checkoutId"];
       }
     | undefined;
-  readonly #artifacts = new Map<string, { readonly bytes: Uint8Array; readonly threadId: string }>();
+  readonly #artifacts = new Map<
+    string,
+    { readonly bytes: Uint8Array; readonly threadId: string }
+  >();
 
   constructor(options: AndroidToolchainServiceOptions) {
     this.#options = options;
@@ -137,11 +141,7 @@ export class AndroidToolchainService {
         },
       };
     }
-    const listed = await this.#command(
-      [sdk.emulatorPath, "-list-avds"],
-      context,
-      30_000,
-    );
+    const listed = await this.#command([sdk.emulatorPath, "-list-avds"], context, 30_000);
     const names = succeeded(listed)
       ? text(listed.stdout)
           .split(/\r?\n/)
@@ -276,7 +276,9 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
     signal: AbortSignal,
   ): Promise<AndroidScreenWatch | { readonly kind: "unavailable"; readonly message: string }> {
-    const emulator = this.#emulators.find((candidate) => String(candidate.emulatorId) === emulatorId);
+    const emulator = this.#emulators.find(
+      (candidate) => String(candidate.emulatorId) === emulatorId,
+    );
     if (emulator === undefined || emulator.state !== "booted" || emulator.serial === undefined) {
       return { kind: "unavailable", message: "That emulator is not booted." };
     }
@@ -352,13 +354,23 @@ export class AndroidToolchainService {
         this.#setState(request.emulatorId, "shutdown");
         return await this.#unavailable(request, startedAt, "emulator");
       }
-      const ready = await this.#waitUntilBooted(request.emulatorId, context, request.timeoutMs, signal);
+      const ready = await this.#waitUntilBooted(
+        request.emulatorId,
+        context,
+        request.timeoutMs,
+        signal,
+      );
       this.#setState(request.emulatorId, ready ? "booted" : "shutdown");
       return await this.#logged(
         request,
         ready ? "succeeded" : signal.aborted ? "cancelled" : "timed-out",
         startedAt,
-        [{ severity: "note", message: ready ? "emulator booted" : "emulator did not become ready" }],
+        [
+          {
+            severity: "note",
+            message: ready ? "emulator booted" : "emulator did not become ready",
+          },
+        ],
         "complete",
       );
     }
@@ -615,9 +627,15 @@ export class AndroidToolchainService {
       reference,
       new TextEncoder().encode(diagnostics.map((item) => item.message).join("\n") + "\n"),
     );
-    return evidence(request, outcome, startedAt, this.#options.now(), diagnostics, [
-      { kind: "log", reference },
-    ], cleanup);
+    return evidence(
+      request,
+      outcome,
+      startedAt,
+      this.#options.now(),
+      diagnostics,
+      [{ kind: "log", reference }],
+      cleanup,
+    );
   }
 
   async #fromProcess(
@@ -625,7 +643,10 @@ export class AndroidToolchainService {
     result: AndroidProcessResult,
     startedAt: string,
   ): Promise<AndroidEmulatorEvidence> {
-    const message = text(result.stderr).trim() || text(result.stdout).trim() || `${request.kind} ${outcomeFor(result)}`;
+    const message =
+      text(result.stderr).trim() ||
+      text(result.stdout).trim() ||
+      `${request.kind} ${outcomeFor(result)}`;
     return await this.#logged(
       request,
       outcomeFor(result),
@@ -732,7 +753,16 @@ function inputArgv(
   request: AndroidEmulatorRequest,
 ): ReadonlyArray<string> | undefined {
   if (request.kind === "tap" && request.point !== undefined) {
-    return [adb, "-s", serial, "shell", "input", "tap", String(Math.round(request.point.x)), String(Math.round(request.point.y))];
+    return [
+      adb,
+      "-s",
+      serial,
+      "shell",
+      "input",
+      "tap",
+      String(Math.round(request.point.x)),
+      String(Math.round(request.point.y)),
+    ];
   }
   if (request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined) {
     return [
@@ -818,9 +848,15 @@ function deniedEvidence(
       : reason === "toolchain-unavailable"
         ? "unavailable"
         : "unauthorized";
-  return evidence(request, outcome, startedAt, completedAt, [
-    { severity: "note", message: reason },
-  ], [], "not-required");
+  return evidence(
+    request,
+    outcome,
+    startedAt,
+    completedAt,
+    [{ severity: "note", message: reason }],
+    [],
+    "not-required",
+  );
 }
 
 function evidence(
@@ -867,7 +903,9 @@ function text(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
-function pngSize(bytes: Uint8Array): { readonly width: number; readonly height: number } | undefined {
+function pngSize(
+  bytes: Uint8Array,
+): { readonly width: number; readonly height: number } | undefined {
   if (bytes.byteLength < 24) return undefined;
   if (bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
     return undefined;
@@ -877,7 +915,8 @@ function pngSize(bytes: Uint8Array): { readonly width: number; readonly height: 
 }
 
 function lengthPrefixed(frame: Uint8Array): Uint8Array {
-  const bounded = frame.byteLength > MAXIMUM_FRAME_BYTES ? frame.slice(0, MAXIMUM_FRAME_BYTES) : frame;
+  const bounded =
+    frame.byteLength > MAXIMUM_FRAME_BYTES ? frame.slice(0, MAXIMUM_FRAME_BYTES) : frame;
   const out = new Uint8Array(4 + bounded.byteLength);
   new DataView(out.buffer).setUint32(0, bounded.byteLength);
   out.set(bounded, 4);

@@ -73,7 +73,9 @@ describe("AndroidEmulatorRequest", () => {
         apkPath: "app/build/outputs/apk/debug/app-debug.apk",
       }).apkPath,
     ).toBe("app/build/outputs/apk/debug/app-debug.apk");
-    expect(() => decodeAndroidEmulatorRequest({ ...base, kind: "open-input", requestedBy: undefined })).toThrow();
+    expect(() =>
+      decodeAndroidEmulatorRequest({ ...base, kind: "open-input", requestedBy: undefined }),
+    ).toThrow();
     expect(() => decodeAndroidEmulatorRequest({ ...base, kind: "tap" })).toThrow();
     expect(() =>
       decodeAndroidEmulatorRequest({ ...base, kind: "install", apkPath: "/tmp/app.apk" }),

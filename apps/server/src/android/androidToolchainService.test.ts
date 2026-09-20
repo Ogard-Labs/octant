@@ -90,7 +90,9 @@ function discoveryExecutor() {
     const argv = input.argv.join(" ");
     if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
     if (argv.includes("devices")) {
-      return processResult("List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64\n");
+      return processResult(
+        "List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64\n",
+      );
     }
     if (argv.includes("emu avd name") || argv.includes("avd name")) {
       return processResult("Pixel_8_API_34\n");
@@ -160,7 +162,10 @@ describe("AndroidToolchainService", () => {
     await service.discover(discoveryRequest, context);
     execute.mockClear();
     const evidence = await service.execute(
-      action("open-input", { requestedBy: actor, approval: { kind: "approved", approvalId: ids.approval } }),
+      action("open-input", {
+        requestedBy: actor,
+        approval: { kind: "approved", approvalId: ids.approval },
+      }),
       { ...context, executionPolicy: "approval-gated", approvalValid: true },
     );
     expect(evidence.outcome).toBe("succeeded");

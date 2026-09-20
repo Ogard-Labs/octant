@@ -25,7 +25,10 @@ import {
 } from "./useAndroidEmulatorLiveScreen";
 
 export type AndroidEmulatorIntent =
-  | { readonly kind: "boot" | "shutdown" | "screenshot" | "open-input"; readonly emulatorId: AndroidEmulatorId }
+  | {
+      readonly kind: "boot" | "shutdown" | "screenshot" | "open-input";
+      readonly emulatorId: AndroidEmulatorId;
+    }
   | {
       readonly kind: "tap";
       readonly emulatorId: AndroidEmulatorId;
@@ -238,15 +241,21 @@ export function AndroidEmulatorPane(props: {
         }
         state={controller.status === "unavailable" ? "neutral" : "loading"}
         title={
-          controller.status === "unavailable" ? "Android emulator is unavailable" : "Android emulator"
+          controller.status === "unavailable"
+            ? "Android emulator is unavailable"
+            : "Android emulator"
         }
       />
     );
   }
 
-  const offerInput = frameAttach && inputAllowed && liveEmulatorId !== undefined && props.requestApproval !== undefined
-    ? true
-    : frameAttach && inputAllowed && liveEmulatorId !== undefined && !approvalGated;
+  const offerInput =
+    frameAttach &&
+    inputAllowed &&
+    liveEmulatorId !== undefined &&
+    props.requestApproval !== undefined
+      ? true
+      : frameAttach && inputAllowed && liveEmulatorId !== undefined && !approvalGated;
 
   return (
     <section aria-label="Android emulator" className="apple-workbench apple-workbench--device">
@@ -498,9 +507,7 @@ function DeviceRail(props: {
                 <OctantButton
                   aria-label={`Shut down ${emulator.name}`}
                   disabled={props.busy}
-                  onClick={() =>
-                    props.onRun({ kind: "shutdown", emulatorId: emulator.emulatorId })
-                  }
+                  onClick={() => props.onRun({ kind: "shutdown", emulatorId: emulator.emulatorId })}
                   type="button"
                   variant="destructive"
                 >

@@ -109,9 +109,7 @@ export function useAndroidEmulator(options: UseAndroidEmulatorOptions): AndroidE
         const next = await refreshSnapshot(controller.signal);
         if (controller.signal.aborted) return;
         setDiscovery((previous) =>
-          previous === undefined
-            ? previous
-            : { ...previous, emulators: next.emulators },
+          previous === undefined ? previous : { ...previous, emulators: next.emulators },
         );
       } catch {
         // A poll that fails leaves the last good snapshot.
@@ -123,7 +121,13 @@ export function useAndroidEmulator(options: UseAndroidEmulatorOptions): AndroidE
       controller.abort();
       clearInterval(interval);
     };
-  }, [enabled, refreshSnapshot, runtime?.active.length, runtime?.paneOpenRequest?.requestId, status]);
+  }, [
+    enabled,
+    refreshSnapshot,
+    runtime?.active.length,
+    runtime?.paneOpenRequest?.requestId,
+    status,
+  ]);
 
   const execute = useCallback(
     async (request: AndroidEmulatorRequest) => {

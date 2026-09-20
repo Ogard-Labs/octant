@@ -112,9 +112,8 @@ describe("AndroidEmulatorPane", () => {
   });
 
   it("says the destination is unavailable when the SDK is missing", async () => {
-    const { AndroidToolchainClientFailure } = await import(
-      "@octant/client-runtime/android-toolchain-client"
-    );
+    const { AndroidToolchainClientFailure } =
+      await import("@octant/client-runtime/android-toolchain-client");
     render(
       <AndroidEmulatorPane
         checkoutId={ids.checkout as never}

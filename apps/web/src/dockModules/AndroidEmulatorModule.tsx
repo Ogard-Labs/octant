@@ -21,10 +21,7 @@ export default function AndroidEmulatorModule(props: AndroidEmulatorModuleProps)
     return loading("Android emulator");
   }
   if (props.androidToolchainClient === undefined) {
-    return unavailable(
-      "Android emulator",
-      "This window has no Android toolchain connection.",
-    );
+    return unavailable("Android emulator", "This window has no Android toolchain connection.");
   }
   const view = controller.activeView;
   const approvals = nativeCodeWorkspaceApprovals(props.hostBridge, view);

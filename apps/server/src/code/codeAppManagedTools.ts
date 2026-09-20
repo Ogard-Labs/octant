@@ -997,9 +997,7 @@ async function androidTool(
   const request = androidActionRequest(input, scope, options.uuid);
   if (request === undefined) return failure("invalid-android-input");
   const opensPane =
-    (input.operation === "boot" ||
-      input.operation === "install" ||
-      input.operation === "launch") &&
+    (input.operation === "boot" || input.operation === "install" || input.operation === "launch") &&
     input.emulatorId !== undefined;
   if (opensPane && input.emulatorId !== undefined) {
     const emulatorId = decodeToolEmulatorId(input.emulatorId);

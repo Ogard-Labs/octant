@@ -183,7 +183,6 @@ export function useAppleSimulatorLiveScreen(options: {
       latestRef.current = undefined;
     };
     // `requestKey` stands in for `request`: callers rebuild the object each render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, decode, enabled, requestKey]);
 
   const state: (typeof known)["state"] =

@@ -6,11 +6,9 @@ const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const SAFE_REFERENCE = /^android-[a-z0-9-]{1,500}$/;
 
 export class AndroidRuntimeStore {
-  readonly #root: string;
   readonly #artifactRoot: string;
 
   constructor(root: string) {
-    this.#root = root;
     this.#artifactRoot = join(root, "artifacts");
   }
 
