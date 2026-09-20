@@ -249,18 +249,19 @@ describe("installed Codex runtime", () => {
 
         // The outside-root attempts above prove reach past the bound root is
         // refused. They cannot prove the ordinary case: a write the posture
-        // confines to the root still has to be the user's decision. Under
-        // `workspace-write` that write simply succeeded and Codex sent nothing,
-        // so this stage is asserted rather than skipped — the model may choose a
-        // shell redirect or its patch tool, but under `read-only` either one has
-        // to escalate before it can touch the file.
+        // confines to the root still has to be the user's decision. That is the
+        // one `workspace-write` performed silently, and only through the shell —
+        // a patch edit is `file-change`, which `auto-accept-edits` waives on
+        // purpose. So this stage names the shell explicitly and asserts the
+        // class: an approval alone would also be satisfied by the patch path and
+        // would let a silent shell redirect back in.
         await stage(
-          "declined in-root write approval",
+          "declined in-root shell write approval",
           installedSmokeStageTimeouts.inRootApproval,
           () =>
             usingConnection(driver, projectRoot, activeConnections, async (approval) => {
               const inRootTarget = join(projectRoot, "must-not-exist.md");
-              let answered = false;
+              let answeredAction: string | undefined;
               await Effect.runPromise(
                 approval.connection.start({
                   sessionId: inRootApprovalSessionId,
@@ -271,8 +272,8 @@ describe("installed Codex runtime", () => {
               const approvalEvents = collectApprovalAttempt(
                 Stream.unwrapScoped(approval.connection.subscribe),
                 (event) => {
-                  if (answered) return Effect.void;
-                  answered = true;
+                  if (answeredAction !== undefined) return Effect.void;
+                  answeredAction = event.action;
                   return approval.connection.answerApproval({
                     sessionId: inRootApprovalSessionId,
                     requestId: event.requestId,
@@ -283,12 +284,18 @@ describe("installed Codex runtime", () => {
               await Effect.runPromise(
                 approval.connection.send({
                   sessionId: inRootApprovalSessionId,
+                  // An ordinary create, not a scripted one: told to run a
+                  // literal `/bin/zsh -lc` line the model declines to act at all
+                  // and the stage proves nothing. Asked plainly, it reaches for
+                  // a shell redirect, which is the path that used to write
+                  // silently.
                   prompt: `Create the file ${inRootTarget} containing the single line: must not exist. Then stop.`,
                   attachments: [],
                   tools: [],
                 }),
               );
               expect(await approvalEvents).toBe(true);
+              expect(answeredAction).toBe("command");
               expect(await pathExists(inRootTarget)).toBe(false);
             }),
         );
