@@ -216,6 +216,34 @@ describe("Linux Bubblewrap confinement", () => {
     expect(existsSync(seccompPath)).toBe(true);
   });
 
+  it("keeps a Plan script's interpreter through the mask over the host executable directories", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath, root } = fixture();
+    const executable = join(root, "tool");
+    writeFileSync(executable, "#!/bin/sh\n", { mode: 0o700 });
+    chmodSync(executable, 0o700);
+    const launch = buildLinuxConfinementLaunch(
+      {
+        executable,
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        allowProcessExec: false,
+        allowProcessFork: false,
+      },
+      { bwrapPath },
+    );
+
+    // `/bin` is replaced by an empty overlay in this posture, so a script whose
+    // interpreter is not bound back cannot start at all.
+    expect(tmpfsTargets(launch.args)).toContain("/bin");
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([
+      realpathSync("/bin/sh"),
+      "/bin/sh",
+    ]);
+  });
+
   it("writes the seccomp filter into a private directory instead of a predictable path", () => {
     const { boundRoot, temporaryDirectory, bwrapPath, root } = fixture();
     const predictablePath = join(temporaryDirectory, "octant-linux-process-deny-fork-exec.bpf");

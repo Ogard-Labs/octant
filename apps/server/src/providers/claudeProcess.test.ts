@@ -3,6 +3,7 @@ import {
   accessSync,
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -497,7 +498,7 @@ describe("Claude runtime confinement", () => {
     const reporter = join(target.root, "report-tmpdir.sh");
     writeFileSync(
       reporter,
-      "#!/bin/sh\nprintf 'tmpdir=%s\\n' \"$TMPDIR\"\n[ -d \"$TMPDIR\" ] && printf 'present=yes\\n'\n",
+      "#!/bin/sh\nprintf 'tmpdir=%s\\n' \"$TMPDIR\"\nprintf 'scratch=%s\\n' \"$CLAUDE_CODE_TMPDIR\"\n[ -d \"$TMPDIR\" ] && printf 'present=yes\\n'\n",
     );
     chmodSync(reporter, 0o755);
     const confinement = recordingConfinement();
@@ -530,6 +531,12 @@ describe("Claude runtime confinement", () => {
     // The runtime is told to use that folder, so it never falls back to the shared one.
     expect(output).toContain(`tmpdir=${launch.temporaryDirectory}`);
     expect(output).toContain("present=yes");
+    // The runtime's own scratch defaults to a `claude-<uid>` tree in the shared
+    // `/tmp`; it is moved into the launch's folder rather than granted.
+    expect(output).toContain(`scratch=${launch.temporaryDirectory}`);
+    const sharedScratch = join("/tmp", `claude-${process.getuid?.() ?? 0}`);
+    expect(launch.additionalWriteRoots ?? []).not.toContain(sharedScratch);
+    expect(launch.readRoots ?? []).not.toContain(sharedScratch);
     // The folder goes with the runtime; the shared root and its other files stay.
     expect(existsSync(launch.temporaryDirectory ?? "")).toBe(false);
     expect(readdirSync(ambient)).toEqual(["neighbour.txt"]);
@@ -556,6 +563,57 @@ describe("Claude runtime confinement", () => {
       }),
     ).toThrow("no sandbox runtime");
     expect(readdirSync(ambient)).toEqual([]);
+  });
+
+  it("opens the credential-store lookup for a subscription launch and not for an API-key one", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    for (const environment of [
+      target.environment,
+      { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+    ]) {
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: environment,
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGTERM");
+    }
+
+    expect(confinement.prepared.map((launch) => launch.allowProviderCredentialLookup)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("refuses a Plan turn whose temporary directory is inside the checkout", () => {
+    const target = fixture();
+    const inside = join(target.root, "scratch");
+    mkdirSync(inside);
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, TMPDIR: inside },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("outside the checkout");
+    // Nothing is created in the tree the turn may only read, and nothing starts.
+    expect(readdirSync(inside)).toEqual([]);
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
   });
 
   it("leaves a posture that still writes on the runtime's own sandbox", () => {
