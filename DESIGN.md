@@ -104,8 +104,11 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 ### Shapes and depth
 
-Radius derives from one `--radius` root: a control is the `lg` step, a card or
-menu the `xl` step, and a compact control clamps below both. Welcome composers and
+Radius has one number per role, defined once as `--oct-radius-*` in
+`octant.css`: a compact control is 8px, a control or a row 10px, a card, panel,
+menu, or popover 16px. The recipes reach the same numbers through `--radius`,
+whose `lg` step is the control and whose `xl` step is the card token itself, so
+a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
@@ -394,8 +397,10 @@ for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
 welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
 controls. Product
-chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
-marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
+chrome uses those tokens and nothing else: a `border-radius` is a token, `0`,
+`50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
+bare pixel literal. A rem corner also shrinks with the interface font size,
+which a token does not. Leftover `.btn*` recipes are gone; adapters own
 button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 

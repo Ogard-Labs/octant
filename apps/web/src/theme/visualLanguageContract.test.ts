@@ -38,6 +38,34 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("rounds every corner from a radius token", () => {
+    // One role, one number: a corner is a token, square, a circle, or the 1–4px
+    // of a mark. Rem literals rounded seven panels at seven sizes, and a rem
+    // corner also shrinks with the interface font size while a token does not.
+    const corner =
+      /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl))\))$/;
+    const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
+    const strays = cssFiles(webRoot).flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(declaration)]
+        .map((match) => (match[1] ?? "").trim())
+        .filter((value) => !value.split(/[\s/]+/).every((part) => corner.test(part)))
+        .map((value) => `${relative(webRoot, path)}: ${value}`),
+    );
+
+    expect(strays).toEqual([]);
+  });
+
+  it("gives a card, a menu, and a popover the same corner", () => {
+    // The recipes round cards, menus, and popovers at their `xl` step and the
+    // stylesheets round panels at the medium token. They were 14px and 16px, so
+    // a menu sat beside a popover with a different corner.
+    const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
+    expect(tailwind).toContain("--radius-xl: var(--oct-radius-md);");
+    // The radius scale has one definition; the second, unread set is gone.
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
+  });
+
   it("does not keep leftover .btn colour recipes beside the adapter", () => {
     const leftovers = cssFiles(webRoot)
       .map((path) => ({

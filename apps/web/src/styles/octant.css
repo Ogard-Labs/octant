@@ -354,8 +354,10 @@
      a 390px-wide panel reads as a hard corner; the phone's whole chrome
      is one continuous soft rectangle. */
   --oct-radius-bubble: 22px;
+  --oct-radius-bubble-tail: 8px;
   --oct-radius-card-m: 26px;
   --oct-radius-sheet: 30px;
+  --oct-radius-device: 44px;
 
   /* Touch. 44px is the floor for anything tappable, which is why the
      desktop control height is already 44px — one number, not two. */
@@ -7935,7 +7937,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   position: relative;
   width: var(--oct-phone-w);
   height: var(--oct-phone-h);
-  border-radius: 44px;
+  border-radius: var(--oct-radius-device);
   border: 1px solid var(--oct-border);
   background: var(--oct-bg);
   overflow: hidden;
@@ -8295,7 +8297,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   max-width: 88%;
   padding: 12px var(--oct-space-4);
   border-radius: var(--oct-radius-bubble);
-  border-bottom-right-radius: 8px;
+  border-bottom-right-radius: var(--oct-radius-bubble-tail);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-transcript);

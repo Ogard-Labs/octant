@@ -8,7 +8,7 @@ describe("OctantEmpty", () => {
 
     const state = screen.getByRole("status");
     expect(state).toHaveAttribute("data-slot", "empty");
-    expect(state).toHaveClass("rounded-[var(--octant-radius-panel)]");
+    expect(state).toHaveClass("rounded-xl");
     expect(state).toHaveClass("shadow-[var(--octant-shadow-sm)]");
   });
 });

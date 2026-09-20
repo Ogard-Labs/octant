@@ -2392,7 +2392,7 @@ textarea.settings-view__text-input {
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 9999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--octant-accent);
   color: var(--octant-accent-foreground);
 }

@@ -50,5 +50,8 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 6px);
+  /* A card, a menu, and a popover are one role. The recipes round them at this
+     step and the stylesheets round panels at the medium token; at radius + 6px
+     this was 14px beside 16px. */
+  --radius-xl: var(--oct-radius-md);
 }
