@@ -119,23 +119,9 @@ export function ThemeAppearanceEditor(props: {
               value={draft.darkPresetId ?? "system"}
             />
           </label>
-          <label className="settings-view__field">
-            <span>Density</span>
-            <OctantSelectField
-              aria-label="Theme density"
-              className="settings-view__select"
-              onValueChange={(value) =>
-                void theme.applyPatch({
-                  density: value as ThemeSettings["density"],
-                })
-              }
-              options={[
-                { id: "comfortable", label: "Comfortable" },
-                { id: "compact", label: "Compact" },
-              ]}
-              value={draft.density}
-            />
-          </label>
+          {/* No Density control yet. The theme keeps the value, but no
+              stylesheet or script reads it, so the control changed nothing on
+              screen. It returns when density is wired to the layout. */}
         </div>
       </section>
       {/* The interface font and its size are among the most-changed settings

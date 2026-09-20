@@ -34,6 +34,9 @@ describe("ThemeAppearanceEditor", () => {
     await user.click(screen.getByText("Code typography", { selector: "summary span" }));
     expect(screen.getByLabelText("Code font")).toBeVisible();
     expect(screen.queryByLabelText("Focus ring color")).not.toBeInTheDocument();
+    // Nothing in the renderer reads the theme's density yet, so a control for
+    // it would change nothing on screen.
+    expect(screen.queryByLabelText("Theme density")).not.toBeInTheDocument();
   });
 
   it("saves appearance changes immediately without an Apply or Cancel bar", async () => {
