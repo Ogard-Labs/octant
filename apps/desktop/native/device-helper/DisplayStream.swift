@@ -28,6 +28,14 @@ final class DisplayStream {
     private let context = CIContext(options: nil)
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let lock = NSLock()
+    /// Held for the length of one frame write, and by `stop()` once it has
+    /// marked the stream stopped. So when `stop()` returns no write of this
+    /// stream is in flight and none can begin — a check of `running` before an
+    /// unguarded write left a gap in which a stopped stream's old frame landed
+    /// after the next stream's first one, and a still device then kept showing
+    /// it. Separate from `lock`, which the render server's notify path takes
+    /// and must never wait on a slow reader.
+    private let writeGate = NSLock()
     private var running = false
     private var encoding = false
     private var dirty = false
@@ -114,6 +122,9 @@ final class DisplayStream {
             return running
         }
         guard wasRunning else { return }
+        // Wait out a write already under way; any later one sees the stream stopped.
+        writeGate.lock()
+        writeGate.unlock()
         typealias Unregister = @convention(c) (AnyObject, Selector, NSUUID) -> Void
         if let send = try? SimulatorBridge.messageSend(Unregister.self),
             descriptor.responds(to: NSSelectorFromString("unregisterScreenCallbacksWithUUID:"))
@@ -176,12 +187,18 @@ final class DisplayStream {
             guard let frame = encode(maximumHeight: height, quality: quality) else { continue }
             // The stream may have been stopped while this frame was being
             // paced or encoded; a frame of a view nobody has any more is not
-            // written into the next view's stream.
-            guard lock.withLock({ running }) else {
+            // written into the next view's stream. The check and the write are
+            // one step under the gate `stop()` also passes through.
+            writeGate.lock()
+            let stillRunning = lock.withLock { running }
+            let written = stillRunning ? write(frame) : false
+            writeGate.unlock()
+            guard stillRunning else {
                 lock.withLock { encoding = false }
                 return
             }
-            if !write(frame) {
+            if !written {
+                // The reader is gone. Stopped outside the gate, which `stop()` takes.
                 stop()
                 lock.withLock { encoding = false }
                 return
