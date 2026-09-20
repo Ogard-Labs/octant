@@ -623,6 +623,8 @@ import {
   type AppleRuntimeReceipt,
   APPLE_TOOLCHAIN_HOST_READ_PATHS,
 } from "./apple/appleToolchainService";
+import { createDesktopSimulatorDevicePort } from "./apple/desktopSimulatorDevicePort";
+import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDesktop";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -4205,8 +4207,13 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
+    // Present only under the desktop app, which owns the native device helper.
+    const simulatorDevice = createDesktopSimulatorDevicePort(process.env);
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
+      ...(simulatorDevice === undefined
+        ? {}
+        : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       // Two hosts on one Mac share a temporary directory; each sweeps only the
       // captures named for its own data directory.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),

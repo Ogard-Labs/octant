@@ -102,9 +102,12 @@ in-app updater. It attaches to the canonical host at
 `http://127.0.0.1:13773`, or starts that independently runnable host when it is
 absent, then probes storage readiness before showing a window. It passes only
 native broker coordinates and the desktop bridge secret that native-only
-operations require. It also runs two loopback-only
+operations require. It also runs loopback-only
 brokers the server talks back to: the credential broker (Keychain access by
-opaque reference) and the browser runtime broker.
+opaque reference), the browser runtime broker, and on macOS the Simulator
+device broker, behind which one native device helper per Simulator delivers
+workbench input (see
+[decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md](decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md)).
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a
@@ -407,6 +410,9 @@ and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed
 attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+Under the desktop app that injection is the native device helper of 0137: a
+tap is a point on the captured screen, typed text is letters, digits, spaces
+and new lines, and every refusal names the helper's own reason.
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a
 thread as a context-aware dock tab opened from the title-bar shortcut or Add
 tool. It may

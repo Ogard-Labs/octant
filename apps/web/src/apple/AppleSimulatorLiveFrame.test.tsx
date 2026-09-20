@@ -158,6 +158,38 @@ describe("AppleSimulatorLiveFrameView", () => {
     expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 300, y: 600 } });
   });
 
+  it("ignores a click beside the drawn screen instead of sending a point that is not on it", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "Showing the latest host-held screen capture for this thread.",
+    };
+    const onInput = vi.fn();
+    render(
+      <AppleSimulatorLiveFrameView
+        frame={frame}
+        inputEnabled
+        onInput={onInput}
+        screenUrl="blob:https://octant.local/screen"
+      />,
+    );
+    const image = screen.getByRole("img", { name: "iPhone 16 screen" });
+    Object.defineProperty(image, "naturalWidth", { value: 1179 });
+    Object.defineProperty(image, "naturalHeight", { value: 2556 });
+    // In a wide dock the height cap makes the screen narrower than its row.
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 20, 332, 720));
+    const hitRegion = screen.getByLabelText("Tap on iPhone 16 Simulator screen");
+
+    fireEvent.click(hitRegion, { clientX: 120, clientY: 300 });
+    fireEvent.click(hitRegion, { clientX: 700, clientY: 300 });
+    fireEvent.click(hitRegion, { clientX: 400, clientY: 800 });
+
+    expect(onInput).not.toHaveBeenCalled();
+  });
+
   it("drops a tap that lands before the screenshot has decoded", () => {
     const frame: AppleSimulatorLiveFrame = {
       status: "live",

@@ -1,4 +1,4 @@
-# 0137. Codex delegation stops at the edit waiver
+# 0138. Codex delegation stops at the edit waiver
 
 **Status:** Accepted
 

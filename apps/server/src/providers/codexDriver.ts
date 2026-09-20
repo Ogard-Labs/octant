@@ -263,10 +263,10 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer is offered to `approval-gated` only (0137). Codex's reviewer
+    // The reviewer is offered to `approval-gated` only (0138). Codex's reviewer
     // is thread-wide, so under `read-only` it would answer the escalation an
     // in-root patch edit now raises — a write 0018 waives — and may deny it,
-    // turning the posture the user chose into a per-write verdict. 0137 is the
+    // turning the posture the user chose into a per-write verdict. 0138 is the
     // scoped exception to 0104's rule that delegation reaches both prompting
     // postures, and it records what that costs: this posture no longer
     // delegates its command prompts either, because the reviewer cannot be

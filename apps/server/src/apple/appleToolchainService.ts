@@ -701,7 +701,7 @@ export class AppleToolchainService {
               severity: "note" as const,
               message:
                 request.kind === "type-text"
-                  ? `type-text ${outcomeFor(terminal)} (text redacted)`
+                  ? typedTextFailureNote(outcomeFor(terminal), text(terminal.stderr))
                   : inputFailureNote(
                       request.kind,
                       outcomeFor(terminal),
@@ -1372,6 +1372,37 @@ function parseBuildProduct(
  * builder into the blanket catch, which reported "interrupted" with an empty
  * log — the one thing a person needed to read was the one thing lost.
  */
+/**
+ * The refusals the desktop's device helper and its broker name. Only these may
+ * follow a failed typed text into evidence: a host's message can begin with
+ * what was typed, and a secret can look like a code.
+ */
+const TYPED_TEXT_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "unsupported-character",
+  "keyboard-layout-unsupported",
+  "keyboard-layout-unknown",
+  "not-booted",
+  "no-such-device",
+  "toolchain-unavailable",
+  "input-service-unavailable",
+  "daemon-unresponsive",
+  "send-stalled",
+  "helper-unavailable",
+  "deadline-too-short",
+  "deadline-passed",
+]);
+
+/**
+ * Why typed text failed, without the host's words: the leading reason code
+ * when it is one the device helper uses, and nothing otherwise.
+ */
+function typedTextFailureNote(outcome: AppleBuildEvidence["outcome"], stderr: string): string {
+  const code = /^([a-z][a-z-]{2,63}):/.exec(stderr.trimStart())?.[1];
+  return code === undefined || !TYPED_TEXT_REFUSAL_CODES.has(code)
+    ? `type-text ${outcome} (text redacted)`
+    : `type-text ${outcome}: ${code} (text redacted)`;
+}
+
 function inputFailureNote(
   kind: AppleSimulatorRequest["kind"],
   outcome: AppleBuildEvidence["outcome"],

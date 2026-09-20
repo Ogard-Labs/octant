@@ -129,4 +129,5 @@ export * from "./canvasShareAccessLog";
 export * from "./canvasBoard";
 
 export * from "./computerUsePlugin";
+export * from "./simulatorDevice";
 export * from "./gitHistory";
