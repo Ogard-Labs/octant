@@ -352,6 +352,31 @@ describe("Simulator device helpers", () => {
     helpers.dispose();
   });
 
+  it("starts a waiting start's clock when the input ahead of it is done, so a stop that hangs cannot hold it", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const watching = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+    if (watch.status === "watching") watch.stop();
+    const again = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+
+    // While the text is going in, neither the stop nor the start may end the helper.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 2, ok: true });
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+
+    // The stop then hangs. Its clock and the start's began when the typing ended.
+    await vi.advanceTimersByTimeAsync(21_000);
+    await expect(again).resolves.toMatchObject({ status: "unavailable" });
+    expect(fake.child.kill).toHaveBeenCalled();
+    helpers.dispose();
+  });
+
   it("does not show a returning viewer a frame the stopping stream sent after everyone had left", async () => {
     const fake = fakeChild();
     const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
