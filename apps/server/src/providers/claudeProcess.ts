@@ -1,6 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -398,8 +406,10 @@ function confineClaudeLaunch(
   spawnOptions: SpawnOptions,
   confinement: ClaudeRuntimeConfinement,
   options: ResolvedClaudeProcessOptions,
-): SpawnOptions {
-  if (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)) return spawnOptions;
+): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
+  if (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)) {
+    return { spawnOptions, release: () => undefined };
+  }
   if (!isAbsolute(confinement.projectRoot) || !existsSync(confinement.projectRoot)) {
     throw new SeatbeltConfinementError(
       "invalid-configuration",
@@ -407,45 +417,82 @@ function confineClaudeLaunch(
     );
   }
   const boundRoot = realpathSync(confinement.projectRoot);
-  const temporaryDirectory = realpathSync(spawnOptions.env.TMPDIR ?? tmpdir());
+  // The launch's own temporary directory, not the ambient one. `TMPDIR` is
+  // normally the user's shared per-user temp root, and granting that whole
+  // directory read and write handed a Plan runtime every sibling temporary
+  // file on the machine, including other threads' scratch checkouts. A folder
+  // only this launch can name is what the design asked for.
+  let temporaryDirectory: string;
+  try {
+    temporaryDirectory = realpathSync(
+      mkdtempSync(join(realpathSync(spawnOptions.env.TMPDIR ?? tmpdir()), "octant-claude-plan-")),
+    );
+  } catch {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement could not create a private temporary directory.",
+    );
+  }
+  const release = () => {
+    try {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    } catch {
+      // Nothing reads the directory again; an entry the operating system holds
+      // open is left to it.
+    }
+  };
   const stateDirectories = claudeRuntimeStateDirectories(spawnOptions.env);
-  const launch = options.confinement.prepare({
-    executable: spawnOptions.command,
-    args: spawnOptions.args,
-    boundRoot,
-    temporaryDirectory,
-    additionalWriteRoots: stateDirectories,
-    readRoots: [boundRoot, temporaryDirectory, ...stateDirectories],
-    privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateDirectories],
-    // The runtime calls its own control plane, so it resolves the runtime
-    // egress policy rather than the thread default (0132, 0143). This driver
-    // carries Code threads, and the policy no longer reads the mode.
-    networkEgress: materializeOsNetworkEgress(
-      resolveProviderRuntimeEgressPolicy({
-        mode: "code",
-        executionPolicy: confinement.executionPolicy,
-      }),
-    ),
-    // Plan is read-only at the sandbox, not only in the provider's permission
-    // layer (0009): the checkout reads and never writes, and the runtime execs
-    // nothing at all. Measured on macOS 27, a session hook under this profile
-    // is refused with `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
-    writeBoundRoot: false,
-    allowProcessExec: false,
-    allowProcessFork: false,
-    allowFileReadStar: true,
-    // Subscription authentication keeps its credential in the platform secret
-    // store rather than in the provider home, so a launch without this reports
-    // itself signed out and the turn never starts. The store's files stay
-    // denied; only the lookup opens (0143).
-    allowProviderCredentialLookup: true,
-  });
-  return { ...spawnOptions, command: launch.command, args: [...launch.args] };
+  try {
+    const launch = options.confinement.prepare({
+      executable: spawnOptions.command,
+      args: spawnOptions.args,
+      boundRoot,
+      temporaryDirectory,
+      additionalWriteRoots: stateDirectories,
+      readRoots: [boundRoot, temporaryDirectory, ...stateDirectories],
+      privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateDirectories],
+      // The runtime calls its own control plane, so it resolves the runtime
+      // egress policy rather than the thread default (0132, 0143). This driver
+      // carries Code threads, and the policy no longer reads the mode.
+      networkEgress: materializeOsNetworkEgress(
+        resolveProviderRuntimeEgressPolicy({
+          mode: "code",
+          executionPolicy: confinement.executionPolicy,
+        }),
+      ),
+      // Plan is read-only at the sandbox, not only in the provider's permission
+      // layer (0009): the checkout reads and never writes, and the runtime execs
+      // nothing at all. Measured on macOS 27, a session hook under this profile
+      // is refused with `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
+      writeBoundRoot: false,
+      allowProcessExec: false,
+      allowProcessFork: false,
+      allowFileReadStar: true,
+      // Subscription authentication keeps its credential in the platform secret
+      // store rather than in the provider home, so a launch without this reports
+      // itself signed out and the turn never starts. The store's files stay
+      // denied; only the lookup opens (0143).
+      allowProviderCredentialLookup: true,
+    });
+    return {
+      spawnOptions: {
+        ...spawnOptions,
+        command: launch.command,
+        args: [...launch.args],
+        env: { ...spawnOptions.env, TMPDIR: temporaryDirectory },
+      },
+      release,
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
 }
 
 function spawnOwnedClaudeProcess(
   spawnOptions: SpawnOptions,
   options: ResolvedClaudeProcessOptions,
+  release: () => void = () => undefined,
 ): SpawnedProcess {
   const invalid = validateBinaryPath(spawnOptions.command);
   if (invalid !== undefined) throw new Error(invalid.message);
@@ -504,11 +551,13 @@ function spawnOwnedClaudeProcess(
       .then(async () => {
         if (!stderrClosed) await stderrClosedPromise;
         cleanupComplete = true;
+        release();
         events.emit("exit", code, signal);
         resolveExited();
       })
       .catch(() => {
         cleanupComplete = true;
+        release();
         events.emit("error", new Error("Claude process cleanup failed."));
         events.emit("exit", code, signal);
         resolveExited();
@@ -531,7 +580,11 @@ function spawnOwnedClaudeProcess(
     reportStderr();
     resolveStderrClosed();
   });
-  child.once("error", (error) => events.emit("error", error));
+  child.once("error", (error) => {
+    // A process that never started has no exit to release after.
+    release();
+    events.emit("error", error);
+  });
   child.once("exit", onChildExit);
   spawnOptions.signal.addEventListener("abort", onAbort, { once: true });
   if (spawnOptions.signal.aborted) requestTermination("SIGTERM");
@@ -593,7 +646,14 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
       ),
     probeSubscription: (binaryPath, environment) =>
       runProbe(binaryPath, ["auth", "status", "--json"], environment, "authentication", resolved),
-    spawn: (confinement) => (spawnOptions) =>
-      spawnOwnedClaudeProcess(confineClaudeLaunch(spawnOptions, confinement, resolved), resolved),
+    spawn: (confinement) => (spawnOptions) => {
+      const confined = confineClaudeLaunch(spawnOptions, confinement, resolved);
+      try {
+        return spawnOwnedClaudeProcess(confined.spawnOptions, resolved, confined.release);
+      } catch (error) {
+        confined.release();
+        throw error;
+      }
+    },
   };
 }
