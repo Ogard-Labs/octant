@@ -64,7 +64,9 @@ export class SimulatorInputGrants {
 
   /**
    * Keeps a grant open another fifteen minutes. An input the grant itself
-   * admitted can finish just after it ran out, and still counts. Any other
+   * admitted can finish just after it ran out, and still counts, but only within
+   * the longest an action may run: one that settles later than that ran on a
+   * clock nobody can vouch for, and brings nothing back. Any other
    * input, full access or the first one approved, renews only a grant that is
    * live: it never needed the grant, so it must not bring one back. A grant
    * that was closed by a shutdown or by the window is gone and stays gone.
@@ -72,7 +74,9 @@ export class SimulatorInputGrants {
   renew(scope: SimulatorInputScope, admittedByGrant = false): void {
     const grant = this.#grants.get(key(scope));
     if (grant === undefined) return;
-    if (admittedByGrant || grant.expiresAt > this.#now()) this.open(scope);
+    const now = this.#now();
+    const withinGrace = admittedByGrant && now < grant.expiresAt + LONGEST_ACTION_MS;
+    if (withinGrace || grant.expiresAt > now) this.open(scope);
   }
 
   /**

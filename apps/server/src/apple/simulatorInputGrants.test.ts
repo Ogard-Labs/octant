@@ -75,6 +75,28 @@ describe("Simulator input grants", () => {
     expect(grants.isOpen(scope(iphone))).toBe(true);
   });
 
+  it("does not revive a grant for an input that finished after the longest an action may run", () => {
+    let now = 0;
+    const grants = new SimulatorInputGrants(() => now);
+    const tap = { kind: "tap" as const, simulatorId: iphone };
+    grants.open(scope(iphone));
+
+    // Admitted under the live grant, but it only settled eleven minutes after
+    // the grant ran out, say because the machine slept while it finished.
+    now = minutes(15) + minutes(11);
+    grants.afterAction(who(), tap, "succeeded", true);
+    now = minutes(27);
+    expect(grants.isOpen(scope(iphone))).toBe(false);
+
+    // Inside those ten minutes it still counts.
+    now = 0;
+    grants.open(scope(iphone));
+    now = minutes(15) + minutes(9);
+    grants.afterAction(who(), tap, "succeeded", true);
+    now = minutes(30);
+    expect(grants.isOpen(scope(iphone))).toBe(true);
+  });
+
   it("does not revive a grant that ran out for an input that was admitted some other way", () => {
     let now = 0;
     const grants = new SimulatorInputGrants(() => now);
