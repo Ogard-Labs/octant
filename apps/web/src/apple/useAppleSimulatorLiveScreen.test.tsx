@@ -96,6 +96,38 @@ describe("the live Simulator screen", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  it("throws away a frame that finishes decoding after the pane moved on", async () => {
+    const stream = feed();
+    const watchScreen = vi.fn(async (_request: unknown, _signal?: AbortSignal) => ({
+      status: "watching" as const,
+      screen: { width: 1206, height: 2622 },
+      frames: stream.frames,
+    }));
+    let finishDecode!: (frame: { width: number; height: number; close: () => void }) => void;
+    const slowDecode = vi.fn(
+      () =>
+        new Promise<{ width: number; height: number; close: () => void }>((resolve) => {
+          finishDecode = resolve;
+        }),
+    );
+    const client = clientWatching(watchScreen);
+    const { result, unmount } = renderHook(() =>
+      useAppleSimulatorLiveScreen({ client, request, enabled: true, decode: slowDecode }),
+    );
+    stream.push(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]));
+    await waitFor(() => expect(slowDecode).toHaveBeenCalled());
+    const statusBefore = result.current.status;
+
+    unmount();
+    const close = vi.fn();
+    finishDecode({ width: 506, height: 1_100, close });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(statusBefore).toBe("connecting");
+    // The decoded picture belongs to a view nobody is looking at: it is released.
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("says why there is no live view so the captured still can show instead", async () => {
     const watchScreen = vi.fn(async () => ({
       status: "failed" as const,

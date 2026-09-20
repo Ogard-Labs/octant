@@ -237,6 +237,10 @@ export function createSimulatorScreenStream(
     // is before this answer's headers exist. It is kept and written first, or
     // a still device would show nothing until something on it moved.
     let early: Uint8Array | undefined;
+    // While the viewer is still taking a frame, newer ones are not queued —
+    // but the newest is kept. A device that goes still after an animation sends
+    // nothing more, so without it a slow viewer would stay on an old screen.
+    let missed: Uint8Array | undefined;
     const send = (jpeg: Uint8Array) => {
       const header = Buffer.alloc(4);
       header.writeUInt32BE(jpeg.byteLength);
@@ -245,6 +249,9 @@ export function createSimulatorScreenStream(
         draining = true;
         outgoing.once("drain", () => {
           draining = false;
+          const newest = missed;
+          missed = undefined;
+          if (open && newest !== undefined) send(newest);
         });
       }
     };
@@ -257,8 +264,9 @@ export function createSimulatorScreenStream(
       },
       {
         onFrame: (jpeg) => {
-          if (!open || draining) return;
-          if (ready) send(jpeg);
+          if (!open) return;
+          if (draining) missed = jpeg;
+          else if (ready) send(jpeg);
           else early = jpeg;
         },
         onEnd: () => {
