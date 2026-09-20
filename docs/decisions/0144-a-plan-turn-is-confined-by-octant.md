@@ -1,4 +1,4 @@
-# 0143. A Plan turn is confined by Octant and reaches only its provider
+# 0144. A Plan turn is confined by Octant and reaches only its provider
 
 **Status:** Accepted
 
@@ -11,7 +11,7 @@ returned nothing outside the two postures that write, `claudeProcess` launched
 without the shared builder, and the only thing holding a Plan turn read-only was
 `permissionMode: "plan"` inside the provider's own runtime.
 
-0142 recorded why and named the close condition: the Agent SDK composes the
+0143 recorded why and named the close condition: the Agent SDK composes the
 launch and hands Octant's spawn callback only command, args, cwd, env, and a
 signal, so the launch cannot see the thread's root or posture. That is fixable
 where the query is opened, which does know both.
@@ -49,7 +49,7 @@ measured on macOS 27 against this builder's profile:
   probe can name, removed when the probe closes. It does not bind the server's
   working directory, which the builder refuses when it is an ancestor of a
   denied path and which otherwise becomes a readable root by accident.
-- This partially supersedes one rule of 0142, that the Claude exception covers
+- This partially supersedes one rule of 0143, that the Claude exception covers
   `claudeProcess.ts` whole. The exception now covers the approval-gated and
   auto-accept-edits postures, whose launches still run on the runtime's own
   sandbox settings. `providerProcessConfinement.test.ts` holds that narrowing
@@ -97,7 +97,7 @@ measured on macOS 27 against this builder's profile:
   the secret store stays unreadable as a file. That reach is narrower than the
   unconfined launch it replaces and wider than 0126 left it.
 - The Codex exception and the two Claude postures that write are unchanged and
-  still stand as 0142 records them.
+  still stand as 0143 records them.
 
 ## Related
 
@@ -105,4 +105,4 @@ measured on macOS 27 against this builder's profile:
   rule scoped)
 - 0126 Seatbelt trust evaluation and launcher symlinks
 - 0132 Provider runtimes reach provider endpoints (one rule superseded)
-- 0142 Confinement wraps a runtime that carries one thread (one rule superseded)
+- 0143 Confinement wraps a runtime that carries one thread (one rule superseded)

@@ -62,6 +62,7 @@ import {
 import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
+  isAppleSimulatorInputKind,
   harnessAutoReviewEffective,
   unsupportedModelOptionValues,
 } from "@octant/domain";
@@ -1135,8 +1136,16 @@ function approvalPrompt(
     message = "Elevate this Code thread to full access?";
     effectDetail = `Full repository and shell access · ${persistenceLabel(effect.permissionPersistence)}`;
   } else if (effect.kind === "apple-action") {
-    message = `Allow Apple ${effect.request.kind}?`;
+    // Input is approved once per Simulator, not once per tap, and the dialog
+    // says what that approval covers.
+    const input = isAppleSimulatorInputKind(effect.request.kind);
+    message = input ? "Allow input to this Simulator?" : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
+      ...(input
+        ? [
+            "Covers taps, swipes, typing and keys on this Simulator for 15 minutes after each input.",
+          ]
+        : []),
       `Action: ${effect.request.kind}`,
       `Platform: ${"platform" in effect.request ? effect.request.platform : "Simulator"}`,
       ...(effect.request.simulatorId === undefined

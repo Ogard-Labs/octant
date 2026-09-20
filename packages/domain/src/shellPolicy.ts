@@ -144,7 +144,9 @@ export function defaultShellSettings(): ShellSettings {
   return {
     chatEnabled: true,
     workEnabled: true,
-    sidebarWidth: 232,
+    // Wide enough for a thread's title to be read rather than guessed: at 232px
+    // a two-line row showed about twenty characters of it.
+    sidebarWidth: 280,
     contextSidebarWidth: 360,
     lastContextSurface: null,
     sidebarMaterial: "system",

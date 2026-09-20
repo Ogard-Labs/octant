@@ -426,14 +426,17 @@ grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
 controls, the right dock head, and the bottom panel toolbar share one 38px
 rail, on which a 30px tab and a 28px icon control sit on one centreline and
-the band's hairline meets the dock's; the sidebar runs 30px navigation,
+the band's hairline meets the dock's; the sidebar runs 32px navigation,
 Project, and thread rows between a 40px header row and a 40px account row,
 with every leading icon on a 12px inset and its section labels at 12px in the
-meta ink with a 12px gap above. Hover-only actions (add, more, pin, archive,
+meta ink with a 20px gap above, so a label never reads as one more row. A
+thread row that carries a facts line is two lines of type and takes 8px above
+and below them (about 56px). Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
-width, defaulting to 232px; narrow Settings layouts retain their responsive
+width, defaulting to 280px (wide enough to read a thread's title rather than
+guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing and may collapse
 completely while leaving Show sidebar and New thread in the native title rail.
 The right dock defaults to 320px when open. A fresh window starts with it

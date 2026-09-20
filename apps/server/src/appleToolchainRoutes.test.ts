@@ -118,6 +118,113 @@ describe("Apple toolchain routes", () => {
     expect(service.discover).toHaveBeenCalledWith(expect.any(Object), context);
   });
 
+  it("tells the pane which Simulators the thread may send input to without a new approval", async () => {
+    const snapshot = {
+      sequence: 4,
+      snapshotAt: "2026-09-19T20:00:03.000Z",
+      toolchain: {
+        toolchainId: "60000000-0000-4000-8000-000000000007",
+        available: true,
+        sdks: [],
+        discoveredAt: "2026-09-19T20:00:00.000Z",
+      },
+      simulators: [],
+      active: [],
+      recentEvidence: [],
+    };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(() => snapshot),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const grants = [
+      {
+        simulatorId: "60000000-0000-4000-8000-00000000000a",
+        expiresAt: "2026-09-19T20:15:00.000Z",
+      },
+    ];
+    const inputGrants = vi.fn(() => grants);
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: async () => context,
+      service,
+      inputGrants,
+      now: () => 2,
+    });
+    const body = { kind: "apple-snapshot-request", authority, ...scope };
+
+    const granted = await handler(request(body));
+    expect(granted?.status).toBe(200);
+    await expect(granted?.json()).resolves.toMatchObject({
+      kind: "apple-runtime-snapshot",
+      snapshot: { sequence: 4, inputGrants: grants },
+    });
+    expect(inputGrants).toHaveBeenCalledWith(windowId, scope.threadId);
+
+    // No grant, no field: the pane asks as it always did.
+    inputGrants.mockReturnValue([]);
+    const ungranted = await (await handler(request(body)))?.json();
+    expect(ungranted.snapshot.inputGrants).toBeUndefined();
+  });
+
+  it("tells the host what an action came to, so a grant follows what was delivered rather than what was asked", async () => {
+    const evidence = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      kind: "tap",
+      outcome: "failed",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      diagnostics: [{ severity: "note", message: "tap failed" }],
+      artifacts: [],
+      cleanup: "not-required",
+      durationMs: 5,
+      completedAt: "2026-09-19T20:00:01.000Z",
+    };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(async () => evidence),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const afterAction = vi.fn();
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: async () => context,
+      service,
+      afterAction,
+      now: () => 2,
+      nowIso: () => "2026-09-19T20:00:00.000Z",
+    });
+    const action = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "tap",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      point: { x: 1, y: 2 },
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "not-required" },
+    };
+
+    const response = await handler(request({ kind: "apple-action-request", request: action }));
+
+    expect(response?.status).toBe(200);
+    expect(afterAction).toHaveBeenCalledTimes(1);
+    expect(afterAction).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ kind: "tap" }),
+      evidence,
+      context,
+    );
+  });
+
   it("fails closed before service access for invalid window authority", async () => {
     const service = {
       discover: vi.fn(),

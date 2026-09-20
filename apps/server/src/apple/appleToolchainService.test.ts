@@ -35,6 +35,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
 };
 
 let AppleToolchainService: ServiceConstructor;
+let isReplayedEvidence: (value: unknown) => boolean;
 
 beforeAll(async () => {
   const path = "./appleToolchainService";
@@ -42,6 +43,7 @@ beforeAll(async () => {
   expect(loaded).toBeDefined();
   expect(loaded?.AppleToolchainService).toBeTypeOf("function");
   AppleToolchainService = loaded!.AppleToolchainService as ServiceConstructor;
+  isReplayedEvidence = loaded!.isReplayedEvidence as typeof isReplayedEvidence;
 });
 
 const ids = {
@@ -77,6 +79,7 @@ interface ExecutionContext {
   readonly sourceRevision: string;
   readonly executionPolicy: "plan" | "approval-gated" | "full-access";
   readonly approvalValid: boolean;
+  readonly inputGranted?: boolean;
 }
 
 const context: ExecutionContext = {
@@ -217,6 +220,29 @@ describe("AppleToolchainService discovery", () => {
       expect.objectContaining({ simulatorId: ids.simulator, state: "booted", platform: "ios" }),
     ]);
     expect(JSON.stringify(result.workspace)).not.toContain(context.checkoutRoot);
+  });
+
+  it("tells the host which Simulators it found and in what state, and says nothing when discovery is refused", async () => {
+    const observeSimulators = vi.fn();
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      observeSimulators,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    await service.discover(discoveryRequest, {
+      ...context,
+      threadId: "40000000-0000-4000-8000-000000000001",
+    });
+    expect(observeSimulators).not.toHaveBeenCalled();
+
+    await service.discover(discoveryRequest, context);
+    expect(observeSimulators).toHaveBeenCalledTimes(1);
+    expect(observeSimulators).toHaveBeenCalledWith([
+      expect.objectContaining({ simulatorId: ids.simulator, state: "booted" }),
+    ]);
   });
 
   it("fails closed before discovery when thread authority does not match", async () => {
@@ -1467,6 +1493,44 @@ describe("AppleToolchainService Simulator input", () => {
 
     const second = await service.execute(request, context);
     expect(second).toEqual(first);
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+    // The service says which answer was delivered and which was remembered, so
+    // a caller never has to guess from timestamps.
+    expect(isReplayedEvidence(first)).toBe(false);
+    expect(isReplayedEvidence(second)).toBe(true);
+  });
+
+  it("delivers input to a Simulator the host holds open even though the request carries no approval", async () => {
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const gated = { ...context, executionPolicy: "approval-gated" as const };
+    await service.discover(discoveryRequest, gated);
+    const tap = simulatorRequest({
+      kind: "tap",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      point: { x: 10, y: 20 },
+      approval: { kind: "not-required" },
+    });
+
+    // Asked as the pane asks once the host has said the Simulator is open.
+    const granted = await service.execute(tap, { ...gated, inputGranted: true });
+    expect(granted.outcome).toBe("succeeded");
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+
+    // The same request without the host's grant is refused before anything is sent.
+    const ungranted = await service.execute(
+      { ...tap, actionId: "30000000-0000-4000-8000-000000000013" as never },
+      gated,
+    );
+    expect(ungranted.outcome).toBe("unauthorized");
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 

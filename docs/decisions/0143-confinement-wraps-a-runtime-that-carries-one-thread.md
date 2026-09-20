@@ -1,4 +1,4 @@
-# 0142. Confinement wraps a provider runtime that carries one thread's authority
+# 0143. Confinement wraps a provider runtime that carries one thread's authority
 
 **Status:** Accepted
 
@@ -110,4 +110,3 @@ not a gap in the rule. Claude can, and is not wrapped yet.
 - 0104 Harness-delegated approvals as a per-thread pass-through
 - 0121 Provider-owned CLI runtimes, profiles, and updates
 - 0132 Provider runtimes reach provider endpoints on Chat and Work turns
-- 0143 A Plan turn is confined by Octant (the Claude rule superseded in scope)

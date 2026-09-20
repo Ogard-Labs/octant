@@ -529,7 +529,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // listed because the modern and legacy entry points are both in use and
     // which one a given runtime takes could not be measured here. The keychain
     // files stay denied above and below, so this opens the lookup and not the
-    // store (0143).
+    // store (0144).
     ...(input.allowProviderCredentialLookup === true
       ? [
           '(allow mach-lookup (global-name "com.apple.SecurityServer"))',

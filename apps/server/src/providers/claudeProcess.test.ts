@@ -452,7 +452,7 @@ describe("Claude runtime confinement", () => {
     expect(launch.allowProcessExec).toBe(false);
     expect(launch.allowProcessFork).toBe(false);
     // The runtime answers a Plan turn by calling its own control plane, which a
-    // `none` egress would refuse before the first token (0132, 0143).
+    // `none` egress would refuse before the first token (0132, 0144).
     expect(launch.networkEgress).toBe("allow");
   });
 

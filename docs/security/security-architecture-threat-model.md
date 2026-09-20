@@ -299,15 +299,15 @@ window, or approves an action class the host policy reserves for the local user.
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
   wrapped, and neither is a Claude launch on the two postures that write, a scoped exception
-  recorded in `docs/decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md` and
-  narrowed by `docs/decisions/0143-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
+  recorded in `docs/decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md` and
+  narrowed by `docs/decisions/0144-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
   threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
     user-selected Full access). Claude sends sandbox settings on approval-gated and
     auto-accept-edits turns, which is the whole of its remaining exception: a Claude Plan launch
     now carries Octant's own profile, so Plan's read-only boundary is the kernel's on that path
-    rather than the runtime's `permissionMode` (0143).
+    rather than the runtime's `permissionMode` (0144).
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
     Pi's also admits all fifteen variables in `PROVIDER_CREDENTIALS` — `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and the rest — from the host whichever provider the
@@ -329,14 +329,15 @@ window, or approves an action class the host policy reserves for the local user.
     (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`). So `~/.aws/credentials`,
     `~/.config/gh/hosts.yml`, `~/.ssh` and anything else the user can read is reachable by the
     runtime process, limited only by what the provider's own sandbox blocks. That is nothing on
-    Full access for either runtime, and nothing on a Claude Plan turn. Keeping a token out of the
+    Full access for either runtime. A Claude Plan turn instead uses Octant's deny-default profile,
+    which denies the rest of the user's home. Keeping a token out of the
     environment does not keep it from a model-generated command that reads its file.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     and those files with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
 - **A confined runtime may look up its own subscription credential.** The Claude runtime keeps
   that credential in the macOS Keychain rather than in its provider home, so the confined Plan
-  launch opens a mach-lookup to the security server (0143). The keychain files stay denied, so the
+  launch opens a mach-lookup to the security server (0144). The keychain files stay denied, so the
   process cannot read the store off disk and the daemon returns only what that binary is already
   trusted for. This is the one launch flag that reaches private credential material; no tool
   launch sets it, and the severity table's "reading Keychain material" still describes reading the
@@ -349,7 +350,7 @@ window, or approves an action class the host policy reserves for the local user.
   goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
   found on `PATH` or in an approved directory, so the executable is not even one the user named.
   Both bound the timeout and output and sanitize the environment, and neither is confined. This
-  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0142 does not
+  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0143 does not
   except it: it is a standing gap across every provider family and across discovery.
   The Oh My Pi connection check in `ohMyPiProcess.ts` runs a version check and an RPC probe the
   same way, against 0122, which exempts a probe from egress only and still requires it to launch

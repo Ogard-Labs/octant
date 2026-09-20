@@ -40,7 +40,7 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
  * The Agent SDK composes the launch and hands the spawn callback only command,
  * args, cwd, env, and a signal, so the bound root and the posture cannot be
  * read off `SpawnOptions`. They are bound here instead, at the call that opens
- * the query, which is the only place that knows them (0142, 0143).
+ * the query, which is the only place that knows them (0143, 0144).
  */
 export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
@@ -467,7 +467,7 @@ function confineClaudeLaunch(
       readRoots: [boundRoot, temporaryDirectory, ...stateDirectories],
       privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateDirectories],
       // The runtime calls its own control plane, so it resolves the runtime
-      // egress policy rather than the thread default (0132, 0143). This driver
+      // egress policy rather than the thread default (0132, 0144). This driver
       // carries Code threads, and the policy no longer reads the mode.
       networkEgress: materializeOsNetworkEgress(
         resolveProviderRuntimeEgressPolicy({
@@ -486,7 +486,7 @@ function confineClaudeLaunch(
       // Subscription authentication keeps its credential in the platform secret
       // store rather than in the provider home, so a launch without this reports
       // itself signed out and the turn never starts. The store's files stay
-      // denied; only the lookup opens (0143). An API-key launch already carries
+      // denied; only the lookup opens (0144). An API-key launch already carries
       // its credential and never resolves one from the store, and the same
       // binary may be trusted for a stored subscription item it has no use for,
       // so the lookup stays closed there.
