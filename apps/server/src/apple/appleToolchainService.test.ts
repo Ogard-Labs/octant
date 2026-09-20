@@ -77,6 +77,7 @@ interface ExecutionContext {
   readonly sourceRevision: string;
   readonly executionPolicy: "plan" | "approval-gated" | "full-access";
   readonly approvalValid: boolean;
+  readonly inputGranted?: boolean;
 }
 
 const context: ExecutionContext = {

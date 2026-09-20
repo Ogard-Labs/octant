@@ -1,5 +1,14 @@
 import { APPLE_INPUT_GRANT_MS, isAppleSimulatorInputKind } from "@octant/domain";
 
+/**
+ * The longest an action may run: its own timeout allows ten minutes. An input
+ * that finishes later than that after a grant ran out was not authorized under
+ * it, so it does not renew it.
+ */
+const LONGEST_ACTION_MS = 10 * 60_000;
+/** How many finished actions are remembered, so a replayed one is recognized. */
+const REMEMBERED_ACTIONS = 256;
+
 export interface SimulatorInputGrant {
   readonly simulatorId: string;
   readonly expiresAt: string;
@@ -16,6 +25,7 @@ export interface SimulatorInputGrant {
 export class SimulatorInputGrants {
   readonly #now: () => number;
   readonly #expiry = new Map<string, number>();
+  readonly #settled = new Set<string>();
 
   constructor(now: () => number = Date.now) {
     this.#now = now;
@@ -33,16 +43,20 @@ export class SimulatorInputGrants {
     const scope = key(threadId, simulatorId);
     const expiresAt = this.#expiry.get(scope);
     if (expiresAt === undefined) return false;
-    if (expiresAt <= this.#now()) {
-      this.#expiry.delete(scope);
-      return false;
-    }
-    return true;
+    if (expiresAt + LONGEST_ACTION_MS <= this.#now()) this.#expiry.delete(scope);
+    return expiresAt > this.#now();
   }
 
-  /** Keeps a live grant open another fifteen minutes; a grant that is gone stays gone. */
+  /**
+   * Keeps a grant open another fifteen minutes. An input authorized under the
+   * grant can finish just after it ran out, and still counts; a grant that was
+   * closed, or ran out long ago, stays closed.
+   */
   renew(threadId: string, simulatorId: string): void {
-    if (this.isOpen(threadId, simulatorId)) this.open(threadId, simulatorId);
+    const expiresAt = this.#expiry.get(key(threadId, simulatorId));
+    if (expiresAt !== undefined && expiresAt + LONGEST_ACTION_MS > this.#now()) {
+      this.open(threadId, simulatorId);
+    }
   }
 
   /**
@@ -50,13 +64,21 @@ export class SimulatorInputGrants {
    * not what was asked: a delivered input keeps its Simulator open, and a
    * Simulator that was shut down is closed to every thread. A failed input or
    * a failed shutdown changes nothing, since the device session carries on.
+   * A request answered again from what was stored delivers nothing new, so
+   * the same action renews only once.
    */
   afterAction(
     threadId: string,
-    action: { readonly kind: string; readonly simulatorId?: string },
+    action: { readonly kind: string; readonly simulatorId?: string; readonly actionId: string },
     outcome: string,
   ): void {
     if (outcome !== "succeeded" || action.simulatorId === undefined) return;
+    if (this.#settled.has(action.actionId)) return;
+    this.#settled.add(action.actionId);
+    if (this.#settled.size > REMEMBERED_ACTIONS) {
+      const oldest = this.#settled.values().next().value;
+      if (oldest !== undefined) this.#settled.delete(oldest);
+    }
     if (action.kind === "shutdown") this.revokeSimulator(action.simulatorId);
     else if (isAppleSimulatorInputKind(action.kind as never)) {
       this.renew(threadId, action.simulatorId);
