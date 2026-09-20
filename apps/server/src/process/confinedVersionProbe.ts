@@ -8,7 +8,7 @@
  * family wrapped: the binary path is user-configured — and, in discovery, not
  * even named by the user — so a replaced executable ran with the user's whole
  * home and the network before any confined launch happened. 0139 names that as
- * a standing gap across every family, and 0140 closes it here, in one place, so
+ * a standing gap across every family, and 0141 closes it here, in one place, so
  * the read sites cannot drift apart again.
  *
  * A version read needs far less than a turn. It has no thread, so no bound
@@ -109,13 +109,15 @@ export function prepareConfinedVersionProbe(
     const launch = confinement.prepare({
       executable: input.binaryPath,
       args: input.args ?? ["--version"],
-      // There is no thread and so no root to bind. Naming the scratch
-      // directory keeps the builder's single-root contract honest: it is the
-      // only place this launch writes, and Linux chdirs into it.
+      // There is no thread, so the one root the builder binds is the scratch
+      // directory itself: the read's working directory on both platforms, and
+      // the only path it may write. It is bound writable rather than left to
+      // the temporary-directory grant, because a bound root a launch may not
+      // write is denied outright after that grant and the denial would cover
+      // the same path.
       boundRoot: scratchDirectory,
       temporaryDirectory: scratchDirectory,
       networkEgress: "none",
-      writeBoundRoot: false,
       allowProcessExec: true,
       allowProcessFork: true,
       allowFileReadStar: true,

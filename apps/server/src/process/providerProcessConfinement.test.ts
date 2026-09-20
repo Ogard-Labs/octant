@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
  * in a manifest this gate could read rather than a source scan. The observed
  * failure was whole modules never adopting the builder, and that is the failure
  * this catches. Its reach is the runtime launch only: a module's `--version`
- * read is confined separately through `confinedVersionProbe` under 0140, which
+ * read is confined separately through `confinedVersionProbe` under 0141, which
  * an entry in {@link UNWRAPPED} still reaches and which this gate does not
  * read, and `discoveryService` runs candidate executables this never sees.
  *

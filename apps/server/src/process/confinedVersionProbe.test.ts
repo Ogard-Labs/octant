@@ -187,10 +187,8 @@ describe("confined version probe", () => {
       const binaryPath = join(installDirectory, "launcher");
       writeFileSync(
         binaryPath,
-        `#!/bin/sh\nprintf 'escaped' > '${outside}'\nexec '${child}' "$@"\n`,
-        {
-          mode: 0o755,
-        },
+        `#!/bin/sh\nprintf 'escaped' > '${outside}'\nprintf 'kept' > scratch.txt\nexec '${child}' "$@"\n`,
+        { mode: 0o755 },
       );
       chmodSync(binaryPath, 0o755);
 
@@ -206,11 +204,16 @@ describe("confined version probe", () => {
         env: launch.environment,
         encoding: "utf8",
       });
+      const inside = join(launch.workingDirectory, "scratch.txt");
+      const wroteInside = existsSync(inside);
       launch.release();
 
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("4.5.6\n");
       expect(existsSync(outside)).toBe(false);
+      // The scratch is the one path the read may write, so a rule that denies
+      // a bound root it may not write must not reach it.
+      expect(wroteInside).toBe(true);
     },
   );
 });

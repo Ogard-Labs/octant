@@ -974,7 +974,7 @@ mechanisms are:
   read every family and the discovery scan perform before a runtime starts is
   wrapped too, with no root, no home, no network and one throwaway scratch
   directory, per
-  [decisions/0140-a-version-read-launches-confined.md](decisions/0140-a-version-read-launches-confined.md).
+  [decisions/0141-a-version-read-launches-confined.md](decisions/0141-a-version-read-launches-confined.md).
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

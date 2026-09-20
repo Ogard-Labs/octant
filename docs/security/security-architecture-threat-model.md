@@ -317,14 +317,14 @@ window, or approves an action class the host policy reserves for the local user.
 - **Version reads are confined; one readiness probe is not.** Every `--version` read prepares
   its launch through `prepareConfinedVersionProbe`
   (`apps/server/src/process/confinedVersionProbe.ts`), recorded in
-  `docs/decisions/0140-a-version-read-launches-confined.md`: the six family reads
+  `docs/decisions/0141-a-version-read-launches-confined.md`: the six family reads
   (`probeAcpBinary`, Claude's `runProbe` at `kind: "version"`, `probeCodexBinary`, Oh My Pi's and
   Pi's `inspectVersion`, `probeOpenCodeBinary`) and `scanDescriptor` in
   `apps/server/src/providers/discoveryService.ts`. The read binds no project root and no managed
   home; one throwaway scratch directory is its working directory, `HOME`, `TMPDIR` and only
   writable path; egress is `none`; reads open the program's own install tree and nothing else
   beneath the user's home. A host that cannot confine refuses the read rather than running it.
-  Process exec and fork stay allowed, a scoped exception to 0122 that 0140 states, because a
+  Process exec and fork stay allowed, a scoped exception to 0122 that 0141 states, because a
   configured path is routinely a launcher that starts the program that answers; a child inherits
   the same profile. The remaining gap is `scanDescriptor`'s optional `authProbeArgs`, which reads
   the provider's credential state out of the user's home and is therefore still spawned
