@@ -130,6 +130,26 @@ describe("confined version probe", () => {
     launch.release();
   });
 
+  it("opens a package launcher's whole node_modules tree, where its hoisted dependencies live", () => {
+    const target = host();
+    const packageBin = join(target.home, "project", "node_modules", "@scope", "tool", "bin");
+    mkdirSync(packageBin, { recursive: true });
+    writeFileSync(join(packageBin, "..", "package.json"), "{}");
+    const binaryPath = join(packageBin, "tool");
+    writeFileSync(binaryPath, "#!/bin/sh\nprintf '1.2.3\\n'\n", { mode: 0o755 });
+    const launch = prepared(target, binaryPath);
+
+    // A manager may hoist a dependency to a sibling of the package, or, with a
+    // symlinking manager, to another directory of the same tree.
+    expect(launch.args[1]).toContain(
+      seatbeltAllowRule("file-read*", join(target.home, "project", "node_modules")),
+    );
+    expect(launch.args[1]).toContain(
+      `(deny file-read* (subpath "${join(target.home, "credentials")}"))`,
+    );
+    launch.release();
+  });
+
   it("keeps the home out of the read roots when the program sits directly in it", () => {
     const target = host();
     const binaryPath = join(target.home, "example");
@@ -342,6 +362,63 @@ describe("confined version probe", () => {
       // The scratch is the one path the read may write, so a rule that denies
       // a bound root it may not write must not reach it.
       expect(wroteInside).toBe(true);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "reads the version from an npm launcher whose native package is hoisted beside it",
+    () => {
+      const root = temporaryRoot();
+      const home = join(root, "home");
+      const modules = join(home, "project", "node_modules", "@scope");
+      const launcherDirectory = join(modules, "tool", "bin");
+      const nativeDirectory = join(modules, "tool-native", "bin");
+      mkdirSync(launcherDirectory, { recursive: true });
+      mkdirSync(nativeDirectory, { recursive: true });
+      writeFileSync(join(modules, "tool", "package.json"), "{}");
+      writeFileSync(join(modules, "tool-native", "package.json"), "{}");
+      writeFileSync(join(nativeDirectory, "tool-native"), "#!/bin/sh\nprintf '7.8.9\\n'\n", {
+        mode: 0o755,
+      });
+      // The shape of a platform-split CLI: the entry point starts a native
+      // program its package manager placed next to the package, not inside it.
+      const binaryPath = join(launcherDirectory, "tool");
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\nexec "\${0%/*}/../../tool-native/bin/tool-native" "$@"\n`,
+        { mode: 0o755 },
+      );
+      // Read by the same profile, so a passing read proves the sibling opened
+      // rather than that nothing under the home was denied.
+      mkdirSync(join(home, "credentials"), { recursive: true });
+      writeFileSync(join(home, "credentials", "token"), "must stay private");
+      const scratchRoot = join(root, "scratch");
+      mkdirSync(scratchRoot, { recursive: true, mode: 0o700 });
+
+      const probe = prepareConfinedVersionProbe({
+        binaryPath,
+        displayName: "Example",
+        environment: () => ({ PATH: "/usr/bin:/bin" }),
+        confinement: makeSeatbeltConfinementLive({
+          platform: "darwin",
+          homeDirectory: home,
+          usersDirectory: root,
+        }),
+        temporaryRoot: scratchRoot,
+        homeDirectory: home,
+      });
+      if (probe.status === "refused") throw new Error(`Unexpected refusal: ${probe.message}`);
+      const { launch } = probe;
+      const result = spawnSync(launch.command, [...launch.args], {
+        cwd: launch.workingDirectory,
+        env: launch.environment,
+        encoding: "utf8",
+      });
+      launch.release();
+
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("7.8.9\n");
     },
   );
 

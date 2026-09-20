@@ -46,8 +46,13 @@ given that fits it.
   not take it.
 - Reads open the program's own install tree and nothing else beneath the user's
   home: the resolved program, its directory, the directory above it, the
-  configured launcher's directory, and the npm package the program resolves out
-  of when it has one. A computed root that is the user's home or an ancestor of
+  configured launcher's directory, and the outermost `node_modules` the program
+  resolves out of when it has one. That is the whole dependency tree rather than
+  the entry point's package, because a platform-split CLI keeps its native
+  program in a sibling package that a project install or a Bun global hoists
+  beside it and a symlinking manager places elsewhere in the tree; the
+  package's own directory alone left such a launcher unable to start it, and the
+  provider was reported unavailable. A computed root that is the user's home or an ancestor of
   it is dropped rather than granted, because the builder re-allows launch roots
   after its own denials and such a root would hand the home back. Each root is
   judged in both its lexical and its resolved spelling, since the builder

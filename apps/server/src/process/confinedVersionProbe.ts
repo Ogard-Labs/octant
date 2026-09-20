@@ -40,7 +40,7 @@
  * so it reaches no more than the probe does.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 
@@ -296,10 +296,13 @@ function versionReadEnvironment(
  * The program alone is not enough. Measured against the installed CLIs on macOS
  * 27: a uv tool's entry point is a script whose interpreter reads `pyvenv.cfg`
  * and `lib/` beside it, so the directory above the program has to open too, and
- * an npm package's entry point resolves its dependencies out of the package's
- * own `node_modules`, which sits above that again. Everything else under the
- * user's home stays denied, which is the reach this confinement exists to take
- * away.
+ * an npm package's entry point resolves its dependencies through Node's
+ * lookup, which walks up every enclosing `node_modules`. A platform-split CLI
+ * keeps its native program in a sibling package a manager may hoist beside it
+ * (a project install, a Bun global) or into another directory of one tree (a
+ * symlinking manager), so the whole outermost `node_modules` opens, not the
+ * entry point's own package. Everything else under the user's home stays
+ * denied, which is the reach this confinement exists to take away.
  */
 function versionProbeReadRoots(
   binaryPath: string,
@@ -313,7 +316,7 @@ function versionProbeReadRoots(
     resolved = binaryPath;
   }
   const home = safeRealpath(homeDirectory);
-  const packageRoot = nodePackageRoot(resolved);
+  const dependencyTree = nodeModulesRoot(resolved);
   const candidates = [
     resolved,
     dirname(resolved),
@@ -321,7 +324,7 @@ function versionProbeReadRoots(
     // The configured path is often a launcher link in a `bin` directory the
     // kernel must read before it can resolve to the program.
     dirname(binaryPath),
-    ...(packageRoot === undefined ? [] : [packageRoot]),
+    ...(dependencyTree === undefined ? [] : [dependencyTree]),
   ];
   // Judged in both forms. The builder canonicalises every root it is given, so
   // a lexical directory that is a link into the home — `/tmp/link/tool` with
@@ -352,16 +355,11 @@ function isOwnInstallPath(path: string, homeDirectory: string): boolean {
   return path.split(sep).filter(Boolean).length >= 2;
 }
 
-/** The npm package directory a resolved entry point lives in, if it is in one. */
-function nodePackageRoot(resolved: string): string | undefined {
-  let current = dirname(resolved);
-  while (current.includes(`${sep}node_modules${sep}`)) {
-    if (existsSync(join(current, "package.json"))) return current;
-    const parent = dirname(current);
-    if (parent === current) return undefined;
-    current = parent;
-  }
-  return undefined;
+/** The outermost `node_modules` directory a resolved entry point lives under, if any. */
+function nodeModulesRoot(resolved: string): string | undefined {
+  const marker = `${sep}node_modules`;
+  const index = resolved.indexOf(`${marker}${sep}`);
+  return index === -1 ? undefined : resolved.slice(0, index + marker.length);
 }
 
 function safeRealpath(path: string): string {
