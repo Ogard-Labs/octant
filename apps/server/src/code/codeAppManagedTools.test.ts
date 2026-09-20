@@ -1231,7 +1231,7 @@ describe("the Apple capability as an agent tool", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a swipe or tap whose coordinate is a number too large to be one", async () => {
+  it("refuses a swipe or tap whose coordinate is no place on a screen", async () => {
     const { execute, tools } = appleTools();
     const simulatorId = "80000000-0000-4000-8000-000000000001";
 
@@ -1245,8 +1245,15 @@ describe("the Apple capability as an agent tool", () => {
       inputJson: `{"operation":"tap","simulatorId":"${simulatorId}","x":-1e400,"y":80}`,
     } as never);
 
+    // A point left of or above the screen is no place either.
+    const negative = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "tap", simulatorId, x: -1, y: 80 }),
+    } as never);
+
     expect(swipe.isError).toBe(true);
     expect(tap.isError).toBe(true);
+    expect(negative.isError).toBe(true);
     expect(execute).not.toHaveBeenCalled();
   });
 

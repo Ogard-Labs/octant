@@ -1331,6 +1331,11 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     // desktop and came back as the desktop being unreachable.
     if (parsed[field] !== undefined && !Number.isFinite(parsed[field])) return undefined;
   }
+  // A point left of or above the screen is no place. Refused here, it is the
+  // caller's mistake; sent on, it was journaled as the device being unavailable.
+  for (const field of ["x", "y", "toX", "toY"] as const) {
+    if (typeof parsed[field] === "number" && parsed[field] < 0) return undefined;
+  }
   if (
     typeof parsed.text === "string" &&
     Buffer.byteLength(parsed.text, "utf8") > MAX_TOOL_INPUT_BYTES
