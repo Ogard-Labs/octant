@@ -113,9 +113,9 @@
   --octant-context-sidebar-min: 280px;
   --octant-success-surface: #16281f;
   --octant-success-text: #6bb299;
-  --octant-warning-surface: #342b0e;
-  --octant-warning-border: #a3801f;
-  --octant-warning-text: #edbc26;
+  --octant-warning-surface: #2b2b2b;
+  --octant-warning-border: #8a8a8a;
+  --octant-warning-text: #f0f0f0;
   --octant-danger-text: #e17d96;
   --octant-addition-text: #6bb299;
   --octant-deletion-text: #e17d96;
@@ -180,9 +180,9 @@ html[data-octant-theme-mode="light"] {
   --octant-accent-text: #1b1b1b;
   --octant-success-surface: #bfd8cc;
   --octant-success-text: #0f6144;
-  --octant-warning-surface: #f0dea8;
-  --octant-warning-border: #987405;
-  --octant-warning-text: #6f5300;
+  --octant-warning-surface: #f0f0ef;
+  --octant-warning-border: #6e6e6e;
+  --octant-warning-text: #1b1b1b;
   --octant-danger-text: #a8102f;
   --octant-destructive: #a8102f;
   --octant-addition-text: #0f6144;
@@ -1049,7 +1049,6 @@ h6 {
 }
 
 .activity-nav__group > .sidebar-section {
-  padding-inline: 6px;
   color: var(--octant-text-secondary);
 }
 
@@ -1099,43 +1098,10 @@ h6 {
   gap: 2px;
 }
 
-.sidebar-navigation__thread.activity-nav__thread {
-  min-height: 48px;
-  align-items: flex-start;
-  padding: 6px;
-}
-
 .sidebar-navigation__thread-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
-}
-
-/* The feed row holds the title line plus whichever properties the view is
-   currently showing beneath it, so the rows are counted rather than fixed at
-   two; the button's own min-height still keeps a one-line row from collapsing. */
-.activity-nav__thread .sidebar-navigation__thread-copy {
-  flex: 1 1 auto;
-  grid-auto-rows: minmax(16px, auto);
-  gap: 2px;
-}
-
-.activity-nav__thread .sidebar-navigation__thread-title,
-.activity-nav__thread .sidebar-navigation__thread-project {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-navigation__thread-project {
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .code-project-views__new {
@@ -1216,10 +1182,11 @@ h6 {
      so neither reading won. */
   gap: 0;
   margin: 2px 0 0;
-  /* Enough to read as nested under its Project, and no more: the row inside
-     adds its own inset, and the two together were pushing thread titles most
-     of the way across the sidebar before the first letter. */
-  padding-left: var(--oct-space-2);
+  /* No indent of its own. An indented list made a thread's selection fill
+     start 16px from the sidebar's edge and end 8px from it, while every other
+     row's fill sat 8px from both; the Project's heavier name and the rows'
+     provider marks are what say these threads belong to it. */
+  padding-left: 0;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -2684,7 +2651,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-settings__local-mark {
   display: inline-flex;
   margin-inline-start: 6px;
-  color: var(--oct-success-text);
   vertical-align: -2px;
 }
 
@@ -3889,7 +3855,6 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-provider-policy__default {
   flex: none;
-  color: var(--oct-success-text);
   font-size: var(--oct-text-xs);
 }
 
@@ -4752,7 +4717,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .environment-subagents__row:hover,
 .environment-subagents__row:focus-visible,
 .environment-subagents__row[aria-expanded="true"] {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
   color: var(--oct-fg);
 }
 
@@ -6502,7 +6467,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   overflow: hidden;
   color: var(--octant-accent-text);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-semibold);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -9756,7 +9721,7 @@ ul.board-col-body {
 
 .code-project-pull-requests__row:hover,
 .code-project-pull-requests__row:focus-visible {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
 }
 
 .code-project-pull-requests__icon {
@@ -9976,7 +9941,7 @@ ul.board-col-body {
 
 .linear-issues__row:hover,
 .linear-issues__row:focus-visible {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
 }
 
 .linear-issues__row[aria-pressed="true"],
@@ -10083,11 +10048,6 @@ ul.board-col-body {
   height: auto;
   flex: 1 1 auto;
   min-width: 0;
-}
-.activity-nav__pr {
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 4px;
 }
 
 .projects-page-layer {

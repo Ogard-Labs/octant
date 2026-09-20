@@ -238,7 +238,12 @@ between rows. A person's message is a right-aligned bubble (`turn-user`,
 `bubble`: control fill, hairline, 16px radius, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
-transcript size with 1.5 leading; markdown headings inside it are labels
+transcript size with 1.5 leading, with no card of its own: only the work a turn
+produced is boxed. The one exception is a workspace with no reading surface
+under it (the application ground behind everything, or a translucent
+workspace), where a reply carries a reading card. Running text keeps a 72ch
+measure; tables and code blocks run the column's width, ending on the same edge
+as the composer; markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
@@ -310,16 +315,23 @@ for labels and the surface role for a background; never rely on hue alone:
 Routine Waiting, idle, and unselected states use neutral text and marks.
 Pending approval requests use a neutral surface and muted icon, without a
 warning stripe. Warning colour is reserved for an actionable warning, not
-every thread that can be resumed. Success, failure, diffs, provider marks,
+every thread that can be resumed. A state, empty, or error message draws its mark in neutral ink, whatever went
+wrong: its glyph and title carry the meaning, and the message recipe offers no
+coloured tone. Success, failure, diffs, provider marks,
 and categorical data may retain semantic colour alongside a label or shape.
 
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#342b0e` dark, `#f0dea8` light) | `--octant-warning-text` (`#edbc26` dark, `#6f5300` light); border `--octant-warning-border` |
+| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f0f0f0` dark, `#1b1b1b` light); border `--octant-warning-border` |
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
+
+The default preset is monochrome, so its warning role carries no hue: the
+control fill, a border that reads at 3:1 on it, and the primary ink. A warning
+is told apart by its mark and its words. A theme that wants an amber warning
+sets the three warning roles.
 
 The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
 `purple`, `pink`) are for Project View identity, chart marks, and provider or
@@ -553,7 +565,13 @@ height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
 view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
-rather than left as a gap. A hovered row takes the soft ink wash and the row
+rather than left as a gap. The Project tree and the Activity feed draw the same
+row: the provider mark in the icon column every navigation row uses, the title
+alone on its line, and the shown facts on one line beneath it in a fixed order
+(Project, pull request, branch, then the age at the end); with no facts shown
+the age sits beside the status instead of opening a line of its own. Thread rows
+are not indented under their Project, so every row's fill sits the same
+distance from both edges of the sidebar. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. One fixed trailing

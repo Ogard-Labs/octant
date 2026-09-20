@@ -152,7 +152,11 @@ describe("HostSettingsSection", () => {
     expect(await screen.findByText("host-1")).toBeInTheDocument();
     expect(screen.getByText("instance-1")).toBeInTheDocument();
     expect(screen.getByText("Managed service")).toBeInTheDocument();
-    expect(screen.getByText(/Automatic startup is enabled/)).toBeInTheDocument();
+    const startup = screen.getByText(/Automatic startup is enabled/);
+    expect(startup).toBeInTheDocument();
+    // The host's ISO timestamp is said as a date and time, not printed raw.
+    expect(startup).not.toHaveTextContent("2026-08-11T12:00:00.000Z");
+    expect(startup).toHaveTextContent(/2026/);
     expect(screen.getByText("1.2.3")).toBeInTheDocument();
     expect(screen.getByText("9")).toBeInTheDocument();
     expect(screen.getByText(/ready/)).toBeInTheDocument();

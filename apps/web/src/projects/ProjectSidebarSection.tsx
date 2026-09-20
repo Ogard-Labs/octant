@@ -18,8 +18,6 @@ import {
   Folder,
   FolderOpen,
   FolderGit,
-  GitBranch,
-  GitPullRequest,
   Layers,
   ListFilter,
   ListTree,
@@ -127,11 +125,11 @@ import {
   ProjectThreadStatus,
   ThreadStatusMark,
   sidebarThreadStatusIcon,
-  threadRowAge,
-  threadRowShortAge,
+  threadRowAgeFact,
   hasInlineActions,
   ThreadRowContextMenu,
 } from "./ProjectThreadList";
+import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1217,7 +1215,9 @@ function ActivityThreadButton(props: {
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
-  const age = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
+  // As in the Project tree, a rested row keeps its wake time even when Last
+  // updated is hidden.
+  const age = threadRowAgeFact(props.thread, shows.lastUpdated);
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
   const row = (
@@ -1230,59 +1230,24 @@ function ActivityThreadButton(props: {
       type="button"
       variant="ghost"
     >
-      <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-headline">
-          <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
-          {pullRequest === undefined || props.actions.onOpenPullRequest !== undefined ? null : (
-            <span
-              className="sidebar-navigation__thread-pr sidebar-navigation__thread-pr-mark"
-              data-state={pullRequest.state}
-            >
-              #{String(pullRequest.identity.number)}
-            </span>
-          )}
-        </span>
-        {shows.project ? (
-          <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
-        ) : null}
-        {checkout === undefined ? null : (
-          <span className="sidebar-navigation__thread-checkout" title={checkout.label}>
-            <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-            <span className="sidebar-navigation__thread-checkout-label">{checkout.label}</span>
-          </span>
-        )}
-      </span>
-      {pullRequest === undefined || props.actions.onOpenPullRequest !== undefined ? null : (
-        <span
-          aria-label={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-          className="sidebar-navigation__thread-pr-mark"
-          data-state={pullRequest.state}
-          role="img"
-          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-        >
-          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />
-        </span>
-      )}
-      {/* As in the Project tree, a rested row keeps its wake time even when
-          Last updated is hidden. */}
-      {props.thread.wakeLabel !== undefined ? (
-        <span className="sidebar-navigation__thread-age">{props.thread.wakeLabel}</span>
-      ) : age === undefined ? null : (
-        <span
-          className="sidebar-navigation__thread-age"
-          title={threadRowAge(props.thread.updatedAt)}
-        >
-          {age}
-        </span>
-      )}
-      {shows.status ? (
-        <ThreadStatusMark
-          activity={props.thread.activity}
-          unread={props.thread.unread}
-          woke={props.thread.woke}
-          followUp={props.thread.followUp}
-        />
-      ) : null}
+      <SidebarThreadRowContent
+        {...(age === undefined ? {} : { age })}
+        {...(checkout === undefined ? {} : { checkout })}
+        {...(shows.project ? { projectName: props.thread.projectName } : {})}
+        {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
+        {...(pullRequest === undefined ? {} : { pullRequest })}
+        status={
+          shows.status ? (
+            <ThreadStatusMark
+              activity={props.thread.activity}
+              unread={props.thread.unread}
+              woke={props.thread.woke}
+              followUp={props.thread.followUp}
+            />
+          ) : null
+        }
+        title={props.thread.title}
+      />
     </OctantButton>
   );
   if (hasMenu) {
@@ -1308,28 +1273,6 @@ function ActivityThreadButton(props: {
       >
         {row}
       </ThreadRowInfoPopup>
-      {pullRequest === undefined || props.actions.onOpenPullRequest === undefined ? null : (
-        <OctantButton
-          aria-label={`Open pull request #${String(pullRequest.identity.number)}`}
-          className="activity-nav__pr"
-          data-state={pullRequest.state}
-          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-          onClick={(event) => {
-            if (event.metaKey || event.ctrlKey) {
-              props.actions.onOpenPullRequestOnGithub?.(pullRequest.identity);
-              return;
-            }
-            props.actions.onOpenPullRequest?.(pullRequest.identity);
-          }}
-          variant="ghost"
-          type="button"
-        >
-          <span className="sidebar-navigation__thread-pr-mark" data-state={pullRequest.state}>
-            <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
-            {String(pullRequest.identity.number)}
-          </span>
-        </OctantButton>
-      )}
     </div>
   );
 }

@@ -318,9 +318,10 @@ describe("WindowChrome", () => {
       "flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);",
     );
     expect(cssRule(".sidebar__native-collapse")).toContain("top: 0;");
-    expect(cssRule(".window-chrome__new-thread")).toContain(
-      "background: var(--oct-surface-muted);",
-    );
+    // This used to pin `background: var(--oct-surface-muted)`, a token nothing
+    // defined, so the control has always drawn clear. It stays outlined.
+    expect(cssRule(".window-chrome__new-thread")).toContain("border-color: var(--oct-border);");
+    expect(cssRule(".window-chrome__new-thread")).not.toContain("--oct-surface-muted");
     expect(cssRule(".workspace-pane__provider")).toContain("width: 14px;");
   });
 
@@ -334,7 +335,9 @@ describe("WindowChrome", () => {
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
       "opacity: 0;",
     );
-    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: 14px;");
+    // The mark fills a destination's icon slot, so a thread's title starts in
+    // the same text column as "Inbox" and "Board".
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: var(--oct-icon-md);");
     expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0.78;");
     expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
       "var(--oct-accent)",
@@ -565,14 +568,44 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("keeps thread row actions in a reserved gutter and bounds the context menu", () => {
-    expect(
-      cssRule(
-        ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions) > .sidebar-navigation__thread",
-      ),
-    ).toContain("padding-inline-end: 56px;");
+  it("makes room for thread row actions only while they show, and bounds the context menu", () => {
+    // DESIGN.md: hover-only actions take no width until their row is hovered
+    // or focused. Reserved at all times, the room left the age and the status
+    // dot floating 56px short of the row's end.
+    const row = ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)";
+    for (const shown of [
+      ":hover",
+      ":focus-within",
+      ':has([aria-expanded="true"])',
+      ":has([data-popup-open])",
+    ]) {
+      expect(cssRule(`${row}${shown} > .sidebar-navigation__thread`)).toContain(
+        "padding-inline-end: 56px;",
+      );
+    }
+    // At rest the only room kept is for the one always-visible overflow action
+    // on a coarse pointer.
+    expect(cssRule(`${row} > .sidebar-navigation__thread`)).not.toContain("56px");
+    expect(cssRule(".sidebar-navigation__thread")).toContain(
+      "padding-inline: var(--oct-nav-inset);",
+    );
+    expect(cssRule(".project-threads")).toContain("padding-left: 0;");
     expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
     expect(cssRule(".thread-row-context-menu")).toContain("width: min(248px, calc(100vw - 24px));");
+  });
+
+  it("keeps a thread row's room and fork mark right on touch and in a narrow window", () => {
+    const coarse = shellStyles.slice(
+      shellStyles.lastIndexOf("@media (pointer: coarse), (max-width: 560px)"),
+    );
+    // One action shows there, always. The hover and focus rules above are more
+    // specific than the plain row rule, so they are restated at 32px; left at
+    // 56px a tapped row lost a column of its title.
+    expect(coarse).toMatch(
+      /:focus-within\s*>\s*\.sidebar-navigation__thread,[\s\S]*?padding-inline-end: 32px;/,
+    );
+    // The fork mark stands left of the status, which stands left of that action.
+    expect(coarse).toMatch(/\.sidebar-navigation__thread-lineage \{\s*right: 50px;/);
   });
 
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
