@@ -409,6 +409,38 @@ describe("the Simulator screen stream", () => {
     expect(watch).not.toHaveBeenCalled();
   });
 
+  it("starts nothing for a viewer who was already gone when the stream was set up", async () => {
+    const { watching } = watchable();
+    const stream = createSimulatorScreenStream(watching);
+    let arrived!: () => void;
+    const requestArrived = new Promise<void>((resolve) => (arrived = resolve));
+    let settled!: () => void;
+    const streamSettled = new Promise<void>((resolve) => (settled = resolve));
+    // The request body is still being read when the viewer hangs up, so the
+    // stream is only set up after the response has closed.
+    const server = createServer((incoming, outgoing) => {
+      incoming.resume();
+      outgoing.once("close", () => void stream({ watch }, outgoing).then(settled));
+      arrived();
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const abort = new AbortController();
+    const pending = fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    }).catch(() => undefined);
+    await requestArrived;
+
+    abort.abort();
+    await pending;
+    await streamSettled;
+
+    expect(watching.send).not.toHaveBeenCalled();
+    expect(watching.watch).not.toHaveBeenCalled();
+  });
+
   it("answers a Simulator that cannot be watched with the helper's reason, not an empty stream", async () => {
     const { fake } = helpers((sent) =>
       sent.op === "hello"
