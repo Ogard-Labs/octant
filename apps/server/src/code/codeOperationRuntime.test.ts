@@ -1190,7 +1190,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("captures the settle tree under the thread's current access, even when the turn started with more", async () => {
+  it("does not snapshot the checkout to record changes after the thread has become Plan", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({
@@ -1212,11 +1212,16 @@ describe("CodeOperationRuntime", () => {
 
     await vi.waitFor(async () => {
       const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      expect(
+        frames.some(
+          (frame) => frame.event.kind === "operation-state" && frame.event.state === "completed",
+        ),
+      ).toBe(true);
       expect(frames.some((frame) => frame.event.kind === "conversation-turn-changed-files")).toBe(
-        true,
+        false,
       );
     });
-    expect(fixture.snapshotPolicies.at(-1)).toBe("plan");
+    expect(fixture.snapshotPolicies).not.toContain("plan");
     fixture.close();
   });
 

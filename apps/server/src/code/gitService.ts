@@ -372,6 +372,9 @@ export class GitService {
   ): Promise<GitTreeChangesResult> {
     const read = this.#observation.readTreeChanges?.bind(this.#observation);
     if (read === undefined) return Promise.resolve({ status: "unavailable" });
+    // The capture copies a scratch index into `.git`. Plan is read-only, so a
+    // turn that is Plan now must not snapshot, even if it started writable.
+    if (input.executionPolicy === "plan") return Promise.resolve({ status: "unavailable" });
     return this.#serialized(input.checkoutId, async () => {
       const now = await this.#mutation.snapshotWorkingTree(
         {

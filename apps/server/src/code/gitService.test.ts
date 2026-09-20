@@ -295,6 +295,27 @@ describe("GitService", () => {
     ).resolves.toEqual({ status: "unavailable" });
   });
 
+  it("does not snapshot the working tree when the thread is Plan", async () => {
+    const observation = readyObservation();
+    const mutation = mutationPort();
+    const readTreeChanges = vi.fn(async () => ({ status: "ready" as const, changes: [] }));
+    const service = new GitService(
+      { observe: vi.fn(async () => observation), readTreeChanges },
+      mutation,
+    );
+
+    await expect(
+      service.changesSince({
+        checkoutId: "checkout-1",
+        checkoutRoot: "/repo",
+        from: "f".repeat(40),
+        executionPolicy: "plan",
+      }),
+    ).resolves.toEqual({ status: "unavailable" });
+    expect(mutation.snapshotWorkingTree).not.toHaveBeenCalled();
+    expect(readTreeChanges).not.toHaveBeenCalled();
+  });
+
   it("hands back the undo point when a restore fails part-way, but not when it is refused", async () => {
     const observation = readyObservation();
     const undo = { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) };
