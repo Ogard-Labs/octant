@@ -57,7 +57,12 @@ describe("SidebarThreadRowContent", () => {
     expect(mark).toHaveAttribute("title", "Codex CLI");
     expect(mark?.nextElementSibling).toHaveClass("sidebar-navigation__thread-copy");
 
+    // A thread whose provider is not resolved keeps the column, empty, so its
+    // title starts where its neighbours' titles do.
     rerender(<SidebarThreadRowContent title="Fix the editor return key" />);
-    expect(container.querySelector(".sidebar-navigation__thread-provider")).toBeNull();
+    const slot = container.querySelector(".sidebar-navigation__thread-provider");
+    expect(slot).toBeEmptyDOMElement();
+    expect(slot).toHaveAttribute("aria-hidden", "true");
+    expect(slot?.nextElementSibling).toHaveClass("sidebar-navigation__thread-copy");
   });
 });
