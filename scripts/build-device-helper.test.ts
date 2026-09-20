@@ -129,6 +129,9 @@ describe.skipIf(!shouldBuildDeviceHelper())("device helper protocol", () => {
     expect(await typed(14, "de_DE@sw=QWERTZ-German;hw=Automatic")).toBe(false);
     expect(await typed(15, "en_US@sw=QWERTY;hw=French")).toBe(false);
     expect(await typed(16, "ja_JP@sw=Kana;hw=Automatic")).toBe(false);
+    // A record with nothing before its settings has no language to judge by.
+    expect(await typed(17, "@")).toBe(false);
+    expect(await typed(18, "@sw=QWERTY;hw=Automatic")).toBe(false);
 
     child.stdin.write(frame({ id: 3, op: "key", key: "nope" }));
     expect(await read()).toMatchObject({ id: 3, ok: false, code: "unsupported-key" });

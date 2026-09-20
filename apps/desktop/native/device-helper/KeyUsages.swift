@@ -43,8 +43,12 @@ enum KeyUsages {
     /// layout that is not QWERTY, or a language outside the list is not known
     /// to be safe, and unknown is treated as unsafe.
     static func typesAsUSPositions(keyboardIdentifier identifier: String) -> Bool {
-        let parts = identifier.split(separator: "@", maxSplits: 1).map(String.init)
-        let language = parts[0].prefix { $0 != "_" && $0 != "-" }.lowercased()
+        // Empty pieces are kept, so a record that starts with "@" has an empty
+        // language rather than no first piece at all to index.
+        let parts = identifier.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+            .map(String.init)
+        guard let first = parts.first else { return false }
+        let language = first.prefix { $0 != "_" && $0 != "-" }.lowercased()
         guard qwertyLanguages.contains(language) else { return false }
         guard parts.count == 2 else { return true }
         var software: String?

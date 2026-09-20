@@ -892,6 +892,40 @@ describe("AppleToolchainService Simulator input", () => {
     expect(recorded).not.toContain("hunter2");
   });
 
+  it("keeps nothing of a typed-text failure whose first word is not one of the helper's codes", async () => {
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      // A host error can begin with what was typed, and a secret can look like a code.
+      injectSimulatorInput: async () =>
+        processResult("", { exitCode: 1, stderr: "correct-horse: invalid keystroke" }),
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "type-text",
+        bundleIdentifier: undefined,
+        text: "correct-horse",
+        requestedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000099" },
+        approval: buildRequest().approval,
+      } as never),
+      context,
+    );
+
+    const recorded = `${JSON.stringify(evidence.diagnostics)} ${[...artifacts.values()]
+      .map((bytes) => new TextDecoder().decode(bytes))
+      .join(" ")}`;
+    expect(recorded).toContain("type-text failed (text redacted)");
+    expect(recorded).not.toContain("correct-horse");
+  });
+
   it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {
     // Observed 2026-09-19 under the packaged app: osascript exited 1 with
     // "Connection Invalid error for service com.apple.hiservices-xpcservice."
