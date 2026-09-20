@@ -2028,7 +2028,8 @@ input.switch:checked::after {
 .octant-preview-card {
   max-width: min(320px, calc(100vw - 24px));
   padding: 10px 12px;
-  border: 1px solid var(--oct-border);
+  /* No border of its own: the overlay shadow already carries the hairline, and
+     the two together drew a double ring. */
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   color: var(--oct-fg);

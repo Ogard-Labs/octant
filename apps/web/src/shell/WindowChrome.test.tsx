@@ -490,6 +490,28 @@ describe("WindowChrome", () => {
     expect(cssRule(".project-dialog h1")).toContain("font-size: var(--oct-text-base)");
   });
 
+  it("gives every popup one thin edge and the floating fill", () => {
+    // The overlay shadow carries the popup's edge, and it is a hairline in both
+    // themes. In dark it used the strong border, so menus and popovers had a
+    // heavier edge than dialogs, and a popup that also set a border showed two.
+    const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
+      (match) => match[1] ?? "",
+    );
+    expect(overlays.length).toBeGreaterThanOrEqual(2);
+    for (const overlay of overlays) {
+      expect(overlay).toContain("0 0 0 1px var(--octant-border)");
+      expect(overlay).not.toContain("--octant-border-strong");
+    }
+    // A feature stylesheet sizes and places a popup; it does not repaint it.
+    const branchMenu = cssRule(".code-branch-selector__menu");
+    expect(branchMenu).not.toMatch(/(^|\s)border:/);
+    expect(branchMenu).not.toContain("background:");
+    const modelMenu = cssRule(".composer-model-picker__menu");
+    expect(modelMenu).not.toMatch(/(^|\s)border:/);
+    expect(modelMenu).not.toContain("background:");
+    expect(modelMenu).not.toContain("box-shadow:");
+  });
+
   it("keeps the opaque utility dock and accessibility fallbacks", () => {
     // --oct-bg is the bridge's alias for the opaque --octant-workspace ground,
     // so the dock and dialog stay workspace-opaque under every theme.

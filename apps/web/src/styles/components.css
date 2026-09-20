@@ -215,10 +215,10 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   gap: 0;
   padding: 0;
   overflow: hidden;
-  background: var(--octant-floating);
-  border: 1px solid var(--octant-border-strong);
+  /* Fill, edge, and shadow are the shared dialog's. A strong border plus the
+     overlay's ring gave search a 2px edge the command palette beside it does
+     not have. */
   border-radius: var(--oct-radius-lg);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .thread-search__field {
