@@ -15,6 +15,9 @@ import { relative, resolve, sep } from "node:path";
 const WEB_SOURCE = "apps/web/src";
 const STYLESHEET_EXTENSION = /\.css$/;
 const COMPONENT_EXTENSION = /(?<!\.test)\.tsx$/;
+/** Scripts that may set a custom property at runtime: the renderer and the theme packages. */
+const SCRIPT_EXTENSION = /(?<!\.test)\.tsx?$/;
+const TOKEN_SCRIPT_SOURCES = ["apps/web/src", "packages/theme/src", "packages/contracts/src"];
 export const BASELINE_PATH = "scripts/ui-stylesheet-baseline.json";
 
 export type StylesheetRule =
@@ -23,7 +26,8 @@ export type StylesheetRule =
   | "motion-literal"
   | "important"
   | "heavy-weight"
-  | "control-repaint";
+  | "control-repaint"
+  | "undefined-token";
 
 export interface StylesheetFinding {
   readonly rule: StylesheetRule;
@@ -305,6 +309,37 @@ function fontSizeOnScale(value: string): boolean {
   return calc !== null && SCALE_STEPS.has(Number(calc[1]));
 }
 
+/** A `var()` with no fallback: the only kind that fails silently when its name is wrong. */
+const BARE_VAR = /var\(\s*(--[\w-]+)\s*\)/g;
+const TOKEN_DEFINITION = /(--[\w-]+)\s*:/g;
+const PROPERTY_RULE = /@property\s+(--[\w-]+)/g;
+/** Set on a popup by the positioning library at runtime, never by a stylesheet. */
+const LIBRARY_TOKENS = new Set([
+  "--available-width",
+  "--available-height",
+  "--anchor-width",
+  "--anchor-height",
+  "--transform-origin",
+]);
+
+/**
+ * The custom properties a script sets at runtime: a quoted `"--name"`, or a
+ * `--name-${...}` template whose prefix stands for a family of names.
+ */
+export function collectScriptedTokens(sources: Readonly<Record<string, string>>): {
+  readonly names: ReadonlySet<string>;
+  readonly prefixes: ReadonlyArray<string>;
+} {
+  const names = new Set<string>();
+  const prefixes = new Set<string>();
+  for (const source of Object.values(sources)) {
+    for (const match of source.matchAll(/["'`](--[\w-]+)["'`]/g)) names.add(match[1] ?? "");
+    for (const match of source.matchAll(/(--[\w-]+)\s*:/g)) names.add(match[1] ?? "");
+    for (const match of source.matchAll(/["'`](--[\w-]+-)\$\{/g)) prefixes.add(match[1] ?? "");
+  }
+  return { names, prefixes: [...prefixes] };
+}
+
 export function findStylesheetFindings(
   files: Readonly<Record<string, string>>,
   primitiveClasses: ReadonlyMap<string, string> = new Map(),
@@ -355,6 +390,49 @@ export function findStylesheetFindings(
   return findings;
 }
 
+/**
+ * References to a custom property that nothing defines.
+ *
+ * A misspelt token with no fallback is not an error to the browser: the
+ * declaration is dropped at computed-value time, so a background goes
+ * transparent and a border takes the text colour. Fifteen of these had shipped,
+ * every one a slip between the two token vocabularies. A token may be defined
+ * in any stylesheet, so the names are gathered before any file is judged.
+ */
+export function findUndefinedTokenFindings(
+  files: Readonly<Record<string, string>>,
+  scripted: ReturnType<typeof collectScriptedTokens> = { names: new Set(), prefixes: [] },
+): ReadonlyArray<StylesheetFinding> {
+  const definedTokens = new Set<string>(LIBRARY_TOKENS);
+  for (const source of Object.values(files)) {
+    const { text } = stripComments(source);
+    for (const match of text.matchAll(TOKEN_DEFINITION)) definedTokens.add(match[1] ?? "");
+    for (const match of text.matchAll(PROPERTY_RULE)) definedTokens.add(match[1] ?? "");
+  }
+  const isDefined = (name: string): boolean =>
+    definedTokens.has(name) ||
+    scripted.names.has(name) ||
+    scripted.prefixes.some((prefix) => name.startsWith(prefix));
+  const findings: StylesheetFinding[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    for (const { property, value, line } of readDeclarations(source)) {
+      for (const reference of value.matchAll(BARE_VAR)) {
+        const token = reference[1] ?? "";
+        if (isDefined(token)) continue;
+        findings.push({
+          rule: "undefined-token",
+          file: file.split(sep).join("/"),
+          line,
+          detail: `${property} reads ${token}, which nothing defines`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 export function countFindings(
   findings: ReadonlyArray<StylesheetFinding>,
 ): Record<StylesheetRule, Record<string, number>> {
@@ -365,6 +443,7 @@ export function countFindings(
     important: {},
     "heavy-weight": {},
     "control-repaint": {},
+    "undefined-token": {},
   };
   for (const finding of findings) {
     const byFile = counts[finding.rule];
@@ -396,9 +475,12 @@ export function compareWithBaseline(
 ): ReadonlyArray<BaselineProblem> {
   const counts = countFindings(findings);
   const problems: BaselineProblem[] = [];
-  for (const file of Object.keys(counts["color-literal"]).sort()) {
-    const current = counts["color-literal"][file] ?? 0;
-    problems.push({ kind: "exceeded", rule: "color-literal", file, recorded: 0, current });
+  // Never baselined: the renderer holds none of either, so one is always new.
+  for (const rule of ["color-literal", "undefined-token"] as const) {
+    for (const file of Object.keys(counts[rule]).sort()) {
+      const current = counts[rule][file] ?? 0;
+      problems.push({ kind: "exceeded", rule, file, recorded: 0, current });
+    }
   }
   for (const rule of RATCHETED_RULES) {
     const recorded = baseline[rule] ?? {};
@@ -451,10 +533,28 @@ async function rendererFiles(root: string): Promise<{
   return { stylesheets, components };
 }
 
+async function scriptSources(root: string): Promise<Readonly<Record<string, string>>> {
+  const sources: Record<string, string> = {};
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolute = resolve(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (entry.isFile() && SCRIPT_EXTENSION.test(entry.name)) {
+        sources[relative(root, absolute).split(sep).join("/")] = await readFile(absolute, "utf8");
+      }
+    }
+  };
+  for (const directory of TOKEN_SCRIPT_SOURCES) await visit(resolve(root, directory));
+  return sources;
+}
+
 async function main(): Promise<void> {
   const root = resolve(import.meta.dir, "..");
   const { stylesheets, components } = await rendererFiles(root);
-  const findings = findStylesheetFindings(stylesheets, collectPrimitiveClasses(components));
+  const findings = [
+    ...findStylesheetFindings(stylesheets, collectPrimitiveClasses(components)),
+    ...findUndefinedTokenFindings(stylesheets, collectScriptedTokens(await scriptSources(root))),
+  ];
   const baselineFile = resolve(root, BASELINE_PATH);
 
   if (process.argv.includes("--write-baseline")) {

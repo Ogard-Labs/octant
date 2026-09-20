@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   collectPrimitiveClasses,
+  collectScriptedTokens,
   compareWithBaseline,
   findStylesheetFindings,
+  findUndefinedTokenFindings,
   serializeBaseline,
 } from "./check-ui-stylesheets";
 import { findUiColorLiteralViolations } from "./check-ui-color-literals";
@@ -17,6 +19,56 @@ describe("UI stylesheet check", () => {
         "apps/mobile/src/ui/StatusCard.tsx": 'const style = { color: "#1b1b1b" };',
       }),
     ).toEqual(["apps/mobile/src/ui/StatusCard.tsx:1 uses a hardcoded color: #1b1b1b"]);
+  });
+
+  it("flags a token that nothing defines, because the browser drops it without a word", () => {
+    expect(
+      findUndefinedTokenFindings({
+        [CSS]: [".card {", "  background: var(--oct-surface-muted);", "}"].join("\n"),
+        "apps/web/src/styles/tokens.css": ":root {\n  --octant-surface-muted: #2b2b2b;\n}",
+      }),
+    ).toEqual([
+      {
+        rule: "undefined-token",
+        file: CSS,
+        line: 2,
+        detail: "background reads --oct-surface-muted, which nothing defines",
+      },
+    ]);
+  });
+
+  it("accepts a token another stylesheet, a script, the library, or a fallback stands behind", () => {
+    const scripted = collectScriptedTokens({
+      "apps/web/src/theme/apply.ts":
+        'root.style.setProperty("--octant-ui-font-size", size);\nroot.style.setProperty(`--octant-palette-${name}`, value);',
+    });
+    expect(
+      findUndefinedTokenFindings(
+        {
+          [CSS]: [
+            ".row {",
+            "  color: var(--oct-fg);",
+            "  font-size: var(--octant-ui-font-size);",
+            "  fill: var(--octant-palette-teal);",
+            "  max-width: var(--available-width);",
+            "  border-color: var(--not-defined-anywhere, currentColor);",
+            "}",
+          ].join("\n"),
+          "apps/web/src/styles/tokens.css": ":root {\n  --oct-fg: var(--octant-ui-font-size);\n}",
+        },
+        scripted,
+      ),
+    ).toEqual([]);
+  });
+
+  it("never baselines an undefined token", () => {
+    const findings = findUndefinedTokenFindings({
+      [CSS]: ".card {\n  background: var(--oct-surface-muted);\n}",
+    });
+    expect(compareWithBaseline(findings, {})).toEqual([
+      { kind: "exceeded", rule: "undefined-token", file: CSS, recorded: 0, current: 1 },
+    ]);
+    expect(serializeBaseline(findings)).toBe("{}\n");
   });
 
   it("flags a raw colour in a rule but not in a token definition", () => {
