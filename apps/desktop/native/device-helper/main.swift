@@ -245,17 +245,19 @@ private func refusal(for error: Error) -> Refusal {
     }
 }
 
-/// The developer directory the person selected, as `xcodebuild` and `simctl`
-/// resolve it: `DEVELOPER_DIR` first, then `xcode-select`. Xcode is often
-/// installed beside a beta or under another name, so a fixed path would reach
-/// the wrong toolchain or none.
+/// The developer directory the workbench's own commands use. Those run with an
+/// environment that does not carry `DEVELOPER_DIR`, so `simctl` and discovery
+/// follow `xcode-select`; honouring the variable here would open a different
+/// toolchain's device set and answer "no such device" for a Simulator the
+/// workbench had just listed. Xcode is often installed beside a beta or under
+/// another name, so a fixed path would be wrong too.
 private func selectedDeveloperDirectory() -> String {
-    if let configured = ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !configured.isEmpty {
-        return configured
-    }
     let select = Process()
     select.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
     select.arguments = ["-p"]
+    var environment = ProcessInfo.processInfo.environment
+    environment.removeValue(forKey: "DEVELOPER_DIR")
+    select.environment = environment
     let output = Pipe()
     select.standardOutput = output
     select.standardError = FileHandle.nullDevice
