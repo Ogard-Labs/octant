@@ -226,7 +226,13 @@ describe("AppleSimulatorLiveFrameView", () => {
 
     // jsdom has no PointerEvent; a MouseEvent carries the same coordinates.
     if (typeof globalThis.PointerEvent === "undefined") {
-      (globalThis as { PointerEvent?: unknown }).PointerEvent = class extends MouseEvent {};
+      (globalThis as { PointerEvent?: unknown }).PointerEvent = class extends MouseEvent {
+        readonly isPrimary: boolean;
+        constructor(type: string, init?: MouseEventInit & { readonly isPrimary?: boolean }) {
+          super(type, init);
+          this.isPrimary = init?.isPrimary ?? true;
+        }
+      };
     }
     afterEach(() => {
       vi.useRealTimers();
@@ -254,11 +260,25 @@ describe("AppleSimulatorLiveFrameView", () => {
       render(liveView({ onInput }));
       const region = drawnAt402();
 
-      fireEvent.pointerDown(region, { clientX: 10 + 201, clientY: 20 + 437 });
-      fireEvent.pointerUp(region, { clientX: 10 + 202, clientY: 20 + 437 });
+      fireEvent.pointerDown(region, { clientX: 10 + 201, clientY: 20 + 437, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 10 + 202, clientY: 20 + 437, isPrimary: true });
 
       expect(onInput).toHaveBeenCalledTimes(1);
       expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 1311 } });
+    });
+
+    it("leaves a right-click to the app instead of touching the device", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      // A right-click from the mouse, then a second touch point that is not primary.
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 457, button: 2, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 457, button: 2, isPrimary: true });
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 457, button: 0, isPrimary: false });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 457, button: 0, isPrimary: false });
+
+      expect(onInput).not.toHaveBeenCalled();
     });
 
     it("sends a drag as one swipe when the finger lifts", () => {
@@ -266,8 +286,8 @@ describe("AppleSimulatorLiveFrameView", () => {
       render(liveView({ onInput }));
       const region = drawnAt402();
 
-      fireEvent.pointerDown(region, { clientX: 211, clientY: 800 });
-      fireEvent.pointerUp(region, { clientX: 211, clientY: 300 });
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 800, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 300, isPrimary: true });
 
       expect(onInput).toHaveBeenCalledTimes(1);
       expect(onInput.mock.calls[0]?.[0]).toMatchObject({

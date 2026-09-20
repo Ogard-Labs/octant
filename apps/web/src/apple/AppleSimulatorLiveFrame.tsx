@@ -244,6 +244,10 @@ function StreamedScreen(props: {
       }}
       onPointerDown={(event) => {
         if (!active) return;
+        // Only a primary press is a finger on the device. A right-click opens
+        // a menu and a second touch point is part of something else; neither
+        // should reach the Simulator as a tap.
+        if (event.button !== 0 || !event.isPrimary) return;
         pressRef.current = { x: event.clientX, y: event.clientY, atMs: event.timeStamp };
         // Keeps the release coming here when a drag runs off the screen.
         event.currentTarget.setPointerCapture?.(event.pointerId);
