@@ -34,9 +34,16 @@ measured on macOS 27 against this builder's profile:
   thread's checkout as its bound root. The checkout is readable and never
   writable, process execution and fork are denied, and the only write roots are
   the runtime's configuration directory, its secure-storage directory when the
-  host names one, and the one scratch directory the runtime opens for itself.
-  There is no unconfined fallback: a builder that cannot prepare the launch
-  fails the turn.
+  host names one, and a temporary directory made for that launch alone. That
+  directory is created inside the ambient temporary root, handed to the runtime
+  as its `TMPDIR`, and removed when the runtime exits or the launch is refused.
+  The shared temporary root is never granted, so a Plan runtime cannot name
+  another thread's scratch files. There is no unconfined fallback: a builder
+  that cannot prepare the launch fails the turn.
+- A readiness probe carries no thread, so it binds an empty folder only that
+  probe can name, removed when the probe closes. It does not bind the server's
+  working directory, which the builder refuses when it is an ancestor of a
+  denied path and which otherwise becomes a readable root by accident.
 - This partially supersedes one rule of 0142, that the Claude exception covers
   `claudeProcess.ts` whole. The exception now covers the approval-gated and
   auto-accept-edits postures, whose launches still run on the runtime's own
@@ -49,9 +56,13 @@ measured on macOS 27 against this builder's profile:
   them: what Plan withholds is writing and running something, and those are
   withheld by the launch's filesystem and process rules.
 - A bound root a launch may not write is denied in the profile, not merely left
-  ungranted. A checkout that sits under the launch's own temporary directory
-  was writable through that directory's subpath grant, which made a Plan launch
-  able to create a file in the checkout it may only read.
+  ungranted. A checkout that sits beneath a write grant — the launch's own
+  temporary directory, or a configured provider directory that contains it —
+  was writable through that grant's subpath rule, which made a Plan launch able
+  to create a file in the checkout it may only read. The denial follows every
+  write grant so no ancestor reopens it. A grant that is the bound root or lies
+  beneath it was asked for by name and stays writable, so a launch that binds a
+  managed home and lists it as a write root keeps writing there.
 - A provider runtime that resolves its own subscription credential from the
   platform secret store may look up the security server. The store's files stay
   denied, so a confined process still cannot read it off disk; the daemon
