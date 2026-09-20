@@ -288,11 +288,13 @@ window, or approves an action class the host policy reserves for the local user.
   the root only for non-plan, non-chat sessions; deny rules enumerate the rest of the user's home.
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
   `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts`, and
-  `claudeProcess.ts` on Plan — the launches whose process carries exactly one thread's root, mode,
-  and execution policy. All of them return the binary unwrapped on Full access, 0009's
-  user-selected unrestricted posture; ACP keeps 0006's static MCP, skills, and hooks denials
-  there. A bound root a launch may not write is denied in the profile rather than left ungranted,
-  so a checkout under the launch's own temp is not writable through that directory's grant.
+  `claudeProcess.ts` on Plan — the runtimes whose process carries exactly one thread's root, mode,
+  and execution policy. On Full access, 0009's user-selected unrestricted posture, OpenCode and Pi
+  return the binary unwrapped. ACP drops the deny-default profile too, and a profile that carries
+  0006's static MCP, skills, and hooks denials launches through an allow-default wrapper that adds
+  only those. A bound root a launch may not write is denied in the profile rather than left
+  ungranted, so a checkout beneath a write grant, such as the temp or a configuration directory,
+  is not writable through it.
   `apps/server/src/childProcessEnvironment.ts` strips the broker URLs, broker tokens, and desktop
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not

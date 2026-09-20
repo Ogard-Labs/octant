@@ -19,7 +19,7 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
  * appears in {@link UNWRAPPED} with a reason, and 0142 names each one that does
  * not. What it does not prove: that every launch inside a wrapped module goes
  * through the builder. A wrapped module still spawns directly for its version
- * probe, and on Full access returns the binary unwrapped by design, so a
+ * probe, and on Full access drops the deny-default profile by design, so a
  * per-launch claim would need each module to declare its launches in a manifest
  * this gate could read rather than a source scan. The observed failure was
  * whole modules never adopting the builder, and that is the failure this
