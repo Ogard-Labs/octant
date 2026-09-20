@@ -452,7 +452,7 @@ describe("Claude runtime confinement", () => {
     expect(launch.allowProcessExec).toBe(false);
     expect(launch.allowProcessFork).toBe(false);
     // The runtime answers a Plan turn by calling its own control plane, which a
-    // `none` egress would refuse before the first token (0132, 0144).
+    // `none` egress would refuse before the first token (0132, 0145).
     expect(launch.networkEgress).toBe("allow");
   });
 
@@ -557,6 +557,28 @@ describe("Claude runtime confinement", () => {
       true,
       false,
     ]);
+  });
+
+  it("refuses a Plan turn whose project root is also a runtime state directory", () => {
+    const target = fixture();
+    const configHome = join(target.root, ".claude");
+    mkdirSync(configHome);
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: configHome,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: configHome,
+        env: { ...target.environment, HOME: configHome, CLAUDE_CONFIG_DIR: configHome },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("also a runtime state directory");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(configHome)).toEqual([]);
   });
 
   it("refuses a Plan turn whose temporary directory is inside the checkout", () => {

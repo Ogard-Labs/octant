@@ -300,14 +300,14 @@ window, or approves an action class the host policy reserves for the local user.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
   wrapped, and neither is a Claude launch on the two postures that write, a scoped exception
   recorded in `docs/decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md` and
-  narrowed by `docs/decisions/0144-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
+  narrowed by `docs/decisions/0145-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
   threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
     user-selected Full access). Claude sends sandbox settings on approval-gated and
     auto-accept-edits turns, which is the whole of its remaining exception: a Claude Plan launch
     now carries Octant's own profile, so Plan's read-only boundary is the kernel's on that path
-    rather than the runtime's `permissionMode` (0144).
+    rather than the runtime's `permissionMode` (0145).
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
     Pi's also admits all fifteen variables in `PROVIDER_CREDENTIALS` — `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and the rest — from the host whichever provider the
@@ -337,7 +337,7 @@ window, or approves an action class the host policy reserves for the local user.
     without announcing is not one Octant's approvals can prompt for.
 - **A confined runtime may look up its own subscription credential.** The Claude runtime keeps
   that credential in the macOS Keychain rather than in its provider home, so the confined Plan
-  launch opens a mach-lookup to the security server (0144). The keychain files stay denied, so the
+  launch opens a mach-lookup to the security server (0145). The keychain files stay denied, so the
   process cannot read the store off disk and the daemon returns only what that binary is already
   trusted for. This is the one launch flag that reaches private credential material; no tool
   launch sets it, and the severity table's "reading Keychain material" still describes reading the

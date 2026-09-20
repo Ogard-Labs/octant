@@ -40,7 +40,7 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
  * The Agent SDK composes the launch and hands the spawn callback only command,
  * args, cwd, env, and a signal, so the bound root and the posture cannot be
  * read off `SpawnOptions`. They are bound here instead, at the call that opens
- * the query, which is the only place that knows them (0143, 0144).
+ * the query, which is the only place that knows them (0143, 0145).
  */
 export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
@@ -381,6 +381,21 @@ function runProbe(
  * shared with every other use of the runtime on this host, so it is named as a
  * write root rather than hidden inside the temp grant.
  */
+function planStateDirectories(
+  boundRoot: string,
+  stateDirectories: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  for (const path of stateDirectories) {
+    if (path === boundRoot) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        "Claude Plan confinement cannot use a project root that is also a runtime state directory.",
+      );
+    }
+  }
+  return stateDirectories;
+}
+
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {
   const configuration =
     environment.CLAUDE_CONFIG_DIR ??
@@ -456,7 +471,10 @@ function confineClaudeLaunch(
       // open is left to it.
     }
   };
-  const stateDirectories = claudeRuntimeStateDirectories(spawnOptions.env);
+  const stateDirectories = planStateDirectories(
+    boundRoot,
+    claudeRuntimeStateDirectories(spawnOptions.env),
+  );
   try {
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
@@ -467,7 +485,7 @@ function confineClaudeLaunch(
       readRoots: [boundRoot, temporaryDirectory, ...stateDirectories],
       privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateDirectories],
       // The runtime calls its own control plane, so it resolves the runtime
-      // egress policy rather than the thread default (0132, 0144). This driver
+      // egress policy rather than the thread default (0132, 0145). This driver
       // carries Code threads, and the policy no longer reads the mode.
       networkEgress: materializeOsNetworkEgress(
         resolveProviderRuntimeEgressPolicy({
@@ -486,7 +504,7 @@ function confineClaudeLaunch(
       // Subscription authentication keeps its credential in the platform secret
       // store rather than in the provider home, so a launch without this reports
       // itself signed out and the turn never starts. The store's files stay
-      // denied; only the lookup opens (0144). An API-key launch already carries
+      // denied; only the lookup opens (0145). An API-key launch already carries
       // its credential and never resolves one from the store, and the same
       // binary may be trusted for a stored subscription item it has no use for,
       // so the lookup stays closed there.

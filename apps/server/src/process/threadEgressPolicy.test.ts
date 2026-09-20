@@ -62,7 +62,7 @@ describe("thread egress policy", () => {
   it("lets a Plan runtime reach its own control plane and nothing wider", () => {
     // A Plan turn still has to ask the model for the plan. What Plan withholds
     // is writing and running something, which the launch's filesystem and
-    // process rules withhold (0144).
+    // process rules withhold (0145).
     expect(
       resolveProviderRuntimeEgressPolicy({
         mode: "work",

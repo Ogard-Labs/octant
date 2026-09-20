@@ -34,7 +34,7 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
  *
  * An exception may also narrow to the postures a module still launches
  * unwrapped, which is how the Claude exception closes one posture at a time
- * (0144). Full access is never listed: 0009 calls it a genuine unrestricted
+ * (0145). Full access is never listed: 0009 calls it a genuine unrestricted
  * posture, so no runtime confines it and it is outside this rule rather than an
  * exception to it.
  */
