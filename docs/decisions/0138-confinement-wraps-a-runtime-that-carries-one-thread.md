@@ -29,11 +29,11 @@ are theirs and not a gap in the rule.
   thread's authority: one bound root, one mode, one execution policy, fixed for
   the life of the process. The ACP, OpenCode, and Pi turn launches meet that
   and stay under 0009's rule unchanged.
-- Version probes are outside this record and outside 0009 today. Every family,
-  wrapped or not, runs the configured executable directly for `--version`
-  before any confined launch (`probeOpenCodeBinary`, `probeAcpBinary`,
-  `inspectVersion`, `probeCodexBinary`). That is one uniform gap, not a
-  property of this exception, and it closes in its own change.
+- This exception covers whole modules, so it does not reach version probes.
+  Every family, wrapped or not, spawns the configured executable for
+  `--version` before any confined launch. That does not satisfy 0009 and is not
+  excepted here; it is a standing gap across every family, recorded in the
+  threat model and closing in its own change.
 - Every provider process module that launches without the shared builder is
   named here rather than left to a grep. This is a scoped exception to one rule
   of 0009, that every such subprocess launches through that builder:
@@ -52,26 +52,20 @@ are theirs and not a gap in the rule.
 - The exception covers the runtime process only. Octant-owned tools those
   threads reach — terminal, test runner, Git helpers, executable extension
   components, brokered tools — stay confined exactly as 0009 requires.
-- The residual risk is stated by posture, not simulated away. Codex carries a
-  sandbox on every `thread/start` (`read-only` on Plan). Claude carries one
-  only on approval-gated and auto-accept-edits turns, bounded to the project
-  root; `claudeSandboxSettings` returns nothing for Plan and Full access, so a
-  Claude Plan turn is read-only by the runtime's `permissionMode` alone. That
-  does not meet 0009's rule that Plan denies writes and process execution at
-  the sandbox and not only in policy, and closing this exception for Claude has
-  to fix it first. 0009 holds that a provider's permission layer is a signal
-  and not the boundary, so a defect in the posture Octant maps into it is a
-  write inside the checkout with no Octant prompt — observed on a Codex Code
-  thread whose approval-gated posture mapped to `workspace-write`.
-- The compensating controls are named exactly, because an unwrapped runtime is
-  what makes their edges matter: environments are allowlist-sanitized, broker
-  coordinates and the desktop bridge secret are stripped from every child, and
-  argv carrying a credential is refused. The provider's own credential is not —
-  API-key authentication resolves `ANTHROPIC_API_KEY` into the runtime's
-  environment at launch, as 0009 allows — so a model-generated command inside
-  these two reads it with no OS boundary in the way. Process receipts, group
-  termination, the tool-call policy choke point, the approval categories, and
-  untrusted-content taint all stand.
+- The residual risk is inventoried by posture in the threat model's sandbox
+  section rather than averaged into a sentence here: which postures carry a
+  provider sandbox, what each runtime's environment actually withholds, and
+  what a model-generated command inside an unwrapped runtime can therefore
+  read. Two entries there bind this record. A Claude Plan turn is read-only by
+  `permissionMode` alone and not at any sandbox, which 0009 requires, so
+  closing this exception for Claude has to fix that first. And 0009 holds that
+  a provider's permission layer is a signal and not the boundary, so a defect
+  in the posture Octant maps into it is a write inside the checkout with no
+  Octant prompt — observed on a Codex Code thread whose approval-gated posture
+  mapped to `workspace-write`.
+- Process receipts, group termination, broker-coordinate stripping, the
+  tool-call policy choke point, the approval categories, and untrusted-content
+  taint stand unchanged for both runtimes.
 - A new provider runtime is wrapped. `providerProcessConfinement.test.ts` keeps
   the live set as a manifest and refuses a module that uses no shared builder
   and claims no entry, an entry whose module has since adopted the builder, and

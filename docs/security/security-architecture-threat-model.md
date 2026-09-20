@@ -288,13 +288,31 @@ window, or approves an action class the host policy reserves for the local user.
   the root only for non-plan, non-chat sessions; deny rules enumerate the rest of the user's home.
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
   `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts` — the runtimes
-  whose process carries exactly one thread's root, mode, and execution policy. The Codex
-  app-server and the Claude Agent SDK launch do not and are not wrapped, a scoped exception
-  recorded in `docs/decisions/0138-confinement-wraps-a-runtime-that-carries-one-thread.md` with
-  its residual risk; the tools those threads reach are confined either way.
-  Environments are allowlist-sanitized (`SAFE_ENVIRONMENT` plus declared
-  provider credentials), and `apps/server/src/childProcessEnvironment.ts` strips the broker URLs,
-  broker tokens, and desktop bridge secret from every child.
+  whose process carries exactly one thread's root, mode, and execution policy.
+  `apps/server/src/childProcessEnvironment.ts` strips the broker URLs, broker tokens, and desktop
+  bridge secret from every child, and argv carrying a provider credential is refused.
+- **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server and the
+  Claude Agent SDK launch are not wrapped, a scoped exception recorded in
+  `docs/decisions/0138-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
+  those threads reach stay confined. What the runtime process itself is left holding:
+  - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
+    (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
+    user-selected Full access). Claude sends sandbox settings only on approval-gated and
+    auto-accept-edits turns; `claudeSandboxSettings` returns nothing for Plan and Full access, so
+    a Claude Plan turn is read-only by `permissionMode` alone and not at any sandbox — which 0009
+    requires and which therefore does not hold for that one path.
+  - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
+    Codex does not: `sanitizeCodexEnvironment` drops only `OCTANT_*`, `ELECTRON_RUN_AS_NODE` and
+    `NODE_OPTIONS`, so every other inherited variable — a `GITHUB_TOKEN` or a cloud key among
+    them — reaches it. Under API-key authentication `ANTHROPIC_API_KEY` is resolved into Claude's
+    environment at launch, as 0009 allows.
+  - _Consequence._ A model-generated shell command inside either runtime reads that environment
+    with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
+    without announcing is not one Octant's approvals can prompt for.
+- **Version probes run the configured executable unconfined.** `probeOpenCodeBinary`,
+  `probeAcpBinary`, `inspectVersion` and `probeCodexBinary` each spawn the user-configured binary
+  for `--version` before any confined launch. This does not satisfy 0009 and is not excepted by
+  0138; it is a standing gap across every provider family.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
