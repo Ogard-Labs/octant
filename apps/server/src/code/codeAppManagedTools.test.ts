@@ -1231,6 +1231,25 @@ describe("the Apple capability as an agent tool", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses a swipe or tap whose coordinate is a number too large to be one", async () => {
+    const { execute, tools } = appleTools();
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+
+    // JSON reads 1e400 as Infinity, which is a number and is not a place.
+    const swipe = await tools.execute({
+      name: "octant_apple",
+      inputJson: `{"operation":"swipe","simulatorId":"${simulatorId}","x":600,"y":2000,"toX":1e400,"toY":800}`,
+    } as never);
+    const tap = await tools.execute({
+      name: "octant_apple",
+      inputJson: `{"operation":"tap","simulatorId":"${simulatorId}","x":-1e400,"y":80}`,
+    } as never);
+
+    expect(swipe.isError).toBe(true);
+    expect(tap.isError).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("refuses an action whose destination or project the caller did not name", async () => {
     const { execute, tools } = appleTools();
 

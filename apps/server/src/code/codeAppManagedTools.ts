@@ -1326,7 +1326,10 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
   for (const field of ["x", "y", "toX", "toY", "durationMs"] as const) {
-    if (parsed[field] !== undefined && typeof parsed[field] !== "number") return undefined;
+    // JSON reads a number too large to hold, such as 1e400, as Infinity. It is
+    // a number and not a place; sent on, it became `null` on the way to the
+    // desktop and came back as the desktop being unreachable.
+    if (parsed[field] !== undefined && !Number.isFinite(parsed[field])) return undefined;
   }
   if (
     typeof parsed.text === "string" &&
