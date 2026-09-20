@@ -346,6 +346,16 @@ export const AppleRuntimeSnapshot = Schema.Struct({
   simulators: Schema.Array(AppleSimulatorRecord).pipe(Schema.maxItems(256)),
   active: Schema.Array(AppleActionProgress).pipe(Schema.maxItems(64)),
   recentEvidence: Schema.Array(AppleBuildEvidence).pipe(Schema.maxItems(64)),
+  /**
+   * Simulators this thread may send input to without a new approval, and until
+   * when. The host decides; the pane reads this only to avoid raising a
+   * confirmation the host would not ask for.
+   */
+  inputGrants: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ simulatorId: AppleSimulatorId, expiresAt: UtcTimestamp }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;
 

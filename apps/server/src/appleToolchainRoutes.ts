@@ -1,9 +1,12 @@
 import {
   decodeAppleArtifactRequest,
   decodeAppleRpcEnvelope,
+  decodeAppleRuntimeSnapshot,
   decodeAppleScreenStreamRequest,
   SIMULATOR_SCREEN_HEADER,
+  type AppleActionRequest,
   type AppleAuthorityScopeRequest,
+  type AppleBuildEvidence,
   type AppleRpcEnvelope,
   type WindowId,
 } from "@octant/contracts";
@@ -26,6 +29,21 @@ export interface AppleToolchainRouteDependencies {
     scope: AppleAuthorityScopeRequest,
     envelope: AppleRpcEnvelope,
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
+  /**
+   * Called with what an action came to, after it ran, and the window that asked.
+   * The host's input grants follow what was delivered rather than what was asked.
+   */
+  readonly afterAction?: (
+    windowId: WindowId,
+    request: AppleActionRequest,
+    evidence: AppleBuildEvidence,
+    context: AppleExecutionContext,
+  ) => void;
+  /** Simulators the window may send input to on the thread without a new approval. */
+  readonly inputGrants?: (
+    windowId: WindowId,
+    threadId: AppleExecutionContext["threadId"],
+  ) => ReadonlyArray<{ readonly simulatorId: string; readonly expiresAt: string }>;
   /**
    * Watches a Simulator's screen through the desktop's device helper. Absent on
    * a host the desktop app did not start, where there is no live view.
@@ -169,6 +187,7 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         case "apple-action-request": {
           const startedAt = nowIso();
           const evidence = await dependencies.service.execute(envelope.request, context);
+          dependencies.afterAction?.(windowId, envelope.request, evidence, context);
           await dependencies.recordEvidence?.(evidence, startedAt);
           return encoded(
             {
@@ -188,12 +207,25 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
             200,
             origin,
           );
-        case "apple-snapshot-request":
+        case "apple-snapshot-request": {
+          const inputGrants = dependencies.inputGrants?.(windowId, context.threadId) ?? [];
           return encoded(
-            { kind: "apple-runtime-snapshot", snapshot: dependencies.service.snapshot(context) },
+            {
+              kind: "apple-runtime-snapshot",
+              // Decoded, not cast: the grants arrive as plain host strings and
+              // leave as the contract's branded identifiers or not at all.
+              snapshot:
+                inputGrants.length === 0
+                  ? dependencies.service.snapshot(context)
+                  : decodeAppleRuntimeSnapshot({
+                      ...dependencies.service.snapshot(context),
+                      inputGrants,
+                    }),
+            },
             200,
             origin,
           );
+        }
         default:
           return failure("invalid", "Apple toolchain request is invalid.", 400, origin);
       }

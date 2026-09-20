@@ -623,6 +623,7 @@ import {
   type AppleRuntimeReceipt,
   APPLE_TOOLCHAIN_HOST_READ_PATHS,
 } from "./apple/appleToolchainService";
+import { SimulatorInputGrants } from "./apple/simulatorInputGrants";
 import { createDesktopSimulatorDevicePort } from "./apple/desktopSimulatorDevicePort";
 import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDesktop";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
@@ -663,6 +664,7 @@ import {
   canonicalizeWorkRelativePath,
   chatTurnAnsweredAttempt,
   decidesCodeEffectsByApproval,
+  isAppleSimulatorInputKind,
   defaultShellSettings,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
@@ -1650,6 +1652,7 @@ export function startOctantServer(
     const startedAt = Date.now();
     const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
     const processAuthorityClock = new ProcessAuthorityClock();
+    const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const machineChangeFeed = new MachineChangeFeed();
     const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
       machineChangeFeed.publishCommitted(append),
@@ -1692,6 +1695,7 @@ export function startOctantServer(
       (windowId) => {
         revokeShellWindow?.(windowId);
         codeApprovalStore.revokeWindow(windowId);
+        simulatorInputGrants.revokeWindow(String(windowId));
         extensionToolApprovalService.revokeWindow(windowId);
         browserToolApprovalService?.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
@@ -3933,6 +3937,9 @@ export function startOctantServer(
             );
             if (context === undefined) return undefined;
             const evidence = await appleToolchainService.execute(request, context);
+            // An agent's shutdown closes a Simulator to every thread, and its
+            // input keeps a live grant open, the same as the pane's.
+            simulatorInputGrants.settle(String(windowId), request, evidence, context);
             await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
@@ -4214,6 +4221,7 @@ export function startOctantServer(
       ...(simulatorDevice === undefined
         ? {}
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
+      observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
       // Two hosts on one Mac share a temporary directory; each sweeps only the
       // captures named for its own data directory.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
@@ -4290,15 +4298,43 @@ export function startOctantServer(
         return undefined;
       }
       const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
-      const approvalValid =
-        envelope.kind !== "apple-action-request"
-          ? true
-          : effectiveThread.executionPolicy === "full-access"
-            ? true
-            : decidesCodeEffectsByApproval(effectiveThread.executionPolicy)
-              ? ((await codeOperationRuntime?.validateAppleApproval(windowId, envelope.request)) ??
-                false)
-              : false;
+      const action = envelope.kind === "apple-action-request" ? envelope.request : undefined;
+      const inputSimulatorId =
+        action !== undefined && isAppleSimulatorInputKind(action.kind) && "simulatorId" in action
+          ? action.simulatorId
+          : undefined;
+      let approvalValid: boolean;
+      let inputGranted = false;
+      if (action === undefined || effectiveThread.executionPolicy === "full-access") {
+        approvalValid = true;
+      } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
+        approvalValid = false;
+      } else if (
+        inputSimulatorId !== undefined &&
+        simulatorInputGrants.isOpen({
+          windowId: String(windowId),
+          threadId: String(thread.id),
+          simulatorId: String(inputSimulatorId),
+        })
+      ) {
+        // One approved input opened this Simulator to this window on this
+        // thread; confirming every tap made the live device unusable. The grant
+        // is the window's, like the approval it came from, so another client on
+        // the thread does not ride it. The policy accepts the grant in place of
+        // a one-shot approval on the request.
+        approvalValid = true;
+        inputGranted = true;
+      } else {
+        approvalValid =
+          (await codeOperationRuntime?.validateAppleApproval(windowId, action)) ?? false;
+        if (approvalValid && inputSimulatorId !== undefined) {
+          simulatorInputGrants.open({
+            windowId: String(windowId),
+            threadId: String(thread.id),
+            simulatorId: String(inputSimulatorId),
+          });
+        }
+      }
       return {
         authority: scope.authority,
         threadId: thread.id,
@@ -4308,12 +4344,17 @@ export function startOctantServer(
         sourceRevision: checkout.head.oid,
         executionPolicy: effectiveThread.executionPolicy,
         approvalValid,
+        ...(inputGranted ? { inputGranted } : {}),
       };
     };
     const appleToolchainRoutes = createAppleToolchainRouteHandler({
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
+      afterAction: (windowId, request, evidence, context) =>
+        simulatorInputGrants.settle(String(windowId), request, evidence, context),
+      inputGrants: (windowId, threadId) =>
+        simulatorInputGrants.list(String(windowId), String(threadId)),
       ...(simulatorDevice === undefined
         ? {}
         : {

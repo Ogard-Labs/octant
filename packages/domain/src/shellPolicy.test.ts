@@ -154,7 +154,7 @@ describe("shell settings policy", () => {
     expect(current).toEqual({
       chatEnabled: true,
       workEnabled: true,
-      sidebarWidth: 232,
+      sidebarWidth: 280,
       contextSidebarWidth: 360,
       lastContextSurface: null,
       sidebarMaterial: "system",
