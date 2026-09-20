@@ -309,11 +309,8 @@ for labels and the surface role for a background; never rely on hue alone:
 
 Routine Waiting, idle, and unselected states use neutral text and marks.
 Pending approval requests use a neutral surface and muted icon, without a
-warning stripe. The default preset is monochrome, so its warning role carries
-no hue: the control fill, a border that reads at 3:1 on it, and the primary ink.
-A warning is told apart by its mark and its words. A theme that wants an amber
-warning sets the three warning roles. The warning treatment is still reserved
-for an actionable warning, not every thread that can be resumed. Success, failure, diffs, provider marks,
+warning stripe. Warning colour is reserved for an actionable warning, not
+every thread that can be resumed. Success, failure, diffs, provider marks,
 and categorical data may retain semantic colour alongside a label or shape.
 
 | Meaning       | Surface                                                      | Text/border                                                                                 |
@@ -323,6 +320,11 @@ and categorical data may retain semantic colour alongside a label or shape.
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
+
+The default preset is monochrome, so its warning role carries no hue: the
+control fill, a border that reads at 3:1 on it, and the primary ink. A warning
+is told apart by its mark and its words. A theme that wants an amber warning
+sets the three warning roles.
 
 The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
 `purple`, `pink`) are for Project View identity, chart marks, and provider or
