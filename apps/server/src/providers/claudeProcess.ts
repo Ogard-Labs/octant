@@ -22,7 +22,7 @@ import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
-import { sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnClaudeCodeProcess"]>;
@@ -257,6 +257,7 @@ function runProbe(
             displayName: "Claude",
             args,
             environment: () => environment,
+            guards: REQUIRED_GUARDS,
             // The same port the runtime launch uses: one builder, two launches.
             confinement: options.confinement,
           })

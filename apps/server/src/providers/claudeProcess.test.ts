@@ -219,6 +219,27 @@ describe("ClaudeProcessPort probes", () => {
     ).resolves.toBe("unauthenticated");
   });
 
+  it("keeps Claude's required guards on the version read", async () => {
+    // The version read keeps a static guard only when its family names it. The
+    // updater and telemetry switches are Claude's, and a read given no home and
+    // no network can stall or fail on either, which reports it unavailable.
+    const target = fixture();
+    const root = mkdtempSync(join(tmpdir(), "octant-claude-guards-"));
+    directories.push(root);
+    const recorded = join(root, "guards.txt");
+    const binaryPath = join(root, "claude-guards");
+    writeFileSync(
+      binaryPath,
+      `#!/bin/sh\nprintf '%s,%s' "\${DISABLE_AUTOUPDATER-unset}" "\${DISABLE_TELEMETRY-unset}" > '${recorded}'\nprintf '2.1.210\\n'\n`,
+      { mode: 0o755 },
+    );
+    chmodSync(binaryPath, 0o755);
+
+    await Effect.runPromise(makePort(target).probeVersion(binaryPath));
+
+    expect(readFileSync(recorded, "utf8")).toBe("1,1");
+  });
+
   it("preserves a fast version probe when receipt persistence loses the exit race", async () => {
     const target = fixture();
     await expect(
