@@ -316,10 +316,15 @@ and categorical data may retain semantic colour alongside a label or shape.
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#342b0e` dark, `#f0dea8` light) | `--octant-warning-text` (`#edbc26` dark, `#6f5300` light); border `--octant-warning-border` |
+| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f0f0f0` dark, `#1b1b1b` light); border `--octant-warning-border` |
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
+
+The default preset is monochrome, so its warning role carries no hue: the
+control fill, a border that reads at 3:1 on it, and the primary ink. A warning
+is told apart by its mark and its words. A theme that wants an amber warning
+sets the three warning roles.
 
 The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
 `purple`, `pink`) are for Project View identity, chart marks, and provider or

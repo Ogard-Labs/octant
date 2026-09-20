@@ -51,6 +51,17 @@ describe("theme semantic token catalog", () => {
     }
   });
 
+  it("keeps the default preset's warning role free of hue", () => {
+    // The default preset is monochrome. Its warning role was brass, so every
+    // warning mark, note, and badge was the one yellow thing on a grey screen.
+    for (const id of ["warning-surface", "warning-border", "warning-text"] as const) {
+      for (const hex of [getRoleDefinition(id).defaultLight, getRoleDefinition(id).defaultDark]) {
+        const { r, g, b } = parseHexColor(hex);
+        expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
   it("publishes unique role ids", () => {
     const ids = THEME_TOKEN_ROLES.map((role) => role.id);
     expect(new Set(ids).size).toBe(ids.length);
