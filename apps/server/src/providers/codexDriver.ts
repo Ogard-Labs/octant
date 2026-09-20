@@ -85,6 +85,12 @@ export type CodexTurnInputItem =
 export interface CodexTurnStartInput {
   readonly threadId: string;
   readonly input: readonly CodexTurnInputItem[];
+  readonly approvalPolicy: "never" | "on-request";
+  readonly sandboxPolicy:
+    | { readonly type: "dangerFullAccess" }
+    | { readonly type: "workspaceWrite" }
+    | { readonly type: "readOnly" };
+  readonly approvalsReviewer?: "auto_review";
 }
 
 export interface CodexApprovalResponse {
@@ -127,6 +133,7 @@ interface SessionState {
   readonly projectRoot: string;
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly autoApprove: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   activeTurnId?: string;
@@ -255,15 +262,48 @@ export function codexExecutionSettings(
     // A `command` is never auto-accepted from its text: Codex reports
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
-    // When the user opts into harness-delegated approvals, the reviewer answers
-    // prompts Octant would otherwise surface; the sandbox is unchanged (0104).
+    //
+    // The reviewer is offered to `approval-gated` only. 0104 delegates "prompts
+    // Octant would otherwise surface", and under `auto-accept-edits` an in-root
+    // file write is not one of those — 0018 already settled it in the user's
+    // favour. Codex's reviewer is thread-wide, so delegating here would route
+    // the escalation `read-only` now creates for a patch edit to a risk-based
+    // reviewer that can deny it, turning a waiver the user chose into a verdict.
+    // Keeping the reviewer off that posture costs delegation of its command
+    // prompts and keeps the guarantee.
     return {
       approvalPolicy: "on-request",
       sandbox: "read-only",
-      ...(autoApprove === true ? { approvalsReviewer: "auto_review" as const } : {}),
+      ...(autoApprove === true && policy === "approval-gated"
+        ? { approvalsReviewer: "auto_review" as const }
+        : {}),
     };
   }
   return { approvalPolicy: "never", sandbox: "read-only" };
+}
+
+/**
+ * The same authority as `codexExecutionSettings`, in the shape `turn/start`
+ * takes. It is re-sent every turn because `thread/start` settles a thread once:
+ * a thread created under an earlier mapping keeps that mapping through
+ * `thread/resume`, which accepts the fields and ignores them (measured against
+ * codex-cli 0.154.0). `sandboxPolicy` is the tagged form of the same value and
+ * is documented as overriding "this turn and subsequent turns", so a thread
+ * created before this posture existed is brought under it on its next turn
+ * rather than keeping a writable sandbox for the rest of its life.
+ */
+export function codexTurnExecutionSettings(
+  policy: ProviderExecutionPolicy,
+  autoApprove?: boolean,
+): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
+  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove);
+  const sandboxPolicy =
+    sandbox === "danger-full-access"
+      ? ({ type: "dangerFullAccess" } as const)
+      : sandbox === "workspace-write"
+        ? ({ type: "workspaceWrite" } as const)
+        : ({ type: "readOnly" } as const);
+  return { ...rest, sandboxPolicy };
 }
 
 /**
@@ -938,6 +978,7 @@ function makeConnection(
       input: {
         readonly sessionId: ProviderSessionId;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly autoApprove?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -955,6 +996,7 @@ function makeConnection(
         projectRoot,
         modelId,
         executionPolicy: input.executionPolicy,
+        autoApprove: input.autoApprove,
         threadId: thread.thread.id,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
@@ -1035,9 +1077,12 @@ function makeConnection(
           Effect.gen(function* () {
             ensureSubscribed();
             const thread = yield* request(() =>
-              client.threadResume({
-                threadId: input.resumeCursor.value,
-              }),
+              // `ThreadResumeParams` also declares `approvalPolicy` and
+              // `sandbox`, but codex-cli 0.154.0 accepts them here and keeps
+              // the settings the thread was created with: a thread resumed with
+              // `read-only` still wrote in-root without asking. The posture is
+              // re-asserted per turn instead, where it does take effect.
+              client.threadResume({ threadId: input.resumeCursor.value }),
             ).pipe(
               Effect.mapError(() =>
                 failure("stale-resume", "Codex thread is no longer available for resume."),
@@ -1076,6 +1121,7 @@ function makeConnection(
                     const turn = await client.turnStart({
                       threadId: state.threadId,
                       input: codexTurnInput(input),
+                      ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
                     });
                     if (state.activeTurnId !== undefined && state.activeTurnId !== turn.turn.id) {
                       throw failure(

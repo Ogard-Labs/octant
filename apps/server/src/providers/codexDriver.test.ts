@@ -28,6 +28,7 @@ import type {
 } from "./codexProtocol";
 import {
   codexExecutionSettings,
+  codexTurnExecutionSettings,
   makeCodexClient,
   makeCodexDriver,
   type CodexClientPort,
@@ -892,6 +893,8 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.calls.at(-1)?.input).toEqual({
       threadId: "thread-1",
       input: [{ type: "text", text: "Explain the repository." }],
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "readOnly" },
     });
     await Effect.runPromise(acquired.connection.interrupt(sessionId));
     expect(f.calls.at(-1)).toEqual({
@@ -1099,6 +1102,8 @@ describe("Codex thread and turn lifecycle", () => {
         { type: "text", text: "Compare the image." },
         { type: "image", url: "data:image/png;base64,AQID" },
       ],
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "readOnly" },
     });
     await acquired.close();
   });
@@ -1568,6 +1573,61 @@ describe("Codex execution authority and approvals", () => {
       expect(codexExecutionSettings(policy).sandbox).toBe("read-only");
       expect(codexExecutionSettings(policy).approvalPolicy).toBe("on-request");
     }
+  });
+
+  it("carries the posture into a turn on a thread created under an older one", async () => {
+    // `thread/start` settles a thread once, and codex-cli 0.154.0 accepts
+    // `approvalPolicy`/`sandbox` on `thread/resume` while keeping what the
+    // thread was created with — measured: a thread started `workspace-write`
+    // and resumed `read-only` still wrote in-root without asking. So a thread
+    // created before this mapping changed only comes under it if every turn
+    // re-asserts it, which `sandboxPolicy` is documented to do for "this turn
+    // and subsequent turns".
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Write a file.", attachments: [], tools: [] }),
+    );
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "readOnly" },
+    });
+    await acquired.close();
+  });
+
+  it.each([
+    ["full-access", "never", "dangerFullAccess"],
+    ["approval-gated", "on-request", "readOnly"],
+    ["auto-accept-edits", "on-request", "readOnly"],
+    ["plan", "never", "readOnly"],
+  ] as const)("re-asserts %s authority on every turn", (policy, approvalPolicy, sandboxType) => {
+    expect(codexTurnExecutionSettings(policy)).toEqual({
+      approvalPolicy,
+      sandboxPolicy: { type: sandboxType },
+    });
+  });
+
+  it("never delegates the edit waiver to the harness reviewer", () => {
+    // `read-only` turns an in-root patch edit into an escalation. Codex's
+    // reviewer is thread-wide and risk-based, so delegating it on a posture that
+    // already waives project file writes would let the reviewer deny an edit
+    // 0018 says proceeds. Approval-gated has no waiver, so it may delegate.
+    expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+    });
+    expect(codexExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "auto_review",
+    });
   });
 
   it.each([
