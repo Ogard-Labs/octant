@@ -441,6 +441,42 @@ export const CodeCheckpoint = Schema.Struct({
   head: Schema.optional(GitObjectId),
 }).annotations(strict);
 export type CodeCheckpoint = typeof CodeCheckpoint.Type;
+
+/**
+ * A transcript is not a file manager: a turn that rewrites a large tree reports
+ * `truncated` and points at the checkout's own review surfaces.
+ */
+export const MAX_CODE_TURN_CHANGED_PATHS = 32;
+export const CodeTurnChangedFile = Schema.Struct({
+  path: CodeRelativePath,
+  insertions: Schema.Int.pipe(Schema.nonNegative()),
+  deletions: Schema.Int.pipe(Schema.nonNegative()),
+  /** Git counts no lines in a binary file; both counts are then zero. */
+  binary: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type CodeTurnChangedFile = typeof CodeTurnChangedFile.Type;
+/**
+ * What differed in the checkout between the moment a turn started and the
+ * moment it settled.
+ *
+ * An observation, never an attribution: the host compares two states of a
+ * folder and cannot know who wrote what, so a file the person saved from an
+ * editor while the turn ran is recorded exactly like one the provider wrote.
+ * Every surface says "changed while this ran", never "created" or "wrote".
+ *
+ * `truncated` is authoritative. It is set when more paths changed than the
+ * record holds, and when a path Git named was refused by the confined
+ * relative-path contract rather than normalized into one a later read would
+ * resolve elsewhere. A turn with no record was not observed at all, which is
+ * not the same as a turn that changed nothing.
+ */
+export const CodeTurnChangedFiles = Schema.Struct({
+  files: Schema.Array(CodeTurnChangedFile).pipe(Schema.maxItems(MAX_CODE_TURN_CHANGED_PATHS)),
+  /** How many paths changed in all, including those `files` leaves out. */
+  total: Schema.Int.pipe(Schema.nonNegative()),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type CodeTurnChangedFiles = typeof CodeTurnChangedFiles.Type;
 /**
  * Put the checkout's files back the way a checkpoint recorded them.
  *
@@ -1135,6 +1171,15 @@ const QuestionEvent = Schema.Struct({
     Schema.filter((options) => options.length <= 32),
   ),
 }).annotations(strict);
+/**
+ * Journaled once, just before a turn's terminal state, on every settled
+ * outcome: a turn that failed or was interrupted may still have changed files,
+ * and leaving that out would tell a person the checkout is untouched.
+ */
+const ConversationTurnChangedFilesEvent = Schema.Struct({
+  kind: Schema.Literal("conversation-turn-changed-files"),
+  changedFiles: CodeTurnChangedFiles,
+}).annotations(strict);
 const FileChangeEvent = Schema.Struct({
   kind: Schema.Literal("file-change"),
   path: CodeRelativePath,
@@ -1196,6 +1241,7 @@ const ResultEvent = Schema.Struct({
 
 export const CodeOperationEvent = Schema.Union(
   ConversationTurnStartedEvent,
+  ConversationTurnChangedFilesEvent,
   OperationStateEvent,
   ContentEvent,
   TerminalOutputEvent,
@@ -1323,6 +1369,12 @@ export const CodeConversationTurn = Schema.Struct({
   ),
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
+  /**
+   * What changed in the checkout while this turn ran. Absent when the host
+   * could not observe it: a Plan turn, a checkout it could not read, a turn
+   * still running, and every turn journaled before the host kept the record.
+   */
+  changedFiles: Schema.optional(CodeTurnChangedFiles),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
    * Why a failed turn failed, as the provider or the host reported it. Absent

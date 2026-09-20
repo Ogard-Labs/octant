@@ -495,6 +495,8 @@ export class CodeOperationEventStore {
               ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
             },
           });
+        } else if (frame.event.kind === "conversation-turn-changed-files") {
+          builder.changedFiles = frame.event.changedFiles;
         } else if (frame.event.kind === "operation-state") {
           builder.status = conversationStatus(frame.event.state);
           if (frame.event.failure !== undefined) builder.failure = frame.event.failure;
@@ -554,6 +556,7 @@ type CodeConversationBuilder = {
   stepsTruncated: boolean;
   status: CodeConversationTurn["status"];
   failure?: CodeConversationTurn["failure"];
+  changedFiles?: CodeConversationTurn["changedFiles"];
   startedAt: CodeConversationTurn["startedAt"];
   updatedAt: CodeConversationTurn["updatedAt"];
 };

@@ -24,6 +24,7 @@ import {
   decodeProviderSessionId,
   type CodeApprovalId,
   type CodeCheckpoint,
+  type CodeTurnChangedFiles,
   type CodeConversationTurn,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeProviderLimit,
@@ -135,6 +136,12 @@ export interface CodeConversationMessage {
    * message whose turn was journaled before the host started recording it.
    */
   readonly executionPolicy?: ProviderExecutionPolicy;
+  /**
+   * What changed in the checkout while this turn ran. Present on an assistant
+   * message whose turn the host observed; absent means "not observed", which is
+   * not the same as "nothing changed".
+   */
+  readonly changedFiles?: CodeTurnChangedFiles;
 }
 
 export interface CodeThreadNavigationItem {
@@ -1010,6 +1017,16 @@ export function useCodeController(options: CodeControllerOptions) {
                   noteProviderRequest(event);
                   noteActivity(operationId, event);
                   noteUsage(operationId, event);
+                  if (event.kind === "conversation-turn-changed-files") {
+                    const changedFiles = event.changedFiles;
+                    setConversation((current) =>
+                      current.map((message) =>
+                        message.id === `${operationId}:assistant`
+                          ? { ...message, changedFiles }
+                          : message,
+                      ),
+                    );
+                  }
                   if (event.kind === "provider-content" && event.channel === "reasoning") {
                     const chunk =
                       frame.displayText ??
@@ -2180,6 +2197,16 @@ export function useCodeController(options: CodeControllerOptions) {
                 );
               }
             }
+            // The host journals the change list just before the turn settles,
+            // so the reply gains its files here rather than on the next reopen.
+            if (event.kind === "conversation-turn-changed-files") {
+              const changedFiles = event.changedFiles;
+              setConversation((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, changedFiles } : message,
+                ),
+              );
+            }
             if (event.kind === "provider-content" && event.channel === "reasoning") {
               const chunk =
                 frame.displayText ??
@@ -2648,6 +2675,7 @@ async function projectConversationTurns(
       modelId: turn.modelId,
       status: turn.status,
       at: String(turn.updatedAt),
+      ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
     });
     const steps = turn.steps ?? [];
     if (steps.length === 0 && turn.stepsTruncated !== true) continue;

@@ -1,12 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
 import {
   createSimulatorInputDelivery,
+  createSimulatorScreenStream,
   simulatorDeviceBrokerHandler,
 } from "./simulatorDeviceBroker";
 import type {
   DeviceHelperReply,
   DeviceHelperRequest,
+  DeviceViewer,
+  DeviceWatch,
   SimulatorDeviceHelpers,
 } from "./simulatorDeviceHelper";
 
@@ -22,7 +27,14 @@ function helpers(answer: (request: DeviceHelperRequest) => DeviceHelperReply) {
       _signal?: AbortSignal,
     ) => answer(request),
   );
-  const fake: SimulatorDeviceHelpers = { send, busy: () => false, dispose: vi.fn() };
+  const fake: SimulatorDeviceHelpers = {
+    send,
+    watch: vi.fn(
+      async (): Promise<DeviceWatch> => ({ status: "unavailable", message: "not under test" }),
+    ),
+    busy: () => false,
+    dispose: vi.fn(),
+  };
   return { fake, send };
 }
 
@@ -100,6 +112,63 @@ describe("Simulator input delivery", () => {
     await expect(
       deliver({ kind: "tap", udid, budgetMs: 30_000, point: { x: 1300, y: 10 } }),
     ).resolves.toMatchObject({ kind: "refused", reason: "point-off-screen" });
+    expect(send.mock.calls.map(([, sent]) => sent.op)).toEqual(["hello"]);
+  });
+
+  it("sends a swipe as two fractions of the screen and refuses one that leaves it", async () => {
+    const { fake, send } = helpers((sent) =>
+      sent.op === "hello"
+        ? { status: "delivered", screen: { width: 1206, height: 2622 } }
+        : { status: "delivered" },
+    );
+    const deliver = createSimulatorInputDelivery(fake);
+
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 2_622 },
+        to: { x: 603, y: 1_311 },
+        durationMs: 250,
+      }),
+    ).resolves.toEqual({ kind: "delivered" });
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 100 },
+        to: { x: 3_000, y: 100 },
+        durationMs: 250,
+      }),
+    ).resolves.toMatchObject({ kind: "refused", reason: "point-off-screen" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([
+      { op: "hello" },
+      { op: "swipe", fromX: 0.5, fromY: 1, toX: 0.5, toY: 0.5, durationMs: 250 },
+    ]);
+  });
+
+  it("does not start a swipe that the deadline would cut off part-way", async () => {
+    let clock = 0;
+    const { fake, send } = helpers((sent) => {
+      // Finding the screen leaves three seconds; the swipe itself takes five.
+      if (sent.op === "hello") clock += 25_000;
+      return { status: "delivered", screen: { width: 1206, height: 2622 } };
+    });
+    const deliver = createSimulatorInputDelivery(fake, { now: () => clock });
+
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 2_000 },
+        to: { x: 603, y: 500 },
+        durationMs: 5_000,
+      }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "deadline-passed" });
     expect(send.mock.calls.map(([, sent]) => sent.op)).toEqual(["hello"]);
   });
 
@@ -229,5 +298,235 @@ describe("private Simulator device broker", () => {
       { kind: "key-press", udid, budgetMs: 30_000, key: "home" },
       expect.any(AbortSignal),
     );
+  });
+});
+
+describe("the Simulator screen stream", () => {
+  const servers: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.closeAllConnections();
+            server.close(() => resolve());
+          }),
+      ),
+    );
+  });
+
+  async function serve(fake: SimulatorDeviceHelpers) {
+    const stream = createSimulatorScreenStream(fake);
+    const server = createServer((incoming, outgoing) => {
+      const chunks: Buffer[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", () => {
+        void stream(JSON.parse(Buffer.concat(chunks).toString("utf8")), outgoing);
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  }
+
+  function watchable() {
+    let viewer: DeviceViewer | undefined;
+    const stop = vi.fn();
+    const { fake } = helpers(() => ({
+      status: "delivered",
+      screen: { width: 1206, height: 2622 },
+    }));
+    const watching: SimulatorDeviceHelpers = {
+      ...fake,
+      watch: vi.fn(async (_udid, _options, next): Promise<DeviceWatch> => {
+        viewer = next;
+        // The helper's first frame arrives before the answer's headers exist.
+        next.onFrame(Uint8Array.from([0xff, 0xd8, 0x01, 0xff, 0xd9]));
+        return { status: "watching", stop };
+      }),
+    };
+    return { watching, stop, frame: (bytes: number[]) => viewer?.onFrame(Uint8Array.from(bytes)) };
+  }
+
+  const watch = { udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+
+  async function readBytes(reader: ReadableStreamDefaultReader<Uint8Array>, count: number) {
+    let bytes = Buffer.alloc(0);
+    while (bytes.length < count) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes = Buffer.concat([bytes, next.value]);
+    }
+    return [...bytes];
+  }
+
+  it("names the screen's size, sends the first screen at once, then each frame behind its length", async () => {
+    const { watching, frame } = watchable();
+    const url = await serve(watching);
+    const abort = new AbortController();
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-octant-simulator-screen")).toBe("1206x2622");
+    const reader = response.body!.getReader();
+    expect(await readBytes(reader, 9)).toEqual([0, 0, 0, 5, 0xff, 0xd8, 0x01, 0xff, 0xd9]);
+
+    frame([0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]);
+    expect(await readBytes(reader, 10)).toEqual([0, 0, 0, 6, 0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]);
+    abort.abort();
+  });
+
+  it("catches a slow viewer up to the newest screen once it can take more", async () => {
+    const { watching, frame } = watchable();
+    const written: number[][] = [];
+    const listeners = new Map<string, () => void>();
+    let accepting = true;
+    const outgoing = {
+      writeHead: vi.fn(),
+      flushHeaders: vi.fn(),
+      end: vi.fn(),
+      once: (event: string, listener: () => void) => {
+        listeners.set(event, listener);
+      },
+      write: (chunk: Uint8Array) => {
+        written.push([...chunk]);
+        return accepting;
+      },
+    };
+    await createSimulatorScreenStream(watching)({ watch }, outgoing as never);
+    written.length = 0;
+
+    // The viewer stops keeping up: this frame fills its buffer...
+    accepting = false;
+    frame([0xff, 0x01]);
+    // ...and these two arrive while it is still draining. The last is the
+    // screen the device then stays on.
+    frame([0xff, 0x02]);
+    frame([0xff, 0x03]);
+    accepting = true;
+    listeners.get("drain")?.();
+
+    expect(written.filter((chunk) => chunk[0] === 0xff)).toEqual([
+      [0xff, 0x01],
+      [0xff, 0x03],
+    ]);
+  });
+
+  it("stops watching when the viewer hangs up", async () => {
+    const { watching, stop } = watchable();
+    const url = await serve(watching);
+    const abort = new AbortController();
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    });
+    await response.body!.getReader().read();
+
+    abort.abort();
+
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+  });
+
+  it("starts no watch for a viewer who hung up while the screen was still being looked up", async () => {
+    let answerHello!: (reply: DeviceHelperReply) => void;
+    const watch = vi.fn(async (): Promise<DeviceWatch> => ({ status: "watching", stop: vi.fn() }));
+    const slow: SimulatorDeviceHelpers = {
+      send: vi.fn(
+        () =>
+          new Promise<DeviceHelperReply>((resolve) => {
+            answerHello = resolve;
+          }),
+      ),
+      watch,
+      busy: () => false,
+      dispose: vi.fn(),
+    };
+    const url = await serve(slow);
+    const abort = new AbortController();
+    const pending = fetch(url, {
+      method: "POST",
+      body: JSON.stringify({
+        watch: { udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      }),
+      signal: abort.signal,
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(slow.send).toHaveBeenCalled());
+
+    abort.abort();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    answerHello({ status: "delivered", screen: { width: 1206, height: 2622 } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it("starts nothing for a viewer who was already gone when the stream was set up", async () => {
+    const { watching } = watchable();
+    const stream = createSimulatorScreenStream(watching);
+    let arrived!: () => void;
+    const requestArrived = new Promise<void>((resolve) => (arrived = resolve));
+    let settled!: () => void;
+    const streamSettled = new Promise<void>((resolve) => (settled = resolve));
+    // The request body is still being read when the viewer hangs up, so the
+    // stream is only set up after the response has closed.
+    const server = createServer((incoming, outgoing) => {
+      incoming.resume();
+      outgoing.once("close", () => void stream({ watch }, outgoing).then(settled));
+      arrived();
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const abort = new AbortController();
+    const pending = fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    }).catch(() => undefined);
+    await requestArrived;
+
+    abort.abort();
+    await pending;
+    await streamSettled;
+
+    expect(watching.send).not.toHaveBeenCalled();
+    expect(watching.watch).not.toHaveBeenCalled();
+  });
+
+  it("answers a Simulator that cannot be watched with the helper's reason, not an empty stream", async () => {
+    const { fake } = helpers((sent) =>
+      sent.op === "hello"
+        ? { status: "refused", code: "not-booted", message: "the Simulator is Shutdown" }
+        : { status: "delivered" },
+    );
+    const url = await serve(fake);
+
+    const response = await fetch(url, { method: "POST", body: JSON.stringify({ watch }) });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      kind: "refused",
+      reason: "not-booted",
+      message: "the Simulator is Shutdown",
+    });
+    expect(fake.watch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed watch request", async () => {
+    const { watching } = watchable();
+    const url = await serve(watching);
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch: { ...watch, framesPerSecond: 1_000 } }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(watching.watch).not.toHaveBeenCalled();
   });
 });

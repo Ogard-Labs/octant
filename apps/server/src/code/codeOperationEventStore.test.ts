@@ -245,6 +245,75 @@ describe("CodeOperationEventStore", () => {
     reopened.connection.close();
   });
 
+  it("keeps what changed while a turn ran on that turn, across a restart, whatever its outcome", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const store = createStore(first.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000034",
+      digest: "b".repeat(64),
+      byteLength: 7,
+    });
+    const started = (providerInstanceId: string, sessionId: string) =>
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId,
+        modelId: "model-one",
+        sessionId,
+        prompt,
+      });
+    const changedFiles = {
+      files: [{ path: "src/app.ts", insertions: 4, deletions: 1 }],
+      total: 1,
+      truncated: false,
+    };
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: started(
+        "89000000-0000-4000-8000-000000000042",
+        "89000000-0000-4000-8000-000000000052",
+      ),
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({ kind: "conversation-turn-changed-files", changedFiles }),
+    });
+    // A failed turn may still have changed files, so its record is kept.
+    store.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("failed") });
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: started(
+        "89000000-0000-4000-8000-000000000043",
+        "89000000-0000-4000-8000-000000000053",
+      ),
+    });
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 1,
+      event: stateEvent("completed"),
+    });
+    first.connection.close();
+
+    const reopened = openJournal(path);
+    const turns = createStore(reopened.journal).conversation({
+      threadId,
+      afterCursor: 0,
+      limit: 10,
+    }).turns;
+    expect(turns[0]).toMatchObject({ operationId, status: "failed", changedFiles });
+    // No record is "not observed", and it never borrows a neighbour's.
+    expect(turns[1]).toMatchObject({ operationId: otherOperationId, status: "completed" });
+    expect(turns[1]).not.toHaveProperty("changedFiles");
+    reopened.connection.close();
+  });
+
   it("replays a turn's tool calls and reasoning in order, folded and bounded", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);
@@ -608,7 +677,7 @@ function createStore(journal: Journal): CodeOperationEventStore {
   });
 }
 
-function stateEvent(state: "running" | "waiting" | "completed"): CodeOperationEvent {
+function stateEvent(state: "running" | "waiting" | "completed" | "failed"): CodeOperationEvent {
   return { kind: "operation-state", state };
 }
 

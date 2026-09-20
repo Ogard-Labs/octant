@@ -1180,6 +1180,83 @@ describe("the Apple capability as an agent tool", () => {
     expect(request.point).toEqual({ x: 40, y: 80 });
   });
 
+  it("sends an agent's swipe with both ends, and refuses one that names only where it starts", async () => {
+    const { execute, tools } = appleTools();
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+
+    await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "swipe",
+        simulatorId,
+        x: 600,
+        y: 2000,
+        toX: 600,
+        toY: 800,
+        durationMs: 300,
+      }),
+    } as never);
+    const oneEnded = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "swipe", simulatorId, x: 600, y: 2000 }),
+    } as never);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "swipe",
+      requestedBy: { kind: "agent" },
+      point: { x: 600, y: 2000 },
+      toPoint: { x: 600, y: 800 },
+      durationMs: 300,
+    });
+    expect(oneEnded.isError).toBe(true);
+
+    // A pace outside what the channel carries is the caller's mistake, and is
+    // said so here rather than surfacing later as an unreachable desktop.
+    for (const durationMs of [10, 6_000, Number.NaN]) {
+      const refused = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify({
+          operation: "swipe",
+          simulatorId,
+          x: 600,
+          y: 2000,
+          toX: 600,
+          toY: 800,
+          durationMs,
+        }),
+      } as never);
+      expect(refused.isError).toBe(true);
+    }
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a swipe or tap whose coordinate is no place on a screen", async () => {
+    const { execute, tools } = appleTools();
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+
+    // JSON reads 1e400 as Infinity, which is a number and is not a place.
+    const swipe = await tools.execute({
+      name: "octant_apple",
+      inputJson: `{"operation":"swipe","simulatorId":"${simulatorId}","x":600,"y":2000,"toX":1e400,"toY":800}`,
+    } as never);
+    const tap = await tools.execute({
+      name: "octant_apple",
+      inputJson: `{"operation":"tap","simulatorId":"${simulatorId}","x":-1e400,"y":80}`,
+    } as never);
+
+    // A point left of or above the screen is no place either.
+    const negative = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "tap", simulatorId, x: -1, y: 80 }),
+    } as never);
+
+    expect(swipe.isError).toBe(true);
+    expect(tap.isError).toBe(true);
+    expect(negative.isError).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("refuses an action whose destination or project the caller did not name", async () => {
     const { execute, tools } = appleTools();
 

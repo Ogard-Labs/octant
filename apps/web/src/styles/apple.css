@@ -195,7 +195,8 @@
 }
 
 .apple-simulator-frame p,
-.apple-simulator-frame img {
+.apple-simulator-frame img,
+.apple-simulator-frame canvas {
   margin: 0;
 }
 
@@ -203,7 +204,8 @@
    well as its width, keeps its own proportions, and sits in the middle. The
    image box is exactly the drawn screen, which is what a tap is measured
    against. */
-.apple-simulator-frame img {
+.apple-simulator-frame img,
+.apple-simulator-frame canvas {
   display: block;
   width: auto;
   max-width: 100%;

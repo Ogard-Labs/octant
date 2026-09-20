@@ -150,8 +150,11 @@ distilled successor of the earlier long-form design specifications.
 | [0136](0136-a-saved-view-filters-and-orders-by-thread-status.md) | A saved view filters and orders by thread status | Accepted |
 | [0137](0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md) | Simulator input reaches the guest through a native device helper | Accepted |
 | [0138](0138-codex-delegation-stops-at-the-edit-waiver.md) | Codex delegation stops at the edit waiver | Accepted |
-| [0139](0139-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
-| [0140](0140-a-plan-turn-is-confined-by-octant.md) | A Plan turn is confined by Octant and reaches only its provider | Accepted |
+| [0139](0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md) | The Simulator frame is a live view streamed through the host | Accepted |
+| [0140](0140-the-live-simulator-screen-is-driven-directly.md) | The live Simulator screen is driven directly | Accepted |
+| [0141](0141-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
+| [0142](0142-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
+| [0143](0143-a-plan-turn-is-confined-by-octant.md) | A Plan turn is confined by Octant and reaches only its provider | Accepted |
 
 ## Adding an ADR
 
