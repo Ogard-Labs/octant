@@ -1967,12 +1967,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ? started.event.checkpoint?.worktree
             : undefined;
         if (from === undefined) return;
-        const effective = this.#effectiveThread(active.windowId, active.thread.id);
+        const resolveExecutionPolicy = () =>
+          this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+          active.thread.executionPolicy;
         const result = await this.#git.changesSince({
           checkoutId: String(active.thread.checkoutId),
           checkoutRoot: active.checkoutRoot,
           from,
-          executionPolicy: effective?.executionPolicy ?? active.thread.executionPolicy,
+          executionPolicy: resolveExecutionPolicy(),
+          resolveExecutionPolicy,
         });
         if (result.status !== "ready") return;
         const changedFiles = turnChangedFiles(result.changes);

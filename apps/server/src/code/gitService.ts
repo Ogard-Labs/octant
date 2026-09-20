@@ -367,20 +367,26 @@ export class GitService {
       /** The `worktree` tree of the earlier capture. */
       readonly from: string;
       readonly executionPolicy?: ProviderExecutionPolicy;
+      /** Re-read immediately before the queued capture writes; the grant can drop to Plan while waiting. */
+      readonly resolveExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
     },
     signal?: AbortSignal,
   ): Promise<GitTreeChangesResult> {
     const read = this.#observation.readTreeChanges?.bind(this.#observation);
     if (read === undefined) return Promise.resolve({ status: "unavailable" });
+    const resolvedPolicy = (): ProviderExecutionPolicy | undefined =>
+      input.resolveExecutionPolicy?.() ?? input.executionPolicy;
     // The capture copies a scratch index into `.git`. Plan is read-only, so a
     // turn that is Plan now must not snapshot, even if it started writable.
-    if (input.executionPolicy === "plan") return Promise.resolve({ status: "unavailable" });
+    if (resolvedPolicy() === "plan") return Promise.resolve({ status: "unavailable" });
     return this.#serialized(input.checkoutId, async () => {
+      const executionPolicy = resolvedPolicy();
+      if (executionPolicy === "plan") return { status: "unavailable" as const };
       const now = await this.#mutation.snapshotWorkingTree(
         {
           checkoutRoot: input.checkoutRoot,
           checkoutId: input.checkoutId,
-          ...mutationPolicy(input.executionPolicy),
+          ...mutationPolicy(executionPolicy),
         },
         signal,
       );
@@ -396,7 +402,7 @@ export class GitService {
             checkoutRoot: input.checkoutRoot,
             checkoutId: input.checkoutId,
             anchorId: now.anchorId,
-            ...mutationPolicy(input.executionPolicy),
+            ...mutationPolicy(executionPolicy),
           },
           signal,
         );

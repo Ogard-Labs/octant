@@ -316,6 +316,43 @@ describe("GitService", () => {
     expect(readTreeChanges).not.toHaveBeenCalled();
   });
 
+  it("does not snapshot a queued capture after the thread becomes Plan", async () => {
+    const observation = readyObservation();
+    const releases: Array<() => void> = [];
+    const stage = vi.fn(async () => {
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return { status: "applied" as const };
+    });
+    const mutation = { ...mutationPort(), stage };
+    const service = new GitService(
+      {
+        observe: vi.fn(async () => observation),
+        readTreeChanges: vi.fn(async () => ({ status: "ready" as const, changes: [] })),
+      },
+      mutation,
+    );
+    let policy: "approval-gated" | "plan" = "approval-gated";
+    const held = service.stage({
+      checkoutId: "checkout-1",
+      checkoutRoot: "/repo",
+      paths: ["file.txt"],
+      expectedStateToken: observation.stateToken,
+    });
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    const pending = service.changesSince({
+      checkoutId: "checkout-1",
+      checkoutRoot: "/repo",
+      from: "f".repeat(40),
+      executionPolicy: "approval-gated",
+      resolveExecutionPolicy: () => policy,
+    });
+    policy = "plan";
+    releases[0]!();
+    await expect(pending).resolves.toEqual({ status: "unavailable" });
+    expect(mutation.snapshotWorkingTree).not.toHaveBeenCalled();
+    await held;
+  });
+
   it("hands back the undo point when a restore fails part-way, but not when it is refused", async () => {
     const observation = readyObservation();
     const undo = { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) };

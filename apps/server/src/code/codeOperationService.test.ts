@@ -1039,10 +1039,15 @@ describe("CodeOperationService", () => {
         sessionId: "60606060-6060-4060-8060-606060606060",
         prompt,
       }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
     // The change list is settlement evidence: the turn had already begun to
     // settle, so a crash before the terminal state must not launch it again.
     expect(turns.start).not.toHaveBeenCalled();
+    expect(events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: { kind: "operation-state", state: "interrupted" },
+      }),
+    );
   });
 
   it("refuses to recover a stale provider turn the Project provider policy no longer accepts", async () => {

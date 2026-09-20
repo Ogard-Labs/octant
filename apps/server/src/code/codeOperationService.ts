@@ -831,6 +831,16 @@ export class CodeOperationService {
           existing.event.result,
         );
       }
+      if (
+        command.kind === "start-provider-turn" &&
+        isUnfinishedSettlement(existing.event.result, replay.frames)
+      ) {
+        return this.#interruptUnfinishedSettlement(
+          command.threadId,
+          command.operationId,
+          replay.nextCursor,
+        );
+      }
       return existing.event.result;
     }
 
@@ -1066,6 +1076,29 @@ export class CodeOperationService {
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
     }
+  }
+
+  /**
+   * Settlement had already journalled the change list, then the host stopped
+   * before a terminal state. Do not relaunch; mark the turn interrupted so a
+   * reopened client does not follow a running result forever.
+   */
+  #interruptUnfinishedSettlement(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+    expectedCursor: number,
+  ): CodeOperationResult {
+    this.#options.events.append({
+      threadId,
+      operationId,
+      expectedCursor,
+      event: { kind: "operation-state", state: "interrupted" },
+    });
+    return decodeCodeOperationResult({
+      kind: "provider-turn-state",
+      operationId,
+      state: "interrupted",
+    });
   }
 
   async readTerminal(
@@ -2783,7 +2816,8 @@ function sameConversationStart(
  * between the operation-result append and RuntimeTurnController.launch.
  * `conversation-turn-changed-files` is settlement evidence: the turn had
  * already begun to settle, so a crash before the terminal state must not
- * launch it again.
+ * launch it again. That case is `isUnfinishedSettlement`, which journals
+ * interrupted instead.
  */
 function isStaleRunningProviderTurn(
   result: CodeOperationResult,
@@ -2791,6 +2825,23 @@ function isStaleRunningProviderTurn(
 ): boolean {
   if (result.kind !== "provider-turn-state" || result.state !== "running") return false;
   return !frames.some((frame) => isDurableProviderLaunchEvidence(frame.event));
+}
+
+function isUnfinishedSettlement(
+  result: CodeOperationResult,
+  frames: ReadonlyArray<CodeOperationEventFrame>,
+): boolean {
+  if (result.kind !== "provider-turn-state" || result.state !== "running") return false;
+  if (!frames.some((frame) => frame.event.kind === "conversation-turn-changed-files")) return false;
+  return !frames.some((frame) => isTerminalSettlement(frame.event));
+}
+
+function isTerminalSettlement(event: CodeOperationEvent): boolean {
+  if (event.kind === "operation-state")
+    return event.state !== "running" && event.state !== "waiting";
+  if (event.kind === "operation-result" && event.result.kind === "provider-turn-state")
+    return event.result.state !== "running" && event.result.state !== "waiting";
+  return false;
 }
 
 function isDurableProviderLaunchEvidence(event: CodeOperationEvent): boolean {
