@@ -353,20 +353,6 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("keeps a thread row's room and fork mark right on touch and in a narrow window", () => {
-    const coarse = shellStyles.slice(
-      shellStyles.lastIndexOf("@media (pointer: coarse), (max-width: 560px)"),
-    );
-    // One action shows there, always. The hover and focus rules above are more
-    // specific than the plain row rule, so they are restated at 32px; left at
-    // 56px a tapped row lost a column of its title.
-    expect(coarse).toMatch(
-      /:focus-within\s*>\s*\.sidebar-navigation__thread,[\s\S]*?padding-inline-end: 32px;/,
-    );
-    // The fork mark stands left of the status, which stands left of that action.
-    expect(coarse).toMatch(/\.sidebar-navigation__thread-lineage \{\s*right: 50px;/);
-  });
-
   it("parts one Project from the next by more than it parts two threads", () => {
     // Three levels, ordered: rows inside a Project, then Projects, then the
     // sections a hairline divides. A Project block used the same 2px step as
@@ -590,6 +576,20 @@ describe("WindowChrome", () => {
     expect(cssRule(".project-threads")).toContain("padding-left: 0;");
     expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
     expect(cssRule(".thread-row-context-menu")).toContain("width: min(248px, calc(100vw - 24px));");
+  });
+
+  it("keeps a thread row's room and fork mark right on touch and in a narrow window", () => {
+    const coarse = shellStyles.slice(
+      shellStyles.lastIndexOf("@media (pointer: coarse), (max-width: 560px)"),
+    );
+    // One action shows there, always. The hover and focus rules above are more
+    // specific than the plain row rule, so they are restated at 32px; left at
+    // 56px a tapped row lost a column of its title.
+    expect(coarse).toMatch(
+      /:focus-within\s*>\s*\.sidebar-navigation__thread,[\s\S]*?padding-inline-end: 32px;/,
+    );
+    // The fork mark stands left of the status, which stands left of that action.
+    expect(coarse).toMatch(/\.sidebar-navigation__thread-lineage \{\s*right: 50px;/);
   });
 
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
