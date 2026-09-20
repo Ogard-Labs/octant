@@ -293,10 +293,12 @@ window, or approves an action class the host policy reserves for the local user.
   0006's static MCP, skills, and hooks denials there.
   `apps/server/src/childProcessEnvironment.ts` strips the broker URLs, broker tokens, and desktop
   bridge secret from every child, and argv carrying a provider credential is refused.
-- **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server and the
-  Claude Agent SDK launch are not wrapped, a scoped exception recorded in
-  `docs/decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
-  those threads reach stay confined. What the runtime process itself is left holding:
+- **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
+  wrapped, a scoped exception recorded in
+  `docs/decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md`. The Claude Agent
+  SDK launch is not wrapped either, and that record does not except it: it carries one thread per
+  query and is a gap. Octant-owned tools those threads reach stay confined. What the runtime
+  process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
     user-selected Full access). Claude sends sandbox settings only on approval-gated and
@@ -329,7 +331,8 @@ window, or approves an action class the host policy reserves for the local user.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     and those files with no Octant-owned OS boundary in the way, and a write the runtime's own
     sandbox permits without announcing is not one Octant's approvals can prompt for. Wrapping the
-    runtime is what closes both, which is why 0142 names it as the way this exception ends.
+    runtime is what closes both; 0142 names it as how the Codex exception ends and the Claude gap
+    closes.
 - **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
   `inspectVersion`, `probeCodexBinary`, and `runProbe` in `claudeProcess.ts` — the last for both
   `--version` and `auth status --json` — each spawn the user-configured binary before any

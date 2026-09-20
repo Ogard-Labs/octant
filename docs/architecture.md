@@ -976,8 +976,10 @@ mechanisms are:
   recorded in [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md).
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
-  Full access and the Codex app-server and the Claude Agent SDK launch are not;
-  that set is named and pinned by
+  Full access. The Codex app-server carries every thread on a provider instance
+  and is a named exception; the Claude Agent SDK launch carries one thread per
+  query and is unwrapped anyway, a gap and not an exception. That set is named
+  and pinned by
   [decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md),
   and the tools those threads reach stay confined either way.
 - **Linux Station isolation tracer, not product-wired.** The server now has a

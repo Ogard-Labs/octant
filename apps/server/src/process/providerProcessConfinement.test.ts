@@ -33,7 +33,7 @@ import { describe, expect, it } from "vitest";
 const UNWRAPPED: ReadonlyArray<{ readonly file: string; readonly reason: string }> = [
   {
     file: "claudeProcess.ts",
-    reason: "The Agent SDK composes the launch and passes no mode or execution policy.",
+    reason: "One process per query, so wrappable; not wired yet. A gap, held and not excused.",
   },
   {
     file: "codexProcess.ts",
