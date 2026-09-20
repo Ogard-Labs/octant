@@ -120,8 +120,8 @@
   /* The fourth face, and the one exception to "three faces, three jobs".
      The body serif is right for a page you read once; a transcript is a
      working surface read for hours, interleaved with code and UI chrome,
-     and a serif fights that. This is the neutral UI sans both Claude Code
-     and Codex use. Set it to var(--oct-font-body) to go back to serif —
+     and a serif fights that. This is the neutral UI sans a terminal-born
+     agent transcript reads best in. Set it to var(--oct-font-body) to go back to serif —
      it is the single token that decides. */
   --oct-font-transcript:
     system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -2413,8 +2413,8 @@ input.switch:checked::after {
 /* ══════════════════════════════════════════════════════════════════════
    Agent transcript
 
-   The shape both Claude Code and Codex converge on, and the reason it
-   works: the agent's prose runs flush at full width like a document, the
+   The shape agent transcripts converge on, and the reason it works: the
+   agent's prose runs flush at full width like a document, the
    user's turns are small right-aligned bubbles, and everything the agent
    *did* collapses to a single quiet line. Reading a long session is then
    reading prose, with the machinery available but never in the way.
