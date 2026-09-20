@@ -68,12 +68,16 @@ describe("androidToolchainClient", () => {
       windowCapability: "A".repeat(43),
     });
     await expect(client.discover(request)).resolves.toEqual(response.snapshot);
-    const [url, init] = fetch.mock.calls[0] ?? [];
-    expect(String(url)).toBe("http://127.0.0.1:13773/api/android/toolchain");
-    expect(JSON.parse(String(init?.body))).toEqual({
-      kind: "android-discovery-request",
-      request,
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/android/toolchain"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          kind: "android-discovery-request",
+          request,
+        }),
+      }),
+    );
   });
 
   it("yields each whole PNG frame from a length-prefixed stream", async () => {
@@ -106,7 +110,9 @@ describe("androidToolchainClient", () => {
       [1, 2, 3],
       [4, 5],
     ]);
-    const [url] = fetch.mock.calls[0] ?? [];
-    expect(String(url)).toBe("http://127.0.0.1:13773/api/android/screen-stream");
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/android/screen-stream"),
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
