@@ -92,6 +92,31 @@ describe("presentAppleSimulatorLiveFrame", () => {
     });
   });
 
+  it("shows the Simulator an agent asked the in-app pane to attach", () => {
+    const otherSimulatorId =
+      "00000000-0000-4000-8000-000000000022" as AppleSimulatorRecord["simulatorId"];
+    expect(
+      presentAppleSimulatorLiveFrame(
+        input({
+          simulators: [
+            booted,
+            {
+              ...booted,
+              simulatorId: otherSimulatorId,
+              name: "iPhone 17",
+              state: "booting",
+              udid: "00000000-0000-4000-8000-000000000022",
+            },
+          ],
+          preferredSimulatorId: otherSimulatorId,
+        }),
+      ),
+    ).toMatchObject({
+      status: "booting",
+      name: "iPhone 17",
+    });
+  });
+
   it("shows a live frame from host-held screenshot evidence, never as a video", () => {
     const frame = presentAppleSimulatorLiveFrame(
       input({

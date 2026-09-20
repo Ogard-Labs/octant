@@ -402,12 +402,15 @@ pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
-shows a thread-bound live frame — the Simulator's screen streamed through the
+is a device pane: the Simulator's screen streamed through the
 host as it changes, authorized like a screenshot and never stored (see
 [decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
 or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
-states; closing the tab does not shut down the destination. Tap, typed text,
+states; closing the tab does not shut down the destination. An agent's
+`octant_apple` `boot`, `run`, or `open` raises that pane once per request
+instead of launching Simulator.app (see
+[decisions/0144-the-agent-opens-the-in-app-simulator-pane.md](decisions/0144-the-agent-opens-the-in-app-simulator-pane.md)). Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed

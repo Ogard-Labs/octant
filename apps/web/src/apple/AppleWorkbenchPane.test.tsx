@@ -338,4 +338,28 @@ describe("AppleWorkbenchPane", () => {
     expect(html).toContain('data-status="stale-after-restart"');
     expect(html).not.toContain('data-status="live"');
   });
+
+  it("renders the dock's iOS Simulator tab as a device pane, not the workbench dump", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        onRun={vi.fn()}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />,
+    );
+    expect(screen.getByLabelText("iOS Simulator")).toBeVisible();
+    expect(screen.queryByText("Apple development")).not.toBeInTheDocument();
+    expect(screen.queryByText("Validation evidence")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Build Fixture" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Test Fixture" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run Fixture on iPhone 16" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Capture the iPhone 16 screen" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Shut down iPhone 16" })).toBeVisible();
+  });
 });

@@ -475,6 +475,9 @@ function AppleWorkbenchSurface(props: {
               : { simulatorId: latestScreenshot.simulatorId }),
           },
         }),
+    ...(controller.runtime?.paneOpenRequest === undefined
+      ? {}
+      : { preferredSimulatorId: controller.runtime.paneOpenRequest.simulatorId }),
   });
   const screenshotReference =
     liveFrame.status === "live" && liveFrame.screen.kind === "screenshot"
@@ -626,6 +629,7 @@ function AppleWorkbenchSurface(props: {
       onCancel={(actionId) => void cancel(actionId)}
       onRetry={controller.retry}
       onRun={(intent) => void run(intent)}
+      {...(props.tab.pane === "device" ? { variant: "device" as const } : {})}
     />
   );
 }

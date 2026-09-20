@@ -32,6 +32,12 @@ export interface AppleSimulatorLiveFrameProps {
   readonly inputEnabled?: boolean;
   readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
   readonly busy?: boolean;
+  /**
+   * The dock's iOS Simulator tab is a device: hide the evidence dump, and
+   * when the screen is streamed hide the Type field — keys go to the focused
+   * screen. The full workbench keeps the form.
+   */
+  readonly chrome?: "workbench" | "device";
 }
 
 export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps) {
@@ -49,6 +55,8 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
     canOfferAppleSimulatorFrameInput(frame);
   const streamed =
     frame.status === "live" && props.liveScreen?.status === "live" ? props.liveScreen : undefined;
+  const chrome = props.chrome ?? "workbench";
+  const device = chrome === "device";
   // The queue lives with the frame, not with the streamed screen: a live view
   // that reconnects unmounts the screen for a moment, and what a person had
   // typed just before was thrown away with it.
@@ -60,7 +68,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
   return (
     <figure
       aria-label="iOS Simulator live frame"
-      className={`apple-simulator-frame apple-simulator-frame--${frame.status}`}
+      className={`apple-simulator-frame apple-simulator-frame--${frame.status}${device ? " apple-simulator-frame--device" : ""}`}
       data-status={frame.status}
     >
       <figcaption>{frame.title}</figcaption>
@@ -70,6 +78,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
           // another it is dropped with the component.
           key={String(frame.simulatorId)}
           attach={streamed.attach}
+          chrome={chrome}
           enqueue={enqueue}
           name={frame.name}
           offerInput={offerInput}
@@ -92,7 +101,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
       ) : (
         <p>{frame.message}</p>
       )}
-      {evidence === undefined ? null : (
+      {device || evidence === undefined ? null : (
         <p>
           Evidence <code>{evidence}</code>
         </p>
@@ -100,6 +109,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
       {offerInput && streamed === undefined ? (
         <FrameInputControls
           busy={props.busy === true}
+          keys={device ? "hardware" : "full"}
           onInput={(intent) => enqueue(intent, false)}
         />
       ) : null}
@@ -293,6 +303,7 @@ function StreamedDevice(props: {
   readonly attach: (canvas: HTMLCanvasElement | null) => void;
   readonly offerInput: boolean;
   readonly enqueue: (intent: AppleSimulatorFrameInputIntent, typing: boolean) => void;
+  readonly chrome: "workbench" | "device";
 }) {
   const { enqueue } = props;
   const active = props.offerInput;
@@ -308,7 +319,11 @@ function StreamedDevice(props: {
       {active ? (
         // Never disabled for being busy: the buttons wait their turn in the
         // same queue as the screen, behind whatever was typed before them.
-        <FrameInputControls busy={false} onInput={(intent) => enqueue(intent, false)} />
+        <FrameInputControls
+          busy={false}
+          keys={props.chrome === "device" ? "hardware" : "full"}
+          onInput={(intent) => enqueue(intent, false)}
+        />
       ) : null}
     </>
   );
@@ -394,9 +409,37 @@ function StreamedScreen(props: {
 function FrameInputControls(props: {
   readonly onInput: (intent: AppleSimulatorFrameInputIntent) => void;
   readonly busy: boolean;
+  readonly keys: "full" | "hardware";
 }) {
   const textId = useId();
   const [text, setText] = useState("");
+  const hardware = (
+    <>
+      <OctantButton
+        disabled={props.busy}
+        onClick={() => props.onInput({ kind: "key-press", key: "home" })}
+        type="button"
+        variant="secondary"
+      >
+        Home
+      </OctantButton>
+      <OctantButton
+        disabled={props.busy}
+        onClick={() => props.onInput({ kind: "key-press", key: "lock" })}
+        type="button"
+        variant="secondary"
+      >
+        Lock
+      </OctantButton>
+    </>
+  );
+  if (props.keys === "hardware") {
+    return (
+      <div className="apple-simulator-frame__keys" role="group" aria-label="Simulator input">
+        {hardware}
+      </div>
+    );
+  }
   return (
     <div className="apple-simulator-frame__input" role="group" aria-label="Simulator input">
       <label className="apple-simulator-frame__type" htmlFor={textId}>
@@ -447,22 +490,7 @@ function FrameInputControls(props: {
         >
           Escape
         </OctantButton>
-        <OctantButton
-          disabled={props.busy}
-          onClick={() => props.onInput({ kind: "key-press", key: "home" })}
-          type="button"
-          variant="secondary"
-        >
-          Home
-        </OctantButton>
-        <OctantButton
-          disabled={props.busy}
-          onClick={() => props.onInput({ kind: "key-press", key: "lock" })}
-          type="button"
-          variant="secondary"
-        >
-          Lock
-        </OctantButton>
+        {hardware}
       </div>
     </div>
   );

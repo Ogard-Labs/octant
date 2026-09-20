@@ -18,12 +18,14 @@ import {
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
   MAX_BROWSER_TABS_PER_CONTEXT,
 } from "@octant/contracts";
-import type {
-  AppleActionRequest,
-  AppleBuildEvidence,
-  AppleDiscoveryRequest,
-  AppleRuntimeSnapshot,
-  ApplePlatform,
+import {
+  decodeAppleSimulatorId,
+  type AppleActionRequest,
+  type AppleBuildEvidence,
+  type AppleDiscoveryRequest,
+  type AppleRuntimeSnapshot,
+  type ApplePlatform,
+  type AppleSimulatorId,
 } from "@octant/contracts";
 import {
   clampTurnAccessPosture,
@@ -108,7 +110,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot and shutdown control the selected Simulator; screenshot observes it. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot observes it. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -121,6 +123,7 @@ const appleDefinition = {
           "test",
           "run",
           "boot",
+          "open",
           "shutdown",
           "screenshot",
           "tap",
@@ -174,6 +177,15 @@ export interface CodeAppleToolPort {
       readonly threadId: CodeThread["id"];
       readonly checkoutId: CodeThread["checkoutId"];
     },
+  ) => Promise<AppleRuntimeSnapshot | undefined>;
+  readonly requestPaneOpen: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    simulatorId: AppleSimulatorId,
   ) => Promise<AppleRuntimeSnapshot | undefined>;
 }
 
@@ -742,34 +754,99 @@ async function appleTool(
     };
   }
 
+  if (input.operation === "open") {
+    if (input.simulatorId === undefined) return failure("invalid-apple-input");
+    const snapshot = await apple.snapshot(options.windowId, scope);
+    if (snapshot === undefined) return failure("apple-unavailable");
+    const destination = snapshot.simulators.find(
+      (simulator) => String(simulator.simulatorId) === input.simulatorId,
+    );
+    if (destination === undefined) {
+      return failure(
+        "simulator-not-found",
+        "No Simulator with that identity is available on this thread.",
+      );
+    }
+    if (destination.state === "unavailable") {
+      return failure("unavailable", "That Simulator destination is unavailable.");
+    }
+    if (destination.state === "booted" || destination.state === "booting") {
+      await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
+      return {
+        result: inAppPaneResult({
+          kind: "open",
+          outcome: "succeeded",
+          simulatorId: String(destination.simulatorId),
+          state: destination.state,
+        }),
+        isError: false,
+      };
+    }
+    const request = appleActionRequest({ ...input, operation: "boot" }, scope, options.uuid);
+    if (request === undefined) return failure("invalid-apple-input");
+    if (signal?.aborted) return failure("tool-interrupted");
+    await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
+    const evidence = await apple.execute(options.windowId, request);
+    if (evidence === undefined) return failure("apple-unavailable");
+    return appleEvidenceResult(evidence, true);
+  }
+
   if (signal?.aborted) return failure("tool-interrupted");
   const request = appleActionRequest(input, scope, options.uuid);
   if (request === undefined) return failure("invalid-apple-input");
+  const opensPane =
+    (input.operation === "boot" || input.operation === "run") && input.simulatorId !== undefined;
+  if (opensPane && input.simulatorId !== undefined) {
+    const simulatorId = decodeToolSimulatorId(input.simulatorId);
+    if (simulatorId !== undefined) {
+      await apple.requestPaneOpen(options.windowId, scope, simulatorId);
+    }
+  }
   const evidence = await apple.execute(options.windowId, request);
   if (evidence === undefined) return failure("apple-unavailable");
+  return appleEvidenceResult(evidence, opensPane);
+}
+
+const IN_APP_PANE_NOTE =
+  "The Simulator is showing in Octant's iOS Simulator pane. Do not launch Simulator.app, run open -a Simulator, or start serve-sim.";
+
+function inAppPaneResult<T extends Record<string, unknown>>(
+  result: T,
+): T & { readonly opensInAppPane: true; readonly pane: string } {
+  return { ...result, opensInAppPane: true, pane: IN_APP_PANE_NOTE };
+}
+
+function appleEvidenceResult(evidence: AppleBuildEvidence, opensPane: boolean) {
+  const result = {
+    kind: evidence.kind,
+    outcome: evidence.outcome,
+    cleanup: evidence.cleanup,
+    durationMs: evidence.durationMs,
+    diagnostics: evidence.diagnostics.slice(0, MAX_APPLE_RESULT_DIAGNOSTICS).map((diagnostic) => ({
+      severity: diagnostic.severity,
+      message: diagnostic.message,
+      ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
+    })),
+    // References, never bytes. A captured screen is an artifact the host
+    // holds; putting it in a tool result would put the Simulator's screen
+    // into the provider transcript.
+    artifacts: evidence.artifacts.map((artifact) => ({
+      kind: artifact.kind,
+      reference: artifact.reference,
+    })),
+  };
   return {
-    result: {
-      kind: evidence.kind,
-      outcome: evidence.outcome,
-      cleanup: evidence.cleanup,
-      durationMs: evidence.durationMs,
-      diagnostics: evidence.diagnostics
-        .slice(0, MAX_APPLE_RESULT_DIAGNOSTICS)
-        .map((diagnostic) => ({
-          severity: diagnostic.severity,
-          message: diagnostic.message,
-          ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
-        })),
-      // References, never bytes. A captured screen is an artifact the host
-      // holds; putting it in a tool result would put the Simulator's screen
-      // into the provider transcript.
-      artifacts: evidence.artifacts.map((artifact) => ({
-        kind: artifact.kind,
-        reference: artifact.reference,
-      })),
-    },
+    result: opensPane && evidence.outcome === "succeeded" ? inAppPaneResult(result) : result,
     isError: evidence.outcome !== "succeeded",
   };
+}
+
+function decodeToolSimulatorId(value: string): AppleSimulatorId | undefined {
+  try {
+    return decodeAppleSimulatorId(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function appleActionRequest(
@@ -1123,6 +1200,7 @@ interface AppleToolInput {
     | "test"
     | "run"
     | "boot"
+    | "open"
     | "shutdown"
     | "screenshot"
     | "tap"
@@ -1305,6 +1383,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "test" &&
     operation !== "run" &&
     operation !== "boot" &&
+    operation !== "open" &&
     operation !== "shutdown" &&
     operation !== "screenshot" &&
     operation !== "tap" &&

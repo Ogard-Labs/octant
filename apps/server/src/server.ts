@@ -3952,6 +3952,16 @@ export function startOctantServer(
             });
             return context === undefined ? undefined : appleToolchainService.snapshot(context);
           },
+          requestPaneOpen: async (windowId, scope, simulatorId) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return appleToolchainService.requestPaneOpen(context, simulatorId);
+          },
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),

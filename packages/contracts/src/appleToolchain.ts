@@ -356,6 +356,18 @@ export const AppleRuntimeSnapshot = Schema.Struct({
       Schema.Struct({ simulatorId: AppleSimulatorId, expiresAt: UtcTimestamp }).annotations(strict),
     ).pipe(Schema.maxItems(256)),
   ),
+  /**
+   * The in-app Simulator pane this thread should show, when an agent just
+   * asked to attach. The host decides; the renderer consumes each requestId
+   * once and never infers authority from it.
+   */
+  paneOpenRequest: Schema.optional(
+    Schema.Struct({
+      requestId: Schema.UUID,
+      simulatorId: AppleSimulatorId,
+      requestedAt: UtcTimestamp,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;
 

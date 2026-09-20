@@ -640,6 +640,11 @@ const AppleWorkbenchWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("apple-workbench"),
   ...CodeWorkspaceTabFields,
   projectPath: AppleProjectPath,
+  /**
+   * The dock's iOS Simulator tab is a device pane, not the full workbench.
+   * Absent on the Apple workbench command, which stays the evidence surface.
+   */
+  pane: Schema.optional(Schema.Literal("device")),
 }).annotations(strict);
 
 const BoundMode = Schema.Literal("work", "code");

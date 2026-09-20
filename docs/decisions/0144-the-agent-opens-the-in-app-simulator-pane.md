@@ -1,0 +1,67 @@
+# 0144. The agent opens the in-app Simulator pane
+
+**Status:** Accepted
+
+## Context
+
+0043 put the iOS Simulator in the right dock by rendering the full Apple
+Development Workbench in that tab. 0139 made the frame a live view and 0140
+let a person drive it, but two things still sent people to Simulator.app.
+
+An agent's `octant_apple` `boot` or `run` prepared a destination and did not
+raise the dock, so the only window that appeared was Apple's. Agents then
+launched Simulator.app, `open -a Simulator`, or serve-sim to "see" the
+device. And the dock tab still dumped scheme facts, Build/Test, and
+validation evidence under the screen, so it did not read as a device.
+
+This record supersedes exactly one rule of 0043: that the iOS Simulator dock
+tab renders the existing Apple Development Workbench. Every other rule in
+0043 stands — thread-scoped, unmount does not shut down, the sidebar grants
+no authority, and opening the full workbench from its project command remains
+a separate main-workspace action. 0139 and 0140 are unchanged: follow-the-
+finger input stays a later decision.
+
+## Decision
+
+- **`boot`, `run`, and `open` raise Octant's iOS Simulator pane.** An
+  agent's `boot` or `run`, and `open` whether the destination was already
+  booted, stamp an in-memory pane-open request on the runtime snapshot
+  (`requestId`, `simulatorId`, `requestedAt`) as the action starts, so the
+  pane rises while the destination is coming up. The renderer consumes each
+  `requestId` once, the way it offers a written document: it opens the
+  dock's iOS Simulator tab without moving composer focus. A tab the person
+  closed stays closed until a later request. Closing the tab still does not
+  shut the destination down.
+- **`open` is the attach operation.** It boots a shut-down destination
+  through the same `boot` path, and otherwise only stamps the request. It is
+  not a destination effect of its own when the Simulator is already booted,
+  so it asks for no approval. The tool result names `opensInAppPane: true`
+  and tells the agent not to launch Simulator.app, `open -a Simulator`, or
+  serve-sim.
+- **The dock tab is a device pane.** It shows the live frame, a compact rail
+  (the destination, Boot or Capture screen and Shut down, Home and Lock), and
+  in-flight progress. It does not show scheme facts, Build, Test, or the
+  validation-evidence dump. Typed text still goes to the focused screen
+  (0140); the Type field stays on the full workbench and on a still fallback.
+- **Watching stays a read.** The pane learns of a request only from the
+  snapshot the workbench already reads. The request lives in the server's
+  memory, is scoped to the thread and checkout, and dies with the process.
+  It is never journaled.
+
+Non-goals: follow-the-finger input, Android, a live view on a remote client,
+and activating or quitting Simulator.app.
+
+## Consequences
+
+- An agent that boots or runs an iOS app shows the device in Octant, not in
+  Apple's Simulator application.
+- The dock reads as a device. Build, test, and evidence stay on the Apple
+  workbench command.
+- A person who closes the tab is not interrupted again until the agent asks
+  to show the Simulator once more.
+
+## Related
+
+- 0043 Simulator follows the active thread (one rule superseded; the rest stands)
+- 0139 The Simulator frame is a live view streamed through the host
+- 0140 The live Simulator screen is driven directly

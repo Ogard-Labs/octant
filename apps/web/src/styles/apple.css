@@ -259,3 +259,36 @@
 .apple-simulator-frame--stale-after-restart {
   color: var(--oct-muted);
 }
+
+.apple-workbench--device {
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3);
+}
+
+.apple-simulator-frame--device {
+  padding: var(--oct-space-2);
+  border-color: color-mix(in srgb, var(--oct-fg) 18%, transparent);
+  background: color-mix(in srgb, var(--oct-bg) 72%, black);
+}
+
+.apple-simulator-frame--device figcaption {
+  justify-self: center;
+  color: var(--oct-muted);
+}
+
+.apple-simulator-frame--device .apple-simulator-frame__screen {
+  padding: 10px;
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--oct-bg) 20%, black);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--oct-fg) 12%, transparent);
+}
+
+.apple-simulator-frame--device img,
+.apple-simulator-frame--device canvas {
+  max-height: min(72vh, 820px);
+  border-radius: 18px;
+}
+
+.apple-workbench--device .apple-workbench__section {
+  padding-top: var(--oct-space-2);
+}

@@ -60,18 +60,27 @@ shows the project path, the "Apple development" eyebrow, Xcode version,
 scheme, revision, SDK count, Simulator count, **Actions**, **Simulator
 destinations**, **Current progress**, and **Validation evidence**.
 
-The iOS Simulator dock tab shows a live frame bound to the owning Code thread
-and checkout. Its states are setup, unavailable, booting, live, interrupted,
-and stale after a host restart. Under the Octant desktop app a live frame
-shows the Simulator's screen as it changes, so you see what a tap or an
-agent's action did without capturing in between. Frames are sent only when the
-screen changes, and they are never stored: nothing of the live view is written
-to disk, to the journal, or into a model's context. **Capture screen** is
-still how a screen becomes validation evidence. When the host has no live
-view, the frame shows the latest captured still instead. Remote, Linux, and headless clients
-say the native frame is not attachable instead of hanging or inventing a
-picture. Closing the tab unmounts the view only; it does not shut down,
-erase, or transfer the destination.
+The iOS Simulator dock tab is a device pane bound to the owning Code thread
+and checkout: the live frame, a compact destination rail (Boot, Capture
+screen, Shut down), Home and Lock, and in-flight progress. It does not show
+scheme facts, Build, Test, or the validation-evidence dump — those stay on
+the Apple workbench command. Its states are setup, unavailable, booting, live,
+interrupted, and stale after a host restart. Under the Octant desktop app a
+live frame shows the Simulator's screen as it changes, so you see what a tap
+or an agent's action did without capturing in between. Frames are sent only
+when the screen changes, and they are never stored: nothing of the live view
+is written to disk, to the journal, or into a model's context. **Capture
+screen** is still how a screen becomes validation evidence. When the host has
+no live view, the frame shows the latest captured still instead. Remote,
+Linux, and headless clients say the native frame is not attachable instead of
+hanging or inventing a picture. Closing the tab unmounts the view only; it
+does not shut down, erase, or transfer the destination.
+
+An agent's `octant_apple` `boot`, `run`, or `open` opens that pane beside the
+transcript. `open` boots a shut-down destination and otherwise only shows the
+pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim: the
+in-app pane is the live device. The pane opens once per request; a tab you
+closed stays closed until the agent asks again.
 
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
@@ -137,8 +146,10 @@ no such command. `Package.swift` is not listed.
 
 A Code thread on **Full access** also reaches these actions through the
 app-managed `octant_apple` tool, so an agent can discover the toolchain, read
-Simulator state, build, test, run, boot, shut down, capture the screen, and
-inject tap, swipe, typed text, and hardware keys. Pane-driven input journals as
+Simulator state, build, test, run, boot, open the in-app pane, shut down,
+capture the screen, and inject tap, swipe, typed text, and hardware keys.
+`boot`, `run`, and `open` show the Simulator in Octant's iOS Simulator pane
+— never by launching Simulator.app. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`. The host binds both to
 the same thread and checkout and refuses them with the same policy; the tool
 is unavailable under Plan and approval-gated postures. The workbench never

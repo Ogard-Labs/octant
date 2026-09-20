@@ -396,6 +396,26 @@ describe("Apple runtime contracts", () => {
       recentEvidence: [],
     });
     expect(snapshot.active[0].step).toBe("testing");
+    expect(snapshot.paneOpenRequest).toBeUndefined();
+    const opening = (decodeSnapshot as (value: unknown) => any)({
+      ...snapshot,
+      paneOpenRequest: {
+        requestId: "10000000-0000-4000-8000-000000000013",
+        simulatorId: "10000000-0000-4000-8000-000000000014",
+        requestedAt: "2026-07-27T20:00:01.000Z",
+      },
+    });
+    expect(opening.paneOpenRequest.simulatorId).toBe("10000000-0000-4000-8000-000000000014");
+    expect(() =>
+      (decodeSnapshot as (value: unknown) => any)({
+        ...snapshot,
+        paneOpenRequest: {
+          requestId: "not-a-uuid",
+          simulatorId: "10000000-0000-4000-8000-000000000014",
+          requestedAt: "2026-07-27T20:00:01.000Z",
+        },
+      }),
+    ).toThrow();
   });
 
   it("decodes project discovery without exposing an absolute repository path", () => {

@@ -72,6 +72,11 @@ export interface AppleWorkbenchPaneProps {
   readonly liveFrame?: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
   readonly liveScreen?: AppleSimulatorLiveScreen;
+  /**
+   * The dock's iOS Simulator tab is a device pane. The Apple workbench
+   * command stays the evidence surface.
+   */
+  readonly variant?: "workbench" | "device";
 }
 
 export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
@@ -83,8 +88,12 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         {...(props.liveFrame === undefined ? {} : { liveFrame: props.liveFrame })}
         {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
         {...(props.liveScreen === undefined ? {} : { liveScreen: props.liveScreen })}
+        {...(props.variant === undefined ? {} : { variant: props.variant })}
       />
     );
+  }
+  if (props.variant === "device") {
+    return <AppleDevicePane {...props} discovery={props.discovery} runtime={props.runtime} />;
   }
   return (
     <section aria-label="Apple development workbench" className="apple-workbench">
@@ -133,7 +142,10 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
 }
 
 function LiveFrame(
-  props: Pick<AppleWorkbenchPaneProps, "liveFrame" | "screenUrl" | "liveScreen" | "onRun" | "busy">,
+  props: Pick<
+    AppleWorkbenchPaneProps,
+    "liveFrame" | "screenUrl" | "liveScreen" | "onRun" | "busy"
+  > & { readonly chrome?: "workbench" | "device" },
 ) {
   if (props.liveFrame === undefined) return null;
   const frame = props.liveFrame;
@@ -142,6 +154,7 @@ function LiveFrame(
   return (
     <AppleSimulatorLiveFrameView
       busy={props.busy === true}
+      chrome={props.chrome ?? "workbench"}
       frame={frame}
       inputEnabled={inputEnabled}
       {...(props.onRun === undefined || frame.status !== "live"
@@ -188,10 +201,78 @@ function LiveFrame(
   );
 }
 
+function AppleDevicePane(
+  props: AppleWorkbenchPaneProps & {
+    readonly discovery: NonNullable<AppleWorkbenchPaneProps["discovery"]>;
+    readonly runtime: NonNullable<AppleWorkbenchPaneProps["runtime"]>;
+  },
+) {
+  return (
+    <section aria-label="iOS Simulator" className="apple-workbench apple-workbench--device">
+      <LiveFrame {...props} chrome="device" />
+      {props.actionMessage === undefined ? null : (
+        <p className="apple-workbench__action-message" role="alert">
+          {props.actionMessage}
+        </p>
+      )}
+      <DeviceRail
+        busy={props.busy === true}
+        {...(props.onRun === undefined ? {} : { onRun: props.onRun })}
+        simulators={props.discovery.simulators}
+      />
+      {props.runtime.active.length === 0 ? null : (
+        <ProgressList
+          busy={props.busy === true}
+          {...(props.onCancel === undefined ? {} : { onCancel: props.onCancel })}
+          progress={props.runtime.active}
+        />
+      )}
+    </section>
+  );
+}
+
+function DeviceRail(props: {
+  readonly busy: boolean;
+  readonly onRun?: (intent: AppleWorkbenchIntent) => void;
+  readonly simulators: ReadonlyArray<AppleSimulatorRecord>;
+}) {
+  if (props.simulators.length === 0) {
+    return (
+      <section aria-labelledby="apple-simulators-heading" className="apple-workbench__section">
+        <h2 id="apple-simulators-heading">Simulator</h2>
+        <p>No compatible Simulator is available.</p>
+      </section>
+    );
+  }
+  return (
+    <section aria-labelledby="apple-simulators-heading" className="apple-workbench__section">
+      <h2 id="apple-simulators-heading">Simulator</h2>
+      <ul>
+        {props.simulators.map((simulator) => (
+          <li key={simulator.simulatorId}>
+            <strong>{simulator.name}</strong>
+            <span>
+              {simulator.platform} {simulator.runtimeVersion} · {simulatorState(simulator.state)}
+            </span>
+            {props.onRun === undefined ? null : (
+              <SimulatorActions
+                busy={props.busy}
+                onRun={props.onRun}
+                scheme={undefined}
+                simulator={simulator}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function AppleWorkbenchState(
   props: Pick<
     AppleWorkbenchPaneProps,
-    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl" | "liveScreen"
+    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl" | "liveScreen" | "variant"
   >,
 ) {
   const presentation = {
@@ -215,13 +296,14 @@ function AppleWorkbenchState(
     ready: ["Waiting for Apple evidence", "No authoritative Apple action state is available yet."],
   } as const;
   const [title, message] = presentation[props.status];
+  const device = props.variant === "device";
   return (
     <section
-      aria-label="Apple development workbench"
-      className={`apple-workbench apple-workbench--${props.status}`}
+      aria-label={device ? "iOS Simulator" : "Apple development workbench"}
+      className={`apple-workbench apple-workbench--${props.status}${device ? " apple-workbench--device" : ""}`}
     >
-      <span className="apple-workbench__eyebrow">Apple development</span>
-      <LiveFrame {...props} />
+      {device ? null : <span className="apple-workbench__eyebrow">Apple development</span>}
+      <LiveFrame {...props} chrome={device ? "device" : "workbench"} />
       <h1>{title}</h1>
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>
       {props.onRetry === undefined ? null : (

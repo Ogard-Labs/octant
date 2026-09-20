@@ -1091,17 +1091,20 @@ describe("the Apple capability as an agent tool", () => {
     const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => appleEvidence());
     const snapshot = vi.fn(async () => appleSnapshot());
     const discover = vi.fn(async () => appleDiscovery());
+    const requestPaneOpen = vi.fn(async () => appleSnapshot());
     const port = {
       resolveAuthority: () => appleAuthority,
       discover,
       execute,
       snapshot,
+      requestPaneOpen,
       ...apple,
     } as never;
     return {
       discover,
       execute,
       snapshot,
+      requestPaneOpen,
       tools: createCodeAppManagedTools({
         windowId,
         thread: thread(threadOverrides),
@@ -1311,6 +1314,101 @@ describe("the Apple capability as an agent tool", () => {
 
     expect(outcome.isError).toBe(true);
     expect(outcome.result).toMatchObject({ outcome: "unauthorized" });
+  });
+
+  it("opens the in-app Simulator pane instead of launching Apple's Simulator application", async () => {
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+    const snapshot = vi.fn(async () => ({
+      ...appleSnapshot(),
+      simulators: [
+        {
+          simulatorId,
+          name: "iPhone 16",
+          platform: "ios",
+          runtimeVersion: "18.5",
+          state: "booted",
+        },
+      ],
+    }));
+    const requestPaneOpen = vi.fn(async () => snapshot());
+    const { execute, tools } = appleTools({ snapshot, requestPaneOpen } as never);
+
+    const opened = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "open", simulatorId }),
+    } as never);
+    const booted = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    } as never);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ kind: "boot" });
+    expect(requestPaneOpen).toHaveBeenCalled();
+    expect(opened.isError).toBe(false);
+    expect(opened.result).toMatchObject({
+      kind: "open",
+      outcome: "succeeded",
+      opensInAppPane: true,
+    });
+    expect(JSON.stringify(opened.result)).toContain("iOS Simulator pane");
+    expect(JSON.stringify(opened.result)).toContain("Do not launch Simulator.app");
+    expect(booted.result).toMatchObject({ opensInAppPane: true });
+  });
+
+  it("boots a shut-down Simulator when opening the in-app pane, and still does not launch Simulator.app", async () => {
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+    const snapshot = vi.fn(async () => ({
+      ...appleSnapshot(),
+      simulators: [
+        {
+          simulatorId,
+          name: "iPhone 16",
+          platform: "ios",
+          runtimeVersion: "18.5",
+          state: "shutdown",
+        },
+      ],
+    }));
+    const requestPaneOpen = vi.fn(async () => snapshot());
+    const execute = vi.fn(async () => ({
+      ...(appleEvidence() as unknown as Record<string, unknown>),
+      kind: "boot",
+      outcome: "succeeded",
+    }));
+    const { tools } = appleTools({ snapshot, requestPaneOpen, execute } as never);
+
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "open", simulatorId }),
+    } as never);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ kind: "boot", simulatorId });
+    expect(requestPaneOpen).toHaveBeenCalled();
+    expect(outcome.isError).toBe(false);
+    expect(outcome.result).toMatchObject({
+      kind: "boot",
+      outcome: "succeeded",
+      opensInAppPane: true,
+    });
+  });
+
+  it("names the in-app pane in the tool description so an agent does not launch Simulator.app", () => {
+    const definition = appleTools().tools.definitions.find(
+      (entry) => entry.name === "octant_apple",
+    );
+    expect(definition?.description).toContain("iOS Simulator pane");
+    expect(definition?.description).toContain("never launch Simulator.app");
+    expect(definition?.inputSchema).toEqual(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          operation: expect.objectContaining({
+            enum: expect.arrayContaining(["open", "boot", "run"]),
+          }),
+        }),
+      }),
+    );
   });
 });
 

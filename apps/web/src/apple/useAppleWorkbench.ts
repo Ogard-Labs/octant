@@ -89,6 +89,41 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     return () => controller.abort();
   }, [attempt, client, discoveryRequestKey, enabled, refreshSnapshot]);
 
+  useEffect(() => {
+    if (!enabled || status !== "ready") return;
+    const watching = (runtime?.active.length ?? 0) > 0 || runtime?.paneOpenRequest !== undefined;
+    if (!watching) return;
+    const controller = new AbortController();
+    const pull = async () => {
+      try {
+        const next = await refreshSnapshot(controller.signal);
+        if (controller.signal.aborted) return;
+        setDiscovery((previous) =>
+          previous === undefined
+            ? previous
+            : {
+                ...previous,
+                simulators: withNewerStates(previous.simulators, next.simulators, undefined),
+              },
+        );
+      } catch {
+        // A poll that fails leaves the last good snapshot; the next one tries again.
+      }
+    };
+    void pull();
+    const interval = setInterval(() => void pull(), 1_000);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [
+    enabled,
+    refreshSnapshot,
+    runtime?.active.length,
+    runtime?.paneOpenRequest?.requestId,
+    status,
+  ]);
+
   const execute = useCallback(
     async (request: AppleActionRequest) => {
       const changesDestinations = request.kind === "boot" || request.kind === "shutdown";

@@ -678,6 +678,43 @@ describe("AppleToolchainService lifecycle", () => {
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
 
+  it("stamps an in-app pane request on the snapshot for that thread only", async () => {
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const simulatorId = service.snapshot(context).simulators[0]?.simulatorId;
+    if (simulatorId === undefined) throw new Error("expected a discovered Simulator");
+    const opened = (
+      service as unknown as {
+        requestPaneOpen: (
+          scope: ExecutionContext,
+          id: typeof simulatorId,
+        ) => {
+          readonly paneOpenRequest?: {
+            readonly requestId: string;
+            readonly simulatorId: typeof simulatorId;
+            readonly requestedAt: string;
+          };
+        };
+      }
+    ).requestPaneOpen(context, simulatorId);
+    expect(opened.paneOpenRequest).toEqual({
+      requestId: "30000000-0000-4000-8000-000000000012",
+      simulatorId,
+      requestedAt: "2026-07-27T20:00:00.000Z",
+    });
+    expect(
+      service.snapshot({
+        ...context,
+        threadId: "30000000-0000-4000-8000-000000000099" as never,
+      }).paneOpenRequest,
+    ).toBeUndefined();
+  });
+
   it("keeps a shutdown that finished while a slower discovery was still reading", async () => {
     const base = discoveryExecutor();
     let releaseProjectProbe!: () => void;

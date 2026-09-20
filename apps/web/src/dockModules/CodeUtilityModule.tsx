@@ -98,6 +98,7 @@ function codeUtilityTab(
       threadId,
       title,
       projectPath: appleProjectPath,
+      pane: "device",
     });
     if (tab.kind !== "apple-workbench") throw new Error("Expected an Apple workbench tab.");
     return tab;

@@ -191,6 +191,20 @@ export class AppleToolchainService {
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
   readonly #captureDirectory: string;
   readonly #capturePrefix: string;
+  /**
+   * The in-app pane an agent last asked this process to show. One request at
+   * a time: a later attach replaces it, and a snapshot for another thread
+   * does not see it.
+   */
+  #paneOpenRequest:
+    | {
+        readonly threadId: AppleExecutionContext["threadId"];
+        readonly checkoutId: AppleExecutionContext["checkoutId"];
+        readonly requestId: string;
+        readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+        readonly requestedAt: string;
+      }
+    | undefined;
   // Files a running capture owns. A capture may run for minutes, so its file's
   // age says nothing about whether it was abandoned; only this does. Shared by
   // every service in the process: a replaced service's later sweeps would
@@ -429,6 +443,7 @@ export class AppleToolchainService {
   }
 
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
+    const paneOpenRequest = this.#paneOpenRequest;
     return decodeAppleRuntimeSnapshot({
       sequence: this.#sequence,
       snapshotAt: this.#options.now(),
@@ -440,7 +455,37 @@ export class AppleToolchainService {
       recentEvidence: this.#recent
         .filter((entry) => recentEvidenceMatches(entry, context))
         .map(({ evidence }) => evidence),
+      ...(paneOpenRequest !== undefined &&
+      paneOpenRequest.threadId === context.threadId &&
+      paneOpenRequest.checkoutId === context.checkoutId
+        ? {
+            paneOpenRequest: {
+              requestId: paneOpenRequest.requestId,
+              simulatorId: paneOpenRequest.simulatorId,
+              requestedAt: paneOpenRequest.requestedAt,
+            },
+          }
+        : {}),
     });
+  }
+
+  /**
+   * Asks the renderer to show this Simulator in the in-app pane. The request
+   * is host memory only: it is not journaled, and a restart forgets it.
+   */
+  requestPaneOpen(
+    context: AppleExecutionContext,
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+  ): AppleRuntimeSnapshot {
+    this.#paneOpenRequest = {
+      threadId: context.threadId,
+      checkoutId: context.checkoutId,
+      requestId: this.#options.newId(),
+      simulatorId,
+      requestedAt: this.#options.now(),
+    };
+    this.#sequence += 1;
+    return this.snapshot(context);
   }
 
   async reconcileAfterRestart(
@@ -562,6 +607,7 @@ export class AppleToolchainService {
     try {
       if (request.kind === "boot") {
         this.#advance(active, "preparing-destination");
+        this.#setSimulatorState(request.simulatorId, "booting");
         terminal = await this.#command(
           ["xcrun", "simctl", "boot", request.simulatorId],
           context,
@@ -870,6 +916,7 @@ export class AppleToolchainService {
       this.#setSimulatorState(simulatorId, "booted");
       return result;
     }
+    this.#setSimulatorState(simulatorId, "booting");
     result = await this.#command(
       ["xcrun", "simctl", "boot", simulatorId],
       context,
