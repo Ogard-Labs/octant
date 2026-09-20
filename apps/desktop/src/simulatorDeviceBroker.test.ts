@@ -115,6 +115,63 @@ describe("Simulator input delivery", () => {
     expect(send.mock.calls.map(([, sent]) => sent.op)).toEqual(["hello"]);
   });
 
+  it("sends a swipe as two fractions of the screen and refuses one that leaves it", async () => {
+    const { fake, send } = helpers((sent) =>
+      sent.op === "hello"
+        ? { status: "delivered", screen: { width: 1206, height: 2622 } }
+        : { status: "delivered" },
+    );
+    const deliver = createSimulatorInputDelivery(fake);
+
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 2_622 },
+        to: { x: 603, y: 1_311 },
+        durationMs: 250,
+      }),
+    ).resolves.toEqual({ kind: "delivered" });
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 100 },
+        to: { x: 3_000, y: 100 },
+        durationMs: 250,
+      }),
+    ).resolves.toMatchObject({ kind: "refused", reason: "point-off-screen" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([
+      { op: "hello" },
+      { op: "swipe", fromX: 0.5, fromY: 1, toX: 0.5, toY: 0.5, durationMs: 250 },
+    ]);
+  });
+
+  it("does not start a swipe that the deadline would cut off part-way", async () => {
+    let clock = 0;
+    const { fake, send } = helpers((sent) => {
+      // Finding the screen leaves three seconds; the swipe itself takes five.
+      if (sent.op === "hello") clock += 25_000;
+      return { status: "delivered", screen: { width: 1206, height: 2622 } };
+    });
+    const deliver = createSimulatorInputDelivery(fake, { now: () => clock });
+
+    await expect(
+      deliver({
+        kind: "swipe",
+        udid,
+        budgetMs: 30_000,
+        from: { x: 603, y: 2_000 },
+        to: { x: 603, y: 500 },
+        durationMs: 5_000,
+      }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "deadline-passed" });
+    expect(send.mock.calls.map(([, sent]) => sent.op)).toEqual(["hello"]);
+  });
+
   it("presses Home and Lock as hardware buttons and every other name as a key", async () => {
     const { fake, send } = helpers(() => ({ status: "delivered" }));
     const deliver = createSimulatorInputDelivery(fake);

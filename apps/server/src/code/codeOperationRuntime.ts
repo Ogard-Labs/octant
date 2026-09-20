@@ -1935,7 +1935,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   /**
    * Journal what differs in the checkout between the capture this turn started
-   * from and the checkout as it stands (0140).
+   * from and the checkout as it stands (0141).
    *
    * The starting capture is read back from the journal rather than carried in
    * memory, so a turn recovered after a restart settles against the same point

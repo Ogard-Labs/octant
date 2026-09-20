@@ -330,6 +330,38 @@ describe("Apple runtime contracts", () => {
     expect(() => decode({ ...base, kind: "type-text", text: "   " })).toThrow();
   });
 
+  it("decodes a swipe only with both ends, a bounded duration, and an actor", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const swipe = {
+      actionId: "10000000-0000-4000-8000-000000000001",
+      correlationId: "10000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "10000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "10000000-0000-4000-8000-000000000004",
+        providerInstanceId: "10000000-0000-4000-8000-000000000007",
+        extension: { kind: "core" },
+      },
+      threadId: "10000000-0000-4000-8000-000000000008",
+      checkoutId: "10000000-0000-4000-8000-000000000009",
+      simulatorId: "10000000-0000-4000-8000-000000000010",
+      timeoutMs: 30000,
+      approval: { kind: "approved", approvalId: "10000000-0000-4000-8000-000000000011" },
+      requestedBy: { kind: "local-user", actorId: "10000000-0000-4000-8000-000000000012" },
+      kind: "swipe",
+      point: { x: 600, y: 2000 },
+      toPoint: { x: 600, y: 800 },
+      durationMs: 250,
+    };
+    expect(decode(swipe).toPoint).toEqual({ x: 600, y: 800 });
+    const { durationMs: _duration, ...untimed } = swipe;
+    expect(decode(untimed).kind).toBe("swipe");
+    const { toPoint: _end, ...oneEnded } = swipe;
+    expect(() => decode(oneEnded)).toThrow();
+    expect(() => decode({ ...swipe, durationMs: 60_000 })).toThrow();
+    expect(() => decode({ ...swipe, requestedBy: undefined })).toThrow();
+  });
+
   it("decodes replay-safe progress and bounded runtime snapshots", () => {
     const decodeProgress = contracts.decodeAppleActionProgress;
     const decodeSnapshot = contracts.decodeAppleRuntimeSnapshot;

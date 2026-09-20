@@ -40,6 +40,13 @@ export type AppleWorkbenchIntent =
       readonly target?: string;
     }
   | {
+      readonly kind: "swipe";
+      readonly simulatorId: AppleSimulatorId;
+      readonly point: { readonly x: number; readonly y: number };
+      readonly toPoint: { readonly x: number; readonly y: number };
+      readonly durationMs: number;
+    }
+  | {
       readonly kind: "type-text";
       readonly simulatorId: AppleSimulatorId;
       readonly text: string;
@@ -147,6 +154,16 @@ function LiveFrame(
                   kind: "tap",
                   simulatorId: frame.simulatorId,
                   point: intent.point,
+                });
+                return;
+              }
+              if (intent.kind === "swipe") {
+                props.onRun!({
+                  kind: "swipe",
+                  simulatorId: frame.simulatorId,
+                  point: intent.from,
+                  toPoint: intent.to,
+                  durationMs: intent.durationMs,
                 });
                 return;
               }

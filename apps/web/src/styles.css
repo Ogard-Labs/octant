@@ -7608,7 +7608,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-xs);
 }
 
-/* What changed while a turn ran (0140). A work product, so it is the one card
+/* What changed while a turn ran (0141). A work product, so it is the one card
    in a transcript whose replies are bare prose: a hairline ring on the card
    fill, no lift. Rows carry no borders; the counts are the only hue, the same
    diff ink the checkout strip uses. */

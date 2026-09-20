@@ -20,15 +20,25 @@ const destination = {
   budgetMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
 };
 
+const screenPoint = Schema.Struct({
+  x: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+  y: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+}).annotations(strict);
+
 export const SimulatorDeviceInput = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("tap"),
     ...destination,
     /** A point on a captured screen, in that capture's own pixels. */
-    point: Schema.Struct({
-      x: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
-      y: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
-    }).annotations(strict),
+    point: screenPoint,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("swipe"),
+    ...destination,
+    /** Both ends are points on a captured screen, like a tap's. */
+    from: screenPoint,
+    to: screenPoint,
+    durationMs: Schema.Int.pipe(Schema.between(50, 5_000)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("type-text"),

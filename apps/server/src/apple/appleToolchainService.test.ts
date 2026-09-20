@@ -1504,6 +1504,46 @@ describe("AppleToolchainService Simulator input", () => {
     expect(evidence.diagnostics).toHaveLength(1);
   });
 
+  it("records both ends of a swipe that did not happen, beside the reason", async () => {
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: async () =>
+        processResult("", {
+          exitCode: 1,
+          stderr: "point-off-screen: The point is outside the 1206×2622 screen.",
+        }),
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "swipe",
+        bundleIdentifier: undefined,
+        point: { x: 603, y: 2_000 },
+        toPoint: { x: 3_000, y: 500 },
+        durationMs: 250,
+        requestedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000099" },
+        approval: buildRequest().approval,
+      } as never),
+      context,
+    );
+
+    const recorded = `${JSON.stringify(evidence.diagnostics)} ${[...artifacts.values()]
+      .map((bytes) => new TextDecoder().decode(bytes))
+      .join(" ")}`;
+    expect(evidence.outcome).toBe("failed");
+    expect(recorded).toContain(
+      "swipe failed (x=603, y=2000 to x=3000, y=500): point-off-screen: The point is outside",
+    );
+  });
+
   it("says why typed text was refused by its reason code, and still keeps the words out", async () => {
     const discovery = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();

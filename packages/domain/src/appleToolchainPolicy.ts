@@ -23,7 +23,7 @@ export interface AppleExecutionScope {
   readonly approvalValid: boolean;
 }
 
-const SIMULATOR_INPUT_KINDS = new Set(["tap", "type-text", "key-press"]);
+const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
 
 export function isAppleSimulatorInputKind(
   kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
@@ -177,8 +177,14 @@ export function isToolchainAvailable(toolchain: AppleToolchainDiscovery): boolea
  * evidence still shows that an input ran; the characters do not.
  */
 export function redactedAppleInputDiagnostic(
-  request: Pick<AppleSimulatorRequest, "kind" | "text" | "key" | "target" | "point">,
+  request: Pick<AppleSimulatorRequest, "kind" | "text" | "key" | "target" | "point" | "toPoint">,
 ): { readonly severity: "note"; readonly message: string } {
+  if (request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined) {
+    return {
+      severity: "note",
+      message: `swipe completed (x=${request.point.x}, y=${request.point.y} to x=${request.toPoint.x}, y=${request.toPoint.y})`,
+    };
+  }
   if (request.kind === "type-text") {
     const length = request.text?.length ?? 0;
     return {

@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { decodeAppleSimulatorId } from "@octant/contracts/apple-toolchain";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
+import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 
 const simulatorId = decodeAppleSimulatorId("90000000-0000-4000-8000-000000000006");
 
@@ -256,45 +257,361 @@ describe("AppleSimulatorLiveFrameView", () => {
       expect(document.querySelector("img")).toBeNull();
     });
 
-    it("sends a tap as a point on the device's own screen, whatever size the canvas is shown at", () => {
-      const onInput = vi.fn();
-      render(
+    // jsdom has no PointerEvent; a MouseEvent carries the same coordinates.
+    if (typeof globalThis.PointerEvent === "undefined") {
+      (globalThis as { PointerEvent?: unknown }).PointerEvent = class extends MouseEvent {
+        readonly isPrimary: boolean;
+        constructor(type: string, init?: MouseEventInit & { readonly isPrimary?: boolean }) {
+          super(type, init);
+          this.isPrimary = init?.isPrimary ?? true;
+        }
+      };
+    }
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function liveView(props: { readonly busy?: boolean; readonly onInput: () => void }) {
+      return (
         <AppleSimulatorLiveFrameView
+          busy={props.busy === true}
           frame={frame}
           inputEnabled
           liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
-          onInput={onInput}
-        />,
+          onInput={props.onInput}
+        />
       );
+    }
+    function drawnAt402() {
       const canvas = screen.getByLabelText("iPhone 17 live screen");
       vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 20, 402, 874));
+      return screen.getByLabelText("Tap on iPhone 17 Simulator screen");
+    }
 
-      fireEvent.click(screen.getByLabelText("Tap on iPhone 17 Simulator screen"), {
-        clientX: 10 + 201,
-        clientY: 20 + 437,
-      });
+    it("sends a press and release in one place as a tap on the device's own screen", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
 
+      fireEvent.pointerDown(region, { clientX: 10 + 201, clientY: 20 + 437, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 10 + 202, clientY: 20 + 437, isPrimary: true });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
       expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 1311 } });
     });
 
-    it("ignores a click beside the streamed screen instead of sending a point that is not on it", () => {
+    it("leaves a right-click to the app instead of touching the device", () => {
       const onInput = vi.fn();
-      render(
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      // A right-click from the mouse, then a second touch point that is not primary.
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 457, button: 2, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 457, button: 2, isPrimary: true });
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 457, button: 0, isPrimary: false });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 457, button: 0, isPrimary: false });
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("sends a drag as one swipe when the finger lifts", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 800, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 300, isPrimary: true });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput.mock.calls[0]?.[0]).toMatchObject({
+        kind: "swipe",
+        from: { x: 603, y: 2340 },
+        to: { x: 603, y: 840 },
+      });
+    });
+
+    it("types what is typed on the focused screen as one text once the typing pauses", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      for (const key of ["O", "c", "t"]) fireEvent.keyDown(region, { key });
+      expect(onInput).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput).toHaveBeenCalledWith({ kind: "type-text", text: "Oct" });
+    });
+
+    it("sends the text typed so far before a key that acts on it", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "h" });
+      fireEvent.keyDown(region, { key: "i" });
+      fireEvent.keyDown(region, { key: "Enter" });
+
+      // One action at a time: the text goes first, Return waits for it.
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+      ]);
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+        { kind: "key-press", key: "return" },
+      ]);
+    });
+
+    it("sends text typed during an action once that action is over and the typing has paused", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput, busy: true }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "o" });
+      fireEvent.keyDown(region, { key: "k" });
+      // The running action finishes before the typing pause has passed.
+      rerender(liveView({ onInput, busy: false }));
+      expect(onInput).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(onInput).toHaveBeenCalledWith({ kind: "type-text", text: "ok" });
+    });
+
+    it("keeps what was typed after a pause apart from what was typed before it, even while busy", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput, busy: true }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "o" });
+      fireEvent.keyDown(region, { key: "k" });
+      // The pause passes while the running action still holds the pane.
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      fireEvent.keyDown(region, { key: "g" });
+      fireEvent.keyDown(region, { key: "o" });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(onInput).not.toHaveBeenCalled();
+
+      rerender(liveView({ onInput, busy: false }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "ok" },
+      ]);
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "ok" },
+        { kind: "type-text", text: "go" },
+      ]);
+    });
+
+    it("does not hold later input forever when an input never made the pane busy", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "Enter" });
+      fireEvent.keyDown(region, { key: "Escape" });
+      expect(onInput).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(1_100);
+      });
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "return" },
+        { kind: "key-press", key: "escape" },
+      ]);
+    });
+
+    it("never sends what was typed on one Simulator to the one the frame shows next", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const view = (name: string, id: string, busy: boolean) => (
         <AppleSimulatorLiveFrameView
-          frame={frame}
+          busy={busy}
+          frame={{ ...frame, name, simulatorId: decodeAppleSimulatorId(id) }}
           inputEnabled
           liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
           onInput={onInput}
-        />,
+        />
       );
+      const { rerender } = render(view("iPhone A", "90000000-0000-4000-8000-0000000000a1", true));
+      fireEvent.keyDown(screen.getByLabelText("Tap on iPhone A Simulator screen"), { key: "x" });
+
+      // A's shutdown finishes and the frame moves on to B while "x" is still waiting.
+      rerender(view("iPhone B", "90000000-0000-4000-8000-0000000000b2", false));
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("still sends what was typed when the same Simulator's live view reconnects meanwhile", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const view = (liveScreen: AppleSimulatorLiveScreen) => (
+        <AppleSimulatorLiveFrameView
+          busy={false}
+          frame={frame}
+          inputEnabled
+          liveScreen={liveScreen}
+          onInput={onInput}
+        />
+      );
+      const live: AppleSimulatorLiveScreen = {
+        status: "live",
+        screen: { width: 1206, height: 2622 },
+        attach: vi.fn(),
+      };
+      const { rerender } = render(view(live));
+      fireEvent.keyDown(drawnAt402(), { key: "o" });
+      fireEvent.keyDown(drawnAt402(), { key: "k" });
+
+      // The stream ends before the typing pause has passed, and comes back.
+      rerender(view({ status: "connecting" }));
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      rerender(view(live));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "ok" },
+      ]);
+    });
+
+    it("pairs a release with the finger that pressed, not with another one lifting", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 800, isPrimary: true, pointerId: 1 });
+      // A second finger comes and goes elsewhere while the first is still down.
+      fireEvent.pointerUp(region, { clientX: 60, clientY: 100, isPrimary: false, pointerId: 2 });
+      expect(onInput).not.toHaveBeenCalled();
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 300, isPrimary: true, pointerId: 1 });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput.mock.calls[0]?.[0]).toMatchObject({
+        kind: "swipe",
+        from: { x: 603, y: 2340 },
+        to: { x: 603, y: 840 },
+      });
+    });
+
+    it("sends a space typed on its own as the Space key, since blank text is not a request", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: " " });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "space" },
+      ]);
+    });
+
+    it("drops a blank it cannot type and still sends what was queued after it", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      // Option-Space gives a non-breaking space: blank, and not the Space key.
+      fireEvent.keyDown(region, { key: "\u00a0" });
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "home" },
+      ]);
+    });
+
+    it("leaves app shortcuts alone while the screen has focus", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      const handled = fireEvent.keyDown(region, { key: "k", metaKey: true });
+
+      expect(handled).toBe(true);
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("sends Home after the text typed just before it, and takes it even while an action runs", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "h" });
+      fireEvent.keyDown(region, { key: "i" });
+      // Home is clicked before the typing pause has passed.
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+      ]);
+
+      rerender(liveView({ onInput, busy: true }));
+      // Still clickable while the typing is being delivered; it waits its turn.
+      fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+      rerender(liveView({ onInput, busy: false }));
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "hi" },
+        { kind: "key-press", key: "home" },
+        { kind: "key-press", key: "lock" },
+      ]);
+    });
+
+    it("offers Home and Lock as the device's buttons, one action at a time", () => {
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+      fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "home" },
+      ]);
+      // Home's action runs and finishes; Lock follows it.
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "home" },
+        { kind: "key-press", key: "lock" },
+      ]);
+    });
+
+    it("ignores a press beside the streamed screen instead of sending a point that is not on it", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
       const canvas = screen.getByLabelText("iPhone 17 live screen");
       // The pane's height cap binds: the canvas is centred with room either side.
       vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 20, 402, 874));
+      const region = screen.getByLabelText("Tap on iPhone 17 Simulator screen");
 
-      fireEvent.click(screen.getByLabelText("Tap on iPhone 17 Simulator screen"), {
-        clientX: 40,
-        clientY: 20 + 437,
-      });
+      fireEvent.pointerDown(region, { clientX: 40, clientY: 20 + 437, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 40, clientY: 20 + 437, isPrimary: true });
 
       expect(onInput).not.toHaveBeenCalled();
     });
