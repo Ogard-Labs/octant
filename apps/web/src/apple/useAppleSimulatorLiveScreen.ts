@@ -84,36 +84,47 @@ export function useAppleSimulatorLiveScreen(options: {
     setState({ status: "connecting" });
     void (async () => {
       let failures = 0;
+      let everLive = false;
+      let stopped = "The live Simulator view stopped.";
       while (!signal.aborted) {
         const watch = await client.watchScreen(request, signal);
         if (signal.aborted) return;
-        if (watch.status === "failed") {
-          setState({ status: "unavailable", message: watch.message });
-          return;
-        }
         let painted = false;
         const startedAt = Date.now();
-        for await (const jpeg of watch.frames) {
-          if (signal.aborted) return;
-          let frame: DecodedFrame;
-          try {
-            frame = await decode(jpeg);
-          } catch {
-            continue;
-          }
-          // Decoding took time, and the pane may have moved to another thread
-          // or Simulator meanwhile. A picture of the old one must not be drawn
-          // on the new pane's canvas or set the size its taps are measured by.
-          if (signal.aborted) {
-            frame.close();
+        if (watch.status === "failed") {
+          // On the first request a refusal is the host's answer — no desktop
+          // app, not booted — and the still shows at once. After a view has
+          // been up it is more often a helper being restarted, so it counts as
+          // one attempt and the back-off below goes on.
+          if (!everLive) {
+            setState({ status: "unavailable", message: watch.message });
             return;
           }
-          latestRef.current?.frame.close();
-          latestRef.current = { key, frame };
-          if (canvasRef.current !== null) paint(canvasRef.current, frame);
-          if (!painted) {
-            painted = true;
-            setState({ status: "live", screen: watch.screen });
+          stopped = watch.message;
+        } else {
+          for await (const jpeg of watch.frames) {
+            if (signal.aborted) return;
+            let frame: DecodedFrame;
+            try {
+              frame = await decode(jpeg);
+            } catch {
+              continue;
+            }
+            // Decoding took time, and the pane may have moved to another thread
+            // or Simulator meanwhile. A picture of the old one must not be drawn
+            // on the new pane's canvas or set the size its taps are measured by.
+            if (signal.aborted) {
+              frame.close();
+              return;
+            }
+            latestRef.current?.frame.close();
+            latestRef.current = { key, frame };
+            if (canvasRef.current !== null) paint(canvasRef.current, frame);
+            if (!painted) {
+              painted = true;
+              everLive = true;
+              setState({ status: "live", screen: watch.screen });
+            }
           }
         }
         if (signal.aborted) return;
@@ -123,7 +134,7 @@ export function useAppleSimulatorLiveScreen(options: {
         if (Date.now() - startedAt >= HEALTHY_VIEW_MS) failures = 0;
         const delay = RECONNECT_DELAYS_MS[failures];
         if (delay === undefined) {
-          setState({ status: "unavailable", message: "The live Simulator view stopped." });
+          setState({ status: "unavailable", message: stopped });
           return;
         }
         failures += 1;

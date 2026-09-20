@@ -226,6 +226,50 @@ describe("the live Simulator screen", () => {
     await waitFor(() => expect(result.current.status).toBe("live"));
   });
 
+  it("keeps trying when the first request after a view ended fails, as a restarting helper makes it", async () => {
+    vi.useFakeTimers();
+    const recovered = feed();
+    async function* oneFrameThenGone() {
+      yield Uint8Array.from([1]);
+    }
+    const watchScreen = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "watching",
+        screen: { width: 1206, height: 2622 },
+        frames: oneFrameThenGone(),
+      })
+      // The helper is being restarted: the next request is refused...
+      .mockResolvedValueOnce({
+        status: "failed",
+        kind: "unavailable",
+        message: "helper-unavailable: The device helper stopped before it answered.",
+      })
+      // ...and the one after it works.
+      .mockResolvedValueOnce({
+        status: "watching",
+        screen: { width: 1206, height: 2622 },
+        frames: recovered.frames,
+      });
+    const client = clientWatching(watchScreen as AppleToolchainClient["watchScreen"]);
+    const { result } = renderHook(() =>
+      useAppleSimulatorLiveScreen({ client, request, enabled: true, decode }),
+    );
+
+    for (const delay of [1_000, 2_000]) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay + 50);
+      });
+    }
+    recovered.push(Uint8Array.from([2]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    expect(watchScreen).toHaveBeenCalledTimes(3);
+    expect(result.current.status).toBe("live");
+  });
+
   it("gives up on a view that keeps dying right after its first frame, so the still can show", async () => {
     vi.useFakeTimers();
     async function* oneFrameThenGone() {
