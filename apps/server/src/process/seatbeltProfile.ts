@@ -591,19 +591,27 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...(input.allowSimulatorControl === true
       ? [seatbeltAllowRule("file-read*", "/private/var/run/com.apple.security.cryptexd/mnt")]
       : []),
-    // A bound root this launch may not write is denied outright, not merely
-    // left ungranted. The temporary-directory grant above is a subpath rule, so
-    // a checkout that happens to live under the launch's temp — a scratch
-    // worktree under `$TMPDIR`, which is where the provider smokes put theirs —
-    // was writable through that ancestor, and a Plan turn could create a file
-    // in it. Seatbelt resolves by last matching rule, so this denial has to sit
-    // after both grants.
-    ...(writeBoundRoot
-      ? []
-      : resolvedRootForms(input.boundRoot).map((path) => seatbeltDenyRule("file-write*", path))),
     ...additionalDenyWritePaths.map((path) => seatbeltDenyRule("file-write*", path)),
     ...uniqueAbsolutePaths(additionalWriteRoots.flatMap((path) => resolvedRootForms(path))).map(
       (path) => seatbeltAllowRule("file-write*", path),
+    ),
+    // A bound root this launch may not write is denied outright, not merely
+    // left ungranted. A grant that is an ancestor of it — the temporary
+    // directory, or a provider's config directory — is a subpath rule, so a
+    // checkout beneath one was writable through it: a scratch worktree under
+    // `$TMPDIR` (where the provider smokes put theirs), or a repository under a
+    // configured `CLAUDE_CONFIG_DIR`. Seatbelt resolves by last matching rule,
+    // so the denial has to come after every write grant, the write roots
+    // included; emitted before them it was overwritten by the ancestor's allow.
+    ...(writeBoundRoot
+      ? []
+      : resolvedRootForms(input.boundRoot).map((path) => seatbeltDenyRule("file-write*", path))),
+    // A grant that is the bound root or lies beneath it was asked for by name,
+    // and stays writable: Chat binds a provider's managed home as its root and
+    // lists the same directory as a write root. Denying last would have taken
+    // that away, so these are allowed again after the denial.
+    ...writeGrantsBeneathBoundRoot(input, additionalWriteRoots, writeBoundRoot).map((path) =>
+      seatbeltAllowRule("file-write*", path),
     ),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
@@ -735,6 +743,28 @@ function prepareDarwinSeatbelt(
     executable: input.executable,
     args: input.args,
   });
+}
+
+/**
+ * The write grants that sit at or beneath a bound root this launch may not
+ * write, in every spelling the kernel might judge them by. A root is included
+ * when any of its forms is at or beneath any form of the bound root.
+ */
+function writeGrantsBeneathBoundRoot(
+  input: SeatbeltProfileInput,
+  additionalWriteRoots: ReadonlyArray<string>,
+  writeBoundRoot: boolean,
+): ReadonlyArray<string> {
+  if (writeBoundRoot) return [];
+  const boundForms = resolvedRootForms(input.boundRoot);
+  const beneath = (path: string) =>
+    boundForms.some((bound) => path === bound || path.startsWith(`${bound}${sep}`));
+  return uniqueAbsolutePaths(
+    [input.temporaryDirectory, ...additionalWriteRoots]
+      .map((root) => resolvedRootForms(root))
+      .filter((forms) => forms.some(beneath))
+      .flat(),
+  );
 }
 
 function assertAbsolute(path: string, label: string): void {
