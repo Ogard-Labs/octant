@@ -1058,6 +1058,42 @@ h6 {
   gap: 2px;
 }
 
+/* The fold is the group's own heading made pressable. The link variant
+   already has no fill and no height of its own; this only keeps the heading's
+   type and sets the label, count, and chevron at glyph spacing. */
+.activity-nav__fold {
+  /* The recipe's default size still brings a control's height and side
+     padding, which set the word 10px to the right of the group labels above
+     it. */
+  height: auto;
+  min-height: 0;
+  gap: var(--oct-space-1);
+  /* The recipe keeps a 1px transparent border for its outlined variants; the
+     margin takes that pixel back so the word starts where the labels do. */
+  margin-inline-start: -1px;
+  padding: 0;
+  font: inherit;
+}
+
+.activity-nav__fold-count {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-nav__fold > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.activity-nav__fold[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-nav__fold > svg {
+    transition: none;
+  }
+}
+
 .activity-nav__threads {
   display: grid;
   gap: 2px;

@@ -1870,6 +1870,65 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(props.onSelectThread).not.toHaveBeenCalled();
   });
 
+  it("folds threads older than a week behind Earlier, and keeps the open thread in view", async () => {
+    const user = userEvent.setup();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+    const props = sidebarProps();
+    render(
+      <ProjectSidebarSection
+        {...props}
+        activeThreadId="thread-old-open"
+        threads={[
+          codeThread,
+          { ...codeThread, threadId: "thread-old", title: "Old spike", updatedAt: monthAgo },
+          {
+            ...codeThread,
+            threadId: "thread-old-open",
+            title: "Old but open",
+            updatedAt: monthAgo,
+          },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+    const fold = screen.getByRole("button", { name: /^Earlier/ });
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(fold).toHaveTextContent("2");
+    expect(screen.getByRole("button", { name: /Planning/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Old spike/ })).not.toBeInTheDocument();
+    // The thread the workspace is showing never hides behind the fold.
+    expect(screen.getByRole("button", { name: /Old but open/ })).toBeVisible();
+
+    await user.click(fold);
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
+  });
+
+  it("never hides a search result behind the Earlier fold", async () => {
+    const user = userEvent.setup();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+    const props = sidebarProps();
+    render(
+      <ProjectSidebarSection
+        {...props}
+        searchQuery="spike"
+        threads={[
+          codeThread,
+          { ...codeThread, threadId: "thread-old", title: "Old spike", updatedAt: monthAgo },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+    // Folded, the only match sat under a heading that showed a count and no row.
+    expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Earlier/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("offers the same pin and archive row actions as Project rows", async () => {
     const user = userEvent.setup();
     const onPinThread = vi.fn();
