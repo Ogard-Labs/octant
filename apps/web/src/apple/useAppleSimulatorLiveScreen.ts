@@ -116,21 +116,34 @@ export function useAppleSimulatorLiveScreen(options: {
             stopped = "The live Simulator view showed no picture.";
             endView();
           }, FIRST_PICTURE_MS);
+          const givenUp = new Promise<undefined>((resolve) => {
+            view.signal.addEventListener("abort", () => resolve(undefined), { once: true });
+          });
           try {
             for await (const jpeg of watch.frames) {
-              if (signal.aborted) return;
-              let frame: DecodedFrame;
+              if (view.signal.aborted) break;
+              // Decoding takes time and need not finish. The view may be given
+              // up meanwhile — the pane moved to another thread or Simulator, or
+              // no first picture came in time — and a picture of it must not be
+              // drawn on the new pane's canvas, set the size its taps are
+              // measured by, or mark an abandoned view live.
+              const decoding = decode(jpeg);
+              let frame: DecodedFrame | undefined;
               try {
-                frame = await decode(jpeg);
+                frame = await Promise.race([decoding, givenUp]);
               } catch {
                 continue;
               }
-              // Decoding took time, and the pane may have moved to another thread
-              // or Simulator meanwhile. A picture of the old one must not be drawn
-              // on the new pane's canvas or set the size its taps are measured by.
-              if (signal.aborted) {
+              if (frame === undefined) {
+                void decoding.then(
+                  (tooLate) => tooLate.close(),
+                  () => undefined,
+                );
+                break;
+              }
+              if (view.signal.aborted) {
                 frame.close();
-                return;
+                break;
               }
               latestRef.current?.frame.close();
               latestRef.current = { key, frame };
