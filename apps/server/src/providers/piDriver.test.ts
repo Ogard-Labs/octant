@@ -214,6 +214,8 @@ describe("Pi provider driver", () => {
       mode: "chat",
       onProcessStarted: expect.any(Function),
     });
+    // Discovery runs for no thread, so it is not told which provider's credential to hold.
+    expect(starts[0]?.modelProvider).toBeUndefined();
     expect(registry.observedState(instanceId)).toEqual(result);
     expect(active()).toBe(0);
     expect(released()).toBe(1);
@@ -317,6 +319,7 @@ describe("Pi provider driver", () => {
       root,
       sessionId,
       executionPolicy: "approval-gated",
+      modelProvider: "anthropic",
     });
 
     const collected = terminal(Stream.unwrapScoped(connection.subscribe));

@@ -16,10 +16,12 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   makePiConfinementLive,
+  makePiProcessLive,
   piArguments,
   piExtensionSource,
   piProcessEnvironment,
   sanitizePiEnvironment,
+  type PiConfinementPort,
 } from "./piProcess";
 import { seatbeltAllowRule, seatbeltDenyRule } from "../process/seatbeltProfile";
 
@@ -71,6 +73,118 @@ describe("Pi process boundary", () => {
     );
   });
 
+  it("gives a Pi process only the credentials its model provider reads", () => {
+    const host = {
+      PATH: "/usr/bin",
+      LC_ALL: "en_US.UTF-8",
+      ANTHROPIC_API_KEY: "anthropic-key",
+      ANTHROPIC_OAUTH_TOKEN: "anthropic-token",
+      OPENAI_API_KEY: "openai-key",
+      OPENAI_BASE_URL: "https://openai.example",
+      AZURE_OPENAI_API_KEY: "azure-key",
+      AZURE_OPENAI_BASE_URL: "https://azure.example",
+      AZURE_OPENAI_RESOURCE_NAME: "azure-resource",
+      GEMINI_API_KEY: "gemini-key",
+      OPENROUTER_API_KEY: "openrouter-key",
+      XAI_API_KEY: "xai-key",
+    };
+    const credentialsFor = (provider: string) =>
+      Object.keys(sanitizePiEnvironment(host, "/managed", "enabled", provider))
+        .filter((name) => /(_API_KEY|_TOKEN|_BASE_URL|_RESOURCE_NAME)$/.test(name))
+        .sort();
+
+    expect(credentialsFor("anthropic")).toEqual(["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]);
+    expect(credentialsFor("openai")).toEqual(["OPENAI_API_KEY", "OPENAI_BASE_URL"]);
+    expect(credentialsFor("azure-openai-responses")).toEqual([
+      "AZURE_OPENAI_API_KEY",
+      "AZURE_OPENAI_BASE_URL",
+      "AZURE_OPENAI_RESOURCE_NAME",
+    ]);
+    expect(credentialsFor("openrouter")).toEqual(["OPENROUTER_API_KEY"]);
+    expect(sanitizePiEnvironment(host, "/managed", "enabled", "xai")).toMatchObject({
+      PATH: "/usr/bin",
+      LC_ALL: "en_US.UTF-8",
+      HOME: "/managed",
+      PI_CODING_AGENT_DIR: "/managed",
+      XAI_API_KEY: "xai-key",
+    });
+  });
+
+  it("gives a discovery run, or a provider with no host variable, no provider credential", () => {
+    const host = {
+      PATH: "/usr/bin",
+      ANTHROPIC_API_KEY: "anthropic-key",
+      OPENAI_API_KEY: "openai-key",
+      XAI_API_KEY: "xai-key",
+    };
+    const held = (environment: NodeJS.ProcessEnv) =>
+      Object.keys(environment).filter((name) => name.endsWith("_API_KEY"));
+
+    expect(held(sanitizePiEnvironment(host, "/managed"))).toEqual([]);
+    // Pi keeps an OAuth login in auth.json, so its provider has nothing to read here.
+    expect(held(sanitizePiEnvironment(host, "/managed", "enabled", "openai-codex"))).toEqual([]);
+    // The name is a model ID prefix, never a key into the table's own prototype.
+    expect(held(sanitizePiEnvironment(host, "/managed", "enabled", "constructor"))).toEqual([]);
+    expect(sanitizePiEnvironment(host, "/managed").PATH).toBe("/usr/bin");
+  });
+
+  it("starts Pi holding only the credentials of the model provider it was asked to run", async () => {
+    const f = fixture();
+    const binary = join(f.base, "fake-pi");
+    writeFileSync(
+      binary,
+      '#!/bin/sh\n[ "$1" = "--version" ] && echo 0.85.1 && exit 0\nexec cat\n',
+      {
+        mode: 0o700,
+      },
+    );
+    const prepared: NodeJS.ProcessEnv[] = [];
+    const confinement: PiConfinementPort = {
+      prepare: (input) =>
+        Effect.sync(() => {
+          prepared.push(input.environment);
+          return {
+            command: input.binaryPath,
+            args: [],
+            cwd: f.root,
+            environment: input.environment,
+          };
+        }),
+    };
+    const port = makePiProcessLive({
+      confinement,
+      inheritedEnvironment: {
+        PATH: "/usr/bin:/bin",
+        ANTHROPIC_API_KEY: "anthropic-key",
+        OPENAI_API_KEY: "openai-key",
+        XAI_API_KEY: "xai-key",
+      },
+    });
+    const start = (modelProvider?: string) =>
+      Effect.runPromise(
+        Effect.scoped(
+          port.start({
+            binaryPath: binary,
+            root: f.root,
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: "session-1",
+            mode: "code",
+            executionPolicy: "approval-gated",
+            ...(modelProvider === undefined ? {} : { modelProvider }),
+          }),
+        ),
+      );
+
+    await start("anthropic");
+    await start();
+
+    expect(prepared[0]?.ANTHROPIC_API_KEY).toBe("anthropic-key");
+    expect(prepared[0]?.OPENAI_API_KEY).toBeUndefined();
+    expect(prepared[0]?.XAI_API_KEY).toBeUndefined();
+    expect(Object.keys(prepared[1] ?? {}).filter((name) => name.endsWith("_API_KEY"))).toEqual([]);
+  });
+
   it("registers only the supplied app-managed tools in the explicit extension", () => {
     const tool: ProviderToolDefinition = {
       name: "octant_browser",
@@ -118,6 +232,8 @@ describe("Pi process boundary", () => {
             NODE_OPTIONS: "--inspect",
           },
           f.home,
+          "enabled",
+          "anthropic",
         ),
       }),
     );
@@ -132,7 +248,7 @@ describe("Pi process boundary", () => {
     expect(launch.args).toContain("--session-id");
     expect(launch.args).toContain("session-1");
     expect(launch.environment.ANTHROPIC_API_KEY).toBe("provider-owned");
-    expect(launch.environment.AIROUTER_API_KEY).toBe("airouter-owned");
+    expect(launch.environment.AIROUTER_API_KEY).toBeUndefined();
     expect(launch.environment.NODE_OPTIONS).toBeUndefined();
     expect(launch.environment.PI_TELEMETRY).toBe("0");
     expect(launch.environment.PI_SKIP_VERSION_CHECK).toBe("1");

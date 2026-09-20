@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import {
+  confinedExecutableExecPaths,
   SeatbeltConfinementError,
   type ConfinedProcessLaunch,
   type SeatbeltConfinementPrepareInput,
@@ -242,7 +243,16 @@ export function buildLinuxConfinementLaunch(
     for (const path of hostExecutableSearchPaths) {
       if (existsSync(path)) addMount("tmpfs", "", path);
     }
-    tryBindReadOnly(input.executable);
+    // A `#!` script starts through its interpreter, which the mask above hides
+    // along with everything else in these directories: without it the launch
+    // never reaches its first line. The Seatbelt builder lists the same
+    // programs for the same reason.
+    for (const path of confinedExecutableExecPaths(
+      input.executable,
+      input.interpreterSearchPath ?? process.env.PATH,
+    )) {
+      tryBindReadOnly(path);
+    }
   }
 
   const writeTargets = [

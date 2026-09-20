@@ -72,6 +72,8 @@ export interface PiProcessPort {
     readonly sessionId: string;
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
+    /** The Pi provider the thread's model runs on; only its credentials reach the process. */
+    readonly modelProvider?: string;
     readonly onProcessStarted?: ProviderProcessStartedListener;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
@@ -114,22 +116,30 @@ const SAFE_ENVIRONMENT = new Set([
   "TZ",
   "USER",
 ]);
-const PROVIDER_CREDENTIALS = new Set([
-  "AIROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_OAUTH_TOKEN",
-  "AZURE_OPENAI_API_KEY",
-  "AZURE_OPENAI_BASE_URL",
-  "AZURE_OPENAI_RESOURCE_NAME",
-  "DEEPSEEK_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "GROQ_API_KEY",
-  "MISTRAL_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENAI_BASE_URL",
-  "OPENROUTER_API_KEY",
-  "XAI_API_KEY",
+// Keyed by the Pi provider id, the part of a model ID before the "/". A Pi
+// process reads a provider's key from the variables Pi names for that provider,
+// so a thread is handed those and no other provider's: with every key passed, a
+// model-generated command in an Anthropic thread could read `OPENAI_API_KEY`. A
+// provider missing here (an OAuth login kept in `auth.json`, for one) gets no
+// host variable and authenticates from its linked `auth.json`. That includes a
+// custom `models.json` provider whose `apiKey` is `$SOME_VARIABLE`: Pi 0.85.1
+// leaves such a provider's models out of the list when the variable is unset,
+// so it needs a literal `apiKey` or a `/login` to be selectable. A Map, because
+// the key is text from a model ID and must never resolve on the prototype.
+const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ["airouter", ["AIROUTER_API_KEY"]],
+  ["anthropic", ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]],
+  [
+    "azure-openai-responses",
+    ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"],
+  ],
+  ["deepseek", ["DEEPSEEK_API_KEY"]],
+  ["google", ["GEMINI_API_KEY", "GOOGLE_API_KEY"]],
+  ["groq", ["GROQ_API_KEY"]],
+  ["mistral", ["MISTRAL_API_KEY"]],
+  ["openai", ["OPENAI_API_KEY", "OPENAI_BASE_URL"]],
+  ["openrouter", ["OPENROUTER_API_KEY"]],
+  ["xai", ["XAI_API_KEY"]],
 ]);
 const APPROVAL_BRIDGE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -233,16 +243,22 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
+// `modelProvider` is the Pi provider a thread runs its model on. A discovery
+// run has no thread, so it names none and holds no provider credential.
 export function sanitizePiEnvironment(
   host: NodeJS.ProcessEnv,
   piHome: string,
   approvals: "enabled" | "disabled" = "enabled",
+  modelProvider?: string,
 ): NodeJS.ProcessEnv {
+  const credentials = new Set(
+    modelProvider === undefined ? [] : (PROVIDER_CREDENTIALS.get(modelProvider) ?? []),
+  );
   return Object.fromEntries([
     ...Object.entries(host).filter(
       ([key, value]) =>
         value !== undefined &&
-        (SAFE_ENVIRONMENT.has(key) || PROVIDER_CREDENTIALS.has(key) || key.startsWith("LC_")),
+        (SAFE_ENVIRONMENT.has(key) || credentials.has(key) || key.startsWith("LC_")),
     ),
     ["HOME", piHome],
     ["PI_CODING_AGENT_DIR", piHome],
@@ -263,8 +279,9 @@ export function piProcessEnvironment(
   host: NodeJS.ProcessEnv,
   piHome: string,
   approvals: "enabled" | "disabled" = "enabled",
+  modelProvider?: string,
 ): NodeJS.ProcessEnv {
-  const sanitized = sanitizePiEnvironment(host, piHome, approvals);
+  const sanitized = sanitizePiEnvironment(host, piHome, approvals, modelProvider);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   const searched = [binaryDirectory, ...approvedHomeBinDirs(host.HOME), ...path];
@@ -660,6 +677,7 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             inherited,
             input.piHome,
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
+            input.modelProvider,
           );
           const launch = yield* confinement.prepare({ ...input, environment: baseEnvironment });
           const version = yield* Effect.tryPromise({
