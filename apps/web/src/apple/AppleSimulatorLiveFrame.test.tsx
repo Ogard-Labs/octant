@@ -335,6 +335,24 @@ describe("AppleSimulatorLiveFrameView", () => {
       ]);
     });
 
+    it("sends text typed during an action once that action is over and the typing has paused", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput, busy: true }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "o" });
+      fireEvent.keyDown(region, { key: "k" });
+      // The running action finishes before the typing pause has passed.
+      rerender(liveView({ onInput, busy: false }));
+      expect(onInput).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(onInput).toHaveBeenCalledWith({ kind: "type-text", text: "ok" });
+    });
+
     it("does not hold later input forever when an input never made the pane busy", () => {
       vi.useFakeTimers();
       const onInput = vi.fn();

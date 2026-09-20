@@ -210,7 +210,9 @@ function StreamedScreen(props: {
     if (typing) {
       typingRef.current = setTimeout(() => {
         typingRef.current = undefined;
-        sendNext();
+        // Through the ref: the action that was running when the key was typed
+        // may be over by now, and this closure still believes it is busy.
+        sendNextRef.current();
       }, TYPING_PAUSE_MS);
       return;
     }
