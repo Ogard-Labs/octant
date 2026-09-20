@@ -238,7 +238,12 @@ between rows. A person's message is a right-aligned bubble (`turn-user`,
 `bubble`: control fill, hairline, 16px radius, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
-transcript size with 1.5 leading; markdown headings inside it are labels
+transcript size with 1.5 leading, with no card of its own: only the work a turn
+produced is boxed. The one exception is a workspace with no reading surface
+under it (the application ground behind everything, or a translucent
+workspace), where a reply carries a reading card. Running text keeps a 72ch
+measure; tables and code blocks run the column's width, ending on the same edge
+as the composer; markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
