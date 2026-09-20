@@ -106,8 +106,12 @@ native receipts; desktop admin routes are loopback-only.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is still confined to the
   bound folder for user work; merge authority is never granted.
-- Provider execution and app-managed filesystem and shell tools cross an
-  Octant-owned sandbox boundary; path checks alone are insufficient.
+- App-managed filesystem and shell tools cross an Octant-owned sandbox
+  boundary; path checks alone are insufficient. Most provider runtimes cross it
+  too, but the Codex and Claude runtimes run their own shell under their own
+  sandbox — neither process is one Octant can bind to a single thread's folder
+  and posture. Octant's approvals still gate what those threads ask for, and
+  every app-managed tool they reach stays confined.
 - Extensions stay quarantined until explicitly reviewed and trusted.
   Installation never implies trust, activation, enablement, or authority.
 - Browser automation uses per-thread incognito contexts with an origin
