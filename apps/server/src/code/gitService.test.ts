@@ -259,6 +259,42 @@ describe("GitService", () => {
     );
   });
 
+  it("compares an earlier capture with the checkout as it stands, and keeps no anchor for it", async () => {
+    const observation = readyObservation();
+    const mutation = mutationPort();
+    const changes = [{ path: "src/app.ts", insertions: 4, deletions: 1, binary: false }];
+    const readTreeChanges = vi.fn(async () => ({ status: "ready" as const, changes }));
+    const service = new GitService(
+      { observe: vi.fn(async () => observation), readTreeChanges },
+      mutation,
+    );
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo", from: "f".repeat(40) };
+
+    await expect(service.changesSince(base)).resolves.toEqual({ status: "ready", changes });
+    // The present is captured like any checkpoint, then compared tree to tree.
+    expect(readTreeChanges).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", from: "f".repeat(40), to: "d".repeat(40) },
+      undefined,
+    );
+    // Nobody will restore to this capture, so it must not pin a tree for the
+    // life of the checkout the way a turn's checkpoint does.
+    expect(mutation.releaseCheckpoint).toHaveBeenCalledWith(
+      {
+        checkoutRoot: "/repo",
+        checkoutId: "checkout-1",
+        anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
+      },
+      undefined,
+    );
+
+    // A checkout that cannot be captured has no change list, never an empty one.
+    mutation.snapshotWorkingTree.mockResolvedValueOnce({ status: "failed" } as never);
+    await expect(service.changesSince(base)).resolves.toEqual({ status: "unavailable" });
+    await expect(
+      new GitService({ observe: vi.fn(async () => observation) }, mutation).changesSince(base),
+    ).resolves.toEqual({ status: "unavailable" });
+  });
+
   it("hands back the undo point when a restore fails part-way, but not when it is refused", async () => {
     const observation = readyObservation();
     const undo = { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) };
