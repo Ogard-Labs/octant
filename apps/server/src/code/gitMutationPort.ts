@@ -890,6 +890,7 @@ export class GitMutationPort {
           executionPolicy === "plan"
             ? planGitMutationConfinement(this.#confinement.confinement)
             : this.#confinement.confinement,
+        platform: this.#confinement.platform,
         gitExecutable: this.#confinement.gitExecutable,
         checkoutRoot,
         args,

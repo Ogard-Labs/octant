@@ -230,7 +230,10 @@ export class GitHistoryPort {
     const metadata = await gitHistoryMetadata(root);
     if (metadata === undefined) return { ok: false, text: "" };
     const binaryDirectory = dirname(this.#sandbox.gitExecutable);
-    const extraRules = [...gitShimExtraRules(), ...gitLinkedWorktreeMetadataRules(root)];
+    const extraRules = [
+      ...gitShimExtraRules(this.#sandbox.platform),
+      ...gitLinkedWorktreeMetadataRules(root),
+    ];
     const launch = this.#sandbox.confinement.prepare({
       executable: this.#sandbox.gitExecutable,
       args: ["-C", root, "-c", "core.quotePath=false", ...args],
