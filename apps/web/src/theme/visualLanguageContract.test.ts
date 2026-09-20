@@ -487,6 +487,25 @@ describe("the public-block visual language", () => {
     expect(hint).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
   });
 
+  it("gives every single-line Settings control one height", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // The recipe's default is 28px. The older field rows set 32px while the
+    // newer sections took the recipe's height, so the same select was 32px on
+    // one page and 28px on the next, and steppers stood 32px beside both.
+    const heights = [...settings.matchAll(/--oct-settings-control-height:\s*([^;]+);/g)].map(
+      (match) => match[1],
+    );
+    expect(heights.length).toBeGreaterThan(0);
+    expect(new Set(heights)).toEqual(new Set(["28px"]));
+    expect(settings).toMatch(
+      /\.octant-number-stepper__input \{[^}]*height: calc\(var\(--oct-settings-control-height, 28px\) - 2px\);/,
+    );
+    expect(runtime).toMatch(
+      /\.settings-view__text-input\[type="color"\] \{[^}]*height: var\(--oct-settings-control-height, 28px\);/,
+    );
+  });
+
   it("keeps Usage on the open grammar instead of stat cards", () => {
     const usage = readFileSync(join(webRoot, "styles/usage.css"), "utf8");
     const dashboard = readFileSync(join(webRoot, "usage/UsageDashboard.tsx"), "utf8");

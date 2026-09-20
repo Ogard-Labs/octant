@@ -2270,7 +2270,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .settings-view__text-input[type="color"] {
   min-width: 46px;
   width: 46px;
-  height: 32px;
+  height: var(--oct-settings-control-height, 28px);
   padding: 2px;
 }
 
@@ -7785,7 +7785,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 
 .model-picker__search {
   width: 100%;
-  height: var(--oct-settings-control-height, 32px);
+  height: var(--oct-settings-control-height, 28px);
   margin-bottom: var(--oct-space-2);
 }
 
