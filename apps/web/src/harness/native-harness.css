@@ -61,7 +61,7 @@
   margin-bottom: 0.75rem;
   padding: 0.75rem;
   border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-  border-radius: 0.75rem;
+  border-radius: var(--oct-radius-md);
   background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
 }
 
