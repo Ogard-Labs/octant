@@ -8906,8 +8906,13 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.code-board .board-card-facts .fact__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Waiting remains a server-derived status, but the board no longer turns
