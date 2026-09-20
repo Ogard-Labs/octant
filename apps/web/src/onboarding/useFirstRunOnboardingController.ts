@@ -25,6 +25,14 @@ export interface UseFirstRunOnboardingControllerOptions {
 }
 
 export interface FirstRunOnboardingController {
+  /**
+   * First run is still unanswered in this session, whether or not another
+   * surface is covering it. The surface mounts on this rather than on
+   * `visible`: mounting on `visible` discarded the draft each time Project
+   * create or Settings covered it, so creating the first Project from the
+   * readiness step came back to step one instead of the step it left.
+   */
+  readonly pending: boolean;
   readonly visible: boolean;
   readonly submitting: FirstRunOnboardingOutcome | undefined;
   /** Honest reason the host cannot record an answer, when there is one. */
@@ -104,10 +112,12 @@ export function useFirstRunOnboardingController(
     setDeferred(true);
   }, []);
 
+  // Without authoritative settings the store's answer is unknown, so the
+  // surface stays hidden rather than flashing over it.
+  const pending = shellStatus !== "loading" && onboarding === "pending" && !deferred;
   return {
-    // Without authoritative settings the store's answer is unknown, so the
-    // surface stays hidden rather than flashing over it.
-    visible: shellStatus !== "loading" && onboarding === "pending" && !deferred && !concealed,
+    pending,
+    visible: pending && !concealed,
     submitting,
     blockedMessage: BLOCKED_COPY[shellStatus],
     complete,

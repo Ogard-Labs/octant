@@ -142,9 +142,12 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
         />
       )}
       {/* First run renders nothing once it has been answered, but a mounted
-          lazy element still fetches its chunk. Asking about visibility here
-          keeps the whole wizard out of every launch after the first. */}
-      {props.firstRun.controller.visible ? (
+          lazy element still fetches its chunk. Asking whether it is still
+          pending keeps the whole wizard out of every launch after the first.
+          It is not asked about visibility: the wizard hides itself while
+          Project create or Settings covers it, and has to stay mounted through
+          that to come back on the step it was left on. */}
+      {props.firstRun.controller.pending ? (
         <Suspense fallback={null}>
           <FirstRunOnboarding {...props.firstRun} />
         </Suspense>
