@@ -658,6 +658,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               groups={activity.groups}
               lineageThreads={everyListedThread ?? []}
               onSelectThread={props.onSelectThread!}
+              searching={searching}
             />
           </SidebarRowPropertiesContext.Provider>
         ) : (
@@ -1121,6 +1122,8 @@ function ActivityThreadList(props: {
   readonly emptyLabel?: string;
   readonly groups: ReturnType<typeof buildSidebarActivityView>["groups"];
   readonly onSelectThread: (threadId: string) => void;
+  /** A search is narrowing the feed, so every row left is a result. */
+  readonly searching?: boolean;
 }) {
   // Every other group is bounded by its day. "Earlier" is everything older than
   // a week, so it is the one group that only grows, and left open it pushed the
@@ -1128,6 +1131,10 @@ function ActivityThreadList(props: {
   // lately. It starts folded; the thread the workspace is showing stays visible
   // while it is, as it does in a folded Project list.
   const [earlierOpen, setEarlierOpen] = useState(false);
+  // A fold must never hide a search result. Folded, a query that matched only
+  // an older thread left an "Earlier" heading with a count and nothing under
+  // it: neither the match nor the line that says nothing matched.
+  const earlierShown = earlierOpen || props.searching === true;
   const earlierThreadsId = useId();
   if (props.groups.length === 0) {
     return props.emptyLabel === undefined ? (
@@ -1143,7 +1150,7 @@ function ActivityThreadList(props: {
       {props.groups.map((group) => {
         const folds = group.id === EARLIER_ACTIVITY_GROUP_ID;
         const threads =
-          !folds || earlierOpen
+          !folds || earlierShown
             ? group.threads
             : group.threads.filter((thread) => thread.navigationId === props.activeThreadId);
         return (
@@ -1152,7 +1159,7 @@ function ActivityThreadList(props: {
               <h2 className="sidebar-section">
                 <OctantButton
                   aria-controls={earlierThreadsId}
-                  aria-expanded={earlierOpen}
+                  aria-expanded={earlierShown}
                   className="activity-nav__fold"
                   onClick={() => setEarlierOpen((open) => !open)}
                   type="button"

@@ -1905,6 +1905,30 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
   });
 
+  it("never hides a search result behind the Earlier fold", async () => {
+    const user = userEvent.setup();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+    const props = sidebarProps();
+    render(
+      <ProjectSidebarSection
+        {...props}
+        searchQuery="spike"
+        threads={[
+          codeThread,
+          { ...codeThread, threadId: "thread-old", title: "Old spike", updatedAt: monthAgo },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+    // Folded, the only match sat under a heading that showed a count and no row.
+    expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Earlier/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("offers the same pin and archive row actions as Project rows", async () => {
     const user = userEvent.setup();
     const onPinThread = vi.fn();
