@@ -18,6 +18,16 @@
  * local, so 0122's probe exception for readiness checks that must reach a
  * control plane does not apply here.
  *
+ * The environment is reduced here, not by each family. A family builds the one
+ * it always built, and this module keeps only a fixed set of inherited names
+ * (PATH, locale, user identity, terminal hints), what the family computed from
+ * the scratch directory, and the static guards the family names. Provider
+ * credentials, cloud keys and a family's config-home variables — `CODEX_HOME`,
+ * `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR` — are dropped, so a program that
+ * consults one falls back to `HOME`, which is the scratch. Six families each
+ * building their own allowlist is how one of them, and discovery, ended up
+ * handing a replaced executable a real config home and a token.
+ *
  * Process execution and fork stay allowed, which a turn in Chat or Plan denies.
  * A provider's configured path is routinely a launcher rather than the program:
  * `@openai/codex`'s npm entry point is a Node script that spawns the platform
@@ -64,10 +74,19 @@ export interface PrepareConfinedVersionProbeInput {
   /** Defaults to `--version`. */
   readonly args?: ReadonlyArray<string>;
   /**
-   * Built from the scratch directory, so a family's managed-home variables name
-   * the one path this launch may write instead of the user's real home.
+   * What the family would launch with. Built from the scratch directory, so a
+   * family's managed-home variables name the one path this launch may write
+   * instead of the user's real home. It is reduced before use; see the module
+   * comment.
    */
   readonly environment: (scratchDirectory: string) => NodeJS.ProcessEnv;
+  /**
+   * Static variables the family sets for every launch, such as a telemetry or
+   * update-check switch. Kept verbatim when `environment` returns the same
+   * value; never host-derived, which is why they pass where a host variable
+   * of the same name would not.
+   */
+  readonly guards?: Readonly<Record<string, string>>;
   readonly confinement?: SeatbeltConfinementPort;
   readonly temporaryRoot?: string;
   readonly homeDirectory?: string;
@@ -99,7 +118,11 @@ export function prepareConfinedVersionProbe(
   };
 
   try {
-    const environment = input.environment(scratchDirectory);
+    const environment = versionReadEnvironment(
+      input.environment(scratchDirectory),
+      scratchDirectory,
+      input.guards ?? {},
+    );
     const confinement = input.confinement ?? makeSeatbeltConfinementLive();
     const readRoots = versionProbeReadRoots(
       input.binaryPath,
@@ -131,11 +154,7 @@ export function prepareConfinedVersionProbe(
         command: launch.command,
         args: launch.args,
         workingDirectory: scratchDirectory,
-        environment: {
-          ...environment,
-          HOME: scratchDirectory,
-          TMPDIR: scratchDirectory,
-        },
+        environment,
         release,
       },
     };
@@ -153,6 +172,43 @@ export function prepareConfinedVersionProbe(
           : `${name} version probe confinement could not be prepared.`,
     };
   }
+}
+
+/** Inherited names a version read may see. Everything else is dropped. */
+const INHERITED_NAMES = new Set([
+  "PATH",
+  "LANG",
+  "LANGUAGE",
+  "LOGNAME",
+  "USER",
+  "SHELL",
+  "TERM",
+  "COLORTERM",
+  "NO_COLOR",
+  "TZ",
+]);
+
+function versionReadEnvironment(
+  environment: NodeJS.ProcessEnv,
+  scratchDirectory: string,
+  guards: Readonly<Record<string, string>>,
+): NodeJS.ProcessEnv {
+  const kept: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(environment)) {
+    if (value === undefined) continue;
+    if (
+      INHERITED_NAMES.has(name) ||
+      name.startsWith("LC_") ||
+      // A value under the scratch names the one path this launch may write; a
+      // host cannot have known it, because the directory did not exist yet.
+      value === scratchDirectory ||
+      value.startsWith(withTrailingSeparator(scratchDirectory)) ||
+      guards[name] === value
+    ) {
+      kept[name] = value;
+    }
+  }
+  return { ...kept, HOME: scratchDirectory, TMPDIR: scratchDirectory };
 }
 
 /**
@@ -189,7 +245,18 @@ function versionProbeReadRoots(
     dirname(binaryPath),
     ...(packageRoot === undefined ? [] : [packageRoot]),
   ];
-  return [scratchDirectory, ...new Set(candidates.filter((path) => isOwnInstallPath(path, home)))];
+  // Judged in both forms. The builder canonicalises every root it is given, so
+  // a lexical directory that is a link into the home — `/tmp/link/tool` with
+  // `link` pointing at `$HOME` — passes a check on its own spelling and then
+  // opens the whole home once resolved.
+  return [
+    scratchDirectory,
+    ...new Set(
+      candidates.filter((path) =>
+        [path, safeRealpath(path)].every((form) => isOwnInstallPath(form, home)),
+      ),
+    ),
+  ];
 }
 
 /**

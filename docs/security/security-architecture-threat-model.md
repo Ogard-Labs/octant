@@ -334,7 +334,10 @@ window, or approves an action class the host policy reserves for the local user.
   `apps/server/src/providers/discoveryService.ts`. The read binds no project root and no managed
   home; one throwaway scratch directory is its working directory, `HOME`, `TMPDIR` and only
   writable path; egress is `none`; reads open the program's own install tree and nothing else
-  beneath the user's home. A host that cannot confine refuses the read rather than running it.
+  beneath the user's home. Its environment is reduced to a fixed set of inherited names plus what
+  the family computed from the scratch, so provider credentials, cloud keys and config-home
+  variables never reach a replaced executable. A host that cannot confine refuses the read rather
+  than running it.
   Process exec and fork stay allowed, a scoped exception to 0122 that 0141 states, because a
   configured path is routinely a launcher that starts the program that answers; a child inherits
   the same profile. The remaining gap is `scanDescriptor`'s optional `authProbeArgs`, which reads

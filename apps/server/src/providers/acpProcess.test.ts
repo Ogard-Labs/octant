@@ -257,6 +257,47 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     });
   }, 15_000);
 
+  it.skipIf(profile.process.npmPackageName !== undefined)(
+    "reads the version from stdout when the program warns on stderr before answering",
+    async () => {
+      // Given a throwaway home the program may explain what it could not set up.
+      // Folded into one buffer, that line made a working install unrecognised.
+      const root = mkdtempSync(join(tmpdir(), "octant-acp-noisy-"));
+      directories.push(root);
+      const binaryPath = join(root, "agent-noisy");
+      const [ready] = versionOutputs[profile.kind];
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\nprintf '%s\\n' 'warning: no home directory' >&2\nsleep 0.1\nprintf '%s\\n' '${ready}'\n`,
+      );
+      chmodSync(binaryPath, 0o755);
+
+      await expect(Effect.runPromise(probeAcp(profile, binaryPath))).resolves.toEqual({
+        binaryPath,
+        version: readyVersions[profile.kind],
+      });
+    },
+    15_000,
+  );
+
+  it.skipIf(profile.process.npmPackageName !== undefined)(
+    "falls back to stderr when the program prints its version there instead",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-acp-stderr-"));
+      directories.push(root);
+      const binaryPath = join(root, "agent-stderr");
+      const [ready] = versionOutputs[profile.kind];
+      writeFileSync(binaryPath, `#!/bin/sh\nprintf '%s\\n' '${ready}' >&2\n`);
+      chmodSync(binaryPath, 0o755);
+
+      await expect(Effect.runPromise(probeAcp(profile, binaryPath))).resolves.toEqual({
+        binaryPath,
+        version: readyVersions[profile.kind],
+      });
+    },
+    15_000,
+  );
+
   it("spawns the agent through confinement with a sanitized environment and negotiates ACP", async () => {
     const target = fixture(profile);
     const prepare = vi.fn(passthroughConfinement.prepare);

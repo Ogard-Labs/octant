@@ -29,9 +29,17 @@ given that fits it.
   confine refuses the read as `incompatible`; nothing runs unconfined.
 - A version read binds no project root and gets no managed home. One throwaway
   scratch directory is its working directory, its `HOME`, its `TMPDIR`, and the
-  only path it may write, and it is removed when the read ends. A family's
-  managed-home variables are resolved from that directory rather than from the
-  user's home.
+  only path it may write, and it is removed when the read ends.
+- Its environment is reduced in the helper, not by each family. A family builds
+  the one it always built; the read keeps only a fixed set of inherited names
+  (`PATH`, locale, user identity, terminal hints), what the family computed from
+  the scratch directory, and the static guards the family names. Provider
+  credentials, cloud keys, and a family's config-home variables
+  (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, `XDG_*_HOME`) are
+  dropped, so a program that consults one falls back to `HOME`. A config-home
+  variable left pointing at real provider state is not only a leak: the read
+  cannot open it, and OpenCode failed its version read that way with
+  `XDG_DATA_HOME` set, which reports the provider unavailable.
 - Egress is `none`. 0122's `provider-endpoints-only` exists for a readiness
   check that must reach a provider's control plane to list models; a version
   string is local, so a version read is not covered by that exception and does
@@ -41,7 +49,10 @@ given that fits it.
   configured launcher's directory, and the npm package the program resolves out
   of when it has one. A computed root that is the user's home or an ancestor of
   it is dropped rather than granted, because the builder re-allows launch roots
-  after its own denials and such a root would hand the home back.
+  after its own denials and such a root would hand the home back. Each root is
+  judged in both its lexical and its resolved spelling, since the builder
+  canonicalises every root: a launcher directory that is a link to the home
+  would otherwise pass on its own spelling and open the home once resolved.
 - Process execution and fork stay allowed, which a Chat or Plan turn denies.
   This is a scoped exception to one sentence of 0122, that a probe launches
   with no process exec or fork; every other rule of 0122 stands. A provider's
@@ -73,9 +84,11 @@ given that fits it.
   state there answers out of a fresh one. Measured across the nine provider
   CLIs installed on the maintainer's host, every version read still succeeds
   and a full discovery scan reports the same versions in the same time.
-- Version output is read from stdout where a family had folded stderr into it,
-  because a program given a throwaway home may explain what it could not set up
-  there while still answering correctly.
+- Version output is read from stdout. Codex, OpenCode and ACP had folded stderr
+  into the same buffer, and a program given a throwaway home may explain what it
+  could not set up there before it answers. OpenCode and ACP read stderr only
+  when stdout carries no version, so a program that prints it there keeps
+  working.
 
 ## Related
 

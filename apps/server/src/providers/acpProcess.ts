@@ -728,6 +728,7 @@ export function probeAcpBinary(
         sanitizeAcpEnvironment(profile, options.inheritedEnvironment ?? process.env, {
           managedHome: scratchDirectory,
         }),
+      guards: profile.process.guards,
       ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
     });
     if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
@@ -758,13 +759,17 @@ export function probeAcpBinary(
       // The scratch directory outlives the process it was granted to unless it
       // goes away with it, and every settle path here runs the terminator.
       const terminate = () => terminateProcess().finally(launch.release);
+      // The version is on stdout. Stderr is bounded separately and read only
+      // when stdout carries none, so a warning the program prints given a
+      // throwaway home cannot turn a working install into an unrecognised one.
       let output = Buffer.alloc(0);
+      let diagnostics = Buffer.alloc(0);
       let overflow = false;
       let settled = false;
       const cleanupListeners = () => {
         clearTimeout(timeout);
         child.stdout.off("data", onOutput);
-        child.stderr.off("data", onOutput);
+        child.stderr.off("data", onDiagnostics);
         child.off("error", onError);
         child.off("close", onClose);
       };
@@ -796,6 +801,12 @@ export function probeAcpBinary(
         if (bytes.length > remaining) overflow = true;
         if (remaining > 0) output = Buffer.concat([output, bytes.subarray(0, remaining)]);
       };
+      const onDiagnostics = (chunk: Buffer | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = outputBytes - diagnostics.length;
+        if (bytes.length > remaining) overflow = true;
+        if (remaining > 0) diagnostics = Buffer.concat([diagnostics, bytes.subarray(0, remaining)]);
+      };
       const onError = () =>
         finish(
           Effect.fail(
@@ -819,7 +830,9 @@ export function probeAcpBinary(
           );
           return;
         }
-        const parsed = parseVersion(profile, output.toString("utf8").trimEnd());
+        const parsed =
+          parseVersion(profile, output.toString("utf8").trimEnd()) ??
+          parseVersion(profile, diagnostics.toString("utf8").trimEnd());
         if (parsed === undefined) {
           finish(
             Effect.fail(failure("protocol", `${name} returned an unrecognized version response.`)),
@@ -851,7 +864,7 @@ export function probeAcpBinary(
         timeoutMs,
       );
       child.stdout.on("data", onOutput);
-      child.stderr.on("data", onOutput);
+      child.stderr.on("data", onDiagnostics);
       child.once("error", onError);
       child.once("close", onClose);
       return cleanupEffect(name, async () => {

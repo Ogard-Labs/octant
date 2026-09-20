@@ -993,13 +993,18 @@ export function probeOpenCodeBinary(
       // The scratch directory outlives the process it was granted to unless it
       // goes away with it, and every settle path here runs the terminator.
       const terminate = () => terminateProcess().finally(launch.release);
+      // The version is on stdout. Stderr is kept apart and read only when
+      // stdout carries none: given a throwaway home the program may warn there
+      // before it answers, and a first line folded in from that warning made a
+      // working install unrecognisable.
       let output = "";
+      let diagnostics = "";
       let settled = false;
 
       const cleanup = () => {
         clearTimeout(timeout);
         child.stdout.off("data", onOutput);
-        child.stderr.off("data", onOutput);
+        child.stderr.off("data", onDiagnostics);
         child.off("error", onError);
         child.off("exit", onExit);
       };
@@ -1028,6 +1033,11 @@ export function probeOpenCodeBinary(
       const onOutput = (chunk: Buffer) => {
         if (output.length < 4_096) output += chunk.toString("utf8", 0, 4_096 - output.length);
       };
+      const onDiagnostics = (chunk: Buffer) => {
+        if (diagnostics.length < 4_096) {
+          diagnostics += chunk.toString("utf8", 0, 4_096 - diagnostics.length);
+        }
+      };
       const onError = () =>
         finish(
           Effect.fail(failure("unavailable", "OpenCode binary could not be started for probing.")),
@@ -1037,7 +1047,8 @@ export function probeOpenCodeBinary(
           finish(Effect.fail(failure("unavailable", "OpenCode binary probe did not succeed.")));
           return;
         }
-        const version = parseOpenCodeVersion(output)?.version;
+        const version = (parseOpenCodeVersion(output) ?? parseOpenCodeVersion(diagnostics))
+          ?.version;
         finish(
           version === undefined
             ? Effect.fail(failure("protocol", "OpenCode binary returned an unrecognized version."))
@@ -1050,7 +1061,7 @@ export function probeOpenCodeBinary(
       }, VERSION_TIMEOUT_MS);
 
       child.stdout.on("data", onOutput);
-      child.stderr.on("data", onOutput);
+      child.stderr.on("data", onDiagnostics);
       child.once("error", onError);
       child.once("exit", onExit);
 

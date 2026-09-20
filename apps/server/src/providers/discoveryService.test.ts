@@ -414,6 +414,9 @@ describe("discoveryService", () => {
         MISTRAL_API_KEY: "secret",
         OPENAI_API_KEY: "secret",
         ARBITRARY_SECRET: "secret",
+        CODEX_HOME: "/Users/test/.codex",
+        CLAUDE_CONFIG_DIR: "/Users/test/.claude",
+        XDG_CONFIG_HOME: "/Users/test/.config",
       },
       now: () => 1753430400000,
     });
@@ -443,6 +446,12 @@ describe("discoveryService", () => {
     expect(versionCall?.[2].env?.HOME).not.toBe("/Users/test");
     expect(versionCall?.[2].env?.HOME).toBe(versionCall?.[2].cwd);
     expect(readinessCall?.[2].env?.HOME).toBe("/Users/test");
+    // A config-home variable would point the confined read at real provider
+    // state it cannot open, so the read drops them and falls back to its HOME.
+    for (const name of ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME"]) {
+      expect(versionCall?.[2].env).not.toHaveProperty(name);
+    }
+    expect(readinessCall?.[2].env?.CODEX_HOME).toBe("/Users/test/.codex");
   });
 
   it("reports unauthenticated when auth probe fails", async () => {

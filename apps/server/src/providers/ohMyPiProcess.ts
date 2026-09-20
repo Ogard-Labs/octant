@@ -278,7 +278,8 @@ export function makeOhMyPiProcessLive(options: OhMyPiProcessOptions = {}): OhMyP
           const versionProbe = prepareConfinedVersionProbe({
             binaryPath: input.binaryPath,
             displayName: "Oh My Pi",
-            environment: () => environment,
+            environment: (scratch) =>
+              ohMyPiProcessEnvironment(input.binaryPath, inherited, scratch),
             ...(options.versionProbeConfinement === undefined
               ? {}
               : { confinement: options.versionProbeConfinement }),

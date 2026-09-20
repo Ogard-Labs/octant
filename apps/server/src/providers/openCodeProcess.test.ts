@@ -500,6 +500,35 @@ describe("probeOpenCodeBinary", () => {
     });
   });
 
+  it("reads the version from stdout when the program warns on stderr before answering", async () => {
+    // Given a throwaway home the program may explain what it could not set up.
+    // Folded into one buffer, that first line made a working install unreadable.
+    const root = fixtureRoot();
+    const binaryPath = join(root, "opencode-noisy");
+    writeFileSync(
+      binaryPath,
+      "#!/bin/sh\nprintf 'warn: no data home\\n' >&2\nsleep 0.1\nprintf 'opencode v2.0.1\\n'\n",
+    );
+    chmodSync(binaryPath, 0o755);
+
+    await expect(Effect.runPromise(probeOpenCode(binaryPath))).resolves.toEqual({
+      binaryPath,
+      version: "opencode v2.0.1",
+    });
+  });
+
+  it("falls back to stderr when the program prints its version there instead", async () => {
+    const root = fixtureRoot();
+    const binaryPath = join(root, "opencode-stderr");
+    writeFileSync(binaryPath, "#!/bin/sh\nprintf 'opencode v2.0.1\\n' >&2\n");
+    chmodSync(binaryPath, 0o755);
+
+    await expect(Effect.runPromise(probeOpenCode(binaryPath))).resolves.toEqual({
+      binaryPath,
+      version: "opencode v2.0.1",
+    });
+  });
+
   it("preserves the beta runtime label instead of parsing it as a v1 semantic version", async () => {
     const fixture = probeWrapper("probe-v2");
     await expect(Effect.runPromise(probeOpenCode(fixture.binaryPath))).resolves.toEqual({
@@ -527,8 +556,11 @@ describe("probeOpenCodeBinary", () => {
 
     await Effect.runPromise(probeOpenCode(fixture.binaryPath));
 
+    // The brokers are stripped, and so is every other inherited variable the
+    // version read has no use for: only a fixed set of names reaches it, so a
+    // credential in the server's environment cannot reach a replaced binary.
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=<unset>\nclaude=<unset>\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=<unset>\nclaude=<unset>\nconfig=<unset>\n",
     );
     expect(process.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");

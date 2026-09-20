@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -159,6 +160,97 @@ describe("confined version probe", () => {
       message: expect.stringContaining("sandbox-exec"),
     });
     expect(existsSync(target.temporaryRoot)).toBe(true);
+  });
+
+  it("hands the version read no credential and no real config home", () => {
+    // A family builds the environment it always built; the read keeps only a
+    // fixed set of inherited names, what the family computed from the scratch,
+    // and the static guards it named. Provider credentials, cloud keys and a
+    // family's config-home variables are dropped, so a program that consults
+    // one falls back to HOME, which is the scratch.
+    const target = host();
+    const probe = prepareConfinedVersionProbe({
+      binaryPath: target.binaryPath,
+      displayName: "Example",
+      environment: (scratch) => ({
+        PATH: "/usr/bin:/bin",
+        LANG: "en_US.UTF-8",
+        LC_ALL: "en_US.UTF-8",
+        USER: "person",
+        HOME: target.home,
+        OPENAI_API_KEY: "sk-secret",
+        GITHUB_TOKEN: "ghp_secret",
+        AWS_SECRET_ACCESS_KEY: "aws-secret",
+        CODEX_HOME: join(target.home, ".codex"),
+        CLAUDE_CONFIG_DIR: join(target.home, ".claude"),
+        PI_CODING_AGENT_DIR: join(target.home, ".pi", "agent"),
+        XDG_CONFIG_HOME: join(target.home, ".config"),
+        NODE_OPTIONS: "--require /tmp/hook.js",
+        // Computed from the scratch by the family, so it stays.
+        OMP_HOME: scratch,
+        VIBE_HOME: join(scratch, ".vibe"),
+        FAMILY_SWITCH: "off",
+      }),
+      guards: { FAMILY_SWITCH: "off" },
+      confinement: target.confinement,
+      temporaryRoot: target.temporaryRoot,
+      homeDirectory: target.home,
+    });
+    if (probe.status === "refused") throw new Error(`Unexpected refusal: ${probe.message}`);
+    const { launch } = probe;
+
+    expect(launch.environment).toEqual({
+      PATH: "/usr/bin:/bin",
+      LANG: "en_US.UTF-8",
+      LC_ALL: "en_US.UTF-8",
+      USER: "person",
+      HOME: launch.workingDirectory,
+      TMPDIR: launch.workingDirectory,
+      OMP_HOME: launch.workingDirectory,
+      VIBE_HOME: join(launch.workingDirectory, ".vibe"),
+      FAMILY_SWITCH: "off",
+    });
+    launch.release();
+  });
+
+  it("does not keep a guard whose value the host changed", () => {
+    // A guard passes only where it is the static constant the family named. A
+    // host variable of the same name with another value is host-derived.
+    const target = host();
+    const probe = prepareConfinedVersionProbe({
+      binaryPath: target.binaryPath,
+      displayName: "Example",
+      environment: () => ({ PATH: "/usr/bin:/bin", FAMILY_SWITCH: "on" }),
+      guards: { FAMILY_SWITCH: "off" },
+      confinement: target.confinement,
+      temporaryRoot: target.temporaryRoot,
+      homeDirectory: target.home,
+    });
+    if (probe.status === "refused") throw new Error(`Unexpected refusal: ${probe.message}`);
+
+    expect(probe.launch.environment).not.toHaveProperty("FAMILY_SWITCH");
+    probe.launch.release();
+  });
+
+  it("does not open the home when the launcher's directory is a link to it", () => {
+    // The builder canonicalises every root it is given. A program kept directly
+    // in the home and reached through a link to it has a launcher directory
+    // that names the home only through the link: it passed a check on its own
+    // spelling and then opened the whole home once resolved.
+    const target = host();
+    const kept = join(target.home, "example");
+    writeFileSync(kept, "#!/bin/sh\nprintf '1.2.3\\n'\n", { mode: 0o755 });
+    chmodSync(kept, 0o755);
+    const linkDirectory = join(target.root, "link");
+    symlinkSync(target.home, linkDirectory);
+    const launch = prepared(target, join(linkDirectory, "example"));
+    const profile = launch.args[1] ?? "";
+
+    expect(profile).not.toContain(seatbeltAllowRule("file-read*", target.home));
+    expect(profile).not.toContain(seatbeltAllowRule("file-read*", linkDirectory));
+    // The program itself still opens, under its resolved name.
+    expect(profile).toContain(seatbeltAllowRule("file-read*", kept));
+    launch.release();
   });
 
   it("takes the scratch directory away when the caller releases the launch", () => {

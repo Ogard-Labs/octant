@@ -243,6 +243,9 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
+/** Static switches every Pi launch sets; the version read keeps them too. */
+const PI_GUARDS = { PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" } as const;
+
 export function sanitizePiEnvironment(
   host: NodeJS.ProcessEnv,
   piHome: string,
@@ -256,8 +259,7 @@ export function sanitizePiEnvironment(
     ),
     ["HOME", piHome],
     ["PI_CODING_AGENT_DIR", piHome],
-    ["PI_TELEMETRY", "0"],
-    ["PI_SKIP_VERSION_CHECK", "1"],
+    ...Object.entries(PI_GUARDS),
     ["OCTANT_PI_APPROVALS", approvals],
     ["NO_COLOR", "1"],
   ]);
@@ -677,7 +679,10 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
           const versionProbe = prepareConfinedVersionProbe({
             binaryPath: input.binaryPath,
             displayName: "Pi",
-            environment: () => launch.environment,
+            // The base environment, not the launch's: that one carries the
+            // per-thread tool-bridge URL and bearer token.
+            environment: () => baseEnvironment,
+            guards: PI_GUARDS,
             ...(versionProbeConfinement === undefined
               ? {}
               : { confinement: versionProbeConfinement }),
