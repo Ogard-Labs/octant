@@ -10,7 +10,7 @@ import {
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { makePiDriver } from "./piDriver";
-import { makePiProcessLive } from "./piProcess";
+import { makePiConfinementLive, makePiProcessLive } from "./piProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const probeEnabled = process.env.OCTANT_PI_PROBE === "1";
@@ -102,6 +102,64 @@ describe("installed Pi runtime", () => {
       }
     },
     120_000,
+  );
+
+  // The table in piProcess.ts mirrors the variables Pi reads for each provider. Dummy
+  // keys and no linked auth.json mean a provider is listed only if Pi found its
+  // credential in the environment Octant passed, so a renamed variable fails here.
+  it.skipIf(!probeEnabled)(
+    "shows Pi a host credential only for the model provider it belongs to",
+    async () => {
+      const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-pi-env-")));
+      const piHome = join(temporaryRoot, "managed");
+      const port = makePiProcessLive({
+        confinement: makePiConfinementLive({
+          credentialPath: join(temporaryRoot, "absent-auth.json"),
+          modelsPath: join(temporaryRoot, "absent-models.json"),
+        }),
+        inheritedEnvironment: {
+          PATH: process.env.PATH ?? "/usr/bin:/bin",
+          ANTHROPIC_API_KEY: "not-a-real-key",
+          OPENAI_API_KEY: "not-a-real-key",
+        },
+      });
+      const availableProviders = (modelProvider?: string) =>
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* port.start({
+                binaryPath,
+                root: piHome,
+                piHome,
+                sessionDirectory: join(piHome, "sessions"),
+                sessionId: `probe-${crypto.randomUUID()}`,
+                mode: "chat",
+                executionPolicy: "approval-gated",
+                ...(modelProvider === undefined ? {} : { modelProvider }),
+              });
+              const response = yield* Effect.promise(() =>
+                connection.rpc.request("get_available_models"),
+              );
+              const models = (response.data as { models?: ReadonlyArray<{ provider: string }> })
+                .models;
+              return new Set((models ?? []).map((model) => model.provider));
+            }),
+          ),
+        );
+      try {
+        const anthropic = await availableProviders("anthropic");
+        expect(anthropic.has("anthropic")).toBe(true);
+        expect(anthropic.has("openai")).toBe(false);
+        const openai = await availableProviders("openai");
+        expect(openai.has("openai")).toBe(true);
+        expect(openai.has("anthropic")).toBe(false);
+        const discovery = await availableProviders();
+        expect(discovery.has("anthropic") || discovery.has("openai")).toBe(false);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+    60_000,
   );
 });
 
