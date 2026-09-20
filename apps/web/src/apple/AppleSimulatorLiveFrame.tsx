@@ -170,20 +170,25 @@ function useOrderedSimulatorInput(options: {
   const sendNext = useCallback(() => {
     if (onInput === undefined || busy || sentRef.current) return;
     let next = waitingRef.current.shift();
-    if (next === undefined) return;
-    // Text that is only spaces is not a typed-text request the host accepts —
-    // blank text is refused there on purpose — but a space is still a key a
-    // person pressed. It goes as the Space key, one press at a time.
-    if (next.kind === "type-text" && next.text.trim().length === 0) {
+    // Text that is only blank is not a typed-text request the host accepts —
+    // blank text is refused there on purpose. An ordinary space is still a key
+    // a person pressed, so it goes as the Space key, one press at a time. Any
+    // other blank (a non-breaking space from Option-Space, say) has no key
+    // here; it is dropped and the next waiting intent is taken in its place,
+    // or what was queued behind it would wait with nothing left to wake it.
+    while (next !== undefined && next.kind === "type-text" && next.text.trim().length === 0) {
       const spaces: AppleSimulatorFrameInputIntent[] = [...next.text]
         .filter((character) => character === " ")
         .map(() => ({ kind: "key-press", key: "space" }));
       const [first, ...rest] = spaces;
-      // Only other whitespace, which no key here types: nothing to send.
-      if (first === undefined) return;
-      waitingRef.current.unshift(...rest);
-      next = first;
+      if (first !== undefined) {
+        waitingRef.current.unshift(...rest);
+        next = first;
+        break;
+      }
+      next = waitingRef.current.shift();
     }
+    if (next === undefined) return;
     // Until `busy` is seen to rise and fall, nothing else goes out. An input
     // the pane refused without ever going busy must not hold the rest forever.
     sentRef.current = true;

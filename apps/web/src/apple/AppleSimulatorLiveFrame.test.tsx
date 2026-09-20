@@ -431,6 +431,21 @@ describe("AppleSimulatorLiveFrameView", () => {
       ]);
     });
 
+    it("drops a blank it cannot type and still sends what was queued after it", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      // Option-Space gives a non-breaking space: blank, and not the Space key.
+      fireEvent.keyDown(region, { key: "\u00a0" });
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "home" },
+      ]);
+    });
+
     it("leaves app shortcuts alone while the screen has focus", () => {
       const onInput = vi.fn();
       render(liveView({ onInput }));
