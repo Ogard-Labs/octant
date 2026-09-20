@@ -353,6 +353,38 @@ describe("AppleSimulatorLiveFrameView", () => {
       expect(onInput).toHaveBeenCalledWith({ kind: "type-text", text: "ok" });
     });
 
+    it("keeps what was typed after a pause apart from what was typed before it, even while busy", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const { rerender } = render(liveView({ onInput, busy: true }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: "o" });
+      fireEvent.keyDown(region, { key: "k" });
+      // The pause passes while the running action still holds the pane.
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      fireEvent.keyDown(region, { key: "g" });
+      fireEvent.keyDown(region, { key: "o" });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(onInput).not.toHaveBeenCalled();
+
+      rerender(liveView({ onInput, busy: false }));
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "ok" },
+      ]);
+      rerender(liveView({ onInput, busy: true }));
+      rerender(liveView({ onInput, busy: false }));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "ok" },
+        { kind: "type-text", text: "go" },
+      ]);
+    });
+
     it("does not hold later input forever when an input never made the pane busy", () => {
       vi.useFakeTimers();
       const onInput = vi.fn();

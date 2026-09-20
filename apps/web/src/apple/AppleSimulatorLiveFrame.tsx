@@ -143,6 +143,8 @@ function LiveScreen(props: {
 
 /** Typing is sent as one text once the keys stop for this long. */
 const TYPING_PAUSE_MS = 350;
+/** The longest text one typed-text request may carry; the host refuses more. */
+const LONGEST_TYPED_TEXT = 4_096;
 /** An input that has not made the pane busy by now never will; stop waiting for it. */
 const UNANSWERED_INPUT_MS = 1_000;
 
@@ -221,7 +223,16 @@ function useOrderedSimulatorInput(options: {
   const enqueue = (intent: AppleSimulatorFrameInputIntent, typing: boolean) => {
     const waiting = waitingRef.current;
     const last = waiting.at(-1);
-    if (intent.kind === "type-text" && last?.kind === "type-text") {
+    // Typing joins the text before it only while that typing's pause is still
+    // running. Once the pause has passed the text is whole, even if it has to
+    // wait for a running action: typing through a long build otherwise grew one
+    // request past the longest text the host accepts, and all of it was refused.
+    if (
+      intent.kind === "type-text" &&
+      last?.kind === "type-text" &&
+      typingRef.current !== undefined &&
+      last.text.length + intent.text.length <= LONGEST_TYPED_TEXT
+    ) {
       waiting[waiting.length - 1] = { kind: "type-text", text: last.text + intent.text };
     } else {
       waiting.push(intent);

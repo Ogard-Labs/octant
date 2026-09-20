@@ -698,12 +698,7 @@ export class AppleToolchainService {
               message:
                 request.kind === "type-text"
                   ? typedTextFailureNote(outcomeFor(terminal), text(terminal.stderr))
-                  : inputFailureNote(
-                      request.kind,
-                      outcomeFor(terminal),
-                      text(terminal.stderr),
-                      context,
-                    ),
+                  : inputFailureNote(request, outcomeFor(terminal), text(terminal.stderr), context),
             };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
@@ -1405,11 +1400,17 @@ function typedTextFailureNote(outcome: AppleBuildEvidence["outcome"], stderr: st
 }
 
 function inputFailureNote(
-  kind: AppleSimulatorRequest["kind"],
+  request: Pick<AppleSimulatorRequest, "kind" | "point" | "toPoint">,
   outcome: AppleBuildEvidence["outcome"],
   stderr: string,
   context: AppleExecutionContext,
 ): string {
+  // A swipe that did not happen still says where it was meant to go, the same
+  // as one that did: "off screen" alone does not tell a reader which end.
+  const attempted =
+    request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined
+      ? `swipe ${outcome} (x=${request.point.x}, y=${request.point.y} to x=${request.toPoint.x}, y=${request.toPoint.y})`
+      : `${request.kind} ${outcome}`;
   // The host's words are journaled, so they cross the same boundary as any
   // other command output: host roots are replaced before anything is kept.
   const detail = stderr
@@ -1420,9 +1421,9 @@ function inputFailureNote(
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .join("\n")
-    .slice(0, MAX_DIAGNOSTIC_LENGTH - 64)
+    .slice(0, MAX_DIAGNOSTIC_LENGTH - attempted.length - 2)
     .trim();
-  return detail.length === 0 ? `${kind} ${outcome}` : `${kind} ${outcome}: ${detail}`;
+  return detail.length === 0 ? attempted : `${attempted}: ${detail}`;
 }
 
 function unrecordedActionNote(
