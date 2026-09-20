@@ -161,6 +161,27 @@ describe("Simulator input grants", () => {
     expect(grants.isOpen(scope(iphone, otherThread, browserWindow))).toBe(false);
   });
 
+  it("closes a Simulator's grants when discovery finds it no longer booted, whoever shut it down", () => {
+    const grants = new SimulatorInputGrants(() => 0);
+    grants.open(scope(iphone));
+    grants.open(scope(iphone, otherThread, browserWindow));
+    grants.open(scope(ipad));
+
+    // Shut down from Xcode or `simctl`, so no Octant action saw it end. A
+    // later boot is a new device session and asks again.
+    grants.closeUnlessBooted([
+      { simulatorId: iphone, state: "shutdown" },
+      { simulatorId: ipad, state: "booted" },
+    ]);
+    expect(grants.isOpen(scope(iphone))).toBe(false);
+    expect(grants.isOpen(scope(iphone, otherThread, browserWindow))).toBe(false);
+    expect(grants.isOpen(scope(ipad))).toBe(true);
+
+    // A Simulator that is still starting up or going down has no session to ride either.
+    grants.closeUnlessBooted([{ simulatorId: ipad, state: "shutting-down" }]);
+    expect(grants.isOpen(scope(ipad))).toBe(false);
+  });
+
   it("lists a window's live grants on a thread with their expiry for the pane", () => {
     let now = Date.parse("2026-09-19T20:00:00.000Z");
     const grants = new SimulatorInputGrants(

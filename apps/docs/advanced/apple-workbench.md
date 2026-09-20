@@ -122,7 +122,8 @@ approval keeps the Simulator open to input from that window, on that thread,
 for fifteen minutes after each input, so driving the live frame is not a dialog
 per touch. Another window or browser tab on the same thread asks for its own
 confirmation. Shutting the Simulator down, closing the window, or restarting
-Octant ends it. **Capture screen**
+Octant ends it. So does a refresh that finds the Simulator no longer booted,
+even if it was shut down from Xcode. **Capture screen**
 asks for nothing: reading
 a booted Simulator's screen changes nothing, so it works under Plan mode too.
 A capture is recorded as a **screenshot** artifact in **Validation evidence**

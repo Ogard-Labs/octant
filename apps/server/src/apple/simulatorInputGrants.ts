@@ -119,6 +119,21 @@ export class SimulatorInputGrants {
     }
   }
 
+  /**
+   * Closes the grants of every Simulator that discovery found not booted. A
+   * Simulator can be shut down from Xcode or `simctl`, which no Octant action
+   * sees; booting it again starts a device session nobody confirmed, so the old
+   * grant must not carry over. Only a discovery sees this, so a shutdown and
+   * reboot between two discoveries goes unnoticed and the grant's own fifteen
+   * minutes are what bound it.
+   */
+  closeUnlessBooted(
+    simulators: ReadonlyArray<{ readonly simulatorId: unknown; readonly state: string }>,
+  ): void {
+    for (const simulator of simulators)
+      if (simulator.state !== "booted") this.revokeSimulator(String(simulator.simulatorId));
+  }
+
   revokeSimulator(simulatorId: string): void {
     for (const [scope, grant] of this.#grants)
       if (grant.simulatorId === simulatorId) this.#grants.delete(scope);

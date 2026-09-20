@@ -33,8 +33,13 @@ separate decision.
   and the grant ends when its window's authority is revoked. The policy accepts a live grant in place of the one-shot
   approval a request would otherwise carry, for input only; a shutdown, a boot
   or any other effect still asks. Looking at a grant does not extend it: only
-  an input that was delivered renews it, and only a shutdown that succeeded
-  closes the Simulator for every thread. An input the grant itself admitted
+  an input that was delivered renews it, and a shutdown that succeeded, or a
+  discovery that finds the Simulator no longer booted, closes it for every
+  window and thread. The second covers a Simulator shut down from Xcode or
+  `simctl`, which no Octant action sees; booting it again is a new device
+  session and asks again. Only a discovery sees this, so a shutdown and reboot
+  between two discoveries goes unnoticed, and the grant's fifteen minutes are
+  what bound it. An input the grant itself admitted
   that finishes just after it ran out still renews it, within the longest an
   action may run. Input admitted another way, full access or the first one
   approved, never brings back a grant that ran out. A request the service

@@ -222,6 +222,29 @@ describe("AppleToolchainService discovery", () => {
     expect(JSON.stringify(result.workspace)).not.toContain(context.checkoutRoot);
   });
 
+  it("tells the host which Simulators it found and in what state, and says nothing when discovery is refused", async () => {
+    const observeSimulators = vi.fn();
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      observeSimulators,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    await service.discover(discoveryRequest, {
+      ...context,
+      threadId: "40000000-0000-4000-8000-000000000001",
+    });
+    expect(observeSimulators).not.toHaveBeenCalled();
+
+    await service.discover(discoveryRequest, context);
+    expect(observeSimulators).toHaveBeenCalledTimes(1);
+    expect(observeSimulators).toHaveBeenCalledWith([
+      expect.objectContaining({ simulatorId: ids.simulator, state: "booted" }),
+    ]);
+  });
+
   it("fails closed before discovery when thread authority does not match", async () => {
     const execute = discoveryExecutor();
     const service = new AppleToolchainService({

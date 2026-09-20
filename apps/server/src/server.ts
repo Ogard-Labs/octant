@@ -4221,6 +4221,7 @@ export function startOctantServer(
       ...(simulatorDevice === undefined
         ? {}
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
+      observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
       // Two hosts on one Mac share a temporary directory; each sweeps only the
       // captures named for its own data directory.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
