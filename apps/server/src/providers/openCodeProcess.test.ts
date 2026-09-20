@@ -559,8 +559,9 @@ describe("probeOpenCodeBinary", () => {
     // The brokers are stripped, and so is every other inherited variable the
     // version read has no use for: only a fixed set of names reaches it, so a
     // credential in the server's environment cannot reach a replaced binary.
+    // OpenCode's own static switches (no updater, no default plugins) stay.
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=<unset>\nclaude=<unset>\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=1\nclaude=1\nconfig=<unset>\n",
     );
     expect(process.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");

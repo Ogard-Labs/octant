@@ -94,6 +94,24 @@ export interface OpenCodeProcessDependencies {
   readonly reserveLoopbackPort?: () => Promise<number>;
 }
 
+/**
+ * Static switches every OpenCode launch sets: no updater, no model fetch, no
+ * borrowed Claude Code integration, no default plugins. The version read keeps
+ * them too, since a read with no network and only a scratch home is exactly
+ * where an update or fetch attempt can stall.
+ */
+const OPENCODE_GUARDS = {
+  OPENCODE_DISABLE_AUTOUPDATE: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+  OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+  OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+  OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+  OPENCODE_DISABLE_MODELS_FETCH: "1",
+  OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+} as const;
+
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const VERSION_TIMEOUT_MS = 5_000;
@@ -593,15 +611,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      OPENCODE_DISABLE_AUTOUPDATE: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
-      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
-      OPENCODE_DISABLE_MODELS_FETCH: "1",
-      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+      ...OPENCODE_GUARDS,
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -962,7 +972,8 @@ export function probeOpenCodeBinary(
     const probe = prepareConfinedVersionProbe({
       binaryPath,
       displayName: "OpenCode",
-      environment: () => childProcessEnvironment(process.env),
+      environment: () => ({ ...childProcessEnvironment(process.env), ...OPENCODE_GUARDS }),
+      guards: OPENCODE_GUARDS,
       ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
     });
     if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
