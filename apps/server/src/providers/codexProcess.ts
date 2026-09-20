@@ -59,6 +59,66 @@ const SEMVER_IDENTIFIER_PATTERN = /^[0-9A-Za-z-]+$/;
 const SEMVER_NUMERIC_IDENTIFIER_PATTERN = /^\d+$/;
 const PROBE_OUTPUT_BYTES = 4_096;
 
+// The app-server spawned below is long-lived and runs model-generated shell
+// commands without Octant confinement around it, so every inherited variable
+// is readable by the model. A denylist here let a host `GITHUB_TOKEN` or
+// `AWS_SECRET_ACCESS_KEY` cross with no OS boundary behind it; the allowlist
+// below carries only what the Codex CLI itself reads, as `codex doctor`
+// reports for auth, custom CA, and proxy configuration. A credential for a
+// service other than the model provider — a GitHub personal access token, AWS
+// keys for Bedrock — is not on the list: those reach the CLI through its own
+// `codex login`, not through an ambient host variable.
+const SAFE_ENVIRONMENT = new Set([
+  "COLORTERM",
+  "HOME",
+  "LANG",
+  "LANGUAGE",
+  "LOGNAME",
+  "NO_COLOR",
+  "PATH",
+  "SHELL",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "TEMP",
+  "TERM",
+  "TERMINFO",
+  "TERMINFO_DIRS",
+  "TERM_PROGRAM",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+  "USER",
+]);
+// Codex reads both spellings, and a host that sets only the lowercase form is
+// the common case on Unix. Dropping one spelling silently removes a corporate
+// proxy the CLI needs to reach the provider at all.
+const PROXY_VARIABLES = new Set([
+  "ALL_PROXY",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NO_PROXY",
+  "all_proxy",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+]);
+const CODEX_NATIVE_VARIABLES = new Set([
+  "CODEX_CA_CERTIFICATE",
+  "CODEX_HOME",
+  "CODEX_OSS_BASE_URL",
+  "CODEX_OSS_PORT",
+  "CODEX_SQLITE_HOME",
+  "OPENAI_BASE_URL",
+  "OPENAI_ORGANIZATION",
+  "OPENAI_PROJECT",
+]);
+// The three auth variables the CLI itself names when no stored credential is
+// found. A `config.toml` model provider may declare any other variable as its
+// `env_key`; that variable does not cross, and `codex doctor` names the
+// refusal ("active model provider auth env var is missing") rather than
+// failing obscurely.
+const CODEX_CREDENTIALS = new Set(["CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"]);
+
 interface ManagedCodexConnection {
   readonly connection: CodexAppServerConnection;
   readonly terminate: () => Promise<void>;
@@ -147,9 +207,11 @@ export function sanitizeCodexEnvironment(environment: NodeJS.ProcessEnv): NodeJS
     Object.entries(environment).filter(
       ([key, value]) =>
         value !== undefined &&
-        !key.startsWith("OCTANT_") &&
-        key !== "ELECTRON_RUN_AS_NODE" &&
-        key !== "NODE_OPTIONS",
+        (SAFE_ENVIRONMENT.has(key) ||
+          PROXY_VARIABLES.has(key) ||
+          CODEX_NATIVE_VARIABLES.has(key) ||
+          CODEX_CREDENTIALS.has(key) ||
+          key.startsWith("LC_")),
     ),
   );
 }
