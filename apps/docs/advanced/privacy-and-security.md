@@ -104,8 +104,9 @@ native receipts; desktop admin routes are loopback-only.
 - **Code** starts approval-gated; Plan mode is strictly read-only, auto-accept
   edits waives only in-root file writes, and Full access must be explicitly
   selected. A per-message posture may only narrow the thread's grant; the
-  server clamps composer intent. Full access is still confined to the
-  bound folder for user work; merge authority is never granted.
+  server clamps composer intent. Full access is what it says: the provider
+  runtime runs without Octant's sandbox, so keep it for folders and providers
+  you trust. Merge authority is never granted, in any posture.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
   too.

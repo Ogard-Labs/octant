@@ -28,7 +28,9 @@ are theirs and not a gap in the rule.
 - Octant wraps a provider runtime launch when the process carries exactly one
   thread's authority: one bound root, one mode, one execution policy, fixed for
   the life of the process. The ACP, OpenCode, and Pi turn launches meet that
-  and stay under 0009's rule unchanged.
+  below Full access and stay under 0009's rule unchanged. On Full access all
+  three return the binary unwrapped — 0009's genuine, user-selected,
+  unrestricted posture, not a gap; ACP keeps 0006's static denials there.
 - This exception covers whole modules, so it does not reach version probes.
   Every family, wrapped or not, spawns the configured executable for
   `--version` before any confined launch. That does not satisfy 0009 and is not

@@ -16,11 +16,12 @@ import { describe, expect, it } from "vitest";
  * What this proves: a provider process module either uses the shared builder or
  * appears in {@link UNWRAPPED} with a reason, and 0138 names each one that does
  * not. What it does not prove: that every launch inside a wrapped module goes
- * through the builder. `acpProcess` and `openCodeProcess` both call `spawn`
- * directly for their version probes, so a per-launch claim would need each
- * module to declare its launches in a manifest this gate could read rather than
- * a source scan. The observed failure was whole modules never adopting the
- * builder, and that is the failure this catches.
+ * through the builder. A wrapped module still spawns directly for its version
+ * probe, and on Full access returns the binary unwrapped by design, so a
+ * per-launch claim would need each module to declare its launches in a manifest
+ * this gate could read rather than a source scan. The observed failure was
+ * whole modules never adopting the builder, and that is the failure this
+ * catches.
  *
  * {@link UNWRAPPED}, not 0138, is the live set. An accepted record keeps its
  * history — a later ADR supersedes it rather than editing it — so reading the
