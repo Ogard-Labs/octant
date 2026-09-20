@@ -809,7 +809,13 @@ function ProjectGroup(props: {
     return null;
   }
   return (
-    <section aria-label={props.label} className="project-section">
+    <section
+      aria-label={props.label}
+      className="project-section"
+      // With no Project yet, adding one is the only thing to do here, so the
+      // header's add control shows at rest instead of waiting for a hover.
+      data-empty={props.projects.length === 0 ? "true" : undefined}
+    >
       <div className="project-section__header sidebar-section">
         <h2>{props.label}</h2>
         {props.onAddProject === undefined &&

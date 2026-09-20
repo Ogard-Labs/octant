@@ -41,6 +41,11 @@ describe("ProjectSidebarSection chat thread nesting", () => {
 
     expect(screen.getByRole("heading", { name: "Projects" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Add folder" })).toBeVisible();
+    // jsdom reports the button visible either way, because it does not apply
+    // the hover-only rule. What keeps it on screen in the app is this mark: an
+    // empty section shows its add control at rest, since adding a Project is
+    // the only thing to do there.
+    expect(screen.getByRole("region", { name: "Projects" })).toHaveAttribute("data-empty", "true");
     // The heading is not left hanging over nothing: one quiet line says so.
     expect(screen.getByText("No Projects yet.")).toBeVisible();
     expect(screen.queryByText("No Projects in this mode.")).toBeNull();

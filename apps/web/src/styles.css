@@ -1225,6 +1225,10 @@ h6 {
   transition: opacity var(--oct-motion-fast) ease;
 }
 
+/* Hover-only while there are Projects to look at. An empty section has one
+   next step, adding a Project, and hiding it behind a hover left a new Code
+   or Work sidebar with no visible way to start. */
+.project-section[data-empty="true"] .project-section__header-actions,
 .project-section:hover .project-section__header-actions,
 .project-section:focus-within .project-section__header-actions,
 .project-section__header-actions:has([aria-expanded="true"]),
@@ -8152,6 +8156,15 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-sm);
   color: var(--octant-text-secondary);
   user-select: none;
+}
+
+/* Above a start screen's composer the host sits in a row of tray controls,
+   which are 12px at weight 500. At its own 14px it was the one larger word in
+   the row on every start screen. */
+.composer-tray .host-selector,
+.draft-thread__context-strip .host-selector {
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 .host-selector__dot {
