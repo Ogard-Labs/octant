@@ -80,7 +80,7 @@ distilled successor of the earlier long-form design specifications.
 | [0070](0070-setup-surfaces-compose-from-public-blocks.md)                    | Renderer visual language matches public block catalogs                                      | Superseded by 0090 |
 | [0071](0071-one-navigation-and-surface-hierarchy.md)                         | One navigation and surface hierarchy                                                        | Accepted           |
 | [0072](0072-settings-collections-stay-open.md)                               | Settings collections stay open                                                              | Accepted           |
-| [0073](0073-one-surface-language.md)                                         | One surface language across the renderer and the site                                       | Accepted           |
+| [0073](0073-one-surface-language.md)                                         | One surface language across the renderer and the site                                       | Superseded by 0142 |
 | [0074](0074-one-machine-one-canonical-host.md)                               | One Machine has one canonical host and store                                                | Accepted           |
 | [0075](0075-thread-reads-are-snapshot-first-and-change-driven.md)            | Thread reads are snapshot-first and change-driven                                           | Accepted           |
 | [0076](0076-pull-request-snapshot-survives-restart.md)                       | The pull-request snapshot survives host restart                                             | Accepted           |
@@ -153,6 +153,7 @@ distilled successor of the earlier long-form design specifications.
 | [0139](0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md) | The Simulator frame is a live view streamed through the host | Accepted |
 | [0140](0140-the-live-simulator-screen-is-driven-directly.md) | The live Simulator screen is driven directly | Accepted |
 | [0141](0141-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
+| [0142](0142-system-compact-typography-is-the-default.md) | System compact typography is the default | Accepted |
 
 ## Adding an ADR
 

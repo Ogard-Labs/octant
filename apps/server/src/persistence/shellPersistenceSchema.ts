@@ -110,7 +110,7 @@ function upcastPersistedShellSettings(value: unknown): unknown {
     transcriptTextSize:
       "transcriptTextSize" in withSidebarBackground
         ? withSidebarBackground.transcriptTextSize
-        : "medium",
+        : "small",
     transcriptWidth:
       "transcriptWidth" in withSidebarBackground ? withSidebarBackground.transcriptWidth : "narrow",
     showThreadProviderIcons:

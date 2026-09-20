@@ -103,7 +103,7 @@ describe("the public-block visual language", () => {
 
   it("keeps every recipe control on whole pixels at the default interface size", () => {
     // Recipe heights are rem so a control grows with the interface size, and the
-    // root is 14px. A quarter-rem step is 3.5px there, so an odd step lands
+    // root is 13px. A quarter-rem step is 3.25px there, so an odd step lands
     // between pixels: `h-7` drew about a hundred 24.5px buttons. An odd step
     // goes through `round(…, 2px)` instead.
     const oddStep = /(?<![\w:-])(?:min-h|h|size)-(\d+)(?![\w.[-])/g;
