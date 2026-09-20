@@ -155,6 +155,7 @@ distilled successor of the earlier long-form design specifications.
 | [0141](0141-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
 | [0142](0142-one-approval-opens-a-simulator-to-input.md) | One approval opens a Simulator to input | Accepted |
 | [0143](0143-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
+| [0144](0144-system-compact-typography-is-the-default.md) | System compact typography is the default | Accepted |
 | [0147](0147-internal-testflight-carries-the-existing-remote-client.md) | Internal TestFlight carries the existing remote client | Accepted |
 | [0148](0148-paired-code-access-is-request-scoped.md) | Paired Code access is request-scoped | Accepted |
 

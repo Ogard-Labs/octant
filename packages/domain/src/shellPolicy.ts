@@ -163,7 +163,7 @@ export function defaultShellSettings(): ShellSettings {
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
-    transcriptTextSize: "medium",
+    transcriptTextSize: "small",
     transcriptWidth: "narrow",
     showThreadProviderIcons: true,
     sidebarRowProperties: {
