@@ -111,6 +111,19 @@ describe.skipIf(!shouldBuildDeviceHelper())("device helper protocol", () => {
     child.stdin.write(frame({ id: 1, op: "tap", x: 1.5, y: 0.5 }));
     expect(await read()).toMatchObject({ id: 1, ok: false, code: "malformed" });
 
+    // JSON `true` is not the number 1, a usage is a whole number, and a
+    // modifier list of the wrong shape is a mistake rather than "no modifiers".
+    const malformed: Array<Record<string, unknown>> = [
+      { op: "tap", x: true, y: 0.5 },
+      { op: "key", usage: 40.9 },
+      { op: "key", usage: 40, modifiers: "shift" },
+      { op: "key", usage: 40, modifiers: [225.5] },
+    ];
+    for (const [index, request] of malformed.entries()) {
+      child.stdin.write(frame({ id: 100 + index, ...request }));
+      expect(await read()).toMatchObject({ id: 100 + index, ok: false, code: "malformed" });
+    }
+
     child.stdin.write(frame({ id: 2, op: "text", text: "a@b" }));
     const refusedText = await read();
     expect(refusedText).toMatchObject({ id: 2, ok: false, code: "unsupported-character" });

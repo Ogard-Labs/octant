@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { CodeProjectPullRequestMergeMethod, CodeThreadId } from "@octant/contracts";
+import { childProcessEnvironment } from "../childProcessEnvironment";
 
 const MAX_GH_OUTPUT_BYTES = 1_048_576;
 const MAX_TITLE_BYTES = 512;
@@ -666,7 +667,9 @@ function validBody(value: string): boolean {
 }
 
 function sanitizeGhEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const sanitized = { ...environment };
+  // `gh` runs extensions and credential helpers, so it never sees the broker
+  // coordinates and bridge secret the desktop handed this server.
+  const sanitized = childProcessEnvironment(environment);
   delete sanitized.GH_TOKEN;
   delete sanitized.GITHUB_TOKEN;
   delete sanitized.GH_ENTERPRISE_TOKEN;
