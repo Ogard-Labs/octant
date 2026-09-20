@@ -15,55 +15,60 @@ runtimes.
 explains why `provider-endpoints-only` materializes as OS `allow` — the finer
 host allowlist would need a broker — not whether a launch is wrapped at all.
 `openCodeProcess` resolves that egress policy and prepares a confined launch in
-the same call, so both statements already hold of one shipped launch.
+the same call, so both already hold of one shipped launch.
 
 What differs is what a launch knows. The builder binds exactly one root
 (`SeatbeltProfileInput.boundRoot`) and needs the thread's mode and execution
 policy to settle write, exec, and egress rules. OpenCode supplies all three
 because it starts one process per connection and refuses to widen that
-process's authority afterwards. The Codex app-server is leased once per
-provider instance — `providerRuntimeRegistry` keys runtimes by `instanceId` and
-the Codex driver's acquire ignores `projectRoot` — so one process carries every
-thread on that instance, each picking its own root and `sandbox` value at
-`thread/start`. No profile is exact for all of them, and one wide enough for
-all of them is not a boundary. The Claude runtime does spawn per query with
-that thread's `cwd`, but the Agent SDK composes the launch and hands Octant's
-spawn callback only command, args, cwd, env, and a signal.
+process's authority afterwards. The two runtimes below cannot, for reasons that
+are theirs and not a gap in the rule.
 
 ## Decision
 
-- Octant wraps a provider runtime launch through the shared builder when the
-  process carries exactly one thread's authority — one bound root, one mode,
-  one execution policy, fixed for the life of the process. ACP, OpenCode, and
-  Pi meet that and stay under 0009's rule unchanged.
+- Octant wraps a provider runtime launch when the process carries exactly one
+  thread's authority: one bound root, one mode, one execution policy, fixed for
+  the life of the process. ACP, OpenCode, and Pi meet that and stay under
+  0009's rule unchanged.
 - Every provider process module that launches without the shared builder is
   named here rather than left to a grep. This is a scoped exception to one rule
-  of 0009, that every such subprocess launches through the shared builder:
-  - **Codex** (`codexProcess.ts`): one app-server serves every thread on a
-    provider instance, so no single bound root, mode, or execution policy
-    exists when it launches.
-  - **Claude** (`claudeProcess.ts`): the Agent SDK owns the launch, and its
-    spawn callback carries no mode or execution policy.
+  of 0009, that every such subprocess launches through that builder:
+  - **Codex** (`codexProcess.ts`): the app-server is leased once per provider
+    instance — `providerRuntimeRegistry` keys runtimes by `instanceId` and the
+    driver's acquire ignores `projectRoot` — so one process carries every
+    thread on that instance, each picking its own root and `sandbox` value at
+    `thread/start`. No profile is exact for all of them, and one wide enough
+    for all of them is not a boundary.
+  - **Claude** (`claudeProcess.ts`): it does spawn per query with that thread's
+    `cwd`, but the Agent SDK composes the launch and hands Octant's spawn
+    callback only command, args, cwd, env, and a signal.
   - **Oh My Pi discovery** (`ohMyPiProcess.ts`): a declaration-only probe in its
     managed home with sessions, tools, extensions, skills, and LSP off, in the
-    family 0122 already carved out. Its turns run on the Pi runtime, which is
-    wrapped.
+    family 0122 carved out. Its turns run on the wrapped Pi runtime.
 - The exception covers the runtime process only. Octant-owned tools those
-  threads reach — the terminal, the project-confined test runner, Git helpers,
-  executable extension components — stay confined exactly as 0009 requires, and
-  so do the Octant-owned brokered tools that hold the finer egress allowlist.
-- The residual risk is stated, not simulated away. For these two families the
-  only OS boundary on a model-generated shell command is the provider's own
-  (`sandbox` on Codex's `thread/start`, `permissionMode` on a Claude query).
-  0009 holds that a provider's own permission layer is a useful signal and not
-  the boundary, and a defect in the posture that Octant maps into that layer is
-  therefore a write inside the checkout with no Octant prompt — observed on a
-  Codex Code thread whose approval-gated posture mapped to `workspace-write`.
-- Every other rule of 0009 stands for both runtimes: allowlist-sanitized
-  environments, credentials stripped from every child and refused in argv,
-  durable process receipts with process-group termination, the server-side
-  tool-call policy choke point, the approval categories, and untrusted-content
-  taint.
+  threads reach — terminal, project-confined test runner, Git helpers,
+  executable extension components, and the brokered tools holding the finer
+  egress allowlist — stay confined exactly as 0009 requires.
+- The residual risk is stated by posture, not simulated away. Codex carries a
+  sandbox on every `thread/start` (`read-only` on Plan). Claude carries one
+  only on approval-gated and auto-accept-edits turns, bounded to the project
+  root; `claudeSandboxSettings` returns nothing for Plan and Full access, so a
+  Claude Plan turn is read-only by the runtime's `permissionMode` alone. That
+  does not meet 0009's rule that Plan denies writes and process execution at
+  the sandbox and not only in policy, and closing this exception for Claude has
+  to fix it first. 0009 holds that a provider's permission layer is a signal
+  and not the boundary, so a defect in the posture Octant maps into it is a
+  write inside the checkout with no Octant prompt — observed on a Codex Code
+  thread whose approval-gated posture mapped to `workspace-write`.
+- The compensating controls are named exactly, because an unwrapped runtime is
+  what makes their edges matter: environments are allowlist-sanitized, broker
+  coordinates and the desktop bridge secret are stripped from every child, and
+  argv carrying a credential is refused. The provider's own credential is not —
+  API-key authentication resolves `ANTHROPIC_API_KEY` into the runtime's
+  environment at launch, as 0009 allows — so a model-generated command inside
+  these two can read it with no OS boundary in the way. Durable process
+  receipts, process-group termination, the tool-call policy choke point, the
+  approval categories, and untrusted-content taint all stand.
 - A new provider runtime is wrapped. `providerProcessConfinement.test.ts` keeps
   the live set as a manifest and refuses a module that uses no shared builder
   and claims no entry, an entry whose module has since adopted the builder, and
