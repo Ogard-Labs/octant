@@ -198,16 +198,24 @@ export function createSimulatorScreenStream(
     } catch {
       return refuse(400, { error: "simulator-device-broker-refused" });
     }
-    const looked = await screenOf(watch.udid, WATCH_START_MS);
-    if (looked.kind !== "screen") return refuse(409, looked);
+    // Listening before the first wait: a viewer who hangs up during the screen
+    // lookup closes the response before a later listener would exist, and the
+    // watch started afterwards could never be stopped.
     let open = true;
+    let stopWatching: (() => void) | undefined;
+    outgoing.once("close", () => {
+      open = false;
+      stopWatching?.();
+    });
+    const looked = await screenOf(watch.udid, WATCH_START_MS);
+    if (!open) return;
+    if (looked.kind !== "screen") return refuse(409, looked);
     let ready = false;
     let draining = false;
     // The helper sends the screen as it is the moment the stream starts, which
     // is before this answer's headers exist. It is kept and written first, or
     // a still device would show nothing until something on it moved.
     let early: Uint8Array | undefined;
-    let stopWatching: (() => void) | undefined;
     const send = (jpeg: Uint8Array) => {
       const header = Buffer.alloc(4);
       header.writeUInt32BE(jpeg.byteLength);
@@ -219,10 +227,6 @@ export function createSimulatorScreenStream(
         });
       }
     };
-    outgoing.once("close", () => {
-      open = false;
-      stopWatching?.();
-    });
     const started = await helpers.watch(
       watch.udid,
       {

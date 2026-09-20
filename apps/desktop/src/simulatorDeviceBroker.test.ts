@@ -321,6 +321,40 @@ describe("the Simulator screen stream", () => {
     await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
   });
 
+  it("starts no watch for a viewer who hung up while the screen was still being looked up", async () => {
+    let answerHello!: (reply: DeviceHelperReply) => void;
+    const watch = vi.fn(async (): Promise<DeviceWatch> => ({ status: "watching", stop: vi.fn() }));
+    const slow: SimulatorDeviceHelpers = {
+      send: vi.fn(
+        () =>
+          new Promise<DeviceHelperReply>((resolve) => {
+            answerHello = resolve;
+          }),
+      ),
+      watch,
+      busy: () => false,
+      dispose: vi.fn(),
+    };
+    const url = await serve(slow);
+    const abort = new AbortController();
+    const pending = fetch(url, {
+      method: "POST",
+      body: JSON.stringify({
+        watch: { udid, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      }),
+      signal: abort.signal,
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(slow.send).toHaveBeenCalled());
+
+    abort.abort();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    answerHello({ status: "delivered", screen: { width: 1206, height: 2622 } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(watch).not.toHaveBeenCalled();
+  });
+
   it("answers a Simulator that cannot be watched with the helper's reason, not an empty stream", async () => {
     const { fake } = helpers((sent) =>
       sent.op === "hello"

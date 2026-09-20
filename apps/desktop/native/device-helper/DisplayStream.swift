@@ -87,7 +87,20 @@ final class DisplayStream {
             defer { running = true }
             return running
         }
-        if !alreadyRunning { try register() }
+        if !alreadyRunning {
+            do {
+                try register()
+            } catch {
+                // A toolchain whose display reports no frames must keep failing
+                // closed; left marked as running, the next request would skip
+                // registration and answer as if a stream had started.
+                lock.withLock {
+                    running = false
+                    self.write = nil
+                }
+                throw error
+            }
+        }
         // The screen as it is now: a still device presents no frame to wait for.
         frameArrived()
     }
