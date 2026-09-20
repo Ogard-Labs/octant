@@ -110,6 +110,53 @@ describe("shared Seatbelt profile builder", () => {
     },
   );
 
+  it("denies a bound root it may not write even when the temporary directory holds it", () => {
+    // A scratch checkout under `$TMPDIR` — where the provider smokes put theirs
+    // — was writable through the temporary directory's own subpath grant, so a
+    // Plan launch could create a file inside the checkout it may only read.
+    const temporaryDirectory = temporaryRoot();
+    const checkout = join(temporaryDirectory, "checkout");
+    mkdirSync(checkout);
+
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: checkout,
+      temporaryDirectory,
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    });
+
+    const lines = profile.split("\n");
+    expect(lines).toContain(seatbeltDenyRule("file-write*", checkout));
+    expect(lines.indexOf(seatbeltDenyRule("file-write*", checkout))).toBeGreaterThan(
+      lines.indexOf(seatbeltAllowRule("file-write*", temporaryDirectory)),
+    );
+    expect(profile).not.toContain(seatbeltAllowRule("file-write*", checkout));
+  });
+
+  it("opens a provider's credential lookup without opening the keychain files", () => {
+    const root = temporaryRoot();
+    const input = {
+      boundRoot: root,
+      temporaryDirectory: root,
+      networkEgress: "allow",
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    } as const;
+
+    const withLookup = buildDenyDefaultSeatbeltProfile({
+      ...input,
+      allowProviderCredentialLookup: true,
+    });
+
+    expect(withLookup).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
+    // The daemon opens the store; this process may never read it off disk.
+    expect(withLookup).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
+    expect(withLookup).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
+    expect(buildDenyDefaultSeatbeltProfile(input)).not.toContain("com.apple.SecurityServer");
+  });
+
   it("grants the resolved form of a launch root reached through a symlink", () => {
     const root = temporaryRoot();
     const checkout = join(root, "project");

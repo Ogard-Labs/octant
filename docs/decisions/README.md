@@ -151,6 +151,7 @@ distilled successor of the earlier long-form design specifications.
 | [0137](0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md) | Simulator input reaches the guest through a native device helper | Accepted |
 | [0138](0138-codex-delegation-stops-at-the-edit-waiver.md) | Codex delegation stops at the edit waiver | Accepted |
 | [0139](0139-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
+| [0140](0140-a-plan-turn-is-confined-by-octant.md) | A Plan turn is confined by Octant and reaches only its provider | Accepted |
 | [0141](0141-a-version-read-launches-confined.md) | A version read launches confined, with no root, no home, and no network | Accepted |
 
 ## Adding an ADR

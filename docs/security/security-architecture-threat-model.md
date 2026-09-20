@@ -290,22 +290,25 @@ window, or approves an action class the host policy reserves for the local user.
   subtree — macOS resolves every temporary directory beneath `/private` — and nothing more: their
   listings and contents stay denied.
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
-  `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts` — the runtimes
-  whose process carries exactly one thread's root, mode, and execution policy. All three return
-  the binary unwrapped on Full access, 0009's user-selected unrestricted posture; ACP keeps
-  0006's static MCP, skills, and hooks denials there.
+  `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts`, and
+  `claudeProcess.ts` on Plan — the launches whose process carries exactly one thread's root, mode,
+  and execution policy. All of them return the binary unwrapped on Full access, 0009's
+  user-selected unrestricted posture; ACP keeps 0006's static MCP, skills, and hooks denials
+  there. A bound root a launch may not write is denied in the profile rather than left ungranted,
+  so a checkout under the launch's own temp is not writable through that directory's grant.
   `apps/server/src/childProcessEnvironment.ts` strips the broker URLs, broker tokens, and desktop
   bridge secret from every child, and argv carrying a provider credential is refused.
-- **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server and the
-  Claude Agent SDK launch are not wrapped, a scoped exception recorded in
-  `docs/decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
-  those threads reach stay confined. What the runtime process itself is left holding:
+- **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
+  wrapped, and neither is a Claude launch on the two postures that write, a scoped exception
+  recorded in `docs/decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md` and
+  narrowed by `docs/decisions/0140-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
+  threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
-    user-selected Full access). Claude sends sandbox settings only on approval-gated and
-    auto-accept-edits turns; `claudeSandboxSettings` returns nothing for Plan and Full access, so
-    a Claude Plan turn is read-only by `permissionMode` alone and not at any sandbox — which 0009
-    requires and which therefore does not hold for that one path.
+    user-selected Full access). Claude sends sandbox settings on approval-gated and
+    auto-accept-edits turns, which is the whole of its remaining exception: a Claude Plan launch
+    now carries Octant's own profile, so Plan's read-only boundary is the kernel's on that path
+    rather than the runtime's `permissionMode` (0140).
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
     Codex does not: `sanitizeCodexEnvironment` drops only `OCTANT_*`, `ELECTRON_RUN_AS_NODE` and
     `NODE_OPTIONS`, so every other inherited variable — a `GITHUB_TOKEN` or a cloud key among
@@ -314,6 +317,14 @@ window, or approves an action class the host policy reserves for the local user.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
+- **A confined runtime may look up its own subscription credential.** The Claude runtime keeps
+  that credential in the macOS Keychain rather than in its provider home, so the confined Plan
+  launch opens a mach-lookup to the security server (0140). The keychain files stay denied, so the
+  process cannot read the store off disk and the daemon returns only what that binary is already
+  trusted for. This is the one launch flag that reaches private credential material; no tool
+  launch sets it, and the severity table's "reading Keychain material" still describes reading the
+  store rather than this lookup. Which service name a given runtime takes was not measured on the
+  authoring host, so both the modern and legacy entry points are opened.
 - **Version reads are confined; one readiness probe is not.** Every `--version` read prepares
   its launch through `prepareConfinedVersionProbe`
   (`apps/server/src/process/confinedVersionProbe.ts`), recorded in

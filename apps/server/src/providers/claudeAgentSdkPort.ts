@@ -29,7 +29,7 @@ import {
   sanitizeFailure,
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
-import type { ClaudeProcessPort } from "./claudeProcess";
+import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
 
 export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
 
@@ -408,7 +408,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly plugins: readonly [];
   readonly includePartialMessages: true;
   readonly sandbox?: ClaudeSandboxSettings;
-  readonly spawnClaudeCodeProcess: ClaudeProcessPort["spawn"];
+  readonly spawnClaudeCodeProcess: SpawnClaudeCodeProcess;
   readonly canUseTool: (
     toolName: string,
     input: Record<string, unknown>,
@@ -785,7 +785,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                       },
                     },
                   }),
-              spawnClaudeCodeProcess: options.spawnClaudeCodeProcess,
+              // The SDK composes the launch and its `SpawnOptions` carry no
+              // bound root or posture, so this query's own are bound to the
+              // callback here (0139, 0140).
+              spawnClaudeCodeProcess: options.spawnClaudeCodeProcess({
+                projectRoot: input.projectRoot,
+                executionPolicy: input.executionPolicy,
+              }),
               canUseTool,
               hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
             };

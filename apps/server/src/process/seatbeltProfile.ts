@@ -63,6 +63,19 @@ export interface SeatbeltProfileInput {
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
   /**
+   * Whether this launch is a provider runtime that resolves its own subscription
+   * credential from the platform secret store.
+   *
+   * The Claude runtime keeps its subscription credential in the macOS Keychain
+   * rather than in its provider home, so a deny-default launch reports itself
+   * signed out and no turn starts. This opens the security server's lookup and
+   * nothing else: `/Library/Keychains` and the user's own `~/Library/Keychains`
+   * stay denied as files, so a confined process still cannot read the store off
+   * disk, and the daemon's per-item ACL hands back only the item this binary is
+   * already trusted for. Off by default, and never set for a tool launch.
+   */
+  readonly allowProviderCredentialLookup?: boolean;
+  /**
    * Whether this process drives the iOS Simulator.
    *
    * `simctl` reaches CoreSimulatorService over XPC, and the service reaches
@@ -124,6 +137,8 @@ export interface SeatbeltConfinementPrepareInput {
   readonly writeBoundRoot?: boolean;
   /** See {@link SeatbeltProfileInput.allowSimulatorControl}. */
   readonly allowSimulatorControl?: boolean;
+  /** See {@link SeatbeltProfileInput.allowProviderCredentialLookup}. */
+  readonly allowProviderCredentialLookup?: boolean;
   /** See {@link SeatbeltProfileInput.additionalDenyReadPaths}. */
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.additionalDenyWritePaths}. */
@@ -508,6 +523,19 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
           seatbeltAllowRule("file-read*", "/System/Library/Security"),
         ]
       : []),
+    // A provider runtime that keeps its own subscription credential in the
+    // platform secret store asks the security server for it over XPC; the
+    // daemon, not this process, opens the keychain file. Both service names are
+    // listed because the modern and legacy entry points are both in use and
+    // which one a given runtime takes could not be measured here. The keychain
+    // files stay denied above and below, so this opens the lookup and not the
+    // store (0140).
+    ...(input.allowProviderCredentialLookup === true
+      ? [
+          '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+          '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+        ]
+      : []),
     // Driving the Simulator needs three things, and the failure without them is
     // silent rather than loud. Measured by bisection on macOS 27:
     //
@@ -569,6 +597,16 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...(input.allowSimulatorControl === true
       ? [seatbeltAllowRule("file-read*", "/private/var/run/com.apple.security.cryptexd/mnt")]
       : []),
+    // A bound root this launch may not write is denied outright, not merely
+    // left ungranted. The temporary-directory grant above is a subpath rule, so
+    // a checkout that happens to live under the launch's temp — a scratch
+    // worktree under `$TMPDIR`, which is where the provider smokes put theirs —
+    // was writable through that ancestor, and a Plan turn could create a file
+    // in it. Seatbelt resolves by last matching rule, so this denial has to sit
+    // after both grants.
+    ...(writeBoundRoot
+      ? []
+      : resolvedRootForms(input.boundRoot).map((path) => seatbeltDenyRule("file-write*", path))),
     ...additionalDenyWritePaths.map((path) => seatbeltDenyRule("file-write*", path)),
     ...uniqueAbsolutePaths(additionalWriteRoots.flatMap((path) => resolvedRootForms(path))).map(
       (path) => seatbeltAllowRule("file-write*", path),
@@ -683,6 +721,9 @@ function prepareDarwinSeatbelt(
     ...(input.allowSimulatorControl === undefined
       ? {}
       : { allowSimulatorControl: input.allowSimulatorControl }),
+    ...(input.allowProviderCredentialLookup === undefined
+      ? {}
+      : { allowProviderCredentialLookup: input.allowProviderCredentialLookup }),
     ...(input.additionalDenyReadPaths === undefined
       ? {}
       : { additionalDenyReadPaths: input.additionalDenyReadPaths }),
