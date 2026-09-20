@@ -49,6 +49,14 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
     canOfferAppleSimulatorFrameInput(frame);
   const streamed =
     frame.status === "live" && props.liveScreen?.status === "live" ? props.liveScreen : undefined;
+  // The queue lives with the frame, not with the streamed screen: a live view
+  // that reconnects unmounts the screen for a moment, and what a person had
+  // typed just before was thrown away with it.
+  const enqueue = useOrderedSimulatorInput({
+    owner: frame.status === "live" ? String(frame.simulatorId) : "",
+    busy: props.busy === true,
+    ...(props.onInput === undefined ? {} : { onInput: props.onInput }),
+  });
   return (
     <figure
       aria-label="iOS Simulator live frame"
@@ -58,15 +66,13 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
       <figcaption>{frame.title}</figcaption>
       {frame.status === "live" && streamed !== undefined ? (
         <StreamedDevice
-          // A device's waiting input, pending press and typing timer belong to
-          // one Simulator. When the frame moves to another they are dropped with
-          // the component, so nothing typed on one device is sent to the next.
+          // A pending press belongs to one Simulator. When the frame moves to
+          // another it is dropped with the component.
           key={String(frame.simulatorId)}
           attach={streamed.attach}
-          busy={props.busy === true}
+          enqueue={enqueue}
           name={frame.name}
           offerInput={offerInput}
-          {...(props.onInput === undefined ? {} : { onInput: props.onInput })}
           screen={streamed.screen}
         />
       ) : frame.status === "live" && props.screenUrl !== undefined ? (
@@ -74,7 +80,11 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
           busy={props.busy === true}
           name={frame.name}
           offerInput={offerInput}
-          {...(props.onInput === undefined ? {} : { onInput: props.onInput })}
+          // Through the same queue: a tap on the still while the live view
+          // reconnects must not overtake text that is waiting for its pause.
+          {...(props.onInput === undefined
+            ? {}
+            : { onInput: (intent: AppleSimulatorFrameInputIntent) => enqueue(intent, false) })}
           screenUrl={props.screenUrl}
         />
       ) : frame.status === "live" && frame.screen.kind === "screenshot" ? (
@@ -88,7 +98,10 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
         </p>
       )}
       {offerInput && streamed === undefined ? (
-        <FrameInputControls busy={props.busy === true} onInput={props.onInput!} />
+        <FrameInputControls
+          busy={props.busy === true}
+          onInput={(intent) => enqueue(intent, false)}
+        />
       ) : null}
     </figure>
   );
@@ -155,10 +168,12 @@ const UNANSWERED_INPUT_MS = 1_000;
  * pause has passed — waits here instead of being lost or overtaking.
  */
 function useOrderedSimulatorInput(options: {
+  /** The Simulator the waiting input is for. */
+  readonly owner: string;
   readonly busy: boolean;
   readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
 }) {
-  const { busy, onInput } = options;
+  const { busy, onInput, owner } = options;
   // The host runs one Simulator action at a time. What a person does meanwhile
   // is kept in order and sent as each action finishes, so fast typing and a tap
   // right after a swipe are not lost to a disabled control.
@@ -212,12 +227,19 @@ function useOrderedSimulatorInput(options: {
     if (typingRef.current === undefined) sendNext();
   }, [busy, sendNext]);
 
+  // Waiting input and its timers belong to one Simulator. When the frame moves
+  // to another they are dropped, so nothing typed on one device is sent to the
+  // next. React runs this before the effect above sends for the new device.
   useEffect(
     () => () => {
       if (typingRef.current !== undefined) clearTimeout(typingRef.current);
       if (unansweredRef.current !== undefined) clearTimeout(unansweredRef.current);
+      typingRef.current = undefined;
+      unansweredRef.current = undefined;
+      waitingRef.current = [];
+      sentRef.current = false;
     },
-    [],
+    [owner],
   );
 
   const enqueue = (intent: AppleSimulatorFrameInputIntent, typing: boolean) => {
@@ -259,14 +281,10 @@ function StreamedDevice(props: {
   readonly screen: { readonly width: number; readonly height: number };
   readonly attach: (canvas: HTMLCanvasElement | null) => void;
   readonly offerInput: boolean;
-  readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
-  readonly busy: boolean;
+  readonly enqueue: (intent: AppleSimulatorFrameInputIntent, typing: boolean) => void;
 }) {
-  const enqueue = useOrderedSimulatorInput({
-    busy: props.busy,
-    ...(props.onInput === undefined ? {} : { onInput: props.onInput }),
-  });
-  const active = props.offerInput && props.onInput !== undefined;
+  const { enqueue } = props;
+  const active = props.offerInput;
   return (
     <>
       <StreamedScreen

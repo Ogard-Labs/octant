@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { decodeAppleSimulatorId } from "@octant/contracts/apple-toolchain";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
+import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 
 const simulatorId = decodeAppleSimulatorId("90000000-0000-4000-8000-000000000006");
 
@@ -426,6 +427,39 @@ describe("AppleSimulatorLiveFrameView", () => {
       });
 
       expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("still sends what was typed when the same Simulator's live view reconnects meanwhile", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const view = (liveScreen: AppleSimulatorLiveScreen) => (
+        <AppleSimulatorLiveFrameView
+          busy={false}
+          frame={frame}
+          inputEnabled
+          liveScreen={liveScreen}
+          onInput={onInput}
+        />
+      );
+      const live: AppleSimulatorLiveScreen = {
+        status: "live",
+        screen: { width: 1206, height: 2622 },
+        attach: vi.fn(),
+      };
+      const { rerender } = render(view(live));
+      fireEvent.keyDown(drawnAt402(), { key: "o" });
+      fireEvent.keyDown(drawnAt402(), { key: "k" });
+
+      // The stream ends before the typing pause has passed, and comes back.
+      rerender(view({ status: "connecting" }));
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      rerender(view(live));
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "type-text", text: "ok" },
+      ]);
     });
 
     it("pairs a release with the finger that pressed, not with another one lifting", () => {
