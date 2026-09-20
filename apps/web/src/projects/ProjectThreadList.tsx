@@ -39,7 +39,7 @@ import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import {
@@ -183,6 +183,33 @@ export function threadRowShortAge(updatedAt: string | undefined): string | undef
   const days = Math.round(hours / 24);
   if (days < 365) return `${days}d`;
   return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+}
+
+/**
+ * The time a row shows: when a snoozed thread returns, otherwise how long ago
+ * it last moved, and only while the view shows Last updated.
+ */
+export function threadRowAgeFact(
+  thread: {
+    readonly wakeLabel?: string;
+    readonly snooze?: { readonly until: string };
+    readonly updatedAt?: string;
+  },
+  showsLastUpdated: boolean,
+): { readonly label: string; readonly title?: string } | undefined {
+  if (thread.wakeLabel !== undefined) {
+    return {
+      label: thread.wakeLabel,
+      ...(thread.snooze === undefined
+        ? {}
+        : { title: `Wakes ${new Date(thread.snooze.until).toLocaleString()}` }),
+    };
+  }
+  if (!showsLastUpdated) return undefined;
+  const label = threadRowShortAge(thread.updatedAt);
+  if (label === undefined) return undefined;
+  const title = threadRowAge(thread.updatedAt);
+  return { label, ...(title === undefined ? {} : { title }) };
 }
 
 export function threadRowAge(updatedAt: string | undefined): string | undefined {
@@ -762,7 +789,12 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   }
   const rowPullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const rowCheckout = shows.branch ? props.thread.checkoutChip : undefined;
-  const rowAge = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
+  // A snoozed row says when it comes back, not when it was last touched; a row
+  // whose snooze ended says so until it is opened, because it reappears where
+  // it was rather than at the top. Hiding Last updated hides the timestamp,
+  // never the wake time: a rested thread that never says when it returns reads
+  // as one that is simply gone.
+  const rowAge = threadRowAgeFact(props.thread, shows.lastUpdated);
   const row = (
     <OctantButton
       aria-current={props.activeThreadId === rowId ? "page" : undefined}
@@ -795,73 +827,23 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       type="button"
       variant="ghost"
     >
-      {props.thread.provider === undefined ? null : (
-        <span
-          className="sidebar-navigation__thread-provider"
-          title={props.thread.provider.displayName}
-        >
-          <ProviderGlyph
-            displayName={props.thread.provider.displayName}
-            driverKind={props.thread.provider.driverKind}
-            size={14}
-          />
-        </span>
-      )}
-      <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-headline">
-          <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
-          {rowPullRequest === undefined ? null : (
-            <span className="sidebar-navigation__thread-pr">
-              #{String(rowPullRequest.identity.number)}
-            </span>
-          )}
-        </span>
-        {rowCheckout === undefined ? null : (
-          <span className="sidebar-navigation__thread-checkout" title={rowCheckout.label}>
-            <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-            <span className="sidebar-navigation__thread-checkout-label">{rowCheckout.label}</span>
-          </span>
-        )}
-      </span>
-      {rowPullRequest === undefined ? null : (
-        <span
-          aria-label={`Pull request #${String(rowPullRequest.identity.number)} · ${rowPullRequest.state}`}
-          className="sidebar-navigation__thread-pr-mark"
-          data-state={rowPullRequest.state}
-          role="img"
-          title={`Pull request #${String(rowPullRequest.identity.number)} · ${rowPullRequest.state}`}
-        >
-          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />
-        </span>
-      )}
-      {/* A snoozed row says when it comes back, not when it was last touched;
-          a row whose snooze ended says so until it is opened, because it
-          reappears where it was rather than at the top. Hiding Last updated
-          hides the timestamp, never the wake time: a rested thread that never
-          says when it returns reads as one that is simply gone. */}
-      {props.thread.wakeLabel !== undefined ? (
-        <span
-          className="sidebar-navigation__thread-age"
-          title={`Wakes ${new Date(props.thread.snooze?.until ?? "").toLocaleString()}`}
-        >
-          {props.thread.wakeLabel}
-        </span>
-      ) : rowAge === undefined ? null : (
-        <span
-          className="sidebar-navigation__thread-age"
-          title={threadRowAge(props.thread.updatedAt)}
-        >
-          {rowAge}
-        </span>
-      )}
-      {shows.status ? (
-        <ThreadStatusMark
-          activity={activity}
-          unread={unread}
-          woke={props.thread.woke === true}
-          followUp={props.thread.followUp === true}
-        />
-      ) : null}
+      <SidebarThreadRowContent
+        {...(rowAge === undefined ? {} : { age: rowAge })}
+        {...(rowCheckout === undefined ? {} : { checkout: rowCheckout })}
+        {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
+        {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
+        status={
+          shows.status ? (
+            <ThreadStatusMark
+              activity={activity}
+              unread={unread}
+              woke={props.thread.woke === true}
+              followUp={props.thread.followUp === true}
+            />
+          ) : null
+        }
+        title={props.thread.title}
+      />
     </OctantButton>
   );
   const wrappedRow = (

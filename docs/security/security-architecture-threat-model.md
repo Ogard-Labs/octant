@@ -309,9 +309,12 @@ window, or approves an action class the host policy reserves for the local user.
     thread uses, so an unrelated key reaches a Pi process. Seatbelt confines a wrapped Pi
     turn's files and network, not the environment it was started with, and Full access is
     unwrapped, so a model-generated command reads those keys either way.
-    Codex does not: `sanitizeCodexEnvironment` drops only `OCTANT_*`, `ELECTRON_RUN_AS_NODE` and
-    `NODE_OPTIONS`, so every other inherited variable — a `GITHUB_TOKEN` or a cloud key among
-    them — reaches it. Under API-key authentication `ANTHROPIC_API_KEY` is written into Claude's
+    Codex's `sanitizeCodexEnvironment` is an allowlist too: host basics, locale, terminal and TLS
+    variables, proxy variables, Codex's own `CODEX_*` and `OPENAI_*` configuration, and the
+    credentials it names. A model provider's own credential crosses (`OPENAI_API_KEY`, the Bedrock
+    bearer token); a general-purpose one — a GitHub token, AWS IAM access keys — does not. The
+    allowlist is the only boundary there, because that runtime is unwrapped. Under API-key
+    authentication `ANTHROPIC_API_KEY` is written into Claude's
     child environment at launch and deleted from the in-memory object when the scope closes.
     0009 reads two ways on that: it says provider credentials are stripped from every child, and
     that secrets reach a process only as named references resolved at launch. This record states

@@ -1380,6 +1380,16 @@ describe("SettingsView", () => {
     expect(await screen.findByRole("button", { name: "Connect" })).toBeEnabled();
   });
 
+  it("shows the sidebar width as whole pixels, however it was dragged", () => {
+    renderSettings({ settings: { ...defaultShellSettings(), sidebarWidth: 357.890625 } });
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+
+    // Dragging the sidebar's edge saves a fractional width, and the row used to
+    // print all of it.
+    expect(screen.getByText("358px")).toBeVisible();
+    expect(screen.queryByText(/357\.89/)).toBeNull();
+  });
+
   it("assigns the settings surface an explicit visual class contract", () => {
     const onSettingsChange = vi.fn();
     render(

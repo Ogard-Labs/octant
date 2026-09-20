@@ -33,7 +33,10 @@ export function ZenRoot(props: ZenRootProps) {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
       const action = matchKeybinding(keybindings, event, isApplePlatform());
       if (action === undefined) return;
-      if (isEditableTarget(event.target) && props.active) return;
+      // A text field keeps its own chords whether or not Zen is showing. The
+      // default Zen chord is Mod+Shift+Z, which is Redo: guarded only while
+      // Zen was active, redoing in the composer opened Zen instead.
+      if (isEditableTarget(event.target)) return;
       if (action === "zen-mode") {
         event.preventDefault();
         props.onToggle();

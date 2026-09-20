@@ -27,15 +27,20 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         link: "h-auto p-0 text-foreground underline-offset-4 hover:underline",
       },
+      // Heights are rem so a control grows with the interface size. The root is
+      // 14px, not the 16px these steps assume, so the odd steps landed between
+      // pixels: 1.75rem was 24.5px and 2.25rem was 31.5px, and about a hundred
+      // small buttons drew a blurred edge. Each odd step rounds to a whole 2px,
+      // which gives 20, 24, 28, and 32 at the default size.
       size: {
         default:
           "h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-7 gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        xs: "h-[round(down,1.5rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-[round(1.75rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-[round(2.25rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
         icon: "size-8",
-        "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-7 rounded-md [&_svg:not([class*='size-'])]:size-3.5",
+        "icon-xs": "size-[round(down,1.5rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-[round(1.75rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3.5",
       },
     },
     defaultVariants: {

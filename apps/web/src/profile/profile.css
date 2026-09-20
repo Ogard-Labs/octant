@@ -116,7 +116,7 @@ fieldset.profile-editor__field > legend {
   opacity: 1;
   padding: 0.45rem 0.6rem;
   border: 1px dashed var(--octant-border, color-mix(in srgb, CanvasText 25%, transparent));
-  border-radius: var(--octant-radius-panel, 16px);
+  border-radius: var(--oct-radius-md);
 }
 
 .profile-editor__accents {
