@@ -359,6 +359,11 @@ describe("WindowChrome", () => {
     expect(revealed).toContain("width: auto;");
     // With Projects present the controls stay hover-only.
     expect(cssRule(".project-section__header-actions")).toContain("opacity: 0;");
+    // The host is a select when there is more than one, and a select sets its
+    // own size, so the tray's size has to name it too.
+    expect(styles).toMatch(
+      /\.composer-tray \.host-selector__select,\s*\.draft-thread__context-strip \.host-selector__select \{\s*font-size: var\(--oct-text-xs\);/,
+    );
   });
 
   it("parts one Project from the next by more than it parts two threads", () => {

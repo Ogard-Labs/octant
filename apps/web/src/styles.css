@@ -8162,7 +8162,11 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
    which are 12px at weight 500. At its own 14px it was the one larger word in
    the row on every start screen. */
 .composer-tray .host-selector,
-.draft-thread__context-strip .host-selector {
+.draft-thread__context-strip .host-selector,
+/* With more than one host the name is a select, which sets its own size, so
+   the ancestor alone left the multi-host row at the larger size. */
+.composer-tray .host-selector__select,
+.draft-thread__context-strip .host-selector__select {
   font-size: var(--oct-text-xs);
   font-weight: 500;
 }

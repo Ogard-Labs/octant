@@ -52,6 +52,25 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(screen.queryByText("Archive")).toBeNull();
   });
 
+  it("keeps an empty section's header quiet when it has no add control to show", () => {
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    // A fresh Chat sidebar offers no add control. Marking it empty revealed the
+    // organization menu at rest instead, which is not a way to start anything.
+    expect(screen.getByRole("region", { name: "Projects" })).not.toHaveAttribute("data-empty");
+  });
+
   it("nests chat threads under their Project and keeps Unfiled for threads with none", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
