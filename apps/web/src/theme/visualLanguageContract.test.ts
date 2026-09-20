@@ -222,6 +222,19 @@ describe("the public-block visual language", () => {
     }
   });
 
+  it("lets a table or code block reach the column's width in any reply", () => {
+    const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
+    // The reading measure belongs to running text. On the wrapper a reply that
+    // also reasoned or used a tool was capped whole, so its table stayed narrow
+    // while a plain reply's could run wide.
+    const parts = chat.match(/\.chat-transcript__parts\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(parts).not.toContain("max-width");
+    expect(chat).toMatch(
+      /\.chat-rich-text > :is\(p, ul, ol, h2, h3, h4, blockquote\)\s*\{\s*max-width: 72ch;/,
+    );
+    expect(chat).toMatch(/\.chat-transcript__parts > \.thinking\s*\{\s*max-width: 72ch;/);
+  });
+
   it("does not add a switch-specific focus ring after its reset", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";

@@ -455,6 +455,13 @@
 .chat-transcript__parts {
   display: grid;
   gap: var(--oct-space-3);
+}
+
+/* The measure belongs to running text, not to the wrapper. Capped here, a reply
+   that also thought or used a tool could never let its table or code block
+   reach the column's width, while a plain reply could. The reasoning block is
+   prose, so it keeps the measure itself. */
+.chat-transcript__parts > .thinking {
   max-width: 72ch;
 }
 
