@@ -30,14 +30,14 @@ export interface AppleToolchainRouteDependencies {
     envelope: AppleRpcEnvelope,
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
   /**
-   * Called with what an action came to, after it ran. The host's input grants
-   * follow what was delivered rather than what was asked. A request answered
-   * again from stored evidence delivered nothing, and does not call it.
+   * Called with what an action came to, after it ran, and when it began. The
+   * host's input grants follow what was delivered rather than what was asked.
    */
   readonly afterAction?: (
     request: AppleActionRequest,
     evidence: AppleBuildEvidence,
     context: AppleExecutionContext,
+    startedAt: string,
   ) => void;
   /** Simulators the thread may send input to without a new approval. */
   readonly inputGrants?: (
@@ -186,10 +186,7 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         case "apple-action-request": {
           const startedAt = nowIso();
           const evidence = await dependencies.service.execute(envelope.request, context);
-          // Evidence older than the request is a replay of an earlier answer.
-          if (Date.parse(evidence.completedAt) >= Date.parse(startedAt)) {
-            dependencies.afterAction?.(envelope.request, evidence, context);
-          }
+          dependencies.afterAction?.(envelope.request, evidence, context, startedAt);
           await dependencies.recordEvidence?.(evidence, startedAt);
           return encoded(
             {

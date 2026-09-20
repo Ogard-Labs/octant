@@ -3935,6 +3935,9 @@ export function startOctantServer(
             );
             if (context === undefined) return undefined;
             const evidence = await appleToolchainService.execute(request, context);
+            // An agent's shutdown closes a Simulator to every thread, and its
+            // input keeps a live grant open, the same as the pane's.
+            simulatorInputGrants.settle(request, evidence, context, startedAt);
             await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
@@ -4335,18 +4338,8 @@ export function startOctantServer(
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
-      afterAction: (request, evidence, context) =>
-        simulatorInputGrants.afterAction(
-          String(context.threadId),
-          {
-            kind: request.kind,
-            ...("simulatorId" in request && request.simulatorId !== undefined
-              ? { simulatorId: String(request.simulatorId) }
-              : {}),
-          },
-          evidence.outcome,
-          context.inputGranted === true,
-        ),
+      afterAction: (request, evidence, context, startedAt) =>
+        simulatorInputGrants.settle(request, evidence, context, startedAt),
       inputGrants: (threadId) => simulatorInputGrants.list(String(threadId)),
       ...(simulatorDevice === undefined
         ? {}

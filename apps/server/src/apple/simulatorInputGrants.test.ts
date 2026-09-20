@@ -95,6 +95,39 @@ describe("Simulator input grants", () => {
     expect(grants.isOpen(otherThread, iphone)).toBe(false);
   });
 
+  it("settles a finished action for the thread it ran on, from the request, its evidence and the context it ran under", () => {
+    let now = 0;
+    const grants = new SimulatorInputGrants(() => now);
+    const evidence = (completedAt: string, outcome = "succeeded") => ({ outcome, completedAt });
+    const at = (minute: number) => new Date(minutes(minute)).toISOString();
+    const tap = { kind: "tap", simulatorId: iphone };
+    grants.open(thread, iphone);
+
+    // Delivered at ten minutes: the grant now runs to twenty-five.
+    now = minutes(10);
+    grants.settle(tap, evidence(at(10)), { threadId: thread }, at(10));
+    now = minutes(24);
+    expect(grants.isOpen(thread, iphone)).toBe(true);
+
+    // The same request answered again from stored evidence delivered nothing.
+    now = minutes(20);
+    grants.settle(tap, evidence(at(10)), { threadId: thread }, at(20));
+    now = minutes(26);
+    expect(grants.isOpen(thread, iphone)).toBe(false);
+
+    // A shutdown that worked, run by an agent or a pane alike, closes every thread.
+    grants.open(thread, iphone);
+    grants.open(otherThread, iphone);
+    grants.settle(
+      { kind: "shutdown", simulatorId: iphone },
+      evidence(at(26)),
+      { threadId: otherThread },
+      at(26),
+    );
+    expect(grants.isOpen(thread, iphone)).toBe(false);
+    expect(grants.isOpen(otherThread, iphone)).toBe(false);
+  });
+
   it("closes a Simulator for every thread when it shuts down, and a thread's grants when the thread loses them", () => {
     const grants = new SimulatorInputGrants(() => 0);
     grants.open(thread, iphone);

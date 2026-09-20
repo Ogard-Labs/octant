@@ -58,6 +58,31 @@ export class SimulatorInputGrants {
   }
 
   /**
+   * Settles a finished action from the request, its evidence and the context it
+   * ran under. Every path that runs Apple actions calls this, so the workbench
+   * route and an agent's tool close and renew grants the same way. Evidence
+   * older than the request is a replay of an earlier answer: nothing was
+   * delivered, so nothing is renewed or closed.
+   */
+  settle(
+    request: { readonly kind: string; readonly simulatorId?: unknown },
+    evidence: { readonly outcome: string; readonly completedAt: string },
+    context: { readonly threadId: unknown; readonly inputGranted?: boolean },
+    startedAt: string,
+  ): void {
+    if (Date.parse(evidence.completedAt) < Date.parse(startedAt)) return;
+    this.afterAction(
+      String(context.threadId),
+      {
+        kind: request.kind,
+        ...(request.simulatorId === undefined ? {} : { simulatorId: String(request.simulatorId) }),
+      },
+      evidence.outcome,
+      context.inputGranted === true,
+    );
+  }
+
+  /**
    * What a finished action means for the grants. Only what happened counts,
    * not what was asked: a delivered input keeps its Simulator open, and a
    * Simulator that was shut down is closed to every thread. A failed input or
