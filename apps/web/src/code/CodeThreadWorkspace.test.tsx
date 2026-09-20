@@ -1,4 +1,4 @@
-import { decodeCodeAttachmentId } from "@octant/contracts/code";
+import { decodeCodeAttachmentId, decodeCodeRelativePath } from "@octant/contracts/code";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeAttachmentId, CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -318,6 +318,43 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Check the two sources.")).toBeVisible();
     await userEvent.click(screen.getByText("Thinking"));
     expect(thinking).not.toHaveAttribute("open");
+  });
+
+  it("ends a reply with the files that changed while its turn ran", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "reply",
+              role: "assistant",
+              text: "Added the helper.",
+              status: "completed",
+              changedFiles: {
+                files: [
+                  { path: decodeCodeRelativePath("src/helper.ts"), insertions: 12, deletions: 0 },
+                ],
+                total: 1,
+                truncated: false,
+              },
+            },
+            { id: "plain", role: "assistant", text: "Nothing to change.", status: "completed" },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    // One card, on the turn that has a record; a turn without one shows none
+    // rather than an empty card that would read as "nothing changed".
+    const cards = screen.getAllByRole("region", { name: "Files changed while this ran" });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent("1 file changed while this ran");
+    expect(cards[0]).toHaveTextContent("src/helper.ts");
+    const reply = screen.getByText("Added the helper.");
+    expect(
+      reply.compareDocumentPosition(cards[0] as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
   });
 
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {

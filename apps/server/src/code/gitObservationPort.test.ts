@@ -222,6 +222,51 @@ describe("GitObservationPort", () => {
     expect(result.deletions).toBe(1);
   });
 
+  it("lists what differs between two trees, one row per path with its line counts", async () => {
+    const repository = createRepository();
+    const before = gitOutput(repository, "rev-parse", "HEAD^{tree}").trim();
+    writeFileSync(join(repository, "README.md"), "alpha\nbeta\ngamma\n");
+    writeFileSync(join(repository, "notes.txt"), "loose\n");
+    writeFileSync(join(repository, "logo.bin"), Buffer.from([0, 1, 2, 0, 255]));
+    git(repository, "add", "-A");
+    const after = gitOutput(repository, "write-tree").trim();
+    const objects = allObjectNames(repository);
+
+    const port = new GitObservationPort(confinedOptions());
+    const result = await port.readTreeChanges({
+      checkoutRoot: repository,
+      from: before,
+      to: after,
+    });
+
+    expect(result).toEqual({
+      status: "ready",
+      changes: [
+        { path: "README.md", insertions: 3, deletions: 1, binary: false },
+        { path: "logo.bin", insertions: 0, deletions: 0, binary: true },
+        { path: "notes.txt", insertions: 1, deletions: 0, binary: false },
+      ],
+    });
+    // Reading is only reading: no object is written to answer it.
+    expect(allObjectNames(repository)).toEqual(objects);
+    expect(
+      await port.readTreeChanges({ checkoutRoot: repository, from: before, to: before }),
+    ).toEqual({ status: "ready", changes: [] });
+  });
+
+  it("refuses a change list for anything that is not plainly a Git object id", async () => {
+    const repository = createRepository();
+    const tree = gitOutput(repository, "rev-parse", "HEAD^{tree}").trim();
+    const port = new GitObservationPort(confinedOptions());
+
+    // An id reaches a command line, so an option or a ref name is never quoted through.
+    for (const from of ["--output=/tmp/owned", "HEAD", "main", ""]) {
+      expect(await port.readTreeChanges({ checkoutRoot: repository, from, to: tree })).toEqual({
+        status: "unavailable",
+      });
+    }
+  });
+
   it("refuses observation when a numstat field is not a complete integer", async () => {
     const repository = createRepository();
     writeFileSync(join(repository, "README.md"), "changed\n");

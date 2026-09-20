@@ -152,6 +152,7 @@ distilled successor of the earlier long-form design specifications.
 | [0138](0138-codex-delegation-stops-at-the-edit-waiver.md) | Codex delegation stops at the edit waiver | Accepted |
 | [0139](0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md) | The Simulator frame is a live view streamed through the host | Accepted |
 | [0140](0140-the-live-simulator-screen-is-driven-directly.md) | The live Simulator screen is driven directly | Accepted |
+| [0141](0141-a-code-turn-records-what-changed-in-its-checkout.md) | A Code turn records what changed in its checkout | Accepted |
 
 ## Adding an ADR
 
