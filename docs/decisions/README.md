@@ -80,7 +80,7 @@ distilled successor of the earlier long-form design specifications.
 | [0070](0070-setup-surfaces-compose-from-public-blocks.md)                    | Renderer visual language matches public block catalogs                                      | Superseded by 0090 |
 | [0071](0071-one-navigation-and-surface-hierarchy.md)                         | One navigation and surface hierarchy                                                        | Accepted           |
 | [0072](0072-settings-collections-stay-open.md)                               | Settings collections stay open                                                              | Accepted           |
-| [0073](0073-one-surface-language.md)                                         | One surface language across the renderer and the site                                       | Superseded by 0144 |
+| [0073](0073-one-surface-language.md)                                         | One surface language across the renderer and the site                                       | Accepted           |
 | [0074](0074-one-machine-one-canonical-host.md)                               | One Machine has one canonical host and store                                                | Accepted           |
 | [0075](0075-thread-reads-are-snapshot-first-and-change-driven.md)            | Thread reads are snapshot-first and change-driven                                           | Accepted           |
 | [0076](0076-pull-request-snapshot-survives-restart.md)                       | The pull-request snapshot survives host restart                                             | Accepted           |
