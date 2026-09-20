@@ -1268,14 +1268,32 @@ function parseBuildProduct(
  * log — the one thing a person needed to read was the one thing lost.
  */
 /**
- * Why typed text failed, without the host's words. A host's message can quote
- * the script that carried the text, so only a leading reason code is kept: a
- * lowercase, hyphenated token before the first colon, which is how the device
- * helper names a refusal and not a shape typed text or a script error takes.
+ * The refusals the desktop's device helper and its broker name. Only these may
+ * follow a failed typed text into evidence: a host's message can begin with
+ * what was typed, and a secret can look like a code.
+ */
+const TYPED_TEXT_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "unsupported-character",
+  "keyboard-layout-unsupported",
+  "keyboard-layout-unknown",
+  "not-booted",
+  "no-such-device",
+  "toolchain-unavailable",
+  "input-service-unavailable",
+  "daemon-unresponsive",
+  "send-stalled",
+  "helper-unavailable",
+  "deadline-too-short",
+  "deadline-passed",
+]);
+
+/**
+ * Why typed text failed, without the host's words: the leading reason code
+ * when it is one the device helper uses, and nothing otherwise.
  */
 function typedTextFailureNote(outcome: AppleBuildEvidence["outcome"], stderr: string): string {
   const code = /^([a-z][a-z-]{2,63}):/.exec(stderr.trimStart())?.[1];
-  return code === undefined
+  return code === undefined || !TYPED_TEXT_REFUSAL_CODES.has(code)
     ? `type-text ${outcome} (text redacted)`
     : `type-text ${outcome}: ${code} (text redacted)`;
 }
