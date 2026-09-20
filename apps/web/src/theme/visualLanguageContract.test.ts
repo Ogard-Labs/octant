@@ -38,6 +38,43 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("rounds every corner from a radius token", () => {
+    // One role, one number: a corner is a token, square, a circle, or the 1–4px
+    // of a mark. Rem literals rounded seven panels at seven sizes, and a rem
+    // corner also shrinks with the interface font size while a token does not.
+    const corner =
+      /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl))\))$/;
+    const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
+    const strays = cssFiles(webRoot).flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(declaration)]
+        .map((match) => (match[1] ?? "").trim())
+        .filter((value) => !value.split(/[\s/]+/).every((part) => corner.test(part)))
+        .map((value) => `${relative(webRoot, path)}: ${value}`),
+    );
+
+    expect(strays).toEqual([]);
+  });
+
+  it("gives a card, a menu, and a popover the same corner", () => {
+    // The recipes round cards, menus, and popovers at their `xl` step and the
+    // stylesheets round panels at the medium token. They were 14px and 16px, so
+    // a menu sat beside a popover with a different corner.
+    // The recipes' scale keeps its one root (0090), so the two numbers are
+    // read and compared rather than one aliased to the other.
+    const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
+    const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
+    const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const control = px(system, /--oct-radius-sm:\s*(\d+)px;/);
+    const card = px(system, /--oct-radius-md:\s*(\d+)px;/);
+    const rootStep = px(theme, /--radius:\s*calc\(var\(--oct-radius-sm\) - (\d+)px\);/);
+    const cardStep = px(tailwind, /--radius-xl:\s*calc\(var\(--radius\) \+ (\d+)px\);/);
+    expect(control - rootStep + cardStep).toBe(card);
+    // The radius scale has one definition; the second, unread set is gone.
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
+  });
+
   it("does not keep leftover .btn colour recipes beside the adapter", () => {
     const leftovers = cssFiles(webRoot)
       .map((path) => ({
@@ -62,6 +99,21 @@ describe("the public-block visual language", () => {
       .map((file) => file.path);
 
     expect(leftovers).toEqual([]);
+  });
+
+  it("keeps every recipe control on whole pixels at the default interface size", () => {
+    // Recipe heights are rem so a control grows with the interface size, and the
+    // root is 14px. A quarter-rem step is 3.5px there, so an odd step lands
+    // between pixels: `h-7` drew about a hundred 24.5px buttons. An odd step
+    // goes through `round(…, 2px)` instead.
+    const oddStep = /(?<![\w:-])(?:min-h|h|size)-(\d+)(?![\w.[-])/g;
+    const strays = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(oddStep)]
+        .filter((match) => Number(match[1]) >= 5 && Number(match[1]) % 2 === 1)
+        .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
+    );
+
+    expect(strays).toEqual([]);
   });
 
   it("does not leave leftover btn-icon or btn-group class names on product surfaces", () => {
@@ -187,9 +239,19 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(/\.turn-user \.bubble \{[^}]*box-shadow:\s*none/);
     expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
     expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
-    expect(system).toMatch(/\.turn-agent \{[^}]*background:\s*var\(--oct-surface\)/);
-    expect(system).toMatch(/\.turn-agent \{[^}]*border:\s*1px solid var\(--oct-border\)/);
-    expect(system).toMatch(/\.turn-agent \{[^}]*border-radius:\s*var\(--oct-radius-md\)/);
+    // A reply is bare prose on the reading surface. It carries a reading card
+    // only where there is no surface under it: over the application ground or
+    // a translucent workspace. Worn everywhere, the card made every answer a
+    // widget.
+    expect(system).toMatch(/\n\.turn-agent \{[^}]*background:\s*transparent/);
+    expect(system).toMatch(/\n\.turn-agent \{[^}]*border:\s*0;/);
+    const readingCard =
+      /\.shell--app-backdrop \.turn-agent,\n\.shell--workspace-material-translucent \.turn-agent \{([^}]*)\}/.exec(
+        system,
+      )?.[1] ?? "";
+    expect(readingCard).toMatch(/background:\s*var\(--oct-surface\)/);
+    expect(readingCard).toMatch(/border:\s*1px solid var\(--oct-border\)/);
+    expect(readingCard).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
     expect(system).toMatch(
       /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 28px;\n  height: 28px;/,
     );
@@ -210,6 +272,19 @@ describe("the public-block visual language", () => {
       // Chat composes its status class with its live/quiet modifiers.
       expect(source).toMatch(/className=\{?[`"]composer-status\b/);
     }
+  });
+
+  it("lets a table or code block reach the column's width in any reply", () => {
+    const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
+    // The reading measure belongs to running text. On the wrapper a reply that
+    // also reasoned or used a tool was capped whole, so its table stayed narrow
+    // while a plain reply's could run wide.
+    const parts = chat.match(/\.chat-transcript__parts\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(parts).not.toContain("max-width");
+    expect(chat).toMatch(
+      /\.chat-rich-text > :is\(p, ul, ol, h2, h3, h4, blockquote\)\s*\{\s*max-width: 72ch;/,
+    );
+    expect(chat).toMatch(/\.chat-transcript__parts > \.thinking\s*\{\s*max-width: 72ch;/);
   });
 
   it("does not add a switch-specific focus ring after its reset", () => {
@@ -307,6 +382,25 @@ describe("the public-block visual language", () => {
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
   });
 
+  it("gives icon-only controls two sizes: the rail button and the row action", () => {
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    // A panel's icon control is the 28px rail button. The terminal's actions
+    // button was 26px and both Refresh buttons took a rem size from the recipe,
+    // which rendered 25px and 29px beside the 28px controls around them.
+    const terminal = code.match(/\.code-terminal-pane__actions-trigger\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(terminal).toContain("width: var(--oct-rail-button-h);");
+    expect(terminal).toContain("height: var(--oct-rail-button-h);");
+    for (const file of ["code/CodeFileExplorer.tsx", "work/WorkFilesPanel.tsx"]) {
+      const source = readFileSync(join(webRoot, file), "utf8");
+      expect(source).toMatch(/<OctantIconButton[^>]*label="Refresh files"/s);
+    }
+    // An action inside a row is a 24px square, on a Project row as on a thread row.
+    const projectAction = styles.match(/\.project-row__action--icon\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(projectAction).toContain("height: 24px;");
+    expect(projectAction).not.toContain("height: var(--oct-nav-row-h);");
+  });
+
   it("retires the legacy underline tab paint from feature surfaces", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const artifacts = readFileSync(join(webRoot, "artifacts/ArtifactLibraryView.tsx"), "utf8");
@@ -391,6 +485,25 @@ describe("the public-block visual language", () => {
       /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
     );
     expect(hint).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
+  });
+
+  it("gives every single-line Settings control one height", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // The recipe's default is 28px. The older field rows set 32px while the
+    // newer sections took the recipe's height, so the same select was 32px on
+    // one page and 28px on the next, and steppers stood 32px beside both.
+    const heights = [...settings.matchAll(/--oct-settings-control-height:\s*([^;]+);/g)].map(
+      (match) => match[1],
+    );
+    expect(heights.length).toBeGreaterThan(0);
+    expect(new Set(heights)).toEqual(new Set(["28px"]));
+    expect(settings).toMatch(
+      /\.octant-number-stepper__input \{[^}]*height: calc\(var\(--oct-settings-control-height, 28px\) - 2px\);/,
+    );
+    expect(runtime).toMatch(
+      /\.settings-view__text-input\[type="color"\] \{[^}]*height: var\(--oct-settings-control-height, 28px\);/,
+    );
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {

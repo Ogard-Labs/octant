@@ -95,5 +95,5 @@ approval categories that stay independent of which provider is running.
 - 0012 Mixed-provider subagents
 - 0110 Native harness model-reviewed approvals (scoped exception)
 - 0132 Provider runtimes reach provider endpoints (scoped exception)
-- 0139 Confinement wraps a runtime that carries one thread (scoped exception)
-- 0140 A Plan turn is confined by Octant (Plan's rule enforced; one read rule scoped)
+- 0142 Confinement wraps a runtime that carries one thread (scoped exception)
+- 0143 A Plan turn is confined by Octant (Plan's rule enforced; one read rule scoped)

@@ -300,35 +300,53 @@ window, or approves an action class the host policy reserves for the local user.
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
   wrapped, and neither is a Claude launch on the two postures that write, a scoped exception
-  recorded in `docs/decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md` and
-  narrowed by `docs/decisions/0140-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
+  recorded in `docs/decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md` and
+  narrowed by `docs/decisions/0143-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
   threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
     user-selected Full access). Claude sends sandbox settings on approval-gated and
     auto-accept-edits turns, which is the whole of its remaining exception: a Claude Plan launch
     now carries Octant's own profile, so Plan's read-only boundary is the kernel's on that path
-    rather than the runtime's `permissionMode` (0140).
+    rather than the runtime's `permissionMode` (0143).
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
-    Codex does not: `sanitizeCodexEnvironment` drops only `OCTANT_*`, `ELECTRON_RUN_AS_NODE` and
-    `NODE_OPTIONS`, so every other inherited variable — a `GITHUB_TOKEN` or a cloud key among
-    them — reaches it. Under API-key authentication `ANTHROPIC_API_KEY` is resolved into Claude's
-    environment at launch, as 0009 allows.
+    Pi's also admits all fifteen variables in `PROVIDER_CREDENTIALS` — `OPENAI_API_KEY`,
+    `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and the rest — from the host whichever provider the
+    thread uses, so an unrelated key reaches a Pi process. Seatbelt confines a wrapped Pi
+    turn's files and network, not the environment it was started with, and Full access is
+    unwrapped, so a model-generated command reads those keys either way.
+    Codex's `sanitizeCodexEnvironment` is an allowlist too: host basics, locale, terminal and TLS
+    variables, proxy variables, Codex's own `CODEX_*` and `OPENAI_*` configuration, and the
+    credentials it names. A model provider's own credential crosses (`OPENAI_API_KEY`, the Bedrock
+    bearer token); a general-purpose one — a GitHub token, AWS IAM access keys — does not cross
+    _as a variable_. That is a statement about the environment only; see _Files_ below. Under
+    API-key authentication `ANTHROPIC_API_KEY` is written into Claude's
+    child environment at launch and deleted from the in-memory object when the scope closes.
+    0009 reads two ways on that: it says provider credentials are stripped from every child, and
+    that secrets reach a process only as named references resolved at launch. This record states
+    the mechanism rather than settling which clause governs.
+  - _Files._ 0009's wrapped profile enumerates the rest of the user's home as denied. An unwrapped
+    runtime gets none of that. Both forward `HOME`, and Codex also forwards the AWS locators
+    (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`). So `~/.aws/credentials`,
+    `~/.config/gh/hosts.yml`, `~/.ssh` and anything else the user can read is reachable by the
+    runtime process, limited only by what the provider's own sandbox blocks. That is nothing on
+    Full access for either runtime, and nothing on a Claude Plan turn. Keeping a token out of the
+    environment does not keep it from a model-generated command that reads its file.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
-    with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
+    and those files with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
 - **A confined runtime may look up its own subscription credential.** The Claude runtime keeps
   that credential in the macOS Keychain rather than in its provider home, so the confined Plan
-  launch opens a mach-lookup to the security server (0140). The keychain files stay denied, so the
+  launch opens a mach-lookup to the security server (0143). The keychain files stay denied, so the
   process cannot read the store off disk and the daemon returns only what that binary is already
   trusted for. This is the one launch flag that reaches private credential material; no tool
   launch sets it, and the severity table's "reading Keychain material" still describes reading the
   store rather than this lookup. Which service name a given runtime takes was not measured on the
   authoring host, so both the modern and legacy entry points are opened.
-- **Version reads are confined; one readiness probe is not.** Every `--version` read prepares
+- **Version reads are confined; three readiness probes are not.** Every `--version` read prepares
   its launch through `prepareConfinedVersionProbe`
   (`apps/server/src/process/confinedVersionProbe.ts`), recorded in
-  `docs/decisions/0141-a-version-read-launches-confined.md`: the six family reads
+  `docs/decisions/0144-a-version-read-launches-confined.md`: the six family reads
   (`probeAcpBinary`, Claude's `runProbe` at `kind: "version"`, `probeCodexBinary`, Oh My Pi's and
   Pi's `inspectVersion`, `probeOpenCodeBinary`) and `scanDescriptor` in
   `apps/server/src/providers/discoveryService.ts`. The read binds no project root and no managed
@@ -338,12 +356,14 @@ window, or approves an action class the host policy reserves for the local user.
   the family computed from the scratch, so provider credentials, cloud keys and config-home
   variables never reach a replaced executable. A host that cannot confine refuses the read rather
   than running it, and it ends the read's whole process group when the read settles.
-  Process exec and fork stay allowed, a scoped exception to 0122 that 0141 states, because a
+  Process exec and fork stay allowed, a scoped exception to 0122 that 0144 states, because a
   configured path is routinely a launcher that starts the program that answers; a child inherits
-  the same profile. The remaining gap is `scanDescriptor`'s optional `authProbeArgs`, which reads
-  the provider's credential state out of the user's home and is therefore still spawned
-  unconfined against a candidate found on `PATH`; it bounds its timeout and output and sanitizes
-  its environment, and giving it a home it can read is a readiness-probe question under 0122.
+  the same profile. Three readiness launches stay unconfined, and 0122 expects each to retain
+  confinement: `scanDescriptor`'s optional `authProbeArgs`, which reads the provider's credential
+  state out of the user's home against a candidate found on `PATH`; Claude's `auth status --json`
+  in `runProbe`; and the Oh My Pi connection check's RPC process in `ohMyPiProcess.ts`. Each bounds
+  its timeout and output and sanitizes its environment. Giving them a home they can read is a
+  readiness-probe question under 0122.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,

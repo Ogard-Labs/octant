@@ -402,7 +402,10 @@ pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
-shows a thread-bound live frame from host-held screenshot evidence, with
+shows a thread-bound live frame — the Simulator's screen streamed through the
+host as it changes, authorized like a screenshot and never stored (see
+[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
+or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
@@ -412,7 +415,13 @@ attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason.
+and new lines, and every refusal names the helper's own reason. A swipe is a
+fourth input kind on the same channel, for the pane and for `octant_apple`
+alike, and the live screen is driven directly: a press and release is a tap, a
+drag is one swipe sent when it ends, keys typed on the focused screen go to
+the device as one text per pause, Home and Lock are buttons, and what a person
+does while an action runs is kept and sent in order (see
+[decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a
 thread as a context-aware dock tab opened from the title-bar shortcut or Add
 tool. It may
@@ -967,7 +976,7 @@ mechanisms are:
   scoped exception to 0009 recorded in
   [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md)
   and extended by
-  [decisions/0140-a-plan-turn-is-confined-by-octant.md](decisions/0140-a-plan-turn-is-confined-by-octant.md):
+  [decisions/0143-a-plan-turn-is-confined-by-octant.md](decisions/0143-a-plan-turn-is-confined-by-octant.md):
   the process producing a plan still has to ask the model for it, while the
   tools that thread reaches keep `none`.
   A provider runtime launch is wrapped when the process carries exactly one
@@ -975,14 +984,14 @@ mechanisms are:
   Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
   and the two Claude postures that write are not. That set is named and pinned
   by
-  [decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md)
-  and narrowed by 0140, and the tools those threads reach stay confined either
+  [decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md)
+  and narrowed by 0143, and the tools those threads reach stay confined either
   way. A bound root a launch may not write is denied in the profile, so a
   checkout under that launch's own temporary directory is not writable through
   it. The `--version` read every family and the discovery scan perform before a
   runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
-  [decisions/0141-a-version-read-launches-confined.md](decisions/0141-a-version-read-launches-confined.md).
+  [decisions/0144-a-version-read-launches-confined.md](decisions/0144-a-version-read-launches-confined.md).
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

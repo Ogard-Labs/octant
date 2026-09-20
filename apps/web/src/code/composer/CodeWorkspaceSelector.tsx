@@ -1,8 +1,6 @@
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import { ChevronDown, FolderGit2, FolderOpen } from "lucide-react";
-import { useState, type ReactNode } from "react";
-import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantPopover } from "../../ui/base/OctantPopover";
+import { OctantMenu } from "../../ui/base/OctantMenu";
 
 export const CODE_WORKSPACE_OPTIONS: ReadonlyArray<{
   readonly id: CodeNewThreadWorkspace;
@@ -30,18 +28,32 @@ export interface CodeWorkspaceSelectorProps {
   readonly value: CodeNewThreadWorkspace;
 }
 
+/**
+ * Where a new Code thread works: the Project's current checkout or a managed
+ * worktree of its own.
+ *
+ * It is the shared menu, with each choice's one sentence under its label. It
+ * used to be a popover of hand-built option buttons whose styles were removed
+ * when the access menu beside it moved to the shared menu, so it opened as an
+ * unstyled strip across the composer with label and sentence run together.
+ */
 export function CodeWorkspaceSelector(props: CodeWorkspaceSelectorProps) {
-  const [open, setOpen] = useState(false);
   const selected =
     CODE_WORKSPACE_OPTIONS.find((option) => option.id === props.value) ?? CODE_WORKSPACE_OPTIONS[0];
   const TriggerIcon = selected?.icon ?? FolderOpen;
 
   return (
-    <OctantPopover
-      className="code-composer-choice__menu"
-      onOpenChange={setOpen}
-      open={open}
-      title="Workspace"
+    <OctantMenu
+      items={CODE_WORKSPACE_OPTIONS.map((option) => ({
+        description: option.detail,
+        icon: <option.icon aria-hidden="true" size={14} strokeWidth={1.7} />,
+        label: option.label,
+        value: option.id,
+      }))}
+      onValueChange={(value) => {
+        const next = CODE_WORKSPACE_OPTIONS.find((option) => option.id === value);
+        if (next !== undefined) props.onChange(next.id);
+      }}
       trigger={
         <>
           <TriggerIcon aria-hidden="true" size={12} strokeWidth={1.8} />
@@ -50,50 +62,9 @@ export function CodeWorkspaceSelector(props: CodeWorkspaceSelectorProps) {
         </>
       }
       triggerClassName="code-composer-choice__trigger composer-tray__item"
-      triggerLabel="Workspace"
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
-    >
-      <p className="code-composer-choice__caption">Workspace</p>
-      <div aria-label="Workspace" className="code-composer-choice__list" role="listbox">
-        {CODE_WORKSPACE_OPTIONS.map((option) => (
-          <WorkspaceOption
-            icon={<option.icon aria-hidden="true" size={14} strokeWidth={1.7} />}
-            key={option.id}
-            label={option.label}
-            detail={option.detail}
-            onSelect={() => {
-              props.onChange(option.id);
-              setOpen(false);
-            }}
-            selected={option.id === props.value}
-          />
-        ))}
-      </div>
-    </OctantPopover>
-  );
-}
-
-function WorkspaceOption(props: {
-  readonly detail: string;
-  readonly icon: ReactNode;
-  readonly label: string;
-  readonly onSelect: () => void;
-  readonly selected: boolean;
-}) {
-  return (
-    <OctantButton
-      aria-selected={props.selected}
-      className="code-composer-choice__option"
-      onClick={props.onSelect}
-      role="option"
-      type="button"
-      variant="ghost"
-    >
-      <span className="code-composer-choice__option-icon">{props.icon}</span>
-      <span className="code-composer-choice__option-copy">
-        <span className="code-composer-choice__option-label">{props.label}</span>
-        <span className="code-composer-choice__option-detail">{props.detail}</span>
-      </span>
-    </OctantButton>
+      triggerLabel="Workspace"
+      value={props.value}
+    />
   );
 }

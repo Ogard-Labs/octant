@@ -1,8 +1,10 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ParseResult } from "effect";
 import {
   decodeSimulatorDeviceInput,
+  decodeSimulatorDeviceWatch,
+  SIMULATOR_SCREEN_HEADER,
   type SimulatorDeviceInput,
   type SimulatorDeviceInputResult,
 } from "@octant/contracts/simulator-device";
@@ -10,6 +12,8 @@ import type { DeviceHelperReply, SimulatorDeviceHelpers } from "./simulatorDevic
 
 const HEADER = "x-octant-simulator-device-token";
 const PATH = "/v1/simulator-device";
+const STREAM_PATH = "/v1/simulator-device/stream";
+const WATCH_START_MS = 20_000;
 const MAX_BODY_BYTES = 16 * 1024;
 /** The helper's answer has to reach the server before the action's own deadline. */
 const ANSWER_MARGIN_MS = 2_000;
@@ -31,12 +35,49 @@ function result(reply: DeviceHelperReply): SimulatorDeviceInputResult {
  * the point is divided by the screen size the helper itself reports — the
  * capture and the device share that pixel space.
  */
+type Screen = { readonly width: number; readonly height: number };
+
+/** A Simulator's screen size, asked of its helper once; a device never changes it. */
+function createScreenLookup(helpers: SimulatorDeviceHelpers) {
+  const screens = new Map<string, Screen>();
+  return async (
+    udid: string,
+    budgetMs: number,
+    cancelled?: AbortSignal,
+  ): Promise<
+    | { readonly kind: "screen"; readonly screen: Screen }
+    | Exclude<SimulatorDeviceInputResult, { readonly kind: "delivered" }>
+  > => {
+    const known = screens.get(udid);
+    if (known !== undefined) return { kind: "screen", screen: known };
+    const described = await helpers.send(udid, { op: "hello" }, budgetMs, cancelled);
+    if (described.status === "refused") {
+      return { kind: "refused", reason: described.code, message: described.message };
+    }
+    if (described.status === "unavailable") {
+      return { kind: "unavailable", reason: "helper-unavailable", message: described.message };
+    }
+    if (described.screen === undefined) {
+      return {
+        kind: "refused",
+        reason: "screen-size-unknown",
+        message: "The Simulator did not report a screen size.",
+      };
+    }
+    screens.set(udid, described.screen);
+    return { kind: "screen", screen: described.screen };
+  };
+}
+
 export function createSimulatorInputDelivery(
   helpers: SimulatorDeviceHelpers,
-  options: { readonly now?: () => number } = {},
+  options: {
+    readonly now?: () => number;
+    readonly screenOf?: ReturnType<typeof createScreenLookup>;
+  } = {},
 ) {
   const now = options.now ?? Date.now;
-  const screens = new Map<string, { readonly width: number; readonly height: number }>();
+  const screenOf = options.screenOf ?? createScreenLookup(helpers);
   return async (
     command: SimulatorDeviceInput,
     cancelled?: AbortSignal,
@@ -72,39 +113,66 @@ export function createSimulatorInputDelivery(
         ),
       );
     }
-    let screen = screens.get(command.udid);
-    if (screen === undefined) {
-      const described = await helpers.send(command.udid, { op: "hello" }, budgetMs, cancelled);
-      if (described.status !== "delivered") return result(described);
-      if (described.screen === undefined) {
-        return {
-          kind: "refused",
-          reason: "screen-size-unknown",
-          message: "The Simulator did not report a screen size to map the tap onto.",
-        };
-      }
-      screen = described.screen;
-      screens.set(command.udid, screen);
-    }
+    const looked = await screenOf(command.udid, budgetMs, cancelled);
+    if (looked.kind !== "screen") return looked;
+    const screen = looked.screen;
     const remainingMs = deadline - now();
-    if (remainingMs < SHORTEST_USEFUL_BUDGET_MS) {
+    // A swipe holds the helper for its whole pace. Started with less time than
+    // that, it was stopped part-way with a finger already down on the screen.
+    const neededMs =
+      SHORTEST_USEFUL_BUDGET_MS + (command.kind === "swipe" ? command.durationMs : 0);
+    if (remainingMs < neededMs) {
       return {
         kind: "unavailable",
         reason: "deadline-passed",
-        message: "Getting the Simulator ready used the action's time; nothing was tapped.",
+        message: "Getting the Simulator ready used the action's time; nothing was sent.",
       };
     }
-    const x = command.point.x / screen.width;
-    const y = command.point.y / screen.height;
-    if (x > 1 || y > 1) {
-      return {
-        kind: "refused",
-        reason: "point-off-screen",
-        message: `The point is outside the ${screen.width}×${screen.height} screen.`,
-      };
+    const fraction = (point: { readonly x: number; readonly y: number }) => ({
+      x: point.x / screen.width,
+      y: point.y / screen.height,
+    });
+    const offScreen: SimulatorDeviceInputResult = {
+      kind: "refused",
+      reason: "point-off-screen",
+      message: `The point is outside the ${screen.width}×${screen.height} screen.`,
+    };
+    if (command.kind === "swipe") {
+      const from = fraction(command.from);
+      const to = fraction(command.to);
+      if (from.x > 1 || from.y > 1 || to.x > 1 || to.y > 1) return offScreen;
+      return result(
+        await helpers.send(
+          command.udid,
+          {
+            op: "swipe",
+            fromX: from.x,
+            fromY: from.y,
+            toX: to.x,
+            toY: to.y,
+            durationMs: command.durationMs,
+          },
+          remainingMs,
+          cancelled,
+        ),
+      );
     }
+    const { x, y } = fraction(command.point);
+    if (x > 1 || y > 1) return offScreen;
     return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs, cancelled));
   };
+}
+
+/** Only the desktop's own server child: loopback, no browser origin, the exact token. */
+function admitted(headers: Headers, peer: string, token: string): boolean {
+  const supplied = Buffer.from(headers.get(HEADER) ?? "");
+  const expected = Buffer.from(token);
+  return (
+    (peer === "127.0.0.1" || peer === "::ffff:127.0.0.1") &&
+    !headers.has("origin") &&
+    supplied.length === expected.length &&
+    timingSafeEqual(supplied, expected)
+  );
 }
 
 export function simulatorDeviceBrokerHandler(
@@ -115,15 +183,7 @@ export function simulatorDeviceBrokerHandler(
   token: string,
 ) {
   return async (request: Request, peer = "127.0.0.1"): Promise<Response> => {
-    const supplied = Buffer.from(request.headers.get(HEADER) ?? "");
-    const expected = Buffer.from(token);
-    if (
-      (peer !== "127.0.0.1" && peer !== "::ffff:127.0.0.1") ||
-      request.headers.has("origin") ||
-      supplied.length !== expected.length ||
-      !timingSafeEqual(supplied, expected)
-    )
-      return failure(401);
+    if (!admitted(request.headers, peer, token)) return failure(401);
     const url = new URL(request.url);
     if (request.method !== "POST" || url.pathname !== PATH || url.search !== "") {
       return failure(400);
@@ -152,11 +212,142 @@ async function readBody(request: IncomingMessage): Promise<Uint8Array | undefine
   return Buffer.concat(chunks, length);
 }
 
+/**
+ * Answers a watch request with the Simulator's screen as it changes: a header
+ * naming the screen's pixel size, then length-prefixed JPEG frames until the
+ * caller hangs up. A frame is dropped while the caller is still taking the
+ * last one, so a slow reader sees the newest screen rather than an old queue.
+ */
+export function createSimulatorScreenStream(
+  helpers: SimulatorDeviceHelpers,
+  screenOf = createScreenLookup(helpers),
+) {
+  return async (body: unknown, outgoing: ServerResponse): Promise<void> => {
+    const refuse = (status: number, value: unknown) => {
+      outgoing.writeHead(status, { "content-type": "application/json" });
+      outgoing.end(JSON.stringify(value));
+    };
+    let watch;
+    try {
+      if (typeof body !== "object" || body === null || !("watch" in body)) throw new SyntaxError();
+      watch = decodeSimulatorDeviceWatch(body.watch);
+    } catch {
+      return refuse(400, { error: "simulator-device-broker-refused" });
+    }
+    // Listening before the first wait: a viewer who hangs up during the screen
+    // lookup closes the response before a later listener would exist, and the
+    // watch started afterwards could never be stopped.
+    // A viewer can also be gone before this runs — the request body is read
+    // first — and a close that already happened is never announced again.
+    if (outgoing.destroyed) return;
+    let open = true;
+    let stopWatching: (() => void) | undefined;
+    outgoing.once("close", () => {
+      open = false;
+      stopWatching?.();
+    });
+    const looked = await screenOf(watch.udid, WATCH_START_MS);
+    if (!open) return;
+    if (looked.kind !== "screen") return refuse(409, looked);
+    let ready = false;
+    let draining = false;
+    // The helper sends the screen as it is the moment the stream starts, which
+    // is before this answer's headers exist. It is kept and written first, or
+    // a still device would show nothing until something on it moved.
+    let early: Uint8Array | undefined;
+    // While the viewer is still taking a frame, newer ones are not queued —
+    // but the newest is kept. A device that goes still after an animation sends
+    // nothing more, so without it a slow viewer would stay on an old screen.
+    let missed: Uint8Array | undefined;
+    const send = (jpeg: Uint8Array) => {
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(jpeg.byteLength);
+      outgoing.write(header);
+      if (!outgoing.write(jpeg)) {
+        draining = true;
+        outgoing.once("drain", () => {
+          draining = false;
+          const newest = missed;
+          missed = undefined;
+          if (open && newest !== undefined) send(newest);
+        });
+      }
+    };
+    const started = await helpers.watch(
+      watch.udid,
+      {
+        maxHeight: watch.maxHeight,
+        quality: watch.quality,
+        framesPerSecond: watch.framesPerSecond,
+      },
+      {
+        onFrame: (jpeg) => {
+          if (!open) return;
+          if (draining) missed = jpeg;
+          else if (ready) send(jpeg);
+          else early = jpeg;
+        },
+        onEnd: () => {
+          open = false;
+          outgoing.end();
+        },
+      },
+      WATCH_START_MS,
+    );
+    if (started.status !== "watching") {
+      return refuse(
+        409,
+        started.status === "refused"
+          ? { kind: "refused", reason: started.code, message: started.message }
+          : { kind: "unavailable", reason: "helper-unavailable", message: started.message },
+      );
+    }
+    outgoing.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "cache-control": "no-store",
+      [SIMULATOR_SCREEN_HEADER]: `${looked.screen.width}x${looked.screen.height}`,
+    });
+    outgoing.flushHeaders();
+    stopWatching = started.stop;
+    if (!open) return started.stop();
+    ready = true;
+    if (early !== undefined) send(early);
+  };
+}
+
 /** A loopback, token-guarded endpoint the desktop's own server child calls. */
 export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers) {
   const token = randomBytes(32).toString("base64url");
-  const handle = simulatorDeviceBrokerHandler(createSimulatorInputDelivery(helpers), token);
+  const screenOf = createScreenLookup(helpers);
+  const handle = simulatorDeviceBrokerHandler(
+    createSimulatorInputDelivery(helpers, { screenOf }),
+    token,
+  );
+  const stream = createSimulatorScreenStream(helpers, screenOf);
   const server = createServer((incoming, outgoing) => {
+    if (incoming.method === "POST" && incoming.url === STREAM_PATH) {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(incoming.headers)) {
+        if (typeof value === "string") headers.set(name, value);
+      }
+      if (!admitted(headers, incoming.socket.remoteAddress ?? "", token)) {
+        outgoing.writeHead(401, { "content-type": "application/json" });
+        outgoing.end(JSON.stringify({ error: "simulator-device-broker-refused" }));
+        return;
+      }
+      void readBody(incoming)
+        .then((body) =>
+          stream(
+            body === undefined ? undefined : JSON.parse(Buffer.from(body).toString("utf8")),
+            outgoing,
+          ),
+        )
+        .catch(() => {
+          if (!outgoing.headersSent) outgoing.writeHead(400);
+          outgoing.end();
+        });
+      return;
+    }
     // The server cancels an action by dropping this connection. That has to
     // reach the helper, or a cold one would finish getting ready and deliver
     // the input seconds after the action was recorded as cancelled.

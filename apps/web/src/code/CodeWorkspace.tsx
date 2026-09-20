@@ -53,6 +53,7 @@ import type { CodeTerminalId } from "@octant/contracts/code";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWorkbenchPane";
 import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
+import { useAppleSimulatorLiveScreen } from "../apple/useAppleSimulatorLiveScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 
 const MonacoEditorPane = lazy(() =>
@@ -495,6 +496,27 @@ function AppleWorkbenchSurface(props: {
     enabled: liveFrame.status === "live",
     ...(screenshotRequest === undefined ? {} : { request: screenshotRequest }),
   });
+  const liveSimulatorId = liveFrame.status === "live" ? liveFrame.simulatorId : undefined;
+  const screenStreamRequest = useMemo(
+    () =>
+      liveSimulatorId === undefined
+        ? undefined
+        : {
+            kind: "apple-screen-stream-request" as const,
+            authority,
+            threadId: props.thread.id,
+            checkoutId: props.checkoutId,
+            simulatorId: liveSimulatorId,
+          },
+    [authority, liveSimulatorId, props.checkoutId, props.thread.id],
+  );
+  // A frame is "live" only on a client that can attach one, so a remote or
+  // headless client never opens a stream it could not be given.
+  const liveScreen = useAppleSimulatorLiveScreen({
+    client: props.client,
+    enabled: liveFrame.status === "live",
+    ...(screenStreamRequest === undefined ? {} : { request: screenStreamRequest }),
+  });
 
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
@@ -587,6 +609,7 @@ function AppleWorkbenchSurface(props: {
       busy={busy}
       liveFrame={liveFrame}
       {...(screenUrl === undefined ? {} : { screenUrl })}
+      liveScreen={liveScreen}
       status={controller.status}
       {...(controller.discovery === undefined ? {} : { discovery: controller.discovery })}
       {...(controller.runtime === undefined ? {} : { runtime: controller.runtime })}
@@ -660,6 +683,17 @@ function appleActionRequest(input: {
         requestedBy: localUserActor(),
         point: intent.point,
         ...(intent.target === undefined ? {} : { target: intent.target }),
+        timeoutMs: 30_000,
+      };
+    case "swipe":
+      return {
+        ...base,
+        kind: "swipe",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        point: intent.point,
+        toPoint: intent.toPoint,
+        durationMs: intent.durationMs,
         timeoutMs: 30_000,
       };
     case "type-text":
@@ -854,7 +888,7 @@ function PullRequestWorkspaceSurface(
 function GitObservationLoading() {
   return (
     <OctantEmptyRoot role="status">
-      <OctantEmptyMedia tone="neutral">
+      <OctantEmptyMedia>
         <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
       </OctantEmptyMedia>
       <OctantEmptyHeader>

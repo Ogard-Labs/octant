@@ -43,7 +43,7 @@ export interface OhMyPiProcessOptions {
   readonly versionTimeoutMs?: number;
   readonly readyTimeoutMs?: number;
   /**
-   * Confinement for the version read only. 0139 records that the declaration
+   * Confinement for the version read only. 0142 records that the declaration
    * probe itself is not wrapped, so this never names that launch.
    */
   readonly versionProbeConfinement?: SeatbeltConfinementPort;

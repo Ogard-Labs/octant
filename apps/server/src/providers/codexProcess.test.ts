@@ -128,14 +128,26 @@ afterAll(() => {
 });
 
 describe("sanitizeCodexEnvironment", () => {
-  it("preserves provider-native variables and strips Octant and runtime injection", () => {
+  it("carries only what the Codex CLI reads and drops every other host variable", () => {
     expect(
       sanitizeCodexEnvironment({
         PATH: "/usr/bin",
         HOME: "/Users/test",
+        TMPDIR: "/var/folders/tmp",
+        TERM: "xterm-256color",
+        LANG: "en_US.UTF-8",
+        LC_CTYPE: "en_US.UTF-8",
+        HTTPS_PROXY: "http://proxy.internal:3128",
+        https_proxy: "http://proxy.internal:3128",
+        SSL_CERT_FILE: "/etc/ssl/cert.pem",
         CODEX_HOME: "/Users/test/.codex",
+        CODEX_CA_CERTIFICATE: "/etc/ssl/corporate.pem",
+        OPENAI_BASE_URL: "https://api.openai.com/v1",
         OPENAI_API_KEY: "provider-owned",
-        AZURE_OPENAI_API_KEY: "provider-owned-too",
+        CODEX_ACCESS_TOKEN: "provider-owned-too",
+        AWS_BEARER_TOKEN_BEDROCK: "bedrock-provider-owned",
+        AWS_REGION: "us-east-1",
+        AWS_PROFILE: "work",
         OCTANT_DESKTOP_BRIDGE_SECRET: "must-not-cross",
         OCTANT_ANOTHER_VALUE: "remove-me",
         ELECTRON_RUN_AS_NODE: "1",
@@ -144,10 +156,41 @@ describe("sanitizeCodexEnvironment", () => {
     ).toEqual({
       PATH: "/usr/bin",
       HOME: "/Users/test",
+      TMPDIR: "/var/folders/tmp",
+      TERM: "xterm-256color",
+      LANG: "en_US.UTF-8",
+      LC_CTYPE: "en_US.UTF-8",
+      HTTPS_PROXY: "http://proxy.internal:3128",
+      https_proxy: "http://proxy.internal:3128",
+      SSL_CERT_FILE: "/etc/ssl/cert.pem",
       CODEX_HOME: "/Users/test/.codex",
+      CODEX_CA_CERTIFICATE: "/etc/ssl/corporate.pem",
+      OPENAI_BASE_URL: "https://api.openai.com/v1",
       OPENAI_API_KEY: "provider-owned",
-      AZURE_OPENAI_API_KEY: "provider-owned-too",
+      CODEX_ACCESS_TOKEN: "provider-owned-too",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-provider-owned",
+      AWS_REGION: "us-east-1",
+      AWS_PROFILE: "work",
     });
+  });
+
+  it("keeps general-purpose cloud and source-host credentials out of the app-server", () => {
+    // The app-server runs model-generated shell commands without confinement,
+    // so a host credential that crosses is readable by the model. IAM keys
+    // grant far more than the Bedrock access a bearer token or profile does.
+    expect(
+      sanitizeCodexEnvironment({
+        PATH: "/usr/bin",
+        GITHUB_TOKEN: "must-not-cross",
+        GH_TOKEN: "must-not-cross",
+        CODEX_GITHUB_PERSONAL_ACCESS_TOKEN: "must-not-cross",
+        AWS_ACCESS_KEY_ID: "must-not-cross",
+        AWS_SECRET_ACCESS_KEY: "must-not-cross",
+        AWS_SESSION_TOKEN: "must-not-cross",
+        ANTHROPIC_API_KEY: "another-provider",
+        STRIPE_SECRET_KEY: "must-not-cross",
+      }),
+    ).toEqual({ PATH: "/usr/bin" });
   });
 
   it("prepends the configured binary directory for env-based interpreters", () => {

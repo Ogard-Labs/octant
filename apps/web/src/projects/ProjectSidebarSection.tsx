@@ -11,14 +11,13 @@ import {
   Briefcase,
   Bug,
   Bell,
+  ChevronRight,
   Clock3,
   Code,
   Flag,
   Folder,
   FolderOpen,
   FolderGit,
-  GitBranch,
-  GitPullRequest,
   Layers,
   ListFilter,
   ListTree,
@@ -100,6 +99,7 @@ import {
   type SidebarRowPropertyView,
 } from "../shell/sidebarRowProperties";
 import {
+  EARLIER_ACTIVITY_GROUP_ID,
   buildSidebarActivityView,
   matchesSidebarSearch,
   readActivityViewEnabled,
@@ -125,11 +125,11 @@ import {
   ProjectThreadStatus,
   ThreadStatusMark,
   sidebarThreadStatusIcon,
-  threadRowAge,
-  threadRowShortAge,
+  threadRowAgeFact,
   hasInlineActions,
   ThreadRowContextMenu,
 } from "./ProjectThreadList";
+import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -656,6 +656,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               groups={activity.groups}
               lineageThreads={everyListedThread ?? []}
               onSelectThread={props.onSelectThread!}
+              searching={searching}
             />
           </SidebarRowPropertiesContext.Provider>
         ) : (
@@ -809,7 +810,17 @@ function ProjectGroup(props: {
     return null;
   }
   return (
-    <section aria-label={props.label} className="project-section">
+    <section
+      aria-label={props.label}
+      className="project-section"
+      // With no Project yet, adding one is the only thing to do here, so the
+      // header's add control shows at rest instead of waiting for a hover. A
+      // section that offers no add control (a fresh Chat sidebar) has only its
+      // organization menu in that slot, which stays hover-only as before.
+      data-empty={
+        props.projects.length === 0 && props.onAddProject !== undefined ? "true" : undefined
+      }
+    >
       <div className="project-section__header sidebar-section">
         <h2>{props.label}</h2>
         {props.onAddProject === undefined &&
@@ -1119,7 +1130,20 @@ function ActivityThreadList(props: {
   readonly emptyLabel?: string;
   readonly groups: ReturnType<typeof buildSidebarActivityView>["groups"];
   readonly onSelectThread: (threadId: string) => void;
+  /** A search is narrowing the feed, so every row left is a result. */
+  readonly searching?: boolean;
 }) {
+  // Every other group is bounded by its day. "Earlier" is everything older than
+  // a week, so it is the one group that only grows, and left open it pushed the
+  // recent groups' neighbours off the bottom of a feed meant for what happened
+  // lately. It starts folded; the thread the workspace is showing stays visible
+  // while it is, as it does in a folded Project list.
+  const [earlierOpen, setEarlierOpen] = useState(false);
+  // A fold must never hide a search result. Folded, a query that matched only
+  // an older thread left an "Earlier" heading with a count and nothing under
+  // it: neither the match nor the line that says nothing matched.
+  const earlierShown = earlierOpen || props.searching === true;
+  const earlierThreadsId = useId();
   if (props.groups.length === 0) {
     return props.emptyLabel === undefined ? (
       <p className="project-nav__empty">No threads in this mode.</p>
@@ -1131,25 +1155,49 @@ function ActivityThreadList(props: {
   }
   return (
     <div className="activity-nav">
-      {props.groups.map((group) => (
-        <section aria-label={group.label} className="activity-nav__group" key={group.id}>
-          <h2 className="sidebar-section">{group.label}</h2>
-          <div className="activity-nav__threads">
-            {group.threads.map((thread) => (
-              <ActivityThreadButton
-                actions={props.actions}
-                {...(props.activeThreadId === undefined
-                  ? {}
-                  : { activeThreadId: props.activeThreadId })}
-                key={thread.navigationId}
-                lineageThreads={props.lineageThreads}
-                onSelectThread={props.onSelectThread}
-                thread={thread}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+      {props.groups.map((group) => {
+        const folds = group.id === EARLIER_ACTIVITY_GROUP_ID;
+        const threads =
+          !folds || earlierShown
+            ? group.threads
+            : group.threads.filter((thread) => thread.navigationId === props.activeThreadId);
+        return (
+          <section aria-label={group.label} className="activity-nav__group" key={group.id}>
+            {folds ? (
+              <h2 className="sidebar-section">
+                <OctantButton
+                  aria-controls={earlierThreadsId}
+                  aria-expanded={earlierShown}
+                  className="activity-nav__fold"
+                  onClick={() => setEarlierOpen((open) => !open)}
+                  type="button"
+                  variant="link"
+                >
+                  <span>{group.label}</span>
+                  <span className="activity-nav__fold-count">{group.threads.length}</span>
+                  <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
+                </OctantButton>
+              </h2>
+            ) : (
+              <h2 className="sidebar-section">{group.label}</h2>
+            )}
+            <div className="activity-nav__threads" id={folds ? earlierThreadsId : undefined}>
+              {threads.map((thread) => (
+                <ActivityThreadButton
+                  actions={props.actions}
+                  {...(props.activeThreadId === undefined
+                    ? {}
+                    : { activeThreadId: props.activeThreadId })}
+                  key={thread.navigationId}
+                  lineageThreads={props.lineageThreads}
+                  onSelectThread={props.onSelectThread}
+                  thread={thread}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -1167,7 +1215,9 @@ function ActivityThreadButton(props: {
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
-  const age = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
+  // As in the Project tree, a rested row keeps its wake time even when Last
+  // updated is hidden.
+  const age = threadRowAgeFact(props.thread, shows.lastUpdated);
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
   const row = (
@@ -1180,59 +1230,24 @@ function ActivityThreadButton(props: {
       type="button"
       variant="ghost"
     >
-      <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-headline">
-          <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
-          {pullRequest === undefined || props.actions.onOpenPullRequest !== undefined ? null : (
-            <span
-              className="sidebar-navigation__thread-pr sidebar-navigation__thread-pr-mark"
-              data-state={pullRequest.state}
-            >
-              #{String(pullRequest.identity.number)}
-            </span>
-          )}
-        </span>
-        {shows.project ? (
-          <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
-        ) : null}
-        {checkout === undefined ? null : (
-          <span className="sidebar-navigation__thread-checkout" title={checkout.label}>
-            <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-            <span className="sidebar-navigation__thread-checkout-label">{checkout.label}</span>
-          </span>
-        )}
-      </span>
-      {pullRequest === undefined || props.actions.onOpenPullRequest !== undefined ? null : (
-        <span
-          aria-label={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-          className="sidebar-navigation__thread-pr-mark"
-          data-state={pullRequest.state}
-          role="img"
-          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-        >
-          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />
-        </span>
-      )}
-      {/* As in the Project tree, a rested row keeps its wake time even when
-          Last updated is hidden. */}
-      {props.thread.wakeLabel !== undefined ? (
-        <span className="sidebar-navigation__thread-age">{props.thread.wakeLabel}</span>
-      ) : age === undefined ? null : (
-        <span
-          className="sidebar-navigation__thread-age"
-          title={threadRowAge(props.thread.updatedAt)}
-        >
-          {age}
-        </span>
-      )}
-      {shows.status ? (
-        <ThreadStatusMark
-          activity={props.thread.activity}
-          unread={props.thread.unread}
-          woke={props.thread.woke}
-          followUp={props.thread.followUp}
-        />
-      ) : null}
+      <SidebarThreadRowContent
+        {...(age === undefined ? {} : { age })}
+        {...(checkout === undefined ? {} : { checkout })}
+        {...(shows.project ? { projectName: props.thread.projectName } : {})}
+        {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
+        {...(pullRequest === undefined ? {} : { pullRequest })}
+        status={
+          shows.status ? (
+            <ThreadStatusMark
+              activity={props.thread.activity}
+              unread={props.thread.unread}
+              woke={props.thread.woke}
+              followUp={props.thread.followUp}
+            />
+          ) : null
+        }
+        title={props.thread.title}
+      />
     </OctantButton>
   );
   if (hasMenu) {
@@ -1258,28 +1273,6 @@ function ActivityThreadButton(props: {
       >
         {row}
       </ThreadRowInfoPopup>
-      {pullRequest === undefined || props.actions.onOpenPullRequest === undefined ? null : (
-        <OctantButton
-          aria-label={`Open pull request #${String(pullRequest.identity.number)}`}
-          className="activity-nav__pr"
-          data-state={pullRequest.state}
-          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
-          onClick={(event) => {
-            if (event.metaKey || event.ctrlKey) {
-              props.actions.onOpenPullRequestOnGithub?.(pullRequest.identity);
-              return;
-            }
-            props.actions.onOpenPullRequest?.(pullRequest.identity);
-          }}
-          variant="ghost"
-          type="button"
-        >
-          <span className="sidebar-navigation__thread-pr-mark" data-state={pullRequest.state}>
-            <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
-            {String(pullRequest.identity.number)}
-          </span>
-        </OctantButton>
-      )}
     </div>
   );
 }

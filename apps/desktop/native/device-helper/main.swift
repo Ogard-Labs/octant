@@ -2,15 +2,28 @@ import Darwin
 import Foundation
 
 // Octant device helper: delivers touch, keyboard and hardware-button input to
-// one booted Simulator. It speaks length-prefixed JSON on stdin/stdout (a
-// 4-byte big-endian length, then one JSON object), answers every request with
-// exactly one response, and exits when stdin closes so it never outlives the
-// desktop process that owns it.
+// one booted Simulator, and streams its screen. It speaks length-prefixed JSON
+// on stdin/stdout (a 4-byte big-endian length, then one JSON object), answers
+// every request with exactly one response, and exits when stdin closes so it
+// never outlives the desktop process that owns it. Screen frames leave on file
+// descriptor 3, each a 4-byte big-endian length and one JPEG, so a slow viewer
+// can never hold up an answer on stdout.
 
 private let protocolVersion = 1
 private let maximumFrameBytes = 262_144
 private let tapHold: TimeInterval = 0.06
 private let swipeStep: TimeInterval = 0.016
+private let frameDescriptor: Int32 = 3
+
+/// Whether the owner opened a frame channel. Read once, before this process
+/// opens anything itself: descriptor numbers are reused, so asking later would
+/// find whatever file or socket happened to land on 3 and write frames into it.
+private let frameChannelIsOpen: Bool = {
+    var status = stat()
+    guard fstat(frameDescriptor, &status) == 0 else { return false }
+    let kind = status.st_mode & S_IFMT
+    return kind == S_IFIFO || kind == S_IFSOCK
+}()
 
 private struct Refusal: Error {
     let code: String
@@ -58,6 +71,31 @@ private func writeResponse(_ response: [String: Any]) {
     }
 }
 
+/// One writer at a time on the frame channel. A record is far larger than a
+/// pipe's atomic write, so two streams' encoders writing together — one still
+/// finishing as the next begins — would interleave their bytes and the reader
+/// would lose its place in the stream.
+private let frameWriting = NSLock()
+
+/// One frame to the viewer. False once the reader has gone away.
+private func writeFrame(_ jpeg: Data) -> Bool {
+    var frame = Data(capacity: jpeg.count + 4)
+    withUnsafeBytes(of: UInt32(jpeg.count).bigEndian) { frame.append(contentsOf: $0) }
+    frame.append(jpeg)
+    frameWriting.lock()
+    defer { frameWriting.unlock() }
+    return frame.withUnsafeBytes { bytes -> Bool in
+        var offset = 0
+        while offset < bytes.count {
+            let written = write(frameDescriptor, bytes.baseAddress! + offset, bytes.count - offset)
+            if written < 0 && errno == EINTR { continue }
+            if written <= 0 { return false }
+            offset += written
+        }
+        return true
+    }
+}
+
 /// A JSON number, and not a JSON boolean: `JSONSerialization` hands both back
 /// as `NSNumber`, so `true` would otherwise pass for 1.
 private func number(_ value: Any?) -> NSNumber? {
@@ -85,6 +123,7 @@ private final class Session {
     private let developerDirectory: String
     private var simulator: SimulatorBridge?
     private var input: GuestInputConnection?
+    private var display: DisplayStream?
 
     init(udid: String, developerDirectory: String) {
         self.udid = udid
@@ -120,6 +159,32 @@ private final class Session {
                 device["screen"] = ["width": Int(screen.width), "height": Int(screen.height)]
             }
             return ["protocol": protocolVersion, "device": device]
+        case "stream-start":
+            guard frameChannelIsOpen else {
+                throw Refusal(code: "stream-unavailable", message: "no frame channel was opened for this helper")
+            }
+            let height = min(max(number(request["maxHeight"])?.intValue ?? 1_100, 240), 4_096)
+            let quality = min(max(number(request["quality"])?.doubleValue ?? 0.7, 0.3), 0.95)
+            let rate = min(max(number(request["framesPerSecond"])?.intValue ?? 30, 1), 60)
+            let simulator = try bridge()
+            guard simulator.isBooted else {
+                // A display found before a shutdown belongs to a render server
+                // that is gone; it is dropped so the next boot finds its own.
+                display?.stop()
+                display = nil
+                throw BridgeRefusal.notBooted(simulator.stateDescription)
+            }
+            let stream = try display ?? DisplayStream(simulator: simulator)
+            display = stream
+            try stream.start(maximumHeight: height, quality: quality, framesPerSecond: rate, write: writeFrame)
+            return [:]
+        case "stream-stop":
+            // The display descriptor is tied to the boot it was found in, and a
+            // device can be shut down and booted again while this process
+            // lives. Each stream therefore finds the display afresh.
+            display?.stop()
+            display = nil
+            return [:]
         case "touch":
             guard let phaseName = request["phase"] as? String,
                 let phase = ["down": DigitizerEventType.start, "move": .position, "up": .end][phaseName]
@@ -256,6 +321,8 @@ private func refusal(for error: Error) -> Refusal {
         return Refusal(code: "not-booted", message: "the Simulator is \(state)")
     case BridgeRefusal.inputServiceUnavailable(let detail):
         return Refusal(code: "input-service-unavailable", message: detail)
+    case DisplayRefusal.noDisplay(let detail):
+        return Refusal(code: "stream-unavailable", message: detail)
     case InputRefusal.xpcSymbolsUnavailable:
         return Refusal(code: "input-service-unavailable", message: "this macOS has no Simulator XPC bridge")
     case InputRefusal.connectionFailed:
@@ -297,6 +364,7 @@ private func selectedDeveloperDirectory() -> String {
 }
 
 private func run() -> Int32 {
+    _ = frameChannelIsOpen
     let arguments = CommandLine.arguments
     guard arguments.count == 2, UUID(uuidString: arguments[1]) != nil else {
         FileHandle.standardError.write(Data("usage: octant-device-helper <simulator-udid>\n".utf8))

@@ -110,6 +110,7 @@ import { TerminalProcessPort } from "./terminalProcessPort";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
+import { turnChangedFiles } from "./codeTurnChangedFiles";
 import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./codeTurnRunner";
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -1261,6 +1262,8 @@ interface ActiveTurn {
   cursor: number;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   lastPersistedState?: CodeTurnOutcome;
+  /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
+  changedFilesRecording?: Promise<void>;
   launch?: () => void;
 }
 
@@ -1813,28 +1816,52 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 ),
               }
             : {}),
-          persistEvent: (event) => Effect.sync(() => this.#persistNormalized(active, event)),
+          persistEvent: (event) =>
+            // The provider's own completion, interruption, or failure is
+            // journaled as the turn's terminal state, ahead of the outcome
+            // below. The change list goes in before whichever comes first.
+            Effect.promise(() =>
+              event.category === "completion" ||
+              event.category === "interruption" ||
+              event.category === "failure"
+                ? this.#recordChangedFiles(active)
+                : Promise.resolve(),
+            ).pipe(Effect.andThen(Effect.sync(() => this.#persistNormalized(active, event)))),
           persistOutcome: (outcome, failure) =>
-            Effect.sync(() => {
-              // A typed failure's message is provider-authored text like any
-              // event's, so it takes the same redaction before it is journaled.
-              const message =
-                failure === undefined || outcome !== "failed"
-                  ? undefined
-                  : boundProviderFailureMessage(
-                      sanitizeProviderText(failure.message, active.checkoutRoot, active.secrets),
-                    );
-              this.#persistOutcome(
-                active,
-                outcome,
-                message === undefined ? undefined : { category: "failed", message },
-              );
-            }),
+            // What changed is journaled before the terminal state, so a client
+            // following the turn has it by the time the turn reads as settled.
+            // A turn waiting on the person has not settled and records nothing.
+            Effect.promise(() =>
+              outcome === "waiting" ? Promise.resolve() : this.#recordChangedFiles(active),
+            ).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  // A typed failure's message is provider-authored text like any
+                  // event's, so it takes the same redaction before it is journaled.
+                  const message =
+                    failure === undefined || outcome !== "failed"
+                      ? undefined
+                      : boundProviderFailureMessage(
+                          sanitizeProviderText(
+                            failure.message,
+                            active.checkoutRoot,
+                            active.secrets,
+                          ),
+                        );
+                  this.#persistOutcome(
+                    active,
+                    outcome,
+                    message === undefined ? undefined : { category: "failed", message },
+                  );
+                }),
+              ),
+            ),
         }),
       ),
     )
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (active.state !== "running") return;
+        await this.#recordChangedFiles(active);
         try {
           this.#persistOutcome(active, "failed", evidenceCapacityFailure(error));
         } catch {
@@ -1904,6 +1931,67 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       event: operationEvent,
     });
     active.cursor = frame.cursor;
+  }
+
+  /**
+   * Journal what differs in the checkout between the capture this turn started
+   * from and the checkout as it stands (0141).
+   *
+   * The starting capture is read back from the journal rather than carried in
+   * memory, so a turn recovered after a restart settles against the same point
+   * as one that never stopped. A turn without one (a Plan turn, a checkout the
+   * host could not read) records nothing: no record means "not observed", and a
+   * guess would read as "nothing changed".
+   *
+   * Never throws and never fails a turn: the change list is evidence about the
+   * turn, not part of it. The turn's own abort signal is deliberately not
+   * passed on, because an interrupted turn is exactly one whose changes a
+   * person needs to see.
+   */
+  async #recordChangedFiles(active: ActiveTurn): Promise<void> {
+    if (active.changedFilesRecording !== undefined) return active.changedFilesRecording;
+    active.changedFilesRecording = (async () => {
+      try {
+        const replay = this.#events.replay({
+          threadId: active.thread.id,
+          operationId: active.operationId,
+          afterCursor: 0,
+          limit: 256,
+        });
+        if (replay.status !== "ok") return;
+        const started = replay.frames.find(
+          (frame) => frame.event.kind === "conversation-turn-started",
+        );
+        const from =
+          started?.event.kind === "conversation-turn-started"
+            ? started.event.checkpoint?.worktree
+            : undefined;
+        if (from === undefined) return;
+        const resolveExecutionPolicy = () =>
+          this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+          active.thread.executionPolicy;
+        const result = await this.#git.changesSince({
+          checkoutId: String(active.thread.checkoutId),
+          checkoutRoot: active.checkoutRoot,
+          from,
+          executionPolicy: resolveExecutionPolicy(),
+          resolveExecutionPolicy,
+        });
+        if (result.status !== "ready") return;
+        const changedFiles = turnChangedFiles(result.changes);
+        if (changedFiles === undefined) return;
+        const frame = this.#events.append({
+          threadId: active.thread.id,
+          operationId: active.operationId,
+          expectedCursor: active.cursor,
+          event: { kind: "conversation-turn-changed-files", changedFiles },
+        });
+        active.cursor = frame.cursor;
+      } catch {
+        // Evidence only; see above.
+      }
+    })();
+    return active.changedFilesRecording;
   }
 
   #persistOutcome(

@@ -1,4 +1,4 @@
-# 0141. A version read launches confined, with no root, no home, and no network
+# 0144. A version read launches confined, with no root, no home, and no network
 
 **Status:** Accepted
 
@@ -6,7 +6,7 @@
 
 0009 says every Octant-spawned subprocess that can execute arbitrary code
 launches through the shared confinement builder, with no unconfined fallback.
-0139 records which runtime launches are wrapped and names the one launch no
+0142 records which runtime launches are wrapped and names the one launch no
 family wrapped: before any confined launch, each family spawns the configured
 executable for `--version`. Discovery goes further — it runs a descriptor's
 version arguments against a candidate it found on `PATH` or in an approved
@@ -77,11 +77,13 @@ given that fits it.
   contents of a denied ancestor open. Without this a program that canonicalises
   a path inside the directory it was just granted is refused at the `/private`
   component, which macOS puts above every temporary directory.
-- Discovery's authentication readiness probe is not covered here. It reads the
-  provider's own credential state out of the user's home, so this confinement
-  would report every installed provider unauthenticated. Giving it a home it
-  can read is a readiness-probe question under 0122, and it remains the one
-  unconfined provider probe the threat model names.
+- The readiness probes that read a credential are not covered here: discovery's
+  `authProbeArgs`, Claude's `auth status --json`, and the Oh My Pi connection
+  check's RPC process. Each reads the provider's own credential state out of the
+  user's home or needs a working provider process, so this confinement would
+  report every installed provider unauthenticated or unreachable. Giving them a
+  home they can read is a readiness-probe question under 0122, and they remain
+  the unconfined provider probes the threat model names.
 
 ## Consequences
 
@@ -104,4 +106,4 @@ given that fits it.
 - 0009 Sandbox confinement and approvals
 - 0122 Provider readiness probes reach provider endpoints (one rule superseded
   in scope)
-- 0139 Confinement wraps a runtime that carries one thread's authority
+- 0142 Confinement wraps a runtime that carries one thread's authority

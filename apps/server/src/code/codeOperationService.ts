@@ -831,6 +831,21 @@ export class CodeOperationService {
           existing.event.result,
         );
       }
+      if (command.kind === "start-provider-turn") {
+        const settlementCursor = this.#unfinishedSettlementCursor(
+          command.threadId,
+          command.operationId,
+          existing.event.result,
+          replay,
+        );
+        if (settlementCursor !== undefined) {
+          return this.#interruptUnfinishedSettlement(
+            command.threadId,
+            command.operationId,
+            settlementCursor,
+          );
+        }
+      }
       return existing.event.result;
     }
 
@@ -1066,6 +1081,61 @@ export class CodeOperationService {
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
     }
+  }
+
+  /**
+   * Page the operation journal: the change list is written at settle, so it
+   * can sit after the first 256 frames of a long turn.
+   */
+  #unfinishedSettlementCursor(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+    result: CodeOperationResult,
+    first: {
+      readonly frames: ReadonlyArray<CodeOperationEventFrame>;
+      readonly nextCursor: number;
+    },
+  ): number | undefined {
+    if (result.kind !== "provider-turn-state" || result.state !== "running") return undefined;
+    let frames = first.frames;
+    let nextCursor = first.nextCursor;
+    let hasChangedFiles = false;
+    for (;;) {
+      if (frames.some((frame) => frame.event.kind === "conversation-turn-changed-files"))
+        hasChangedFiles = true;
+      if (frames.some((frame) => isTerminalSettlement(frame.event))) return undefined;
+      if (frames.length < 256) break;
+      const last = frames.at(-1);
+      if (last === undefined) break;
+      const page = this.#replay(threadId, operationId, last.cursor, 256);
+      frames = page.frames;
+      nextCursor = page.nextCursor;
+      if (frames.length === 0) break;
+    }
+    return hasChangedFiles ? nextCursor : undefined;
+  }
+
+  /**
+   * Settlement had already journalled the change list, then the host stopped
+   * before a terminal state. Do not relaunch; mark the turn interrupted so a
+   * reopened client does not follow a running result forever.
+   */
+  #interruptUnfinishedSettlement(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+    expectedCursor: number,
+  ): CodeOperationResult {
+    this.#options.events.append({
+      threadId,
+      operationId,
+      expectedCursor,
+      event: { kind: "operation-state", state: "interrupted" },
+    });
+    return decodeCodeOperationResult({
+      kind: "provider-turn-state",
+      operationId,
+      state: "interrupted",
+    });
   }
 
   async readTerminal(
@@ -2781,6 +2851,9 @@ function sameConversationStart(
  * durable launch/stream evidence after conversation-turn-started. Returning
  * that cached result would leave the thread permanently idle after a crash
  * between the operation-result append and RuntimeTurnController.launch.
+ * `conversation-turn-changed-files` is settlement evidence: the turn had
+ * already begun to settle, so a crash before the terminal state must not
+ * launch it again. That case pages the journal and journals interrupted.
  */
 function isStaleRunningProviderTurn(
   result: CodeOperationResult,
@@ -2788,6 +2861,14 @@ function isStaleRunningProviderTurn(
 ): boolean {
   if (result.kind !== "provider-turn-state" || result.state !== "running") return false;
   return !frames.some((frame) => isDurableProviderLaunchEvidence(frame.event));
+}
+
+function isTerminalSettlement(event: CodeOperationEvent): boolean {
+  if (event.kind === "operation-state")
+    return event.state !== "running" && event.state !== "waiting";
+  if (event.kind === "operation-result" && event.result.kind === "provider-turn-state")
+    return event.result.state !== "running" && event.result.state !== "waiting";
+  return false;
 }
 
 function isDurableProviderLaunchEvidence(event: CodeOperationEvent): boolean {
@@ -2801,6 +2882,7 @@ function isDurableProviderLaunchEvidence(event: CodeOperationEvent): boolean {
     case "task-progress":
     case "usage":
     case "child-activity":
+    case "conversation-turn-changed-files":
       return true;
     case "operation-result":
       return (

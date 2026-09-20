@@ -4,13 +4,14 @@ import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
@@ -483,8 +484,78 @@ describe("Claude runtime confinement", () => {
     expect(launch.allowProcessExec).toBe(false);
     expect(launch.allowProcessFork).toBe(false);
     // The runtime answers a Plan turn by calling its own control plane, which a
-    // `none` egress would refuse before the first token (0132, 0140).
+    // `none` egress would refuse before the first token (0132, 0143).
     expect(launch.networkEgress).toBe("allow");
+  });
+
+  it("gives a Plan turn a temporary directory only that launch can name, and removes it after the runtime exits", async () => {
+    const target = fixture();
+    const ambient = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-ambient-")));
+    directories.push(ambient);
+    // Another thread's scratch file in the shared temp root: the runtime must not be able to name it.
+    writeFileSync(join(ambient, "neighbour.txt"), "another thread\n");
+    const reporter = join(target.root, "report-tmpdir.sh");
+    writeFileSync(
+      reporter,
+      "#!/bin/sh\nprintf 'tmpdir=%s\\n' \"$TMPDIR\"\n[ -d \"$TMPDIR\" ] && printf 'present=yes\\n'\n",
+    );
+    chmodSync(reporter, 0o755);
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: reporter,
+      args: [],
+      cwd: target.root,
+      env: { ...target.environment, TMPDIR: ambient },
+      signal: new AbortController().signal,
+    });
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      output += chunk.toString();
+    });
+    await waitForExit(child);
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    // A fresh folder inside the ambient root, never the ambient root itself.
+    expect(launch.temporaryDirectory).not.toBe(ambient);
+    expect(dirname(launch.temporaryDirectory ?? "")).toBe(ambient);
+    expect(basename(launch.temporaryDirectory ?? "")).toMatch(/^octant-claude-plan-/);
+    expect(launch.readRoots).toContain(launch.temporaryDirectory);
+    expect(launch.readRoots).not.toContain(ambient);
+    expect(launch.privateHomeAllowPaths).not.toContain(ambient);
+    // The runtime is told to use that folder, so it never falls back to the shared one.
+    expect(output).toContain(`tmpdir=${launch.temporaryDirectory}`);
+    expect(output).toContain("present=yes");
+    // The folder goes with the runtime; the shared root and its other files stay.
+    expect(existsSync(launch.temporaryDirectory ?? "")).toBe(false);
+    expect(readdirSync(ambient)).toEqual(["neighbour.txt"]);
+  });
+
+  it("removes a Plan turn's temporary directory when the launch is refused", () => {
+    const target = fixture();
+    const ambient = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-ambient-")));
+    directories.push(ambient);
+
+    expect(() =>
+      makePort(target, {
+        confinement: {
+          prepare: () => {
+            throw new Error("no sandbox runtime");
+          },
+        },
+      }).spawn({ projectRoot: target.root, executionPolicy: "plan" })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, TMPDIR: ambient },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("no sandbox runtime");
+    expect(readdirSync(ambient)).toEqual([]);
   });
 
   it("leaves a posture that still writes on the runtime's own sandbox", () => {

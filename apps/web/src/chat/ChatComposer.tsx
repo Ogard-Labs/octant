@@ -765,6 +765,38 @@ export function ChatComposer(props: ChatComposerProps) {
           }
         />
       </div>
+      <div className="chat-composer__research">
+        <OctantButton
+          aria-label={props.research.enabled ? "Disable web research" : "Enable web research"}
+          aria-pressed={props.research.enabled}
+          disabled={settingsLocked}
+          onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
+          size="sm"
+          type="button"
+          variant={props.research.enabled ? "secondary" : "ghost"}
+        >
+          <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+          <span>Web</span>
+        </OctantButton>
+        {props.research.enabled ? (
+          <label htmlFor={researchRoutingId}>
+            <span className="chat-composer__visually-hidden">Research routing</span>
+            <OctantSelectField
+              disabled={settingsLocked}
+              id={researchRoutingId}
+              onValueChange={(value) =>
+                props.onResearchRoutingChange(value as ChatComposerResearchRouting)
+              }
+              options={[
+                { id: "automatic", label: "Automatic" },
+                { id: "searxng", label: "SearXNG" },
+                { id: "provider-native", label: "Provider-native" },
+              ]}
+              value={props.research.routing}
+            />
+          </label>
+        ) : null}
+      </div>
       <div className="chat-composer__selectors">
         {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
           <ComposerModelPicker
@@ -863,38 +895,6 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.poolControl}
             </OctantPopover>
           </div>
-        ) : null}
-      </div>
-      <div className="chat-composer__research">
-        <OctantButton
-          aria-label={props.research.enabled ? "Disable web research" : "Enable web research"}
-          aria-pressed={props.research.enabled}
-          disabled={settingsLocked}
-          onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
-          size="sm"
-          type="button"
-          variant={props.research.enabled ? "secondary" : "ghost"}
-        >
-          <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-          <span>Web</span>
-        </OctantButton>
-        {props.research.enabled ? (
-          <label htmlFor={researchRoutingId}>
-            <span className="chat-composer__visually-hidden">Research routing</span>
-            <OctantSelectField
-              disabled={settingsLocked}
-              id={researchRoutingId}
-              onValueChange={(value) =>
-                props.onResearchRoutingChange(value as ChatComposerResearchRouting)
-              }
-              options={[
-                { id: "automatic", label: "Automatic" },
-                { id: "searxng", label: "SearXNG" },
-                { id: "provider-native", label: "Provider-native" },
-              ]}
-              value={props.research.routing}
-            />
-          </label>
         ) : null}
       </div>
     </>

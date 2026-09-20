@@ -223,9 +223,15 @@ function compareActivityThreads(left: SidebarActivityThread, right: SidebarActiv
   });
 }
 
+/**
+ * The one recency group with no far edge: everything older than a week. The
+ * feed folds it, so the id is shared rather than spelled where it is tested.
+ */
+export const EARLIER_ACTIVITY_GROUP_ID = "earlier";
+
 function recencyBucket(updatedAt: string | undefined, now: Date): { id: string; label: string } {
   if (updatedAt === undefined || Number.isNaN(Date.parse(updatedAt))) {
-    return { id: "earlier", label: "Earlier" };
+    return { id: EARLIER_ACTIVITY_GROUP_ID, label: "Earlier" };
   }
   const updated = startOfLocalDay(new Date(updatedAt));
   const today = startOfLocalDay(now);
@@ -239,7 +245,7 @@ function recencyBucket(updatedAt: string | undefined, now: Date): { id: string; 
       label: weekdayLabel(updated),
     };
   }
-  return { id: "earlier", label: "Earlier" };
+  return { id: EARLIER_ACTIVITY_GROUP_ID, label: "Earlier" };
 }
 
 function recencyBucketOrder(now: Date): ReadonlyArray<{ id: string; label: string }> {
@@ -252,7 +258,7 @@ function recencyBucketOrder(now: Date): ReadonlyArray<{ id: string; label: strin
     { id: "today", label: "Today" },
     { id: "yesterday", label: "Yesterday" },
     ...weekdayBuckets,
-    { id: "earlier", label: "Earlier" },
+    { id: EARLIER_ACTIVITY_GROUP_ID, label: "Earlier" },
   ];
 }
 

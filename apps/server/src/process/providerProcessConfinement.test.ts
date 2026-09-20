@@ -13,28 +13,28 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
  * that stops doing so: a driver that spawns its runtime directly is green,
  * shipped, and visible only to a grep. Three provider process modules had
  * drifted out of the rule that way with nothing recording it, which is what
- * 0139 settles.
+ * 0142 settles.
  *
  * What this proves: a provider process module either uses the shared builder or
- * appears in {@link UNWRAPPED} with a reason, and 0139 names each one that does
+ * appears in {@link UNWRAPPED} with a reason, and 0142 names each one that does
  * not. What it does not prove: that every launch inside a wrapped module goes
  * through the builder. A module returns the binary unwrapped on Full access by
  * design, so a per-launch claim would need each module to declare its launches
  * in a manifest this gate could read rather than a source scan. The observed
  * failure was whole modules never adopting the builder, and that is the failure
  * this catches. Its reach is the runtime launch only: a module's `--version`
- * read is confined separately through `confinedVersionProbe` under 0141, which
+ * read is confined separately through `confinedVersionProbe` under 0144, which
  * an entry in {@link UNWRAPPED} still reaches and which this gate does not
  * read, and `discoveryService` runs candidate executables this never sees.
  *
- * {@link UNWRAPPED}, not 0139, is the live set. An accepted record keeps its
+ * {@link UNWRAPPED}, not 0142, is the live set. An accepted record keeps its
  * history — a later ADR supersedes it rather than editing it — so reading the
- * live set out of 0139 would make confining Codex fail this suite until someone
+ * live set out of 0142 would make confining Codex fail this suite until someone
  * deleted that history. Confining a runtime deletes its entry here instead.
  *
  * An exception may also narrow to the postures a module still launches
  * unwrapped, which is how the Claude exception closes one posture at a time
- * (0140). Full access is never listed: 0009 calls it a genuine unrestricted
+ * (0143). Full access is never listed: 0009 calls it a genuine unrestricted
  * posture, so no runtime confines it and it is outside this rule rather than an
  * exception to it.
  */
@@ -55,7 +55,7 @@ const UNWRAPPED: ReadonlyArray<{
   },
   {
     file: "ohMyPiProcess.ts",
-    reason: "A declaration-only probe in its managed home; its turns run on the Pi runtime.",
+    reason: "A probe with no turn, unconfined against 0009 and 0122 both. Held, not excused.",
   },
 ];
 
@@ -69,7 +69,7 @@ const decisionPath = join(
   "..",
   "docs",
   "decisions",
-  "0139-confinement-wraps-a-runtime-that-carries-one-thread.md",
+  "0142-confinement-wraps-a-runtime-that-carries-one-thread.md",
 );
 
 function providerProcessModules(): ReadonlyArray<string> {

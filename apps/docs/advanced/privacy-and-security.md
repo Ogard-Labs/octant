@@ -110,13 +110,14 @@ native receipts; desktop admin routes are loopback-only.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
   too.
-- The Codex runtime does not: its process is not one Octant can bind to a
-  single thread's folder and posture, so the shell it runs falls to the
-  provider's own sandbox, which it carries on every posture except Full access.
-  The Claude runtime crosses the boundary on Plan turns, where Octant's own
-  sandbox makes the folder unwritable and stops the runtime starting any
-  process at all; its approval-gated and auto-accept-edits turns still fall to
-  the provider's own sandbox.
+- The Codex runtime does not: one Codex process serves every thread, which
+  Octant cannot bind to a single folder and posture, so the shell it runs falls
+  to the provider's own sandbox. That sandbox is on every posture except Full
+  access, which you select explicitly and which is unsandboxed by design. The
+  Claude runtime crosses the boundary on Plan turns, where Octant's own sandbox
+  makes the folder unwritable and stops the runtime starting any process at
+  all; its approval-gated and auto-accept-edits turns still fall to the
+  provider's own sandbox.
 - Every app-managed tool those two threads reach is still confined, and
   approvals still gate every app-managed action and every provider callback
   that reaches Octant. A write one of those runtimes makes inside its own

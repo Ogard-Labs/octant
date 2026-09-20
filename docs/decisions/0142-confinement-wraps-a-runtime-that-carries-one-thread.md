@@ -1,4 +1,4 @@
-# 0139. Confinement wraps a provider runtime that carries one thread's authority
+# 0142. Confinement wraps a provider runtime that carries one thread's authority
 
 **Status:** Accepted
 
@@ -20,8 +20,8 @@ What differs is what a launch knows. The builder binds exactly one root
 (`SeatbeltProfileInput.boundRoot`) and needs the thread's mode and execution
 policy to settle write, exec, and egress rules. OpenCode supplies all three
 because it starts one process per connection and refuses to widen that
-process's authority afterwards. The two runtimes below cannot, for reasons that
-are theirs and not a gap in the rule.
+process's authority afterwards. Codex cannot, for a reason that is its own and
+not a gap in the rule. Claude can, and is not wrapped yet.
 
 ## Decision
 
@@ -31,27 +31,36 @@ are theirs and not a gap in the rule.
   below Full access and stay under 0009's rule unchanged. On Full access all
   three return the binary unwrapped — 0009's genuine, user-selected,
   unrestricted posture, not a gap; ACP keeps 0006's static denials there.
-- This exception covers whole modules, so it does not reach version probes.
-  Every family, wrapped or not, spawns the configured executable for
-  `--version` before any confined launch. That does not satisfy 0009 and is not
-  excepted here; it is a standing gap across every family, recorded in the
-  threat model and closing in its own change.
+  Claude meets the same test, one process per query started with that thread's
+  root and execution policy, and is unwrapped anyway; see below.
+- Neither of those reaches probes. Every family spawns the configured
+  executable to read a version or an auth state
+  before any confined launch, and discovery does the same to a candidate it
+  found. That does not satisfy 0009 and is not excepted here: a standing gap,
+  inventoried in the threat model, closing in its own change. The Oh My Pi
+  connection check (`ohMyPiProcess.ts`) is the same gap and a sharper one: it
+  runs a version check and an RPC probe with no confinement, though 0122 exempts
+  a probe from egress only and still requires it to launch confined. The gate
+  holds that file so it stays visible; that is bookkeeping, not an exception.
 - Every provider process module that launches without the shared builder is
-  named here rather than left to a grep. This is a scoped exception to one rule
-  of 0009, that every such subprocess launches through that builder:
-  - **Codex** (`codexProcess.ts`): the app-server is leased once per provider
-    instance — `providerRuntimeRegistry` keys runtimes by `instanceId` and the
-    driver's acquire ignores `projectRoot` — so one process carries every
-    thread on that instance, each picking its own root and `sandbox` value at
-    `thread/start`. No profile is exact for all of them, and one wide enough
-    for all of them is not a boundary.
-  - **Claude** (`claudeProcess.ts`): it does spawn per query with that thread's
-    `cwd`, but the Agent SDK composes the launch and hands Octant's spawn
-    callback only command, args, cwd, env, and a signal.
-  - **Oh My Pi discovery** (`ohMyPiProcess.ts`): a declaration-only probe in its
-    managed home with sessions, tools, extensions, skills, and LSP off, in the
-    family 0122 carved out. Its turns run on the wrapped Pi runtime.
-- The exception covers the runtime process only. Octant-owned tools those
+  named here rather than left to a grep. One is a scoped exception to one rule
+  of 0009, that every such subprocess launches through that builder. **Codex**
+  (`codexProcess.ts`): the app-server is leased once per provider instance —
+  `providerRuntimeRegistry` keys runtimes by `instanceId` and the driver's
+  acquire ignores `projectRoot` — so one process carries every thread on that
+  instance, each picking its own root and `sandbox` value at `thread/start`. No
+  profile is exact for all of them, and one wide enough for all of them is not a
+  boundary.
+- **Claude** (`claudeProcess.ts`) is not excepted. The query that installs the
+  SDK's `spawnClaudeCodeProcess` holds the thread's root and execution policy,
+  so a per-query callback can close over them even though the SDK calls it with
+  only command, args, cwd, env, and a signal. It is unwrapped because that is
+  not wired, not because it cannot be. Whether a deny-default profile admits a
+  Claude runtime — its credential store, its own model call under OS `none` —
+  is unverified here and has to be measured on a real host. It is a gap like
+  the probes, and the gate holds the file so it stays visible; that is
+  bookkeeping, not an exception.
+- The Codex exception covers the runtime process only. Octant-owned tools those
   threads reach — terminal, test runner, Git helpers, executable extension
   components, brokered tools — stay confined exactly as 0009 requires.
 - The residual risk is inventoried by posture in the threat model's sandbox
@@ -59,11 +68,12 @@ are theirs and not a gap in the rule.
   provider sandbox, what each runtime's environment actually withholds, and
   what a model-generated command inside an unwrapped runtime can therefore
   read. Two entries there bind this record. A Claude Plan turn is read-only by
-  `permissionMode` alone and not at any sandbox, which 0009 requires, so
-  closing this exception for Claude has to fix that first. And 0009 holds that
-  a provider's permission layer is a signal and not the boundary, so a defect
-  in the posture Octant maps into it is a write inside the checkout with no
-  Octant prompt — observed, and since fixed, on a Codex Code thread whose
+  `permissionMode` alone and not at any sandbox, which 0009 requires. This
+  record names that an open defect and authorizes nothing: it supersedes no
+  Plan rule, and closing the Claude gap has to fix it first. And 0009 holds
+  that a provider's permission layer is a signal and not the boundary, so a
+  defect in the posture Octant maps into it is a write inside the checkout with
+  no Octant prompt — observed, and since fixed, on a Codex Code thread whose
   approval-gated posture mapped to `workspace-write`. What the missing boundary
   leaves standing is the class, not that one instance.
 - Process receipts, group termination, broker-coordinate stripping, the
@@ -77,10 +87,10 @@ are theirs and not a gap in the rule.
   drops a manifest entry rather than a line here. Reading modules catches one
   that never adopts the builder, the failure that produced this exception;
   proving a single launch inside a wrapped module needs a launch manifest.
-- The exception closes per runtime, each as its own deliverable with its own
-  evidence: Codex when its runtime lease is keyed by the thread's root and
-  execution policy the way OpenCode's connection is, Claude when the SDK launch
-  carries the thread's mode and policy through to the spawn callback.
+- Each closes as its own deliverable with its own evidence. The Codex exception
+  closes when its runtime lease is keyed by the thread's root and execution
+  policy the way OpenCode's connection is. The Claude gap closes when its
+  per-query spawn callback prepares a confined launch.
 
 ## Consequences
 
@@ -96,4 +106,4 @@ are theirs and not a gap in the rule.
 - 0104 Harness-delegated approvals as a per-thread pass-through
 - 0121 Provider-owned CLI runtimes, profiles, and updates
 - 0132 Provider runtimes reach provider endpoints on Chat and Work turns
-- 0140 A Plan turn is confined by Octant (the Claude rule superseded in scope)
+- 0143 A Plan turn is confined by Octant (the Claude rule superseded in scope)

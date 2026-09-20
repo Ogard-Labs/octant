@@ -74,6 +74,8 @@ export interface OctantMenuProps {
    * would otherwise decide which one wins.
    */
   readonly triggerClassName?: string;
+  /** A trigger that cannot open right now, such as a composer that is already sending. */
+  readonly triggerDisabled?: boolean;
   readonly triggerLabel: string;
   readonly value: string;
   /** Action menus invoke every enabled item, including the current value. */
@@ -112,6 +114,7 @@ export function OctantMenu(props: OctantMenuProps) {
       <DropdownMenuTrigger
         aria-label={props.triggerLabel}
         className={cn(props.triggerClassName ?? "octant-menu__trigger", "window-no-drag")}
+        disabled={props.triggerDisabled === true}
         ref={triggerRef}
       >
         {props.trigger}
