@@ -35,6 +35,24 @@ interface SpawnedProcess {
   ): unknown;
 }
 
+/**
+ * The temporary directory a confined launch may write when none is named.
+ * Callers that hand a confined command a path to write share this resolution
+ * so the path is inside the launch's writable temporary root.
+ */
+export function defaultTemporaryDirectory(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  // An empty or relative TMPDIR is set often enough (stripped environments,
+  // launchers) and a confined launch refuses a temporary root that is not
+  // absolute, so the first usable value wins rather than the first one set.
+  for (const name of ["TMPDIR", "TMP", "TEMP"] as const) {
+    const value = environment[name];
+    if (value !== undefined && isAbsolute(value)) return value;
+  }
+  return "/tmp";
+}
+
 interface RepositoryTestProcessPortOptions {
   readonly platform?: NodeJS.Platform;
   readonly spawn?: (
@@ -123,12 +141,7 @@ export class RepositoryTestProcessPort {
     this.#receiptDirectory = options.receiptDirectory;
     this.#processIdentity = options.processIdentity;
     this.#processGroupExists = options.processGroupExists ?? defaultProcessGroupExists;
-    this.#temporaryDirectory =
-      options.temporaryDirectory ??
-      process.env.TMPDIR ??
-      process.env.TMP ??
-      process.env.TEMP ??
-      "/tmp";
+    this.#temporaryDirectory = options.temporaryDirectory ?? defaultTemporaryDirectory();
     this.#networkEgress = options.networkEgress ?? "allow";
     this.#literalReadPaths = options.literalReadPaths ?? [];
     this.#allowSimulatorControl = options.allowSimulatorControl === true;
@@ -190,7 +203,7 @@ export class RepositoryTestProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.cwd,
-        env: sanitizedEnvironment(input.environment),
+        env: sanitizedEnvironment(input.environment, this.#temporaryDirectory),
         shell: false,
         detached: true,
         windowsHide: true,
@@ -567,12 +580,23 @@ function unsafeEnvironmentName(name: string): boolean {
   );
 }
 
-function sanitizedEnvironment(explicit: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
+const TEMPORARY_VARIABLES: ReadonlySet<string> = new Set(["TMPDIR", "TMP", "TEMP"]);
+
+function sanitizedEnvironment(
+  explicit: Readonly<Record<string, string>>,
+  temporaryDirectory: string,
+): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   for (const name of SAFE_INHERITED_ENVIRONMENT) {
     const value = process.env[name];
-    if (value !== undefined) environment[name] = value;
+    if (value === undefined) continue;
+    // An empty or relative temporary variable resolves beneath the checkout
+    // inside the child and meets the sandbox's write denial there, although
+    // the launch was given a usable temporary root.
+    if (TEMPORARY_VARIABLES.has(name) && !isAbsolute(value)) continue;
+    environment[name] = value;
   }
+  if (environment.TMPDIR === undefined) environment.TMPDIR = temporaryDirectory;
   return { ...environment, ...explicit };
 }
 
