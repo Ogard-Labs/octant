@@ -58,6 +58,10 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
       <figcaption>{frame.title}</figcaption>
       {frame.status === "live" && streamed !== undefined ? (
         <StreamedScreen
+          // A screen's waiting input, pending press and typing timer belong to
+          // one Simulator. When the frame moves to another they are dropped with
+          // the component, so nothing typed on one device is sent to the next.
+          key={String(frame.simulatorId)}
           attach={streamed.attach}
           busy={props.busy === true}
           name={frame.name}
@@ -151,7 +155,7 @@ function StreamedScreen(props: {
   readonly busy: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pressRef = useRef<PointerSample | undefined>(undefined);
+  const pressRef = useRef<(PointerSample & { readonly pointerId: number }) | undefined>(undefined);
   // The host runs one Simulator action at a time. What a person does meanwhile
   // is kept in order and sent as each action finishes, so fast typing and a tap
   // right after a swipe are not lost to a disabled control.
@@ -166,8 +170,21 @@ function StreamedScreen(props: {
 
   const sendNext = useCallback(() => {
     if (onInput === undefined || busy || sentRef.current) return;
-    const next = waitingRef.current.shift();
+    let next = waitingRef.current.shift();
     if (next === undefined) return;
+    // Text that is only spaces is not a typed-text request the host accepts —
+    // blank text is refused there on purpose — but a space is still a key a
+    // person pressed. It goes as the Space key, one press at a time.
+    if (next.kind === "type-text" && next.text.trim().length === 0) {
+      const spaces: AppleSimulatorFrameInputIntent[] = [...next.text]
+        .filter((character) => character === " ")
+        .map(() => ({ kind: "key-press", key: "space" }));
+      const [first, ...rest] = spaces;
+      // Only other whitespace, which no key here types: nothing to send.
+      if (first === undefined) return;
+      waitingRef.current.unshift(...rest);
+      next = first;
+    }
     // Until `busy` is seen to rise and fall, nothing else goes out. An input
     // the pane refused without ever going busy must not hold the rest forever.
     sentRef.current = true;
@@ -241,8 +258,8 @@ function StreamedScreen(props: {
         if (intent.kind === "text") enqueue({ kind: "type-text", text: intent.text }, true);
         else enqueue({ kind: "key-press", key: intent.key }, false);
       }}
-      onPointerCancel={() => {
-        pressRef.current = undefined;
+      onPointerCancel={(event) => {
+        if (pressRef.current?.pointerId === event.pointerId) pressRef.current = undefined;
       }}
       onPointerDown={(event) => {
         if (!active) return;
@@ -250,12 +267,19 @@ function StreamedScreen(props: {
         // a menu and a second touch point is part of something else; neither
         // should reach the Simulator as a tap.
         if (event.button !== 0 || !event.isPrimary) return;
-        pressRef.current = { x: event.clientX, y: event.clientY, atMs: event.timeStamp };
+        pressRef.current = {
+          x: event.clientX,
+          y: event.clientY,
+          atMs: event.timeStamp,
+          pointerId: event.pointerId,
+        };
         // Keeps the release coming here when a drag runs off the screen.
         event.currentTarget.setPointerCapture?.(event.pointerId);
       }}
       onPointerUp={(event) => {
         const down = pressRef.current;
+        // Another finger lifting is not the end of this press.
+        if (down === undefined || down.pointerId !== event.pointerId) return;
         pressRef.current = undefined;
         const canvas = canvasRef.current;
         if (!active || down === undefined || canvas === null) return;

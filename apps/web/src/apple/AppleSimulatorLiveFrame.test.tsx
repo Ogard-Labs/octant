@@ -372,6 +372,65 @@ describe("AppleSimulatorLiveFrameView", () => {
       ]);
     });
 
+    it("never sends what was typed on one Simulator to the one the frame shows next", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const view = (name: string, id: string, busy: boolean) => (
+        <AppleSimulatorLiveFrameView
+          busy={busy}
+          frame={{ ...frame, name, simulatorId: decodeAppleSimulatorId(id) }}
+          inputEnabled
+          liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
+          onInput={onInput}
+        />
+      );
+      const { rerender } = render(view("iPhone A", "90000000-0000-4000-8000-0000000000a1", true));
+      fireEvent.keyDown(screen.getByLabelText("Tap on iPhone A Simulator screen"), { key: "x" });
+
+      // A's shutdown finishes and the frame moves on to B while "x" is still waiting.
+      rerender(view("iPhone B", "90000000-0000-4000-8000-0000000000b2", false));
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("pairs a release with the finger that pressed, not with another one lifting", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.pointerDown(region, { clientX: 211, clientY: 800, isPrimary: true, pointerId: 1 });
+      // A second finger comes and goes elsewhere while the first is still down.
+      fireEvent.pointerUp(region, { clientX: 60, clientY: 100, isPrimary: false, pointerId: 2 });
+      expect(onInput).not.toHaveBeenCalled();
+      fireEvent.pointerUp(region, { clientX: 211, clientY: 300, isPrimary: true, pointerId: 1 });
+
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput.mock.calls[0]?.[0]).toMatchObject({
+        kind: "swipe",
+        from: { x: 603, y: 2340 },
+        to: { x: 603, y: 840 },
+      });
+    });
+
+    it("sends a space typed on its own as the Space key, since blank text is not a request", () => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const region = drawnAt402();
+
+      fireEvent.keyDown(region, { key: " " });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(onInput.mock.calls.map(([intent]) => intent)).toEqual([
+        { kind: "key-press", key: "space" },
+      ]);
+    });
+
     it("leaves app shortcuts alone while the screen has focus", () => {
       const onInput = vi.fn();
       render(liveView({ onInput }));
