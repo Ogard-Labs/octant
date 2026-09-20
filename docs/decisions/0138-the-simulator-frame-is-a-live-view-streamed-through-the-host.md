@@ -16,8 +16,9 @@ encoding it as a JPEG scaled to 1100 pixels tall takes 1.7 ms, the render
 server reports each presented frame, and a frame is about 90 KB. A swipe
 produced frames of the page mid-transition, which no capture can show.
 
-0062 lists streaming as a non-goal of that record; nothing accepted forbids
-it. What must hold is what 0062 and 0043 already require: one channel, the
+0062 and 0137 each list streaming the screen as a non-goal. This record
+supersedes that one item in both; every other rule in them stands. What must
+hold is what 0062 and 0043 already require: one channel, the
 server deciding who may look, and clients that cannot attach failing closed.
 
 ## Decision

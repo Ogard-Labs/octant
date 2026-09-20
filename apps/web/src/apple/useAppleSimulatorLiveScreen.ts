@@ -25,6 +25,12 @@ interface DecodedFrame {
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 /** A view that lasted this long was working; one that ended sooner was not. */
 const HEALTHY_VIEW_MS = 10_000;
+/**
+ * Every view opens with a picture of the screen as it is. One that has shown
+ * none by now will not: a still screen sends nothing more, so the wait would
+ * never end and the pane would say "connecting" for good.
+ */
+const FIRST_PICTURE_MS = 5_000;
 
 /**
  * Watches a booted Simulator's screen for as long as the pane shows it. The
@@ -87,7 +93,11 @@ export function useAppleSimulatorLiveScreen(options: {
       let everLive = false;
       let stopped = "The live Simulator view stopped.";
       while (!signal.aborted) {
-        const watch = await client.watchScreen(request, signal);
+        // One view can be given up without leaving the pane.
+        const view = new AbortController();
+        const endView = () => view.abort();
+        signal.addEventListener("abort", endView, { once: true });
+        const watch = await client.watchScreen(request, view.signal);
         if (signal.aborted) return;
         let painted = false;
         const startedAt = Date.now();
@@ -102,31 +112,43 @@ export function useAppleSimulatorLiveScreen(options: {
           }
           stopped = watch.message;
         } else {
-          for await (const jpeg of watch.frames) {
-            if (signal.aborted) return;
-            let frame: DecodedFrame;
-            try {
-              frame = await decode(jpeg);
-            } catch {
-              continue;
+          const noPicture = setTimeout(() => {
+            stopped = "The live Simulator view showed no picture.";
+            endView();
+          }, FIRST_PICTURE_MS);
+          try {
+            for await (const jpeg of watch.frames) {
+              if (signal.aborted) return;
+              let frame: DecodedFrame;
+              try {
+                frame = await decode(jpeg);
+              } catch {
+                continue;
+              }
+              // Decoding took time, and the pane may have moved to another thread
+              // or Simulator meanwhile. A picture of the old one must not be drawn
+              // on the new pane's canvas or set the size its taps are measured by.
+              if (signal.aborted) {
+                frame.close();
+                return;
+              }
+              latestRef.current?.frame.close();
+              latestRef.current = { key, frame };
+              if (canvasRef.current !== null) paint(canvasRef.current, frame);
+              if (!painted) {
+                painted = true;
+                everLive = true;
+                clearTimeout(noPicture);
+                setState({ status: "live", screen: watch.screen });
+              }
             }
-            // Decoding took time, and the pane may have moved to another thread
-            // or Simulator meanwhile. A picture of the old one must not be drawn
-            // on the new pane's canvas or set the size its taps are measured by.
-            if (signal.aborted) {
-              frame.close();
-              return;
-            }
-            latestRef.current?.frame.close();
-            latestRef.current = { key, frame };
-            if (canvasRef.current !== null) paint(canvasRef.current, frame);
-            if (!painted) {
-              painted = true;
-              everLive = true;
-              setState({ status: "live", screen: watch.screen });
-            }
+          } finally {
+            clearTimeout(noPicture);
           }
         }
+        signal.removeEventListener("abort", endView);
+        // Whatever ended the frames, this view's request is over at its source.
+        endView();
         if (signal.aborted) return;
         // Every view sends a first frame, so a first frame proves nothing: a
         // helper that dies right after it would be asked for again forever.

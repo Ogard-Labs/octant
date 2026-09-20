@@ -141,13 +141,20 @@ async function watchScreen(
       frames: framesOf(response.body),
     };
   }
-  try {
-    const reply = decodeAppleRpcEnvelope(await response.json());
-    if (reply.kind === "apple-failure") {
-      return { status: "failed", kind: reply.failure.category, message: reply.failure.message };
+  if (response.ok) {
+    // A stream that opened without naming its screen is still open. Reading it
+    // as a refusal would wait for bytes that never end, and the pane would sit
+    // at "connecting" with nothing to retry.
+    await response.body?.cancel().catch(() => undefined);
+  } else {
+    try {
+      const reply = decodeAppleRpcEnvelope(await response.json());
+      if (reply.kind === "apple-failure") {
+        return { status: "failed", kind: reply.failure.category, message: reply.failure.message };
+      }
+    } catch {
+      // Falls through to the protocol failure below.
     }
-  } catch {
-    // Falls through to the protocol failure below.
   }
   return {
     status: "failed",
