@@ -367,6 +367,25 @@ describe("the public-block visual language", () => {
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
   });
 
+  it("gives icon-only controls two sizes: the rail button and the row action", () => {
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    // A panel's icon control is the 28px rail button. The terminal's actions
+    // button was 26px and both Refresh buttons took a rem size from the recipe,
+    // which rendered 25px and 29px beside the 28px controls around them.
+    const terminal = code.match(/\.code-terminal-pane__actions-trigger\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(terminal).toContain("width: var(--oct-rail-button-h);");
+    expect(terminal).toContain("height: var(--oct-rail-button-h);");
+    for (const file of ["code/CodeFileExplorer.tsx", "work/WorkFilesPanel.tsx"]) {
+      const source = readFileSync(join(webRoot, file), "utf8");
+      expect(source).toMatch(/<OctantIconButton[^>]*label="Refresh files"/s);
+    }
+    // An action inside a row is a 24px square, on a Project row as on a thread row.
+    const projectAction = styles.match(/\.project-row__action--icon\s*\{[^}]+\}/)?.[0] ?? "";
+    expect(projectAction).toContain("height: 24px;");
+    expect(projectAction).not.toContain("height: var(--oct-nav-row-h);");
+  });
+
   it("retires the legacy underline tab paint from feature surfaces", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const artifacts = readFileSync(join(webRoot, "artifacts/ArtifactLibraryView.tsx"), "utf8");

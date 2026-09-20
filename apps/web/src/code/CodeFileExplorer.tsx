@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";
@@ -224,17 +224,14 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         </label>
 
         {props.onRefresh === undefined ? null : (
-          <OctantButton
-            aria-label="Refresh files"
+          <OctantIconButton
             disabled={props.refreshing === true}
+            label="Refresh files"
             onClick={props.onRefresh}
-            size="icon-sm"
-            title="Refresh files"
             type="button"
-            variant="ghost"
           >
             <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-          </OctantButton>
+          </OctantIconButton>
         )}
       </div>
 

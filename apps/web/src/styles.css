@@ -1422,7 +1422,9 @@ h6 {
 .project-row__action--icon {
   width: 0;
   min-width: 0;
-  height: var(--oct-nav-row-h);
+  /* Square, like a thread row's actions. At the row's own height the hover
+     fill was a 24px by 30px slab beside 24px squares one row down. */
+  height: 24px;
   min-height: 0;
   padding: 0;
   overflow: hidden;
