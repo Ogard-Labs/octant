@@ -2684,7 +2684,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-settings__local-mark {
   display: inline-flex;
   margin-inline-start: 6px;
-  color: var(--oct-success-text);
   vertical-align: -2px;
 }
 
@@ -3889,7 +3888,6 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-provider-policy__default {
   flex: none;
-  color: var(--oct-success-text);
   font-size: var(--oct-text-xs);
 }
 
@@ -4752,7 +4750,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .environment-subagents__row:hover,
 .environment-subagents__row:focus-visible,
 .environment-subagents__row[aria-expanded="true"] {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
   color: var(--oct-fg);
 }
 
@@ -6502,7 +6500,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   overflow: hidden;
   color: var(--octant-accent-text);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-semibold);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -9756,7 +9754,7 @@ ul.board-col-body {
 
 .code-project-pull-requests__row:hover,
 .code-project-pull-requests__row:focus-visible {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
 }
 
 .code-project-pull-requests__icon {
@@ -9976,7 +9974,7 @@ ul.board-col-body {
 
 .linear-issues__row:hover,
 .linear-issues__row:focus-visible {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
 }
 
 .linear-issues__row[aria-pressed="true"],

@@ -318,9 +318,10 @@ describe("WindowChrome", () => {
       "flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);",
     );
     expect(cssRule(".sidebar__native-collapse")).toContain("top: 0;");
-    expect(cssRule(".window-chrome__new-thread")).toContain(
-      "background: var(--oct-surface-muted);",
-    );
+    // This used to pin `background: var(--oct-surface-muted)`, a token nothing
+    // defined, so the control has always drawn clear. It stays outlined.
+    expect(cssRule(".window-chrome__new-thread")).toContain("border-color: var(--oct-border);");
+    expect(cssRule(".window-chrome__new-thread")).not.toContain("--oct-surface-muted");
     expect(cssRule(".workspace-pane__provider")).toContain("width: 14px;");
   });
 
