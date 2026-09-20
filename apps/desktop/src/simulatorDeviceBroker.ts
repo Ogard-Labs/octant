@@ -237,6 +237,9 @@ export function createSimulatorScreenStream(
     // Listening before the first wait: a viewer who hangs up during the screen
     // lookup closes the response before a later listener would exist, and the
     // watch started afterwards could never be stopped.
+    // A viewer can also be gone before this runs — the request body is read
+    // first — and a close that already happened is never announced again.
+    if (outgoing.destroyed) return;
     let open = true;
     let stopWatching: (() => void) | undefined;
     outgoing.once("close", () => {

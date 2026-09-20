@@ -602,6 +602,20 @@ describe("AppleSimulatorLiveFrameView", () => {
       ]);
     });
 
+    it("ignores a press beside the streamed screen instead of sending a point that is not on it", () => {
+      const onInput = vi.fn();
+      render(liveView({ onInput }));
+      const canvas = screen.getByLabelText("iPhone 17 live screen");
+      // The pane's height cap binds: the canvas is centred with room either side.
+      vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 20, 402, 874));
+      const region = screen.getByLabelText("Tap on iPhone 17 Simulator screen");
+
+      fireEvent.pointerDown(region, { clientX: 40, clientY: 20 + 437, isPrimary: true });
+      fireEvent.pointerUp(region, { clientX: 40, clientY: 20 + 437, isPrimary: true });
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
     it("falls back to the captured still when the host has no live view", () => {
       render(
         <AppleSimulatorLiveFrameView
