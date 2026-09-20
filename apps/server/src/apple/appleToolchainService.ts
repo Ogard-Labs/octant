@@ -330,7 +330,7 @@ export class AppleToolchainService {
     const startedAt = this.#options.now();
     if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
       const prior = this.#findCompletedInput(request, context);
-      if (prior !== undefined) return prior;
+      if (prior !== undefined) return replayedFrom(prior);
     }
     const cached = this.#findDiscovery(request);
     const decision = isBuildRequest(request)
@@ -1503,6 +1503,24 @@ function evidence(
     durationMs: elapsed(startedAt, completedAt),
     completedAt,
   });
+}
+
+/**
+ * Evidence that answered a request again from memory. Nothing was delivered
+ * this time, so a caller that reacts to what happened on a device — renewing an
+ * input grant, say — must be able to tell it from a real delivery without
+ * comparing timestamps, which a clock change can reorder.
+ */
+const replayedEvidence = new WeakSet<object>();
+
+export function replayedFrom<Evidence extends object>(value: Evidence): Evidence {
+  const replay = { ...value };
+  replayedEvidence.add(replay);
+  return replay;
+}
+
+export function isReplayedEvidence(value: object): boolean {
+  return replayedEvidence.has(value);
 }
 
 export function withInputMustReissueNote(value: AppleBuildEvidence): AppleBuildEvidence {

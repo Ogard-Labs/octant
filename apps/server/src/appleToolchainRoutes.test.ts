@@ -221,7 +221,6 @@ describe("Apple toolchain routes", () => {
       expect.objectContaining({ kind: "tap" }),
       evidence,
       context,
-      "2026-09-19T20:00:00.000Z",
     );
   });
 

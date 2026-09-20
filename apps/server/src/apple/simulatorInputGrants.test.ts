@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { replayedFrom } from "./appleToolchainService";
 import { SimulatorInputGrants } from "./simulatorInputGrants";
 
 const thread = "c5b0e039-ee21-40cb-a8b7-7c8d6da68354";
@@ -105,25 +106,22 @@ describe("Simulator input grants", () => {
 
     // Delivered at ten minutes: the grant now runs to twenty-five.
     now = minutes(10);
-    grants.settle(tap, evidence(at(10)), { threadId: thread }, at(10));
+    grants.settle(tap, evidence(at(10)), { threadId: thread });
     now = minutes(24);
     expect(grants.isOpen(thread, iphone)).toBe(true);
 
-    // The same request answered again from stored evidence delivered nothing.
+    // The same request answered again from the service's memory delivered nothing.
     now = minutes(20);
-    grants.settle(tap, evidence(at(10)), { threadId: thread }, at(20));
+    grants.settle(tap, replayedFrom(evidence(at(10))), { threadId: thread });
     now = minutes(26);
     expect(grants.isOpen(thread, iphone)).toBe(false);
 
     // A shutdown that worked, run by an agent or a pane alike, closes every thread.
     grants.open(thread, iphone);
     grants.open(otherThread, iphone);
-    grants.settle(
-      { kind: "shutdown", simulatorId: iphone },
-      evidence(at(26)),
-      { threadId: otherThread },
-      at(26),
-    );
+    grants.settle({ kind: "shutdown", simulatorId: iphone }, evidence(at(26)), {
+      threadId: otherThread,
+    });
     expect(grants.isOpen(thread, iphone)).toBe(false);
     expect(grants.isOpen(otherThread, iphone)).toBe(false);
   });
@@ -145,7 +143,10 @@ describe("Simulator input grants", () => {
 
   it("lists a thread's live grants with their expiry for the pane", () => {
     let now = Date.parse("2026-09-19T20:00:00.000Z");
-    const grants = new SimulatorInputGrants(() => now);
+    const grants = new SimulatorInputGrants(
+      () => now,
+      () => now,
+    );
     grants.open(thread, iphone);
     grants.open(otherThread, ipad);
     expect(grants.list(thread)).toEqual([
@@ -153,5 +154,23 @@ describe("Simulator input grants", () => {
     ]);
     now += minutes(16);
     expect(grants.list(thread)).toEqual([]);
+  });
+
+  it("tells the pane when a grant ends by the pane's own clock, even after the host's clock fell behind while the machine slept", () => {
+    // The host's authority clock does not run while the machine sleeps, so it
+    // can trail the wall clock by hours. The pane compares expiry to its wall
+    // clock, so an expiry reported in the host's time would read as long over.
+    let authority = 0;
+    let wall = Date.parse("2026-09-19T23:00:00.000Z");
+    const grants = new SimulatorInputGrants(
+      () => authority,
+      () => wall,
+    );
+    grants.open(thread, iphone);
+    authority += minutes(5);
+    wall += minutes(5);
+    expect(grants.list(thread)).toEqual([
+      { simulatorId: iphone, expiresAt: "2026-09-19T23:15:00.000Z" },
+    ]);
   });
 });

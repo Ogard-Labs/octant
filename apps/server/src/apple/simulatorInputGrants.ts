@@ -1,4 +1,5 @@
 import { APPLE_INPUT_GRANT_MS, isAppleSimulatorInputKind } from "@octant/domain";
+import { isReplayedEvidence } from "./appleToolchainService";
 
 /**
  * The longest an action may run: its own timeout allows ten minutes. An
@@ -22,10 +23,17 @@ export interface SimulatorInputGrant {
  */
 export class SimulatorInputGrants {
   readonly #now: () => number;
+  readonly #wallNow: () => number;
   readonly #expiry = new Map<string, number>();
 
-  constructor(now: () => number = Date.now) {
+  /**
+   * `now` measures grant lifetime: the host passes its suspend-aware authority
+   * clock, so a machine that sleeps or has its clock set back cannot stretch a
+   * grant. `wallNow` is only for telling the pane when a grant ends.
+   */
+  constructor(now: () => number = Date.now, wallNow: () => number = Date.now) {
     this.#now = now;
+    this.#wallNow = wallNow;
   }
 
   open(threadId: string, simulatorId: string): void {
@@ -60,17 +68,16 @@ export class SimulatorInputGrants {
   /**
    * Settles a finished action from the request, its evidence and the context it
    * ran under. Every path that runs Apple actions calls this, so the workbench
-   * route and an agent's tool close and renew grants the same way. Evidence
-   * older than the request is a replay of an earlier answer: nothing was
-   * delivered, so nothing is renewed or closed.
+   * route and an agent's tool close and renew grants the same way. Evidence the
+   * service gave again from memory delivered nothing, so it renews and closes
+   * nothing.
    */
   settle(
     request: { readonly kind: string; readonly simulatorId?: unknown },
-    evidence: { readonly outcome: string; readonly completedAt: string },
+    evidence: { readonly outcome: string },
     context: { readonly threadId: unknown; readonly inputGranted?: boolean },
-    startedAt: string,
   ): void {
-    if (Date.parse(evidence.completedAt) < Date.parse(startedAt)) return;
+    if (isReplayedEvidence(evidence)) return;
     this.afterAction(
       String(context.threadId),
       {
@@ -111,14 +118,20 @@ export class SimulatorInputGrants {
       if (scope.startsWith(`${threadId}:`)) this.#expiry.delete(scope);
   }
 
+  /**
+   * A thread's live grants. The expiry is what remains of the grant laid on the
+   * wall clock, because the pane compares it to its own clock and the host's
+   * authority clock can trail that by however long the machine slept.
+   */
   list(threadId: string): ReadonlyArray<SimulatorInputGrant> {
     const now = this.#now();
+    const wallNow = this.#wallNow();
     const grants: SimulatorInputGrant[] = [];
     for (const [scope, expiresAt] of this.#expiry) {
       if (!scope.startsWith(`${threadId}:`) || expiresAt <= now) continue;
       grants.push({
         simulatorId: scope.slice(threadId.length + 1),
-        expiresAt: new Date(expiresAt).toISOString(),
+        expiresAt: new Date(wallNow + (expiresAt - now)).toISOString(),
       });
     }
     return grants;

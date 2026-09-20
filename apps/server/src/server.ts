@@ -3937,7 +3937,7 @@ export function startOctantServer(
             const evidence = await appleToolchainService.execute(request, context);
             // An agent's shutdown closes a Simulator to every thread, and its
             // input keeps a live grant open, the same as the pane's.
-            simulatorInputGrants.settle(request, evidence, context, startedAt);
+            simulatorInputGrants.settle(request, evidence, context);
             await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
@@ -4212,7 +4212,7 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
-    const simulatorInputGrants = new SimulatorInputGrants();
+    const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     // Present only under the desktop app, which owns the native device helper.
     const simulatorDevice = createDesktopSimulatorDevicePort(process.env);
     const appleToolchainService = new AppleToolchainService({
@@ -4338,8 +4338,8 @@ export function startOctantServer(
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
-      afterAction: (request, evidence, context, startedAt) =>
-        simulatorInputGrants.settle(request, evidence, context, startedAt),
+      afterAction: (request, evidence, context) =>
+        simulatorInputGrants.settle(request, evidence, context),
       inputGrants: (threadId) => simulatorInputGrants.list(String(threadId)),
       ...(simulatorDevice === undefined
         ? {}

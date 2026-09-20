@@ -35,6 +35,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
 };
 
 let AppleToolchainService: ServiceConstructor;
+let isReplayedEvidence: (value: unknown) => boolean;
 
 beforeAll(async () => {
   const path = "./appleToolchainService";
@@ -42,6 +43,7 @@ beforeAll(async () => {
   expect(loaded).toBeDefined();
   expect(loaded?.AppleToolchainService).toBeTypeOf("function");
   AppleToolchainService = loaded!.AppleToolchainService as ServiceConstructor;
+  isReplayedEvidence = loaded!.isReplayedEvidence as typeof isReplayedEvidence;
 });
 
 const ids = {
@@ -1469,6 +1471,10 @@ describe("AppleToolchainService Simulator input", () => {
     const second = await service.execute(request, context);
     expect(second).toEqual(first);
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+    // The service says which answer was delivered and which was remembered, so
+    // a caller never has to guess from timestamps.
+    expect(isReplayedEvidence(first)).toBe(false);
+    expect(isReplayedEvidence(second)).toBe(true);
   });
 
   it("delivers input to a Simulator the host holds open even though the request carries no approval", async () => {
