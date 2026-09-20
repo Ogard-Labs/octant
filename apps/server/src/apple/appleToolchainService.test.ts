@@ -1062,6 +1062,68 @@ describe("AppleToolchainService lifecycle", () => {
     expect(evidence.outcome).toBe("failed");
   });
 
+  it("gives every attempt at a capture its own file, so an abandoned writer cannot touch a retry", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const paths: string[] = [];
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      paths.push(input.argv.at(-1)!);
+      return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
+    });
+    const request = simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined });
+
+    await service.execute(request, context);
+    await service.execute(request, context);
+
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).not.toBe(paths[1]);
+    for (const path of paths)
+      expect(path.startsWith(join(captureDirectory, "octant-apple-capture-"))).toBe(true);
+  });
+
+  it("reports a capture too large to keep as failed, with the reason, not as interrupted", async () => {
+    const execute = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const writeArtifact = vi.fn(async (_reference: string, bytes: Uint8Array) => {
+      // The production store refuses anything above 16 MiB.
+      if (bytes.byteLength > 16 * 1024 * 1024) throw new Error("Apple artifact is invalid.");
+    });
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const oversized = new Uint8Array(17 * 1024 * 1024);
+      oversized.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      await writeFile(input.argv.at(-1)!, oversized);
+      return processResult("");
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(
+      writeArtifact.mock.calls.every(([reference]) => !reference.startsWith("apple-screenshot-")),
+    ).toBe(true);
+  });
+
   it("shrugs off a return visit that cannot remove what it finds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const rejections: unknown[] = [];

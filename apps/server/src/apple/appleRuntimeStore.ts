@@ -16,7 +16,9 @@ import type { AppleRuntimeReceipt } from "./appleToolchainService";
 
 const MAX_RECEIPTS = 64;
 const MAX_RECEIPT_BYTES = 1024 * 1024;
-const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
+/** The largest artifact the store keeps; a producer bounds itself to the same size. */
+export const MAX_APPLE_ARTIFACT_BYTES = 16 * 1024 * 1024;
+const MAX_ARTIFACT_BYTES = MAX_APPLE_ARTIFACT_BYTES;
 const SAFE_REFERENCE = /^apple-[a-z0-9-]{1,500}$/;
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);

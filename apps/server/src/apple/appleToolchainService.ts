@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -31,6 +31,7 @@ import {
   type AppleExecutionScope,
 } from "@octant/domain";
 import { defaultTemporaryDirectory } from "../code/repositoryTestProcessPort";
+import { MAX_APPLE_ARTIFACT_BYTES } from "./appleRuntimeStore";
 
 /**
  * Host link state `xcode-select` reads to answer where the developer directory
@@ -566,9 +567,12 @@ export class AppleToolchainService {
         // A capture whose process outlived its timeout can write its file after
         // this action already removed it; the next capture clears what is left.
         await sweepStaleCaptures(this.#captureDirectory, Date.now(), this.#capturesInProgress);
+        // One file per attempt, not per action: a retry of a capture whose
+        // first process is still alive would otherwise share its path, and the
+        // two writers would race for the file the retry then reads.
         const capturePath = join(
           this.#captureDirectory,
-          `${CAPTURE_FILE_PREFIX}${request.actionId}.png`,
+          `${CAPTURE_FILE_PREFIX}${request.actionId}-${randomUUID()}.png`,
         );
         this.#capturesInProgress.add(capturePath);
         let exitedCleanly = false;
@@ -1569,8 +1573,12 @@ async function sweepStaleCaptures(
   );
 }
 
-/** A Simulator screen is a few megabytes; nothing near this is a capture. */
-const MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
+/**
+ * A Simulator screen is a few megabytes. The bound is the artifact store's own:
+ * a capture it would refuse is refused here, as a failed capture with a reason,
+ * rather than thrown past the action as "interrupted".
+ */
+const MAX_CAPTURE_BYTES = MAX_APPLE_ARTIFACT_BYTES;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
 /**
