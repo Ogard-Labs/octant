@@ -1530,8 +1530,35 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   />
                 </>
               )}
-              {/* Model sits beside send, not on a strip above the composer:
-                      the bar holds how the task runs (0073). */}
+              <ComposerVoiceButton
+                disabled={creating || completionLocked}
+                onTranscript={(transcript) =>
+                  rememberDraft(appendTranscript(prompt, transcript), null)
+                }
+              />
+              {thread?.lifecycle === "active" && !completionLocked ? (
+                <OctantMenu
+                  items={[
+                    {
+                      value: "complete",
+                      label: "Mark complete",
+                      icon: <Check aria-hidden="true" size={14} />,
+                      disabled: completing || providerChanging || creating,
+                    },
+                  ]}
+                  onValueChange={() => setCompletionFormOpen(true)}
+                  selectionMode="action"
+                  trigger={<Ellipsis aria-hidden="true" size={16} />}
+                  triggerClassName="shell-icon-button"
+                  triggerLabel="Task actions"
+                  value=""
+                />
+              ) : null}
+              {/* Two groups with space between: what the person adds sits left,
+                  how the task runs (0073) sits right beside send. The model
+                  used to hug the attach button, so it jumped sides between a
+                  new task and the thread it became. */}
+              <span aria-hidden="true" className="composer-gap" />
               {thread === undefined ? null : (
                 <span
                   aria-label="Bound provider and model"
@@ -1563,30 +1590,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   />
                 </span>
               )}
-              {thread?.lifecycle === "active" && !completionLocked ? (
-                <OctantMenu
-                  items={[
-                    {
-                      value: "complete",
-                      label: "Mark complete",
-                      icon: <Check aria-hidden="true" size={14} />,
-                      disabled: completing || providerChanging || creating,
-                    },
-                  ]}
-                  onValueChange={() => setCompletionFormOpen(true)}
-                  selectionMode="action"
-                  trigger={<Ellipsis aria-hidden="true" size={16} />}
-                  triggerClassName="shell-icon-button"
-                  triggerLabel="Task actions"
-                  value=""
-                />
-              ) : null}
-              <ComposerVoiceButton
-                disabled={creating || completionLocked}
-                onTranscript={(transcript) =>
-                  rememberDraft(appendTranscript(prompt, transcript), null)
-                }
-              />
             </>
           ),
           actions: {

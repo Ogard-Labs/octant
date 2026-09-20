@@ -1663,6 +1663,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   props.controller.setPendingDraft?.(next, next.length);
                 }}
               />
+              {/* Two groups with space between: what the person adds sits left,
+                  how the turn runs sits right beside send. The model used to
+                  hug the attach button, so it jumped sides between a new task
+                  and the thread it became. */}
+              <span aria-hidden="true" className="composer-gap" />
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}

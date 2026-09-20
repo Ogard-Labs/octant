@@ -90,19 +90,17 @@
   --octant-shadow-lg:
     0 0 0 1px var(--octant-border), 0 10px 18px -8px rgb(0 0 0 / 50%),
     0 22px 46px -16px rgb(0 0 0 / 68%);
-  --octant-shadow-overlay:
-    0 0 0 1px var(--octant-border-strong), 0 18px 48px -16px rgb(0 0 0 / 72%);
+  /* The overlay's own edge is a hairline, as the popover recipe says and as the
+     light theme already draws it. In dark it used the strong border, so every
+     menu and popover had a heavier edge than a dialog, and a popup that also
+     set a border showed two. */
+  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 18px 48px -16px rgb(0 0 0 / 72%);
   --octant-shadow-pop: 0 18px 48px -16px rgb(0 0 0 / 78%);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
   --octant-glass-border: rgb(255 255 255 / 9%);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 7%);
-  --octant-radius-chip: 9999px;
-  --octant-radius-control: 10px;
-  --octant-radius-panel: 16px;
-  --octant-radius-composer: 20px;
-  --octant-radius-pill: 999px;
   --octant-space-1: 4px;
   --octant-space-2: 8px;
   --octant-space-3: 12px;
@@ -239,7 +237,7 @@ html[data-octant-theme-mode="light"] {
   background: var(--octant-border-strong);
   background-clip: padding-box;
   border: 3px solid transparent;
-  border-radius: var(--octant-radius-pill);
+  border-radius: var(--oct-radius-pill);
 }
 
 :where(*)::-webkit-scrollbar-thumb:hover {
@@ -1049,7 +1047,6 @@ h6 {
 }
 
 .activity-nav__group > .sidebar-section {
-  padding-inline: 6px;
   color: var(--octant-text-secondary);
 }
 
@@ -1099,43 +1096,10 @@ h6 {
   gap: 2px;
 }
 
-.sidebar-navigation__thread.activity-nav__thread {
-  min-height: 48px;
-  align-items: flex-start;
-  padding: 6px;
-}
-
 .sidebar-navigation__thread-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
-}
-
-/* The feed row holds the title line plus whichever properties the view is
-   currently showing beneath it, so the rows are counted rather than fixed at
-   two; the button's own min-height still keeps a one-line row from collapsing. */
-.activity-nav__thread .sidebar-navigation__thread-copy {
-  flex: 1 1 auto;
-  grid-auto-rows: minmax(16px, auto);
-  gap: 2px;
-}
-
-.activity-nav__thread .sidebar-navigation__thread-title,
-.activity-nav__thread .sidebar-navigation__thread-project {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-navigation__thread-project {
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .code-project-views__new {
@@ -1216,10 +1180,11 @@ h6 {
      so neither reading won. */
   gap: 0;
   margin: 2px 0 0;
-  /* Enough to read as nested under its Project, and no more: the row inside
-     adds its own inset, and the two together were pushing thread titles most
-     of the way across the sidebar before the first letter. */
-  padding-left: var(--oct-space-2);
+  /* No indent of its own. An indented list made a thread's selection fill
+     start 16px from the sidebar's edge and end 8px from it, while every other
+     row's fill sat 8px from both; the Project's heavier name and the rows'
+     provider marks are what say these threads belong to it. */
+  padding-left: 0;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1457,7 +1422,9 @@ h6 {
 .project-row__action--icon {
   width: 0;
   min-width: 0;
-  height: var(--oct-nav-row-h);
+  /* Square, like a thread row's actions. At the row's own height the hover
+     fill was a 24px by 30px slab beside 24px squares one row down. */
+  height: 24px;
   min-height: 0;
   padding: 0;
   overflow: hidden;
@@ -2303,7 +2270,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .settings-view__text-input[type="color"] {
   min-width: 46px;
   width: 46px;
-  height: 32px;
+  height: var(--oct-settings-control-height, 28px);
   padding: 2px;
 }
 
@@ -6463,10 +6430,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
-  background: var(--octant-surface);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
+  /* Size and place only. The popover recipe paints the fill, the edge, and the
+     corner; this rule used to repaint all three, and its fill was the
+     workspace's, so it was the one darker popup beside the menus. */
 }
 
 /* The chosen model's effort/reasoning level, one tap from the list. The
@@ -6526,7 +6492,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   height: 4px;
   translate: 0 -50%;
   background: var(--octant-accent);
-  border-radius: var(--octant-radius-pill);
+  border-radius: var(--oct-radius-pill);
 }
 
 .composer-model-picker__level-knob {
@@ -6536,7 +6502,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   height: 16px;
   translate: -50% -50%;
   background: var(--octant-text-primary);
-  border-radius: var(--octant-radius-pill);
+  border-radius: var(--oct-radius-pill);
   box-shadow: var(--octant-shadow-xs);
   transition: inset-inline-start var(--oct-motion-fast) var(--oct-ease-standard);
 }
@@ -7819,7 +7785,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 
 .model-picker__search {
   width: 100%;
-  height: var(--oct-settings-control-height, 32px);
+  height: var(--oct-settings-control-height, 28px);
   margin-bottom: var(--oct-space-2);
 }
 
@@ -8294,7 +8260,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   display: grid;
   gap: 0.5rem;
   padding: 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--oct-radius-sm);
   border: 1px solid var(--octant-border);
   background: var(--octant-surface-raised);
 }
@@ -8310,7 +8276,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-sm);
   padding: 0.2rem 0.4rem;
-  border-radius: 0.3rem;
+  border-radius: 4px;
   background: var(--octant-surface);
 }
 
@@ -8417,7 +8383,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   max-width: 14rem;
   height: 1.6rem;
   border: 1px solid color-mix(in srgb, var(--octant-border) 80%, transparent);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--octant-surface) 88%, transparent);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
@@ -8528,7 +8494,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   min-width: 12rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--octant-border);
-  border-radius: 0.375rem;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
 }
 
@@ -8599,7 +8565,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   gap: 1rem;
   padding: 1rem;
   border: 1px solid var(--octant-border);
-  border-radius: 0.65rem;
+  border-radius: var(--oct-radius-md);
   background: var(--octant-surface-raised);
 }
 
@@ -8622,7 +8588,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .validation-pane__timeline-entry {
   min-width: 0;
   padding: 0.7rem;
-  border-radius: 0.45rem;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-muted);
 }
 
@@ -10050,7 +10016,7 @@ ul.board-col-body {
 
 .model-picker__group--octant {
   border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-  border-radius: 0.75rem;
+  border-radius: var(--oct-radius-sm);
   padding: 0.25rem 0.5rem 0.5rem;
 }
 
@@ -10081,11 +10047,6 @@ ul.board-col-body {
   height: auto;
   flex: 1 1 auto;
   min-width: 0;
-}
-.activity-nav__pr {
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 4px;
 }
 
 .projects-page-layer {
