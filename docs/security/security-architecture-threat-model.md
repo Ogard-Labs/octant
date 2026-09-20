@@ -312,16 +312,24 @@ window, or approves an action class the host policy reserves for the local user.
     Codex's `sanitizeCodexEnvironment` is an allowlist too: host basics, locale, terminal and TLS
     variables, proxy variables, Codex's own `CODEX_*` and `OPENAI_*` configuration, and the
     credentials it names. A model provider's own credential crosses (`OPENAI_API_KEY`, the Bedrock
-    bearer token); a general-purpose one — a GitHub token, AWS IAM access keys — does not. The
-    allowlist is the only boundary there, because that runtime is unwrapped. Under API-key
-    authentication `ANTHROPIC_API_KEY` is written into Claude's
+    bearer token); a general-purpose one — a GitHub token, AWS IAM access keys — does not cross
+    _as a variable_. That is a statement about the environment only; see _Files_ below. Under
+    API-key authentication `ANTHROPIC_API_KEY` is written into Claude's
     child environment at launch and deleted from the in-memory object when the scope closes.
     0009 reads two ways on that: it says provider credentials are stripped from every child, and
     that secrets reach a process only as named references resolved at launch. This record states
     the mechanism rather than settling which clause governs.
+  - _Files._ 0009's wrapped profile enumerates the rest of the user's home as denied. An unwrapped
+    runtime gets none of that. Both forward `HOME`, and Codex also forwards the AWS locators
+    (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`). So `~/.aws/credentials`,
+    `~/.config/gh/hosts.yml`, `~/.ssh` and anything else the user can read is reachable by the
+    runtime process, limited only by what the provider's own sandbox blocks. That is nothing on
+    Full access for either runtime, and nothing on a Claude Plan turn. Keeping a token out of the
+    environment does not keep it from a model-generated command that reads its file.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
-    with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
-    without announcing is not one Octant's approvals can prompt for.
+    and those files with no Octant-owned OS boundary in the way, and a write the runtime's own
+    sandbox permits without announcing is not one Octant's approvals can prompt for. Wrapping the
+    runtime is what closes both, which is why 0142 names it as the way this exception ends.
 - **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
   `inspectVersion`, `probeCodexBinary`, and `runProbe` in `claudeProcess.ts` — the last for both
   `--version` and `auth status --json` — each spawn the user-configured binary before any
