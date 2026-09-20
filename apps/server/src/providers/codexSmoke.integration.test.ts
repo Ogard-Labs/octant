@@ -21,7 +21,7 @@ const approvalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-00000
 const resumedSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000404");
 const fallbackApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000405");
 const inRootApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000406");
-const installedSmokeOuterTimeoutMs = 360_000;
+const installedSmokeOuterTimeoutMs = 420_000;
 const installedSmokeCleanupMarginMs = 30_000;
 const installedSmokeStageTimeouts = {
   prerequisites: 8_000,
@@ -29,6 +29,12 @@ const installedSmokeStageTimeouts = {
   plan: 90_000,
   interrupt: 60_000,
   approval: 90_000,
+  // One bounded attempt rather than the two the outside-root stage makes, so it
+  // needs less than that stage. It is its own entry because the bounds test
+  // below sums each entry once: a stage that borrows another's budget is spent
+  // twice in a run and counted once, which is how the real deadline drifts past
+  // the outer timeout without the bound noticing.
+  inRootApproval: 60_000,
   restart: 8_000,
   resume: 20_000,
 } as const;
@@ -248,40 +254,43 @@ describe("installed Codex runtime", () => {
         // so this stage is asserted rather than skipped — the model may choose a
         // shell redirect or its patch tool, but under `read-only` either one has
         // to escalate before it can touch the file.
-        await stage("declined in-root write approval", installedSmokeStageTimeouts.approval, () =>
-          usingConnection(driver, projectRoot, activeConnections, async (approval) => {
-            const inRootTarget = join(projectRoot, "must-not-exist.md");
-            let answered = false;
-            await Effect.runPromise(
-              approval.connection.start({
-                sessionId: inRootApprovalSessionId,
-                modelId,
-                executionPolicy: "approval-gated",
-              }),
-            );
-            const approvalEvents = collectApprovalAttempt(
-              Stream.unwrapScoped(approval.connection.subscribe),
-              (event) => {
-                if (answered) return Effect.void;
-                answered = true;
-                return approval.connection.answerApproval({
+        await stage(
+          "declined in-root write approval",
+          installedSmokeStageTimeouts.inRootApproval,
+          () =>
+            usingConnection(driver, projectRoot, activeConnections, async (approval) => {
+              const inRootTarget = join(projectRoot, "must-not-exist.md");
+              let answered = false;
+              await Effect.runPromise(
+                approval.connection.start({
                   sessionId: inRootApprovalSessionId,
-                  requestId: event.requestId,
-                  approved: false,
-                });
-              },
-            );
-            await Effect.runPromise(
-              approval.connection.send({
-                sessionId: inRootApprovalSessionId,
-                prompt: `Create the file ${inRootTarget} containing the single line: must not exist. Then stop.`,
-                attachments: [],
-                tools: [],
-              }),
-            );
-            expect(await approvalEvents).toBe(true);
-            expect(await pathExists(inRootTarget)).toBe(false);
-          }),
+                  modelId,
+                  executionPolicy: "approval-gated",
+                }),
+              );
+              const approvalEvents = collectApprovalAttempt(
+                Stream.unwrapScoped(approval.connection.subscribe),
+                (event) => {
+                  if (answered) return Effect.void;
+                  answered = true;
+                  return approval.connection.answerApproval({
+                    sessionId: inRootApprovalSessionId,
+                    requestId: event.requestId,
+                    approved: false,
+                  });
+                },
+              );
+              await Effect.runPromise(
+                approval.connection.send({
+                  sessionId: inRootApprovalSessionId,
+                  prompt: `Create the file ${inRootTarget} containing the single line: must not exist. Then stop.`,
+                  attachments: [],
+                  tools: [],
+                }),
+              );
+              expect(await approvalEvents).toBe(true);
+              expect(await pathExists(inRootTarget)).toBe(false);
+            }),
         );
 
         await stage("driver restart", installedSmokeStageTimeouts.restart, () =>
