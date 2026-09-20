@@ -71,6 +71,7 @@ import {
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
+import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
@@ -1261,6 +1262,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                       </>
                     )}
+                    {/* After the reply, like Work's: the files are what the turn
+                        left behind, read once the answer has been. */}
+                    {message.role === "assistant" && message.changedFiles !== undefined ? (
+                      <CodeTurnChangedFilesCard changedFiles={message.changedFiles} />
+                    ) : null}
                     {(markedCheckpoint !== undefined ||
                       checkpointDraft?.messageId === message.id) &&
                     message.role === "assistant" &&
