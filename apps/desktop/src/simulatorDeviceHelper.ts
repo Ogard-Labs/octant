@@ -23,6 +23,13 @@ export type DeviceHelperRequest =
       readonly x: number;
       readonly y: number;
     }
+  | {
+      readonly op: "stream-start";
+      readonly maxHeight: number;
+      readonly quality: number;
+      readonly framesPerSecond: number;
+    }
+  | { readonly op: "stream-stop" }
   | { readonly op: "text"; readonly text: string }
   | { readonly op: "key"; readonly key: string }
   | { readonly op: "button"; readonly button: "home" | "lock" };
@@ -38,6 +45,24 @@ export type DeviceHelperReply =
   /** No answer came: the helper is missing, died, or outlived its budget. */
   | { readonly status: "unavailable"; readonly message: string };
 
+export interface DeviceWatchOptions {
+  readonly maxHeight: number;
+  readonly quality: number;
+  readonly framesPerSecond: number;
+}
+
+export interface DeviceViewer {
+  /** One whole JPEG of the Simulator's screen. */
+  readonly onFrame: (jpeg: Uint8Array) => void;
+  /** The helper stopped; no more frames will come. Not called after `stop()`. */
+  readonly onEnd: () => void;
+}
+
+export type DeviceWatch =
+  | { readonly status: "watching"; readonly stop: () => void }
+  | { readonly status: "refused"; readonly code: string; readonly message: string }
+  | { readonly status: "unavailable"; readonly message: string };
+
 /** The part of a child process this module uses, so a test can stand one in. */
 export interface DeviceHelperChild {
   readonly stdin: {
@@ -46,6 +71,11 @@ export interface DeviceHelperChild {
     on(event: "error", listener: () => void): unknown;
   };
   readonly stdout: { on(event: "data", listener: (chunk: Uint8Array) => void): unknown };
+  /** File descriptor 3: length-prefixed JPEG frames while a stream is running. */
+  readonly frames: {
+    on(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    on(event: "error", listener: () => void): unknown;
+  };
   on(event: "exit" | "error", listener: () => void): unknown;
   kill(): unknown;
 }
@@ -59,19 +89,35 @@ export interface SimulatorDeviceHelpersOptions {
 
 interface PendingReply {
   readonly settle: (reply: DeviceHelperReply) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  /** Unset while the deadline has not begun: a request that waits behind an input. */
+  timer: ReturnType<typeof setTimeout> | undefined;
+  readonly timeoutMs: number;
+  /**
+   * Sends something to the device. A screen lookup and starting or stopping
+   * the stream do not.
+   */
+  readonly delivers: boolean;
 }
 
 interface RunningHelper {
   readonly child: DeviceHelperChild;
   readonly pending: Map<number, PendingReply>;
+  readonly viewers: Set<DeviceViewer>;
   buffered: Buffer;
+  bufferedFrames: Buffer;
+  /** The newest frame of the running stream, for a viewer who joins a still screen. */
+  latestFrame: Uint8Array | undefined;
   nextId: number;
   idle: ReturnType<typeof setTimeout> | undefined;
+  /** Settles once the helper has answered the viewers' shared `stream-start`. */
+  streaming: Promise<DeviceHelperReply> | undefined;
 }
 
 const SIMULATOR_ID = /^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/;
 const MAXIMUM_REPLY_BYTES = 262_144;
+const MAXIMUM_FRAME_BYTES = 8 * 1024 * 1024;
+/** A stream stop the helper has not answered by now never will be. */
+const STREAM_STOP_MS = 20_000;
 const DEFAULT_IDLE_MS = 120_000;
 
 function frame(value: Record<string, unknown>): Buffer {
@@ -116,8 +162,28 @@ function replyFrom(value: unknown): DeviceHelperReply {
 export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOptions) {
   const spawn =
     options.spawn ??
-    ((helperPath: string, simulatorId: string): DeviceHelperChild =>
-      spawnProcess(helperPath, [simulatorId], { stdio: ["pipe", "pipe", "ignore"] }));
+    ((helperPath: string, simulatorId: string): DeviceHelperChild => {
+      const child = spawnProcess(helperPath, [simulatorId], {
+        stdio: ["pipe", "pipe", "ignore", "pipe"],
+      });
+      const frames = child.stdio[3];
+      if (
+        child.stdin === null ||
+        child.stdout === null ||
+        frames === null ||
+        frames === undefined
+      ) {
+        child.kill();
+        throw new Error("The device helper started without its pipes.");
+      }
+      return {
+        stdin: child.stdin,
+        stdout: child.stdout,
+        frames,
+        on: (event, listener) => child.on(event, listener),
+        kill: () => child.kill(),
+      };
+    });
   const idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
   const running = new Map<string, RunningHelper>();
   let disposed = false;
@@ -130,6 +196,9 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       waiting.settle({ status: "unavailable", message });
     }
     helper.pending.clear();
+    const viewers = [...helper.viewers];
+    helper.viewers.clear();
+    for (const viewer of viewers) viewer.onEnd();
     try {
       helper.child.stdin.end();
     } catch {
@@ -138,9 +207,31 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     helper.child.kill();
   }
 
+  /**
+   * The helper answers in order and cannot be asked to drop a request, and a
+   * deadline that passes stops it. A live view's screen lookup, stream start
+   * or stream stop waiting behind an input would therefore stop the helper
+   * under that input, which may already have typed part of its text. So a
+   * request that sends nothing to the device begins its deadline only once
+   * nothing being delivered is ahead of it; the input's own deadline is what
+   * catches a helper that truly hangs.
+   */
+  function beginDeadlines(simulatorId: string, helper: RunningHelper): void {
+    for (const waiting of helper.pending.values()) {
+      if (waiting.delivers) return;
+      waiting.timer ??= setTimeout(
+        () => stop(simulatorId, helper, "The device helper did not answer in time."),
+        waiting.timeoutMs,
+      );
+    }
+  }
+
   /** Starts the idle clock: nothing is waiting on this helper any more. */
   function restIdle(simulatorId: string, helper: RunningHelper): void {
     if (helper.idle !== undefined) clearTimeout(helper.idle);
+    helper.idle = undefined;
+    // A helper someone is watching is in use even when no input arrives.
+    if (helper.viewers.size > 0) return;
     helper.idle = setTimeout(
       () => stop(simulatorId, helper, "The device helper was stopped while idle."),
       idleMs,
@@ -151,10 +242,34 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     const helper: RunningHelper = {
       child: spawn(options.helperPath, simulatorId),
       pending: new Map(),
+      viewers: new Set(),
       buffered: Buffer.alloc(0),
+      bufferedFrames: Buffer.alloc(0),
+      latestFrame: undefined,
       nextId: 1,
       idle: undefined,
+      streaming: undefined,
     };
+    helper.child.frames.on("data", (chunk) => {
+      helper.bufferedFrames = Buffer.concat([helper.bufferedFrames, chunk]);
+      while (helper.bufferedFrames.length >= 4) {
+        const length = helper.bufferedFrames.readUInt32BE(0);
+        if (length > MAXIMUM_FRAME_BYTES) {
+          stop(simulatorId, helper, "The device helper sent an oversized frame.");
+          return;
+        }
+        if (helper.bufferedFrames.length < length + 4) return;
+        // Copied: the viewers keep the frame after this buffer moves on.
+        const jpeg = Uint8Array.from(helper.bufferedFrames.subarray(4, length + 4));
+        helper.bufferedFrames = helper.bufferedFrames.subarray(length + 4);
+        // Kept only for a stream somebody is watching or waiting for. A stop is
+        // queued, not instant, so the ending stream can present once more after
+        // the last viewer left; kept, that frame was the first thing the next
+        // viewer saw, however long ago it was taken.
+        if (helper.viewers.size > 0 || helper.streaming !== undefined) helper.latestFrame = jpeg;
+        for (const viewer of helper.viewers) viewer.onFrame(jpeg);
+      }
+    });
     helper.child.stdout.on("data", (chunk) => {
       helper.buffered = Buffer.concat([helper.buffered, chunk]);
       while (helper.buffered.length >= 4) {
@@ -179,6 +294,7 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         helper.pending.delete(id);
         clearTimeout(waiting.timer);
         if (helper.pending.size === 0) restIdle(simulatorId, helper);
+        else beginDeadlines(simulatorId, helper);
         waiting.settle(replyFrom(value));
       }
     });
@@ -189,8 +305,59 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     // not from `write`. With no listener that is an unhandled error event,
     // which would take the desktop's main process down with the helper.
     helper.child.stdin.on("error", gone);
+    helper.child.frames.on("error", gone);
     running.set(simulatorId, helper);
     return helper;
+  }
+
+  function ask(
+    simulatorId: string,
+    helper: RunningHelper,
+    request: DeviceHelperRequest,
+    timeoutMs: number,
+    cancelled?: AbortSignal,
+  ): Promise<DeviceHelperReply> {
+    // A helper with a request in hand is not idle, however long the request
+    // takes; the clock starts again when the last answer arrives.
+    if (helper.idle !== undefined) clearTimeout(helper.idle);
+    helper.idle = undefined;
+    const id = helper.nextId;
+    helper.nextId += 1;
+    const delivers =
+      request.op !== "hello" && request.op !== "stream-start" && request.op !== "stream-stop";
+    return new Promise<DeviceHelperReply>((resolve) => {
+      // The helper works through one request at a time and cannot be asked to
+      // drop one. A cancel that arrives before its answer therefore stops the
+      // helper: whatever it had not yet sent to the device is never sent, and
+      // the next request starts a fresh one.
+      const onCancel = () => {
+        if (helper.pending.has(id)) stop(simulatorId, helper, "The action was cancelled.");
+      };
+      cancelled?.addEventListener("abort", onCancel, { once: true });
+      const settle = (reply: DeviceHelperReply) => {
+        cancelled?.removeEventListener("abort", onCancel);
+        resolve(reply);
+      };
+      helper.pending.set(id, {
+        settle,
+        // An input's deadline begins now. Any other request's begins in
+        // `beginDeadlines`, once no input is ahead of it.
+        timer: delivers
+          ? setTimeout(
+              () => stop(simulatorId, helper, "The device helper did not answer in time."),
+              timeoutMs,
+            )
+          : undefined,
+        timeoutMs,
+        delivers,
+      });
+      beginDeadlines(simulatorId, helper);
+      try {
+        helper.child.stdin.write(frame({ ...request, id }));
+      } catch {
+        stop(simulatorId, helper, "The device helper stopped before it answered.");
+      }
+    });
   }
 
   return {
@@ -227,36 +394,66 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
           message: "The device helper could not be started.",
         });
       }
-      // A helper with a request in hand is not idle, however long the request
-      // takes; the clock starts again when the last answer arrives.
+      return ask(simulatorId, helper, request, timeoutMs, cancelled);
+    },
+
+    /**
+     * Shows a viewer the Simulator's screen as it changes. Viewers of one
+     * Simulator share a single stream, started with the first viewer's options
+     * and stopped with the last viewer; a watched helper is never idle.
+     */
+    async watch(
+      simulatorId: string,
+      watchOptions: DeviceWatchOptions,
+      viewer: DeviceViewer,
+      timeoutMs: number,
+    ): Promise<DeviceWatch> {
+      if (disposed) return { status: "unavailable", message: "The desktop is shutting down." };
+      if (!SIMULATOR_ID.test(simulatorId)) {
+        return {
+          status: "refused",
+          code: "no-such-device",
+          message: "That is not a Simulator identifier.",
+        };
+      }
+      let helper: RunningHelper;
+      try {
+        helper = running.get(simulatorId) ?? start(simulatorId);
+      } catch {
+        return { status: "unavailable", message: "The device helper could not be started." };
+      }
+      helper.streaming ??= ask(
+        simulatorId,
+        helper,
+        { op: "stream-start", ...watchOptions },
+        timeoutMs,
+      );
+      const started = await helper.streaming;
+      if (started.status !== "delivered") {
+        if (running.get(simulatorId) === helper) helper.streaming = undefined;
+        return started;
+      }
+      if (running.get(simulatorId) !== helper) {
+        return { status: "unavailable", message: "The device helper stopped before it answered." };
+      }
+      helper.viewers.add(viewer);
       if (helper.idle !== undefined) clearTimeout(helper.idle);
-      helper.idle = undefined;
-      const id = helper.nextId;
-      helper.nextId += 1;
-      return new Promise<DeviceHelperReply>((resolve) => {
-        const timer = setTimeout(
-          () => stop(simulatorId, helper, "The device helper did not answer in time."),
-          timeoutMs,
-        );
-        // The helper works through one request at a time and cannot be asked to
-        // drop one. A cancel that arrives before its answer therefore stops the
-        // helper: whatever it had not yet sent to the device is never sent, and
-        // the next request starts a fresh one.
-        const onCancel = () => {
-          if (helper.pending.has(id)) stop(simulatorId, helper, "The action was cancelled.");
-        };
-        cancelled?.addEventListener("abort", onCancel, { once: true });
-        const settle = (reply: DeviceHelperReply) => {
-          cancelled?.removeEventListener("abort", onCancel);
-          resolve(reply);
-        };
-        helper.pending.set(id, { settle, timer });
-        try {
-          helper.child.stdin.write(frame({ ...request, id }));
-        } catch {
-          stop(simulatorId, helper, "The device helper stopped before it answered.");
-        }
-      });
+      // Frames come only when the screen changes, and the helper's first one
+      // arrives before its answer does. A viewer is shown the newest frame at
+      // once, or a still device would leave it with nothing to draw.
+      if (helper.latestFrame !== undefined) viewer.onFrame(helper.latestFrame);
+      return {
+        status: "watching",
+        stop: () => {
+          if (!helper.viewers.delete(viewer) || helper.viewers.size > 0) return;
+          helper.streaming = undefined;
+          helper.latestFrame = undefined;
+          if (running.get(simulatorId) === helper) {
+            // Its deadline begins once no input is ahead of it (`beginDeadlines`).
+            void ask(simulatorId, helper, { op: "stream-stop" }, STREAM_STOP_MS);
+          }
+        },
+      };
     },
 
     /** True while any input is still waiting for its answer. */

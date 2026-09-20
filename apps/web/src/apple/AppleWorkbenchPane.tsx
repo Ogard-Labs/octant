@@ -9,6 +9,7 @@ import type {
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
+import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 
 export type AppleWorkbenchStatus =
   | "loading"
@@ -63,6 +64,7 @@ export interface AppleWorkbenchPaneProps {
   readonly actionMessage?: string;
   readonly liveFrame?: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
+  readonly liveScreen?: AppleSimulatorLiveScreen;
 }
 
 export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
@@ -73,6 +75,7 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         status="waiting"
         {...(props.liveFrame === undefined ? {} : { liveFrame: props.liveFrame })}
         {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
+        {...(props.liveScreen === undefined ? {} : { liveScreen: props.liveScreen })}
       />
     );
   }
@@ -123,7 +126,7 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
 }
 
 function LiveFrame(
-  props: Pick<AppleWorkbenchPaneProps, "liveFrame" | "screenUrl" | "onRun" | "busy">,
+  props: Pick<AppleWorkbenchPaneProps, "liveFrame" | "screenUrl" | "liveScreen" | "onRun" | "busy">,
 ) {
   if (props.liveFrame === undefined) return null;
   const frame = props.liveFrame;
@@ -163,6 +166,7 @@ function LiveFrame(
             },
           })}
       {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
+      {...(props.liveScreen === undefined ? {} : { liveScreen: props.liveScreen })}
     />
   );
 }
@@ -170,7 +174,7 @@ function LiveFrame(
 function AppleWorkbenchState(
   props: Pick<
     AppleWorkbenchPaneProps,
-    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl"
+    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl" | "liveScreen"
   >,
 ) {
   const presentation = {
