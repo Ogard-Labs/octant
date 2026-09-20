@@ -16,9 +16,9 @@ function read(relative: string): string {
  * roles, and no uppercase kickers creeping back into headings.
  */
 describe("surface language", () => {
-  it("ships Inter as the interface face with the system face as fallback", () => {
+  it("ships the system face as the interface default with the bundled face available", () => {
     expect(read("styles.css")).toContain('@import "@fontsource-variable/inter/opsz.css";');
-    expect(DEFAULT_THEME_SETTINGS.typography.ui.family).toMatch(/^'Inter Variable', /);
+    expect(DEFAULT_THEME_SETTINGS.typography.ui.family).toMatch(/^-apple-system, /);
     expect(DEFAULT_THEME_SETTINGS.typography.ui.family).toContain("system-ui");
     expect(read("styles/octant.css")).toMatch(/^body \{[^}]*font-optical-sizing: auto;/m);
   });
