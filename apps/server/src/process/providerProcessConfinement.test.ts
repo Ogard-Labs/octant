@@ -11,10 +11,10 @@ import { describe, expect, it } from "vitest";
  * that stops doing so: a driver that spawns its runtime directly is green,
  * shipped, and visible only to a grep. Three provider process modules had
  * drifted out of the rule that way with nothing recording it, which is what
- * 0142 settles.
+ * 0143 settles.
  *
  * What this proves: a provider process module either uses the shared builder or
- * appears in {@link UNWRAPPED} with a reason, and 0142 names each one that does
+ * appears in {@link UNWRAPPED} with a reason, and 0143 names each one that does
  * not. What it does not prove: that every launch inside a wrapped module goes
  * through the builder. A wrapped module still spawns directly for its version
  * probe, and on Full access drops the deny-default profile by design, so a
@@ -25,9 +25,9 @@ import { describe, expect, it } from "vitest";
  * candidate executables from `discoveryService`, which this never reads, and
  * the threat model carries that gap instead.
  *
- * {@link UNWRAPPED}, not 0142, is the live set. An accepted record keeps its
+ * {@link UNWRAPPED}, not 0143, is the live set. An accepted record keeps its
  * history — a later ADR supersedes it rather than editing it — so reading the
- * live set out of 0142 would make confining Codex fail this suite until someone
+ * live set out of 0143 would make confining Codex fail this suite until someone
  * deleted that history. Confining a runtime deletes its entry here instead.
  */
 const UNWRAPPED: ReadonlyArray<{ readonly file: string; readonly reason: string }> = [
@@ -55,7 +55,7 @@ const decisionPath = join(
   "..",
   "docs",
   "decisions",
-  "0142-confinement-wraps-a-runtime-that-carries-one-thread.md",
+  "0143-confinement-wraps-a-runtime-that-carries-one-thread.md",
 );
 
 function providerProcessModules(): ReadonlyArray<string> {

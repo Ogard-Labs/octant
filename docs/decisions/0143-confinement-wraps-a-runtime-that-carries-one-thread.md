@@ -1,4 +1,4 @@
-# 0142. Confinement wraps a provider runtime that carries one thread's authority
+# 0143. Confinement wraps a provider runtime that carries one thread's authority
 
 **Status:** Accepted
 

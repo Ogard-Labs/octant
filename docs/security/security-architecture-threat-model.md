@@ -296,16 +296,16 @@ window, or approves an action class the host policy reserves for the local user.
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
   wrapped, a scoped exception recorded in
-  `docs/decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md`. The Claude Agent
+  `docs/decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md`. The Claude Agent
   SDK launch is not wrapped either, and that record does not except it: it carries one thread per
   query and is a gap. Octant-owned tools those threads reach stay confined. What the runtime
   process itself is left holding:
-  - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
-    (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
-    user-selected Full access). Claude sends sandbox settings only on approval-gated and
-    auto-accept-edits turns; `claudeSandboxSettings` returns nothing for Plan and Full access, so
-    a Claude Plan turn is read-only by `permissionMode` alone and not at any sandbox — which 0009
-    requires and which therefore does not hold for that one path.
+  - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`: `read-only` on
+    Plan, approval-gated and auto-accept-edits, so an in-root write escalates to Octant, and
+    `danger-full-access` on the user-selected Full access. Claude sends sandbox settings only on
+    approval-gated and auto-accept-edits turns; `claudeSandboxSettings` returns nothing for Plan
+    and Full access, so a Claude Plan turn is read-only by `permissionMode` alone and not at any
+    sandbox — which 0009 requires and which therefore does not hold for that one path.
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
     Pi's also admits all fifteen variables in `PROVIDER_CREDENTIALS` — `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and the rest — from the host whichever provider the
@@ -332,7 +332,7 @@ window, or approves an action class the host policy reserves for the local user.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     and those files with no Octant-owned OS boundary in the way, and a write the runtime's own
     sandbox permits without announcing is not one Octant's approvals can prompt for. Wrapping the
-    runtime is what closes both; 0142 names it as how the Codex exception ends and the Claude gap
+    runtime is what closes both; 0143 names it as how the Codex exception ends and the Claude gap
     closes.
 - **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
   `inspectVersion`, `probeCodexBinary`, and `runProbe` in `claudeProcess.ts` — the last for both
@@ -341,7 +341,7 @@ window, or approves an action class the host policy reserves for the local user.
   goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
   found on `PATH` or in an approved directory, so the executable is not even one the user named.
   Both bound the timeout and output and sanitize the environment, and neither is confined. This
-  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0142 does not
+  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0143 does not
   except it: it is a standing gap across every provider family and across discovery.
   The Oh My Pi connection check in `ohMyPiProcess.ts` runs a version check and an RPC probe the
   same way, against 0122, which exempts a probe from egress only and still requires it to launch
