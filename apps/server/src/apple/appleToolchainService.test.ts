@@ -1157,6 +1157,82 @@ describe("AppleToolchainService lifecycle", () => {
     }
   });
 
+  it("does not let one service instance sweep a capture another instance is still taking", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const execute = discoveryExecutor();
+    const options = {
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    };
+    const running = new AppleToolchainService({ execute, ...options });
+    await running.discover(discoveryRequest, context);
+    let capturePath = "";
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      capturePath = input.argv.at(-1)!;
+      await writeFile(
+        capturePath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      const old = new Date(Date.now() - 5 * 60_000);
+      await utimes(capturePath, old, old);
+      await held;
+      return processResult("");
+    });
+    const capture = running.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+    await vi.waitFor(() => expect(capturePath).not.toBe(""));
+
+    // A replacement service in the same process sweeps as it starts.
+    new AppleToolchainService({ execute: discoveryExecutor(), ...options });
+    const sweepDone = Date.now() + 200;
+    while (Date.now() < sweepDone) await new Promise((resolve) => setImmediate(resolve));
+
+    expect(existsSync(capturePath)).toBe(true);
+    release();
+    expect((await capture).outcome).toBe("succeeded");
+  });
+
+  it("reads no more of a capture than it agreed to, even if the file grows under it", async () => {
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const execute = discoveryExecutor();
+    const stored: number[] = [];
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async (_reference: string, bytes: Uint8Array) => {
+        stored.push(bytes.byteLength);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      // Just over the limit: the size check and the read must agree it is too big.
+      const grown = new Uint8Array(16 * 1024 * 1024 + 1);
+      grown.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      await writeFile(input.argv.at(-1)!, grown);
+      return processResult("");
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(stored.every((size) => size <= 16 * 1024 * 1024)).toBe(true);
+  });
+
   it("sweeps only its own host's captures when two hosts share a temporary directory", async () => {
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
     const mine = join(

@@ -186,8 +186,10 @@ export class AppleToolchainService {
   readonly #captureDirectory: string;
   readonly #capturePrefix: string;
   // Files a running capture owns. A capture may run for minutes, so its file's
-  // age says nothing about whether it was abandoned; only this does.
-  readonly #capturesInProgress = new Set<string>();
+  // age says nothing about whether it was abandoned; only this does. Shared by
+  // every service in the process: a replaced service's later sweeps would
+  // otherwise judge the new service's running capture by age alone.
+  readonly #capturesInProgress = capturesInProgress;
   // States an action set while a discovery was reading. A discovery lists the
   // devices and then probes the project, which can take seconds; a boot or
   // shutdown that finishes in between is newer than that list and must not be
@@ -1567,6 +1569,8 @@ function invalidFailure(message: string): AppleDiscoveryResult {
 }
 
 const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
+/** Every attempt has its own path, so one set serves all services in the process. */
+const capturesInProgress = new Set<string>();
 const STALE_CAPTURE_MS = 60_000;
 /** When an action returns for a file its unconfirmed process may still write. */
 const CAPTURE_RETURN_VISITS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
@@ -1630,7 +1634,20 @@ async function readCapture(path: string): Promise<Uint8Array | undefined> {
     ) {
       return undefined;
     }
-    const bytes = new Uint8Array(await handle.readFile());
+    // The size above is a snapshot, and whoever shares the directory can grow
+    // the file after it. Exactly that many bytes are read into a buffer of that
+    // size, and one more byte is asked for: if it is there the file changed
+    // under the read and the capture is refused, so the host never allocates
+    // more than the limit however large the file becomes.
+    const bytes = new Uint8Array(opened.size);
+    let filled = 0;
+    while (filled < bytes.byteLength) {
+      const { bytesRead } = await handle.read(bytes, filled, bytes.byteLength - filled, filled);
+      if (bytesRead === 0) return undefined;
+      filled += bytesRead;
+    }
+    const beyond = await handle.read(new Uint8Array(1), 0, 1, filled);
+    if (beyond.bytesRead > 0) return undefined;
     return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte) ? bytes : undefined;
   } catch {
     return undefined;
