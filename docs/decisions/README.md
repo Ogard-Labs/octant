@@ -157,6 +157,8 @@ distilled successor of the earlier long-form design specifications.
 | [0143](0143-confinement-wraps-a-runtime-that-carries-one-thread.md) | Confinement wraps a provider runtime that carries one thread's authority | Accepted |
 | [0144](0144-system-compact-typography-is-the-default.md) | System compact typography is the default | Accepted |
 | [0145](0145-the-agent-opens-the-in-app-simulator-pane.md) | The agent opens the in-app Simulator pane | Accepted |
+| [0146](0146-allow-input-opens-a-device-to-clicks.md) | Allow input opens a device to clicks | Accepted |
+| [0147](0147-android-emulator-is-a-separate-device-destination.md) | Android emulator is a separate in-app device destination | Accepted |
 
 ## Adding an ADR
 

@@ -323,6 +323,8 @@ describe("Apple runtime contracts", () => {
     expect(decode({ ...base, kind: "type-text", text: "hello" }).text).toBe("hello");
     expect(decode({ ...base, kind: "type-text", text: " spaced " }).text).toBe(" spaced ");
     expect(decode({ ...base, kind: "key-press", key: "return" }).key).toBe("return");
+    expect(decode({ ...base, kind: "open-input" }).kind).toBe("open-input");
+    expect(() => decode({ ...base, kind: "open-input", requestedBy: undefined })).toThrow();
     expect(() => decode({ ...base, kind: "tap" })).toThrow();
     expect(() =>
       decode({ ...base, kind: "type-text", text: "hello", requestedBy: undefined }),

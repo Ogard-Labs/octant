@@ -1,4 +1,4 @@
-import { APPLE_INPUT_GRANT_MS, isAppleSimulatorInputKind } from "@octant/domain";
+import { APPLE_INPUT_GRANT_MS, appleActionOpensInputGrant } from "@octant/domain";
 import { isReplayedEvidence } from "./appleToolchainService";
 
 /**
@@ -24,9 +24,9 @@ export interface SimulatorInputScope {
  * Which Simulators a window may send input to, on one thread, without a new
  * approval.
  *
- * One approved tap, key or typed text opens its Simulator to further input from
- * that window on that thread, and each delivered input keeps it open; shutting
- * the Simulator down closes it for everyone. A grant belongs to the window whose
+ * One approved Allow input opens its destination to further input from that
+ * window on that thread, and each delivered input keeps it open; shutting the
+ * destination down closes it for everyone. A grant belongs to the window whose
  * native confirmation opened it, like every other approval on this host, so a
  * second client on the same thread — a browser tab, say — needs its own. It ends
  * with the window. Grants live in memory only: a restarted host asks again,
@@ -118,7 +118,7 @@ export class SimulatorInputGrants {
   ): void {
     if (outcome !== "succeeded" || action.simulatorId === undefined) return;
     if (action.kind === "shutdown") this.revokeSimulator(action.simulatorId);
-    else if (isAppleSimulatorInputKind(action.kind as never)) {
+    else if (appleActionOpensInputGrant(action.kind as never)) {
       this.renew({ ...who, simulatorId: action.simulatorId }, admittedByGrant);
     }
   }

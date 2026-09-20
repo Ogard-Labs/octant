@@ -99,6 +99,7 @@ export default defineConfig({
             { text: "Code Thread Board", link: "/advanced/code-board" },
             { text: "Browser and Computer Use", link: "/advanced/browser-and-computer-use" },
             { text: "Apple Workbench", link: "/advanced/apple-workbench" },
+            { text: "Android emulator", link: "/advanced/android-emulator" },
           ],
         },
         {

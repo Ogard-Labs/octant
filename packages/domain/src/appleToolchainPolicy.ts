@@ -23,9 +23,10 @@ export interface AppleExecutionScope {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvalValid: boolean;
   /**
-   * The host holds this thread's Simulator open to input (0142). Input is then
-   * allowed without a one-shot approval on the request; the pane sends none,
-   * because it only ever learns of the grant, and cannot make one.
+   * The host holds this thread's Simulator open to input (0142, 0146). Input is
+   * then allowed without a one-shot approval on the request; Allow input is
+   * what opened the grant. The pane sends none for clicks, because it only
+   * ever learns of the grant, and cannot make one.
    */
   readonly inputGranted?: boolean;
 }
@@ -33,10 +34,10 @@ export interface AppleExecutionScope {
 const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
 
 /**
- * How long one approved input keeps a Simulator open to further input on its
- * thread. Confirming every tap made the live device unusable, so an approval
- * covers the Simulator for this long after each delivered input instead of
- * covering one action.
+ * How long one approved Allow input keeps a Simulator open to further input
+ * on its thread. Confirming every tap made the live device unusable, so an
+ * approval covers the Simulator for this long after each delivered input
+ * instead of covering one action.
  */
 export const APPLE_INPUT_GRANT_MS = 15 * 60_000;
 
@@ -55,6 +56,20 @@ export function isAppleSimulatorInputKind(
   kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
 ): boolean {
   return SIMULATOR_INPUT_KINDS.has(kind);
+}
+
+/** Whether this action is the confirmation that opens a destination to input. */
+export function isAppleSimulatorOpenInputKind(
+  kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
+): boolean {
+  return kind === "open-input";
+}
+
+/** Whether a succeeded, approved action should open or renew the input grant. */
+export function appleActionOpensInputGrant(
+  kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
+): boolean {
+  return isAppleSimulatorInputKind(kind) || isAppleSimulatorOpenInputKind(kind);
 }
 
 export function evaluateAppleBuildRequest(
@@ -103,7 +118,10 @@ export function evaluateAppleSimulatorRequest(
     isAppleSimulatorInputKind(request.kind) && scope.inputGranted === true,
   );
   if (scoped.kind === "denied") return scoped;
-  if (isAppleSimulatorInputKind(request.kind) && request.requestedBy === undefined) {
+  if (
+    (isAppleSimulatorInputKind(request.kind) || isAppleSimulatorOpenInputKind(request.kind)) &&
+    request.requestedBy === undefined
+  ) {
     return { kind: "denied", reason: "actor-required" };
   }
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
@@ -119,7 +137,8 @@ export function evaluateAppleSimulatorRequest(
       request.kind === "terminate" ||
       request.kind === "logs" ||
       request.kind === "screenshot" ||
-      isAppleSimulatorInputKind(request.kind)) &&
+      isAppleSimulatorInputKind(request.kind) ||
+      isAppleSimulatorOpenInputKind(request.kind)) &&
     simulator.state !== "booted"
   ) {
     return { kind: "denied", reason: "destination-not-booted" };
@@ -244,4 +263,11 @@ export function redactedAppleInputDiagnostic(
     };
   }
   return { severity: "note", message: `${request.kind} completed` };
+}
+
+export function redactedAppleOpenInputDiagnostic(): {
+  readonly severity: "note";
+  readonly message: string;
+} {
+  return { severity: "note", message: "Input is allowed to this Simulator." };
 }

@@ -21,6 +21,7 @@ export interface RightUtilityDockProps {
   readonly document?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
+  readonly androidEmulator?: ReactNode;
   readonly isNarrow: boolean;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
@@ -62,6 +63,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.document === undefined ? {} : { document: props.document })}
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
+      {...(props.androidEmulator === undefined ? {} : { androidEmulator: props.androidEmulator })}
       launchableSurfaces={props.launchableSurfaces}
       {...(props.launchableReferences === undefined
         ? {}

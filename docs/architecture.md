@@ -387,7 +387,7 @@ top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, and iOS Simulator, as mode and capability allow. Document shows the
+Tests, iOS Simulator, and Android emulator, as mode and capability allow. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
 Chat-authored Canvas) in the dock once per document, never after the person
@@ -410,12 +410,19 @@ honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app (see
-[decisions/0145-the-agent-opens-the-in-app-simulator-pane.md](decisions/0145-the-agent-opens-the-in-app-simulator-pane.md)). Tap, typed text,
+[decisions/0145-the-agent-opens-the-in-app-simulator-pane.md](decisions/0145-the-agent-opens-the-in-app-simulator-pane.md)).
+An Android emulator is a separate dock destination and `octant_android` tool,
+not an iOS helper feature
+([decisions/0147-android-emulator-is-a-separate-device-destination.md](decisions/0147-android-emulator-is-a-separate-device-destination.md)).
+Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed
 attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+On an approval-gated thread, **Allow input** is the confirmation that opens
+that destination; clicks, typing, Home, and Lock never raise it
+([decisions/0146-allow-input-opens-a-device-to-clicks.md](decisions/0146-allow-input-opens-a-device-to-clicks.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Without that

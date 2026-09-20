@@ -162,6 +162,39 @@ describe("Code operation contracts", () => {
     expect(request.effect.kind).toBe("apple-action");
   });
 
+  it("decodes a core Android emulator action as a bounded one-shot approval effect", () => {
+    const request = decodeCodeOperationApprovalRequest({
+      effect: {
+        kind: "android-action",
+        request: {
+          actionId: "d0000000-0000-4000-8000-000000000001",
+          correlationId: "d0000000-0000-4000-8000-000000000002",
+          authority: {
+            hostId: "d0000000-0000-4000-8000-000000000003",
+            mode: "code",
+            projectId: "d0000000-0000-4000-8000-000000000004",
+            providerInstanceId: "d0000000-0000-4000-8000-000000000005",
+            extension: { kind: "core" },
+          },
+          threadId: "d0000000-0000-4000-8000-000000000006",
+          checkoutId: "d0000000-0000-4000-8000-000000000007",
+          kind: "open-input",
+          emulatorId: "Pixel_8_API_34",
+          requestedBy: {
+            kind: "local-user",
+            actorId: "d0000000-0000-4000-8000-000000000008",
+          },
+          timeoutMs: 30000,
+          approval: {
+            kind: "approved",
+            approvalId: "d0000000-0000-4000-8000-000000000009",
+          },
+        },
+      },
+    });
+    expect(request.effect.kind).toBe("android-action");
+  });
+
   it("decodes the complete closed command surface", () => {
     const commands = [
       {

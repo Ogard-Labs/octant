@@ -3,6 +3,7 @@ export * from "./computerUsePolicy";
 export * from "./validationCompositionPolicy";
 export * from "./providerDiscoveryPolicy";
 export * from "./appleToolchainPolicy";
+export * from "./androidToolchainPolicy";
 export * from "./appleSimulatorLiveFrame";
 export * from "./chatPolicy";
 export * from "./providerSessionReaping";

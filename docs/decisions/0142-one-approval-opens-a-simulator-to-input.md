@@ -77,3 +77,4 @@ separate decision.
 - 0062 Simulator frame input transport (one rule superseded; the rest stands)
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0043 Simulator follows the active thread in the right sidebar
+- 0146 Allow input opens a device to clicks (first-input confirmation superseded)

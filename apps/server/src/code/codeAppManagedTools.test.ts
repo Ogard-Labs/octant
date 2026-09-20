@@ -1455,6 +1455,140 @@ function appleDiscovery() {
   } as never;
 }
 
+describe("the Android capability as an agent tool", () => {
+  function androidTools(
+    android: Partial<Parameters<typeof createCodeAppManagedTools>[0]["android"]> = {},
+    threadOverrides: Partial<CodeThread> = {},
+  ) {
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => androidEvidence());
+    const snapshot = vi.fn(async () => androidSnapshot());
+    const discover = vi.fn(async () => androidDiscovery());
+    const requestPaneOpen = vi.fn(async () => androidSnapshot());
+    const port = {
+      resolveAuthority: () => appleAuthority,
+      discover,
+      execute,
+      snapshot,
+      requestPaneOpen,
+      ...android,
+    } as never;
+    return {
+      discover,
+      execute,
+      snapshot,
+      requestPaneOpen,
+      tools: createCodeAppManagedTools({
+        windowId,
+        thread: thread(threadOverrides),
+        readThread: () => thread(threadOverrides),
+        uuid: uuidFactory(),
+        executeOperation: async () => ({}) as never,
+        terminal: { read: async () => ({}) as never },
+        android: port,
+      }),
+    };
+  }
+
+  it("offers the Android tool only where the host has an Android capability to lend", () => {
+    expect(androidTools().tools.definitions.map((definition) => definition.name)).toContain(
+      "octant_android",
+    );
+    expect(
+      createCodeAppManagedTools({
+        windowId,
+        thread: thread(),
+        readThread: () => thread(),
+        uuid: uuidFactory(),
+        executeOperation: async () => ({}) as never,
+        terminal: { read: async () => ({}) as never },
+      }).definitions.map((definition) => definition.name),
+    ).not.toContain("octant_android");
+  });
+
+  it("stays unavailable to a thread that is not on full access", async () => {
+    const { execute, snapshot, tools } = androidTools({}, { executionPolicy: "plan" } as never);
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "status" }),
+    } as never);
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toMatchObject({ error: "full-access-required" });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("opens the in-app Android emulator pane instead of an external emulator window", async () => {
+    const emulatorId = "Pixel_8_API_34";
+    const snapshot = vi.fn(async () => ({
+      ...(androidSnapshot() as unknown as Record<string, unknown>),
+      emulators: [{ emulatorId, name: "Pixel 8", state: "booted" }],
+    }));
+    const requestPaneOpen = vi.fn(async () => snapshot());
+    const { execute, tools } = androidTools({ snapshot, requestPaneOpen } as never);
+    const opened = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "open", emulatorId }),
+    } as never);
+    const booted = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "boot", emulatorId }),
+    } as never);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ kind: "boot" });
+    expect(requestPaneOpen).toHaveBeenCalled();
+    expect(opened.isError).toBe(false);
+    expect(opened.result).toMatchObject({
+      kind: "open",
+      outcome: "succeeded",
+      opensInAppPane: true,
+    });
+    expect(JSON.stringify(opened.result)).toContain("Android emulator pane");
+    expect(JSON.stringify(booted.result)).toContain("Do not start an external emulator window");
+  });
+
+  it("names the in-app pane in the tool description", () => {
+    const definition = androidTools().tools.definitions.find(
+      (entry) => entry.name === "octant_android",
+    );
+    expect(definition?.description).toContain("Android emulator pane");
+    expect(definition?.description).toContain("never start an external emulator window");
+  });
+});
+
+function androidEvidence() {
+  return {
+    actionId: "90000000-0000-4000-8000-000000000001",
+    correlationId: "90000000-0000-4000-8000-000000000002",
+    authority: appleAuthority,
+    kind: "screenshot",
+    outcome: "succeeded",
+    diagnostics: [],
+    artifacts: [{ kind: "screenshot", reference: "android-screenshot-1" }],
+    cleanup: "not-required",
+    durationMs: 90,
+    completedAt: "2026-08-06T08:00:01.000Z",
+  } as never;
+}
+
+function androidSnapshot() {
+  return {
+    sequence: 1,
+    snapshotAt: "2026-08-06T08:00:01.000Z",
+    sdk: { sdkId: "a", available: true, discoveredAt: "x" },
+    emulators: [],
+    active: [],
+    recentEvidence: [],
+  } as never;
+}
+
+function androidDiscovery() {
+  return {
+    kind: "discovered",
+    sdk: { sdkId: "a", available: true, discoveredAt: "x" },
+    emulators: [],
+  } as never;
+}
+
 describe("the planner board and proposal as agent tools", () => {
   function plannerTools(
     planner: NonNullable<Parameters<typeof createCodeAppManagedTools>[0]["planner"]>,

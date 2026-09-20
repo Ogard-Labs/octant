@@ -112,6 +112,12 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
           keys="full"
           onInput={(intent) => enqueue(intent, false)}
         />
+      ) : device && streamed === undefined ? (
+        <FrameInputControls
+          busy={true}
+          keys="hardware"
+          onInput={() => undefined}
+        />
       ) : null}
     </figure>
   );
@@ -316,13 +322,17 @@ function StreamedDevice(props: {
         name={props.name}
         screen={props.screen}
       />
-      {active ? (
+      {active || props.chrome === "device" ? (
         // Never disabled for being busy: the buttons wait their turn in the
         // same queue as the screen, behind whatever was typed before them.
+        // On a gated pane they stay visible but do nothing until Allow input.
         <FrameInputControls
-          busy={false}
+          busy={!active}
           keys={props.chrome === "device" ? "hardware" : "full"}
-          onInput={(intent) => enqueue(intent, false)}
+          onInput={(intent) => {
+            if (!active) return;
+            enqueue(intent, false);
+          }}
         />
       ) : null}
     </>

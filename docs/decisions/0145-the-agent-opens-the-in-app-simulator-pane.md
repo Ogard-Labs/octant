@@ -85,3 +85,5 @@ and activating or quitting Simulator.app.
 - 0139 The Simulator frame is a live view streamed through the host
 - 0140 The live Simulator screen is driven directly
 - 0142 One approval opens a Simulator to input
+- 0146 Allow input opens a device to clicks (first-input confirmation superseded)
+- 0147 Android emulator is a separate in-app device destination (Android non-goal superseded)

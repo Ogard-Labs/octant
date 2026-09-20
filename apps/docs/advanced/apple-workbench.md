@@ -90,9 +90,10 @@ small native helper it ships. Nothing comes to the foreground and no macOS
 Accessibility permission is needed. Without that helper, tap, swipe, typing,
 and keys are unavailable — Octant does not launch or script Simulator.app to
 deliver them. A tap lands on the point you click on the
-captured screen. The first confirmation on an approval-gated thread covers
-input to that Simulator for fifteen minutes after each input; further taps
-do not raise another dialog. **Type** sends letters, digits, spaces, and new lines; text
+captured screen. On an approval-gated thread, **Allow input** is the one
+confirmation that opens that Simulator; clicks, typing, Home, and Lock never
+raise a dialog. That grant covers input for fifteen minutes after each
+input. **Type** sends letters, digits, spaces, and new lines; text
 with any other character is refused whole rather than typed wrong, because a
 Simulator maps key positions with its own keyboard language. For the same
 reason typing works on a Simulator whose keyboard language uses a QWERTY
@@ -130,13 +131,13 @@ running can be **Cancel**led from **Current progress**.
 
 An approval-gated Code thread asks for confirmation before each of these, the
 same confirmation the rest of Code uses. Input to the device is the exception
-to "each": the first tap, typed text or key to a Simulator asks once, and that
-approval keeps the Simulator open to input from that window, on that thread,
-for fifteen minutes after each input, so driving the live frame is not a dialog
-per touch. Another window or browser tab on the same thread asks for its own
-confirmation. Shutting the Simulator down, closing the window, or restarting
-Octant ends it. So does a refresh that finds the Simulator no longer booted,
-even if it was shut down from Xcode. **Capture screen**
+to "each": **Allow input** asks once, and that approval keeps the Simulator
+open to input from that window, on that thread, for fifteen minutes after each
+input, so driving the live frame is not a dialog per touch. Clicks never open
+that confirmation. Another window or browser tab on the same thread asks for
+its own confirmation. Shutting the Simulator down, closing the window, or
+restarting Octant ends it. So does a refresh that finds the Simulator no
+longer booted, even if it was shut down from Xcode. **Capture screen**
 asks for nothing: reading
 a booted Simulator's screen changes nothing, so it works under Plan mode too.
 A capture is recorded as a **screenshot** artifact in **Validation evidence**
@@ -188,6 +189,7 @@ the core Apple path.
 
 ## Next steps
 
+- [Android emulator](/advanced/android-emulator) for the separate in-app AVD destination
 - [Browser and computer use](/advanced/browser-and-computer-use) for the host-owned computer-use surface
 - [Plugins and skills](/advanced/plugins-and-skills) for optional extension content
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries

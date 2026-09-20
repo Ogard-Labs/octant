@@ -28,10 +28,11 @@ without over-trusting a surface that has not shipped.
 - [Code Thread Board](/advanced/code-board) — runtime-derived Code thread status and Project grouping.
 - [Work Thread Board](/advanced/work-board) — runtime-derived Work thread status, confined root binding, and delivery confirmation.
 
-## Browser, Apple, and extensions
+## Browser, Apple, Android, and extensions
 
 - [Browser and computer use](/advanced/browser-and-computer-use) — isolated browser contexts and host-controlled computer use.
 - [Apple Development Workbench](/advanced/apple-workbench) — provider-neutral Xcode, Simulator, and validation workflows.
+- [Android emulator](/advanced/android-emulator) — in-app AVD pane, `adb` input, and `octant_android`.
 - [Plugins and skills](/advanced/plugins-and-skills) — install, trust, enable, and use extension packages and standalone skills.
 
 ## Appearance and workflows

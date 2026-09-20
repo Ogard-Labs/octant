@@ -221,6 +221,7 @@ function threadAndProject(
         composerId: undefined,
       };
     case "apple-action":
+    case "android-action":
       return {
         projectId: undefined,
         threadId: String(request.effect.request.threadId),

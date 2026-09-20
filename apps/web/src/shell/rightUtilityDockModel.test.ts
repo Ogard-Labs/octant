@@ -130,6 +130,12 @@ describe("resolving what the right utility dock shows", () => {
         modes: ["code"],
         scope: "thread",
       },
+      {
+        id: "android-emulator",
+        label: "Android emulator",
+        modes: ["code"],
+        scope: "thread",
+      },
     ]);
   });
 

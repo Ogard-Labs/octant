@@ -137,7 +137,8 @@ separated from other classified leftovers. **Open** stays on a usable listener.
 Copy URL and details live in that row's menu. **Stop** appears only for an
 Octant-owned safe stop, or for a classified leftover after confirmation.
 Unmanaged processes say so and have no fake Stop control. Files, Plan,
-Delivery, Agents, Browser, and Review stay in the dock.
+Delivery, Agents, Browser, Review, iOS Simulator, and Android emulator stay in
+the dock.
 
 ## Managed worktrees
 
@@ -157,6 +158,7 @@ Code exposes repository-valid engineering surfaces:
 - Git surfaces
 - Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` names a file in this checkout.
 - Browser surfaces
+- iOS Simulator and Android emulator device panes, when the host has those destinations
 - Extension-contributed surfaces approved by effective activation policy
 
 The active Code thread's composer shows a circular context-usage meter. Opening
@@ -167,12 +169,13 @@ or thread. The right sidebar is a compact launcher when empty and a tool strip
 when open. It can host Side Chat, Browser, Files, Canvas, Plan when this thread
 has a current plan artifact, Pull requests for the thread's Project, Delivery
 when a target is enabled, Changes,
-Terminal, Tests, or iOS Simulator instead of replacing the Code thread. iOS
+Terminal, Tests, iOS Simulator, or Android emulator instead of replacing the Code thread. iOS
 Simulator is absent until Octant has found an Xcode project and Apple
-toolchain. When it is open it shows a live frame for that thread's destination,
-or an honest unavailable or stale-after-restart state when the host cannot
-attach one. Hiding Browser, Terminal, or Simulator does not stop the
-server-owned session.
+toolchain. Android emulator is always launchable on Code; a host without the
+SDK shows the destination as unavailable. When either pane is open it shows a
+live frame for that thread's destination, or an honest unavailable state when
+the host cannot attach one. Hiding Browser, Terminal, or a device pane does
+not stop the server-owned session.
 **Pull requests** lists the active Project's open and draft requests from the
 cached snapshot and opens a selected row in Review in the same dock; the
 request named on a pane tab opens there too.

@@ -362,4 +362,26 @@ describe("AppleWorkbenchPane", () => {
     expect(screen.getByRole("button", { name: "Capture the iPhone 16 screen" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Shut down iPhone 16" })).toBeVisible();
   });
+
+  it("offers Allow input on an approval-gated device pane and does not send clicks until then", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onRun = vi.fn();
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        needsAllowInput
+        onRun={onRun}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Allow input to iPhone 16" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Allow input to iPhone 16" }));
+    expect(onRun).toHaveBeenCalledWith({
+      kind: "open-input",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+    });
+  });
 });

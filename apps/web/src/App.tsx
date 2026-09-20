@@ -329,6 +329,7 @@ import {
   type SimulatorPaneOffers,
 } from "./apple/appleSimulatorPaneOffer";
 import { useAppleSimulatorPaneOffer } from "./apple/useAppleSimulatorPaneOffer";
+import { useAndroidEmulatorPaneOffer } from "./android/useAndroidEmulatorPaneOffer";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import {
@@ -937,6 +938,9 @@ function LaunchedShell(
   const [simulatorPaneOffersByThread, setSimulatorPaneOffersByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, SimulatorPaneOffers>
   >(new Map());
+  const [androidPaneOffersByThread, setAndroidPaneOffersByThread] = useState<
+    ReadonlyMap<ThreadUtilityDockKey, SimulatorPaneOffers>
+  >(new Map());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
@@ -1169,6 +1173,7 @@ function LaunchedShell(
     agentMessageClient,
     nativeHarnessClient,
     appleToolchainClient,
+    androidToolchainClient,
     automationClient,
     automationNotificationClient,
     browserAutomationClient,
@@ -1989,6 +1994,63 @@ function LaunchedShell(
     simulatorPaneOffersByThread,
     simulatorPaneRequest,
   ]);
+  const androidToolActivity = useMemo(() => {
+    if (activeCodeTurnActivity === undefined) {
+      return { watch: false, activityKey: "" };
+    }
+    const keys: string[] = [];
+    let watch = false;
+    for (const activity of activeCodeTurnActivity.values()) {
+      for (const row of activity.rows) {
+        if (row.kind !== "tool" || row.toolName !== "octant_android") continue;
+        keys.push(`${row.id}:${row.state}`);
+        if (row.state === "started" || row.state === "running") watch = true;
+      }
+    }
+    return { watch, activityKey: keys.join("|") };
+  }, [activeCodeTurnActivity]);
+  const androidPaneSnapshotRequest = useMemo(() => {
+    const thread = activeCodeThreadView?.thread;
+    const checkoutId = activeCodeThreadView?.checkout.id;
+    if (thread === undefined || checkoutId === undefined) return undefined;
+    return {
+      kind: "android-snapshot-request" as const,
+      authority: {
+        hostId: LOCAL_TOOL_HOST_ID,
+        mode: "code" as const,
+        projectId: thread.projectId,
+        providerInstanceId: thread.providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId: thread.id,
+      checkoutId,
+    };
+  }, [activeCodeThreadView?.checkout.id, activeCodeThreadView?.thread]);
+  const androidPaneRequest = useAndroidEmulatorPaneOffer({
+    ...(androidToolchainClient === undefined ? {} : { client: androidToolchainClient }),
+    enabled: androidToolchainClient !== undefined && androidPaneSnapshotRequest !== undefined,
+    watch: androidToolActivity.watch,
+    activityKey: androidToolActivity.activityKey,
+    ...(androidPaneSnapshotRequest === undefined
+      ? {}
+      : { snapshotRequest: androidPaneSnapshotRequest }),
+  });
+  useEffect(() => {
+    if (androidPaneRequest === undefined || activeCodeThreadId === undefined) return;
+    const key = threadUtilityDockKey("code", String(activeCodeThreadId));
+    const offers = androidPaneOffersByThread.get(key) ?? NO_SIMULATOR_PANE_OFFERS;
+    const noted = noteSimulatorPaneRequest(offers, androidPaneRequest.requestId);
+    if (!noted.open) return;
+    setAndroidPaneOffersByThread((current) => new Map(current).set(key, noted.offers));
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "android-emulator"));
+  }, [
+    activeCodeThreadId,
+    androidPaneOffersByThread,
+    androidPaneRequest,
+    setDockStatesByThread,
+    setDockVisible,
+  ]);
   /**
    * A Canvas the thread authored opens in the dock's Canvas tool once. The
    * cards the thread already had when it was opened are seen documents, not
@@ -2680,6 +2742,7 @@ function LaunchedShell(
         }}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
+        androidToolchainClient={androidToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
         {...(utilityTab?.browserContextId === undefined
           ? {}
@@ -6080,6 +6143,11 @@ function LaunchedShell(
                 bottomPanelOpen && activeBottomSurface?.id === "ios-simulator"
                   ? undefined
                   : threadUtility("ios-simulator")
+              }
+              androidEmulator={
+                bottomPanelOpen && activeBottomSurface?.id === "android-emulator"
+                  ? undefined
+                  : threadUtility("android-emulator")
               }
               launchableSurfaces={launchableDockSurfaces}
               launchableReferences={launchableDockReferences}

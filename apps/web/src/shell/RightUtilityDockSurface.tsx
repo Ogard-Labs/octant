@@ -30,6 +30,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly environment?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
+  readonly androidEmulator?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose?: () => void;
@@ -64,6 +65,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     environment: props.environment,
     files: props.files,
     "ios-simulator": props.iosSimulator,
+    "android-emulator": props.androidEmulator,
     plan: props.plan,
     "side-chat": props.sideChat,
     terminal: props.terminal,
@@ -197,6 +199,7 @@ function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   if (surface === "files") return "Browse the active checkout";
   if (surface === "document") return "Read the document this thread wrote";
   if (surface === "ios-simulator") return "Open the active Simulator";
+  if (surface === "android-emulator") return "Open the Android emulator";
   if (surface === "plan") return "Inspect the current plan";
   if (surface === "side-chat") return "Ask about this thread";
   if (surface === "terminal") return "Open the repository shell";

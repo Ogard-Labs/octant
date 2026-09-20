@@ -30,7 +30,7 @@ export type AppleWorkbenchStatus =
 export type AppleWorkbenchIntent =
   | { readonly kind: "build" | "test" }
   | {
-      readonly kind: "run" | "boot" | "shutdown" | "screenshot";
+      readonly kind: "run" | "boot" | "shutdown" | "screenshot" | "open-input";
       readonly simulatorId: AppleSimulatorId;
     }
   | {
@@ -72,6 +72,16 @@ export interface AppleWorkbenchPaneProps {
   readonly liveFrame?: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
   readonly liveScreen?: AppleSimulatorLiveScreen;
+  /**
+   * Pointer, keyboard, Home, and Lock are offered only while this is true.
+   * Absent means the pane may drive the destination (Full access / not gated).
+   */
+  readonly inputAllowed?: boolean;
+  /**
+   * Approval-gated thread with no live grant: show Allow input, and do not
+   * send clicks.
+   */
+  readonly needsAllowInput?: boolean;
   /**
    * The dock's iOS Simulator tab is a device pane. The Apple workbench
    * command stays the evidence surface.
@@ -130,6 +140,7 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         {...(props.onRun === undefined ? {} : { onRun: props.onRun })}
         scheme={props.discovery.workspace.schemes[0]}
         simulators={props.discovery.simulators}
+        {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
       />
       <ProgressList
         busy={props.busy === true}
@@ -144,13 +155,16 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
 function LiveFrame(
   props: Pick<
     AppleWorkbenchPaneProps,
-    "liveFrame" | "screenUrl" | "liveScreen" | "onRun" | "busy"
+    "liveFrame" | "screenUrl" | "liveScreen" | "onRun" | "busy" | "inputAllowed"
   > & { readonly chrome?: "workbench" | "device" },
 ) {
   if (props.liveFrame === undefined) return null;
   const frame = props.liveFrame;
   const inputEnabled =
-    props.onRun !== undefined && frame.status === "live" && props.liveFrame !== undefined;
+    props.onRun !== undefined &&
+    frame.status === "live" &&
+    props.inputAllowed !== false &&
+    props.liveFrame !== undefined;
   return (
     <AppleSimulatorLiveFrameView
       busy={props.busy === true}
@@ -210,6 +224,11 @@ function AppleDevicePane(
   return (
     <section aria-label="iOS Simulator" className="apple-workbench apple-workbench--device">
       <LiveFrame {...props} chrome="device" />
+      {props.needsAllowInput === true && props.onRun !== undefined ? (
+        <p className="apple-workbench__action-message" role="status">
+          Allow input to drive this Simulator. Clicks do not ask again after that.
+        </p>
+      ) : null}
       {props.actionMessage === undefined ? null : (
         <p className="apple-workbench__action-message" role="alert">
           {props.actionMessage}
@@ -219,6 +238,7 @@ function AppleDevicePane(
         busy={props.busy === true}
         {...(props.onRun === undefined ? {} : { onRun: props.onRun })}
         simulators={props.discovery.simulators}
+        {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
       />
       {props.runtime.active.length === 0 ? null : (
         <ProgressList
@@ -235,6 +255,7 @@ function DeviceRail(props: {
   readonly busy: boolean;
   readonly onRun?: (intent: AppleWorkbenchIntent) => void;
   readonly simulators: ReadonlyArray<AppleSimulatorRecord>;
+  readonly needsAllowInput?: boolean;
 }) {
   if (props.simulators.length === 0) {
     return (
@@ -260,6 +281,7 @@ function DeviceRail(props: {
                 onRun={props.onRun}
                 scheme={undefined}
                 simulator={simulator}
+                {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
               />
             )}
           </li>
@@ -377,6 +399,7 @@ function SimulatorList(props: {
   readonly onRun?: (intent: AppleWorkbenchIntent) => void;
   readonly scheme: string | undefined;
   readonly simulators: ReadonlyArray<AppleSimulatorRecord>;
+  readonly needsAllowInput?: boolean;
 }) {
   return (
     <section aria-labelledby="apple-simulators-heading" className="apple-workbench__section">
@@ -397,6 +420,7 @@ function SimulatorList(props: {
                   onRun={props.onRun}
                   scheme={props.scheme}
                   simulator={simulator}
+                  {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
                 />
               )}
             </li>
@@ -418,6 +442,7 @@ function SimulatorActions(props: {
   readonly onRun: (intent: AppleWorkbenchIntent) => void;
   readonly scheme: string | undefined;
   readonly simulator: AppleSimulatorRecord;
+  readonly needsAllowInput?: boolean;
 }) {
   const { simulator } = props;
   const booted = simulator.state === "booted";
@@ -437,6 +462,18 @@ function SimulatorActions(props: {
       )}
       {!booted ? null : (
         <>
+          {props.needsAllowInput === true ? (
+            <OctantButton
+              aria-label={`Allow input to ${simulator.name}`}
+              disabled={disabled}
+              onClick={() =>
+                props.onRun({ kind: "open-input", simulatorId: simulator.simulatorId })
+              }
+              type="button"
+            >
+              Allow input
+            </OctantButton>
+          ) : null}
           {props.scheme === undefined ? null : (
             <OctantButton
               aria-label={`Run ${props.scheme} on ${simulator.name}`}

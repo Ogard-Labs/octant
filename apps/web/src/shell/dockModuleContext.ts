@@ -6,6 +6,7 @@ import type { CodeProjectPullRequestRow, NativeHarnessFollowUpCreation } from "@
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type { AndroidToolchainClient } from "@octant/client-runtime/android-toolchain-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
@@ -41,6 +42,7 @@ export interface ThreadUtilityDockContentProps {
   }) => void;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
+  readonly androidToolchainClient?: AndroidToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly browserContextId?: string;
   readonly canvasClient?: CanvasClient;

@@ -27,7 +27,9 @@ import {
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
   isAppleSimulatorInputKind,
+  isAppleSimulatorOpenInputKind,
   redactedAppleInputDiagnostic,
+  redactedAppleOpenInputDiagnostic,
   type AppleExecutionScope,
 } from "@octant/domain";
 import { defaultTemporaryDirectory } from "../code/repositoryTestProcessPort";
@@ -349,7 +351,10 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
   ): Promise<AppleBuildEvidence> {
     const startedAt = this.#options.now();
-    if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
+    if (
+      !isBuildRequest(request) &&
+      (isAppleSimulatorInputKind(request.kind) || isAppleSimulatorOpenInputKind(request.kind))
+    ) {
       const prior = this.#findCompletedInput(request, context);
       if (prior !== undefined) return replayedFrom(prior);
     }
@@ -725,6 +730,22 @@ export class AppleToolchainService {
             }
           }
         }
+      } else if (!isBuildRequest(request) && isAppleSimulatorOpenInputKind(request.kind)) {
+        // Allow input opens the grant on the host; this action itself injects
+        // nothing, so it must not wait on a helper the destination does not need.
+        this.#advance(active, "completed", "completed");
+        const note = redactedAppleOpenInputDiagnostic();
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        return evidence(
+          request,
+          "succeeded",
+          startedAt,
+          this.#options.now(),
+          [note],
+          [{ kind: "log", reference: logReference }],
+          "not-required",
+        );
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
         terminal = await this.#command(

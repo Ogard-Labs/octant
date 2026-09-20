@@ -502,7 +502,7 @@ describe("CodeWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Code overview" })).not.toBeInTheDocument();
   });
 
-  it("asks once to open a Simulator to input, then further keys run without another confirmation", async () => {
+  it("asks once to Allow input, then Home runs without another confirmation", async () => {
     const simulatorId = "90000000-0000-4000-8000-000000000006";
     let resolveApproval: ((id: string | undefined) => void) | undefined;
     const requestApproval = vi.fn(
@@ -546,8 +546,6 @@ describe("CodeWorkspace", () => {
         },
         simulators,
       })),
-      // The host has already opened the grant; this snapshot still omits it,
-      // which is what made every tap raise another native confirmation.
       snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
       execute,
       cancel: vi.fn(),
@@ -588,10 +586,22 @@ describe("CodeWorkspace", () => {
     const home = await screen.findByRole("button", { name: "Home" });
     fireEvent.click(home);
     fireEvent.click(home);
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+
+    const allow = await screen.findByRole("button", { name: "Allow input to iPhone 16" });
+    fireEvent.click(allow);
+    fireEvent.click(allow);
     await waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(1));
     resolveApproval?.(ids.approval);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({ kind: "open-input" });
+
+    fireEvent.click(home);
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({ kind: "key-press", key: "home" });
   });
 });
 

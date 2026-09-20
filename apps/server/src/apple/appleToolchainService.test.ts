@@ -1614,6 +1614,37 @@ describe("AppleToolchainService Simulator input", () => {
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 
+  it("opens a Simulator to input without injecting anything", async () => {
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const gated = {
+      ...context,
+      executionPolicy: "approval-gated" as const,
+      approvalValid: true,
+    };
+    await service.discover(discoveryRequest, gated);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "open-input",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      gated,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.kind).toBe("open-input");
+    expect(JSON.stringify(evidence.diagnostics)).toContain("Input is allowed to this Simulator.");
+    expect(injectSimulatorInput).not.toHaveBeenCalled();
+  });
+
   it("replaces host paths in the reason an action recorded no evidence", async () => {
     const discovery = discoveryExecutor();
     const execute = vi.fn(async (input: { readonly argv: readonly string[] }) => {
