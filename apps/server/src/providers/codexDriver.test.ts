@@ -28,6 +28,7 @@ import type {
 } from "./codexProtocol";
 import {
   codexExecutionSettings,
+  codexTurnExecutionSettings,
   makeCodexClient,
   makeCodexDriver,
   type CodexClientPort,
@@ -832,7 +833,8 @@ describe("Codex thread and turn lifecycle", () => {
       cwd: projectRoot,
       model: "gpt-5.4",
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
       serviceTier: "fast",
       config: { model_reasoning_effort: "low" },
     });
@@ -840,7 +842,8 @@ describe("Codex thread and turn lifecycle", () => {
       cwd: projectRoot,
       model: "gpt-5.4",
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
     });
     await acquired.close();
   });
@@ -874,7 +877,8 @@ describe("Codex thread and turn lifecycle", () => {
       cwd: projectRoot,
       model: "gpt-5.4",
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
     } satisfies Partial<CodexThreadStartInput>);
     await Effect.runPromise(
       acquired.connection.send({
@@ -892,6 +896,9 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.calls.at(-1)?.input).toEqual({
       threadId: "thread-1",
       input: [{ type: "text", text: "Explain the repository." }],
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "readOnly" },
+      approvalsReviewer: "user",
     });
     await Effect.runPromise(acquired.connection.interrupt(sessionId));
     expect(f.calls.at(-1)).toEqual({
@@ -1099,6 +1106,9 @@ describe("Codex thread and turn lifecycle", () => {
         { type: "text", text: "Compare the image." },
         { type: "image", url: "data:image/png;base64,AQID" },
       ],
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "readOnly" },
+      approvalsReviewer: "user",
     });
     await acquired.close();
   });
@@ -1541,20 +1551,118 @@ describe("Codex execution authority and approvals", () => {
     expect(codexExecutionSettings("full-access")).toEqual({
       approvalPolicy: "never",
       sandbox: "danger-full-access",
+      approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("approval-gated")).toEqual({
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+    expect(codexExecutionSettings("auto-accept-edits")).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("plan")).toEqual({
       approvalPolicy: "never",
       sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+  });
+
+  it("keeps a sandbox that still refuses an in-root write on both prompting postures", () => {
+    // Measured against codex-cli 0.154.0: `on-request` only means the model may
+    // escalate, so under `workspace-write` it ran `printf ... > NOTES.md` inside
+    // the bound root and sent no request at all — silently waiving the
+    // `shell-commands` class for both postures. Under `read-only` the same
+    // prompt raised `item/commandExecution/requestApproval` ("The workspace is
+    // read-only") and declining it left no file. The sandbox is what decides
+    // whether the handler below is ever consulted, so it has to keep refusing.
+    for (const policy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(codexExecutionSettings(policy).sandbox).toBe("read-only");
+      expect(codexExecutionSettings(policy).approvalPolicy).toBe("on-request");
+    }
+  });
+
+  it("carries the posture into a turn on a thread created under an older one", async () => {
+    // `thread/start` settles a thread once, and codex-cli 0.154.0 accepts
+    // `approvalPolicy`/`sandbox` on `thread/resume` while keeping what the
+    // thread was created with — measured: a thread started `workspace-write`
+    // and resumed `read-only` still wrote in-root without asking. So a thread
+    // created before this mapping changed only comes under it if every turn
+    // re-asserts it, which `sandboxPolicy` is documented to do for "this turn
+    // and subsequent turns".
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Write a file.", attachments: [], tools: [] }),
+    );
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "readOnly" },
+    });
+    await acquired.close();
+  });
+
+  it.each([
+    ["full-access", "never", "dangerFullAccess"],
+    ["approval-gated", "on-request", "readOnly"],
+    ["auto-accept-edits", "on-request", "readOnly"],
+    ["plan", "never", "readOnly"],
+  ] as const)("re-asserts %s authority on every turn", (policy, approvalPolicy, sandboxType) => {
+    expect(codexTurnExecutionSettings(policy)).toEqual({
+      approvalPolicy,
+      sandboxPolicy: { type: sandboxType },
+      approvalsReviewer: "user",
+    });
+  });
+
+  it("routes approvals back to the user rather than leaving the reviewer set", () => {
+    // Codex documents `approvalsReviewer` as an override for "this thread and
+    // subsequent turns", so omitting it keeps whatever the thread was last
+    // told. A thread that once delegated would still route to the reviewer
+    // after taint, after the user turns delegation off, or on a resume under a
+    // posture that must not delegate — with the host never seeing the request.
+    // Every path states the value, so the absence of delegation is sent rather
+    // than implied.
+    for (const policy of ["full-access", "approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(codexExecutionSettings(policy).approvalsReviewer).toBe("user");
+      expect(codexTurnExecutionSettings(policy).approvalsReviewer).toBe("user");
+      expect(codexExecutionSettings(policy, false).approvalsReviewer).toBe("user");
+    }
+    expect(codexTurnExecutionSettings("approval-gated", true).approvalsReviewer).toBe(
+      "auto_review",
+    );
+  });
+
+  it("never delegates the edit waiver to the harness reviewer", () => {
+    // `read-only` turns an in-root patch edit into an escalation. Codex's
+    // reviewer is thread-wide and risk-based, so delegating it on a posture that
+    // already waives project file writes would let the reviewer deny an edit
+    // 0018 says proceeds. Approval-gated has no waiver, so it may delegate.
+    expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+    expect(codexExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "auto_review",
     });
   });
 
   it.each([
     ["full-access", "never", "danger-full-access"],
-    ["approval-gated", "on-request", "workspace-write"],
+    ["approval-gated", "on-request", "read-only"],
+    ["auto-accept-edits", "on-request", "read-only"],
     ["plan", "never", "read-only"],
   ] as const)(
     "starts %s with only the Project root and exact authority",
@@ -1567,6 +1675,7 @@ describe("Codex execution authority and approvals", () => {
         model: "gpt-5.4",
         approvalPolicy,
         sandbox,
+        approvalsReviewer: "user",
       });
       await acquired.close();
     },

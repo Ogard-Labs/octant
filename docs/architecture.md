@@ -404,7 +404,7 @@ selected tool — never the previous pane's content. Hiding a Browser or Termina
 tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
 shows a thread-bound live frame — the Simulator's screen streamed through the
 host as it changes, authorized like a screenshot and never stored (see
-[decisions/0138-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0138-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
+[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
 or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. Tap, typed text,
@@ -421,7 +421,7 @@ alike, and the live screen is driven directly: a press and release is a tap, a
 drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
 does while an action runs is kept and sent in order (see
-[decisions/0139-the-live-simulator-screen-is-driven-directly.md](decisions/0139-the-live-simulator-screen-is-driven-directly.md)).
+[decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a
 thread as a context-aware dock tab opened from the title-bar shortcut or Add
 tool. It may

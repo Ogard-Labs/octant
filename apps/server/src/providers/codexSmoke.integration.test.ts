@@ -20,7 +20,8 @@ const interruptSessionId = decodeProviderSessionId("90000000-0000-4000-8000-0000
 const approvalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000403");
 const resumedSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000404");
 const fallbackApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000405");
-const installedSmokeOuterTimeoutMs = 360_000;
+const inRootApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000406");
+const installedSmokeOuterTimeoutMs = 420_000;
 const installedSmokeCleanupMarginMs = 30_000;
 const installedSmokeStageTimeouts = {
   prerequisites: 8_000,
@@ -28,6 +29,12 @@ const installedSmokeStageTimeouts = {
   plan: 90_000,
   interrupt: 60_000,
   approval: 90_000,
+  // One bounded attempt rather than the two the outside-root stage makes, so it
+  // needs less than that stage. It is its own entry because the bounds test
+  // below sums each entry once: a stage that borrows another's budget is spent
+  // twice in a run and counted once, which is how the real deadline drifts past
+  // the outer timeout without the bound noticing.
+  inRootApproval: 60_000,
   restart: 8_000,
   resume: 20_000,
 } as const;
@@ -237,6 +244,59 @@ describe("installed Codex runtime", () => {
               expect(await pathExists(deniedTarget)).toBe(false);
               declineObserved = undefined;
               return providerApprovalDeclined;
+            }),
+        );
+
+        // The outside-root attempts above prove reach past the bound root is
+        // refused. They cannot prove the ordinary case: a write the posture
+        // confines to the root still has to be the user's decision. That is the
+        // one `workspace-write` performed silently, and only through the shell —
+        // a patch edit is `file-change`, which `auto-accept-edits` waives on
+        // purpose. So this stage names the shell explicitly and asserts the
+        // class: an approval alone would also be satisfied by the patch path and
+        // would let a silent shell redirect back in.
+        await stage(
+          "declined in-root shell write approval",
+          installedSmokeStageTimeouts.inRootApproval,
+          () =>
+            usingConnection(driver, projectRoot, activeConnections, async (approval) => {
+              const inRootTarget = join(projectRoot, "must-not-exist.md");
+              let answeredAction: string | undefined;
+              await Effect.runPromise(
+                approval.connection.start({
+                  sessionId: inRootApprovalSessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                }),
+              );
+              const approvalEvents = collectApprovalAttempt(
+                Stream.unwrapScoped(approval.connection.subscribe),
+                (event) => {
+                  if (answeredAction !== undefined) return Effect.void;
+                  answeredAction = event.action;
+                  return approval.connection.answerApproval({
+                    sessionId: inRootApprovalSessionId,
+                    requestId: event.requestId,
+                    approved: false,
+                  });
+                },
+              );
+              await Effect.runPromise(
+                approval.connection.send({
+                  sessionId: inRootApprovalSessionId,
+                  // An ordinary create, not a scripted one: told to run a
+                  // literal `/bin/zsh -lc` line the model declines to act at all
+                  // and the stage proves nothing. Asked plainly, it reaches for
+                  // a shell redirect, which is the path that used to write
+                  // silently.
+                  prompt: `Create the file ${inRootTarget} containing the single line: must not exist. Then stop.`,
+                  attachments: [],
+                  tools: [],
+                }),
+              );
+              expect(await approvalEvents).toBe(true);
+              expect(answeredAction).toBe("command");
+              expect(await pathExists(inRootTarget)).toBe(false);
             }),
         );
 

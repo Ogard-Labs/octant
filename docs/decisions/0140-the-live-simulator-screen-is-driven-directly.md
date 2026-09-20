@@ -1,10 +1,10 @@
-# 0139. The live Simulator screen is driven directly
+# 0140. The live Simulator screen is driven directly
 
 **Status:** Accepted
 
 ## Context
 
-0138 made the Simulator frame a live view, and 0137 made input land in tens
+0139 made the Simulator frame a live view, and 0137 made input land in tens
 of milliseconds. The pane still offered a device the way a form would: click
 for a tap, a text box with a **Type** button, and buttons for Return and
 Escape. Nothing could be scrolled, because 0062 named tap, typed text and a
@@ -72,4 +72,4 @@ refuses.
 
 - 0062 Simulator frame input rides the Apple workbench channel
 - 0137 Simulator input reaches the guest through a native device helper
-- 0138 The Simulator frame is a live view streamed through the host
+- 0139 The Simulator frame is a live view streamed through the host
