@@ -831,15 +831,20 @@ export class CodeOperationService {
           existing.event.result,
         );
       }
-      if (
-        command.kind === "start-provider-turn" &&
-        isUnfinishedSettlement(existing.event.result, replay.frames)
-      ) {
-        return this.#interruptUnfinishedSettlement(
+      if (command.kind === "start-provider-turn") {
+        const settlementCursor = this.#unfinishedSettlementCursor(
           command.threadId,
           command.operationId,
-          replay.nextCursor,
+          existing.event.result,
+          replay,
         );
+        if (settlementCursor !== undefined) {
+          return this.#interruptUnfinishedSettlement(
+            command.threadId,
+            command.operationId,
+            settlementCursor,
+          );
+        }
       }
       return existing.event.result;
     }
@@ -1076,6 +1081,38 @@ export class CodeOperationService {
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
     }
+  }
+
+  /**
+   * Page the operation journal: the change list is written at settle, so it
+   * can sit after the first 256 frames of a long turn.
+   */
+  #unfinishedSettlementCursor(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+    result: CodeOperationResult,
+    first: {
+      readonly frames: ReadonlyArray<CodeOperationEventFrame>;
+      readonly nextCursor: number;
+    },
+  ): number | undefined {
+    if (result.kind !== "provider-turn-state" || result.state !== "running") return undefined;
+    let frames = first.frames;
+    let nextCursor = first.nextCursor;
+    let hasChangedFiles = false;
+    for (;;) {
+      if (frames.some((frame) => frame.event.kind === "conversation-turn-changed-files"))
+        hasChangedFiles = true;
+      if (frames.some((frame) => isTerminalSettlement(frame.event))) return undefined;
+      if (frames.length < 256) break;
+      const last = frames.at(-1);
+      if (last === undefined) break;
+      const page = this.#replay(threadId, operationId, last.cursor, 256);
+      frames = page.frames;
+      nextCursor = page.nextCursor;
+      if (frames.length === 0) break;
+    }
+    return hasChangedFiles ? nextCursor : undefined;
   }
 
   /**
@@ -2816,8 +2853,7 @@ function sameConversationStart(
  * between the operation-result append and RuntimeTurnController.launch.
  * `conversation-turn-changed-files` is settlement evidence: the turn had
  * already begun to settle, so a crash before the terminal state must not
- * launch it again. That case is `isUnfinishedSettlement`, which journals
- * interrupted instead.
+ * launch it again. That case pages the journal and journals interrupted.
  */
 function isStaleRunningProviderTurn(
   result: CodeOperationResult,
@@ -2825,15 +2861,6 @@ function isStaleRunningProviderTurn(
 ): boolean {
   if (result.kind !== "provider-turn-state" || result.state !== "running") return false;
   return !frames.some((frame) => isDurableProviderLaunchEvidence(frame.event));
-}
-
-function isUnfinishedSettlement(
-  result: CodeOperationResult,
-  frames: ReadonlyArray<CodeOperationEventFrame>,
-): boolean {
-  if (result.kind !== "provider-turn-state" || result.state !== "running") return false;
-  if (!frames.some((frame) => frame.event.kind === "conversation-turn-changed-files")) return false;
-  return !frames.some((frame) => isTerminalSettlement(frame.event));
 }
 
 function isTerminalSettlement(event: CodeOperationEvent): boolean {
