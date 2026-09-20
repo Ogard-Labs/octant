@@ -118,7 +118,11 @@ export class SimulatorInputGrants {
   ): void {
     if (outcome !== "succeeded" || action.simulatorId === undefined) return;
     if (action.kind === "shutdown") this.revokeSimulator(action.simulatorId);
-    else if (appleActionOpensInputGrant(action.kind as never)) {
+    else if (action.kind === "open-input") {
+      // Allow input is the confirmation that opens the destination, even if a
+      // previous grant already ran out. Taps only renew a grant that is live.
+      this.open({ ...who, simulatorId: action.simulatorId });
+    } else if (appleActionOpensInputGrant(action.kind as never)) {
       this.renew({ ...who, simulatorId: action.simulatorId }, admittedByGrant);
     }
   }

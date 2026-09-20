@@ -236,7 +236,7 @@ export function AndroidEmulatorPane(props: {
             ? "Install the Android SDK (platform-tools and an emulator) on this host, then retry."
             : "Discovering Android emulators for this Code thread.")
         }
-        state={controller.status === "unavailable" ? "empty" : "loading"}
+        state={controller.status === "unavailable" ? "neutral" : "loading"}
         title={
           controller.status === "unavailable" ? "Android emulator is unavailable" : "Android emulator"
         }
