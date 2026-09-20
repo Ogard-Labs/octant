@@ -23,7 +23,10 @@ export const DEVICE_HELPER_SOURCES = [
   "vendor/simulator-hid/XPCEncoder.swift",
 ] as const;
 
-export const deviceHelperBuildArgs = (sourceDirectory: string, destination: string) => [
+export const deviceHelperBuildArgs = (
+  sourceDirectory: string,
+  destination: string,
+): readonly [string, ...string[]] => [
   "swiftc",
   "-O",
   "-target",
@@ -54,7 +57,7 @@ export async function buildDeviceHelper(
   await mkdir(dirname(resolvedDestination), { recursive: true });
   await mkdir(moduleCache, { recursive: true });
   const [command, ...args] = deviceHelperBuildArgs(resolvedSources, resolvedDestination);
-  const child = spawn(command!, args, {
+  const child = spawn(command, args, {
     env: { ...process.env, CLANG_MODULE_CACHE_PATH: moduleCache },
     stdio: "inherit",
   });
