@@ -5,7 +5,7 @@ import type { UserProfile } from "@octant/contracts/user-profile";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { enabledModes, isNamed, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -195,6 +195,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     ],
   );
 
+  // Returning to the first step mounts the field a render later than the ask.
+  useEffect(() => {
+    if (nameAsked && step === "profile") nameField.current?.focus();
+  }, [nameAsked, step]);
+
   if (!controller.visible) return null;
 
   const steps = buildFirstRunSteps({
@@ -281,6 +286,14 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
    */
   function askForName() {
     setNameAsked(true);
+    // The name field lives on the first step. A profile can come back unnamed
+    // while a later step is up (the host refused a conflicting write and the
+    // draft followed it), and asking there pointed at a field that was not on
+    // screen, so Continue looked dead.
+    if (step !== "profile") {
+      setHandoffOpen(false);
+      setStep("profile");
+    }
     nameField.current?.focus();
   }
 

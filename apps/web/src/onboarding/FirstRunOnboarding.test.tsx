@@ -618,6 +618,23 @@ describe("FirstRunOnboarding", () => {
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
+  it("goes back to the name field when the name is missing on a later step", async () => {
+    const user = userEvent.setup();
+    const view = mount({ profile: namedProfile });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+
+    // The host can hand back an unnamed profile while a later step is up, for
+    // instance after refusing a conflicting write. Asking for the name there
+    // pointed at a field that was not on screen, so Continue looked dead.
+    view.rerender({ profile: emptyProfile });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    const name = await screen.findByLabelText("Name");
+    await waitFor(() => expect(name).toHaveFocus());
+    expect(name).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("keeps a name the user typed even when they skip the rest of first run", async () => {
     const user = userEvent.setup();
     const props = mount({ profile: emptyProfile });
