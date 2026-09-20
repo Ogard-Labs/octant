@@ -187,9 +187,19 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(/\.turn-user \.bubble \{[^}]*box-shadow:\s*none/);
     expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
     expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
-    expect(system).toMatch(/\.turn-agent \{[^}]*background:\s*var\(--oct-surface\)/);
-    expect(system).toMatch(/\.turn-agent \{[^}]*border:\s*1px solid var\(--oct-border\)/);
-    expect(system).toMatch(/\.turn-agent \{[^}]*border-radius:\s*var\(--oct-radius-md\)/);
+    // A reply is bare prose on the reading surface. It carries a reading card
+    // only where there is no surface under it: over the application ground or
+    // a translucent workspace. Worn everywhere, the card made every answer a
+    // widget.
+    expect(system).toMatch(/\n\.turn-agent \{[^}]*background:\s*transparent/);
+    expect(system).toMatch(/\n\.turn-agent \{[^}]*border:\s*0;/);
+    const readingCard =
+      /\.shell--app-backdrop \.turn-agent,\n\.shell--workspace-material-translucent \.turn-agent \{([^}]*)\}/.exec(
+        system,
+      )?.[1] ?? "";
+    expect(readingCard).toMatch(/background:\s*var\(--oct-surface\)/);
+    expect(readingCard).toMatch(/border:\s*1px solid var\(--oct-border\)/);
+    expect(readingCard).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
     expect(system).toMatch(
       /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 28px;\n  height: 28px;/,
     );

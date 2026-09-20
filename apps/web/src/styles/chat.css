@@ -278,9 +278,16 @@
 .chat-rich-text {
   display: grid;
   gap: var(--oct-space-3);
-  max-width: 72ch;
   font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
+}
+
+/* The reading measure belongs to running text. On the whole reply it also cut
+   tables and code blocks 44px short of the column, which the reply's old card
+   hid and bare prose shows: boxed work now ends on the same edge as the
+   composer and the person's bubble. */
+.chat-rich-text > :is(p, ul, ol, h2, h3, h4, blockquote) {
+  max-width: 72ch;
 }
 
 .chat-rich-text h2,
