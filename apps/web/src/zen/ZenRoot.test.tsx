@@ -44,4 +44,25 @@ describe("ZenRoot", () => {
     fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true });
     expect(onToggle).toHaveBeenCalledOnce();
   });
+
+  it("leaves Redo to the composer instead of opening Zen while someone is typing", () => {
+    const onToggle = vi.fn();
+    render(
+      <ZenRoot active={false} onExit={() => undefined} onToggle={onToggle} zen={<div>Zen</div>}>
+        <textarea aria-label="Message" />
+      </ZenRoot>,
+    );
+
+    // Mod+Shift+Z is Redo in every text field. Outside Zen the chord was taken
+    // anyway, so redoing in the composer threw the window into Zen.
+    const redo = fireEvent.keyDown(screen.getByLabelText("Message"), {
+      key: "z",
+      metaKey: true,
+      shiftKey: true,
+    });
+
+    expect(onToggle).not.toHaveBeenCalled();
+    // `fireEvent` returns false when the event was cancelled; Redo must survive.
+    expect(redo).toBe(true);
+  });
 });
