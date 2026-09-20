@@ -812,7 +812,17 @@ function ProjectGroup(props: {
     return null;
   }
   return (
-    <section aria-label={props.label} className="project-section">
+    <section
+      aria-label={props.label}
+      className="project-section"
+      // With no Project yet, adding one is the only thing to do here, so the
+      // header's add control shows at rest instead of waiting for a hover. A
+      // section that offers no add control (a fresh Chat sidebar) has only its
+      // organization menu in that slot, which stays hover-only as before.
+      data-empty={
+        props.projects.length === 0 && props.onAddProject !== undefined ? "true" : undefined
+      }
+    >
       <div className="project-section__header sidebar-section">
         <h2>{props.label}</h2>
         {props.onAddProject === undefined &&
