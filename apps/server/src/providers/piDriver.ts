@@ -632,6 +632,7 @@ function makeConnection(
                 sessionId: input.sessionId,
                 mode,
                 executionPolicy: input.executionPolicy,
+                modelProvider: selection.provider,
                 ...(tools.length === 0 ? {} : { tools }),
                 ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
                 onProcessStarted: async (process) => {
