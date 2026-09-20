@@ -90,6 +90,8 @@ export interface SimulatorDeviceHelpersOptions {
 interface PendingReply {
   readonly settle: (reply: DeviceHelperReply) => void;
   readonly timer: ReturnType<typeof setTimeout>;
+  /** Starting or stopping the stream, as opposed to something sent to the device. */
+  readonly streamControl: boolean;
 }
 
 interface RunningHelper {
@@ -313,7 +315,11 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
         cancelled?.removeEventListener("abort", onCancel);
         resolve(reply);
       };
-      helper.pending.set(id, { settle, timer });
+      helper.pending.set(id, {
+        settle,
+        timer,
+        streamControl: request.op === "stream-start" || request.op === "stream-stop",
+      });
       try {
         helper.child.stdin.write(frame({ ...request, id }));
       } catch {
@@ -388,12 +394,14 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       // still being delivered waits behind it. Its own short deadline would
       // then stop the helper under that input, which may already have typed
       // part of its text; the input's deadline is what catches a helper that
-      // truly hangs.
+      // truly hangs. A waiting stream stop is not an input and has no such
+      // deadline, so behind only that the start keeps its own.
+      const delivering = [...helper.pending.values()].some((waiting) => !waiting.streamControl);
       helper.streaming ??= ask(
         simulatorId,
         helper,
         { op: "stream-start", ...watchOptions },
-        helper.pending.size > 0 ? LONGEST_INPUT_MS : timeoutMs,
+        delivering ? LONGEST_INPUT_MS : timeoutMs,
       );
       const started = await helper.streaming;
       if (started.status !== "delivered") {

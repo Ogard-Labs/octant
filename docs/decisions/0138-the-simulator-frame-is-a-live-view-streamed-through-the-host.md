@@ -37,8 +37,9 @@ server deciding who may look, and clients that cannot attach failing closed.
   writes length-prefixed JPEGs on file descriptor 3; the desktop broker's
   `/v1/simulator-device/stream` relays them to the server child, and the
   server relays them to the window. The renderer never reaches the broker or
-  the helper, so a remote client that the server authorizes can watch through
-  the same route.
+  the helper, so the route would serve a remote client the same way. It does
+  not yet: a remote client still reports the frame `not-attachable` (0062) and
+  asks for no stream. Showing the frame remotely is its own decision.
 - **The host chooses size, quality and rate** (1100 pixels tall, quality 0.7,
   at most 30 frames a second). A client cannot ask for more. The response
   names the device's screen in pixels in `x-octant-simulator-screen`, because
