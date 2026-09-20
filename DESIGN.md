@@ -446,6 +446,11 @@ for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
+Every composer's control row is two groups with the row's free space between
+them, in one order on a new task and in the thread it becomes: what the person
+adds on the left (attach, dictation, a surface's own extras such as Web or Task
+actions), then how the turn runs on the right (model, access, the context
+meter, send). A control never changes sides between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
