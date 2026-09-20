@@ -988,7 +988,10 @@ mechanisms are:
   and narrowed by 0145, and the tools those threads reach stay confined either
   way. A bound root a launch may not write is denied in the profile, so a
   checkout under that launch's own temporary directory is not writable through
-  it.
+  it. The `--version` read every family and the discovery scan perform before a
+  runtime starts is wrapped too, with no root, no home, no network and one
+  throwaway scratch directory it may write, per
+  [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

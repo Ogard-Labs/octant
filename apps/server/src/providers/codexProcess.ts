@@ -5,6 +5,8 @@ import { delimiter, dirname, isAbsolute } from "node:path";
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
+import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 import { decodeInitializeResult } from "./codexProtocol";
 import {
   CodexRpcClientFailure,
@@ -38,6 +40,7 @@ export interface CodexProbeOptions {
   readonly shutdownTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly onProcessStarted?: ProviderProcessStartedListener;
+  readonly confinement?: SeatbeltConfinementPort;
 }
 
 export interface CodexProcessOptions {
@@ -47,6 +50,11 @@ export interface CodexProcessOptions {
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
   readonly stderrBytes?: number;
+  /**
+   * Confinement for the version read only. 0142 records that the app-server
+   * itself is not wrapped, so this never names the runtime's confinement.
+   */
+  readonly versionProbeConfinement?: SeatbeltConfinementPort;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -327,98 +335,132 @@ export function probeCodexBinary(
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_VERSION_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
-
-  return Effect.async<CodexBinaryProbe, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, ["--version"], {
-      detached: process.platform !== "win32",
-      env: codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
-      stdio: ["ignore", "pipe", "pipe"],
+  // Preparing inside the suspend keeps one scratch directory per run: an
+  // Effect a caller holds and never runs leaves nothing behind, and one it runs
+  // twice does not hand the second run a directory the first already released.
+  return Effect.suspend(() => {
+    const probe = prepareConfinedVersionProbe({
+      binaryPath,
+      displayName: "Codex",
+      environment: () =>
+        codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
+      ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
     });
-    let childExitedObserved = false;
-    const childExited = new Promise<void>((resolveExit) =>
-      child.once("exit", () => {
-        childExitedObserved = true;
-        resolveExit();
-      }),
-    );
-    let ownershipReady: Promise<void> = Promise.resolve();
-    if (child.pid !== undefined && options.onProcessStarted !== undefined) {
-      ownershipReady = options
-        .onProcessStarted({ pid: child.pid, exited: childExited })
-        .then(() => undefined);
-      void ownershipReady.catch(() => undefined);
-    }
-    const terminate = makeProcessTerminator(child, shutdownTimeoutMs);
-    let output = Buffer.alloc(0);
-    let outputOverflow = false;
-    let settled = false;
+    if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
+    const { launch } = probe;
 
-    const cleanupListeners = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onOutput);
-      child.stderr.off("data", onOutput);
-      child.off("error", onError);
-      child.off("close", onClose);
-    };
-    const finish = (result: Effect.Effect<CodexBinaryProbe, ProviderFailure>) => {
-      if (settled) return;
-      settled = true;
-      cleanupListeners();
-      void terminate().then(
-        async () => {
-          try {
-            await ownershipReady;
-            resume(result);
-          } catch {
-            if (childExitedObserved) resume(result);
-            else
-              resume(
-                Effect.fail(failure("provider-failed", "Codex process receipt is unavailable.")),
-              );
-          }
-        },
-        () => resume(Effect.fail(failure("provider-failed", "Codex binary probe cleanup failed."))),
+    return Effect.async<CodexBinaryProbe, ProviderFailure>((resume) => {
+      const child = spawn(launch.command, [...launch.args], {
+        cwd: launch.workingDirectory,
+        detached: process.platform !== "win32",
+        env: launch.environment,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let childExitedObserved = false;
+      const childExited = new Promise<void>((resolveExit) =>
+        child.once("exit", () => {
+          childExitedObserved = true;
+          resolveExit();
+        }),
       );
-    };
-    const onOutput = (chunk: Buffer | string) => {
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = PROBE_OUTPUT_BYTES - output.length;
-      if (bytes.length > remaining) outputOverflow = true;
-      if (remaining > 0) output = Buffer.concat([output, bytes.subarray(0, remaining)]);
-    };
-    const onError = () =>
-      finish(Effect.fail(failure("unavailable", "Codex binary could not be started for probing.")));
-    const onClose = (code: number | null) => {
-      if (outputOverflow) {
-        finish(Effect.fail(failure("protocol", "Codex binary version output exceeded the limit.")));
-        return;
+      let ownershipReady: Promise<void> = Promise.resolve();
+      if (child.pid !== undefined && options.onProcessStarted !== undefined) {
+        ownershipReady = options
+          .onProcessStarted({ pid: child.pid, exited: childExited })
+          .then(() => undefined);
+        void ownershipReady.catch(() => undefined);
       }
-      if (code !== 0) {
-        finish(Effect.fail(failure("unavailable", "Codex binary probe did not succeed.")));
-        return;
-      }
-      const version = parseCodexVersion(output.toString("utf8"));
-      finish(
-        version === undefined
-          ? Effect.fail(failure("protocol", "Codex binary returned an unrecognized version."))
-          : Effect.succeed({ binaryPath, version }),
+      const terminateProcess = makeProcessTerminator(child, shutdownTimeoutMs);
+      // The scratch directory outlives the process it was granted to unless it
+      // goes away with it, and every settle path here runs the terminator.
+      const terminate = () => terminateProcess().finally(launch.release);
+      // The version line is read from stdout alone. Codex writes the version
+      // there and keeps stderr for advice: given a throwaway home it warns that
+      // it cannot install its PATH aliases, which a version read does not need
+      // and which folded into one buffer made the whole read unrecognizable.
+      let output = Buffer.alloc(0);
+      let outputOverflow = false;
+      let settled = false;
+
+      const cleanupListeners = () => {
+        clearTimeout(timeout);
+        child.stdout.off("data", onStdout);
+        child.stderr.off("data", onStderr);
+        child.off("error", onError);
+        child.off("close", onClose);
+      };
+      const finish = (result: Effect.Effect<CodexBinaryProbe, ProviderFailure>) => {
+        if (settled) return;
+        settled = true;
+        cleanupListeners();
+        void terminate().then(
+          async () => {
+            try {
+              await ownershipReady;
+              resume(result);
+            } catch {
+              if (childExitedObserved) resume(result);
+              else
+                resume(
+                  Effect.fail(failure("provider-failed", "Codex process receipt is unavailable.")),
+                );
+            }
+          },
+          () =>
+            resume(Effect.fail(failure("provider-failed", "Codex binary probe cleanup failed."))),
+        );
+      };
+      const onStdout = (chunk: Buffer | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = PROBE_OUTPUT_BYTES - output.length;
+        if (bytes.length > remaining) outputOverflow = true;
+        if (remaining > 0) output = Buffer.concat([output, bytes.subarray(0, remaining)]);
+      };
+      // Stderr is still bounded, so a program that floods it is refused rather
+      // than read forever; its bytes never reach the version line.
+      let stderrBytes = 0;
+      const onStderr = (chunk: Buffer | string) => {
+        stderrBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.from(chunk).length;
+        if (stderrBytes > PROBE_OUTPUT_BYTES) outputOverflow = true;
+      };
+      const onError = () =>
+        finish(
+          Effect.fail(failure("unavailable", "Codex binary could not be started for probing.")),
+        );
+      const onClose = (code: number | null) => {
+        if (outputOverflow) {
+          finish(
+            Effect.fail(failure("protocol", "Codex binary version output exceeded the limit.")),
+          );
+          return;
+        }
+        if (code !== 0) {
+          finish(Effect.fail(failure("unavailable", "Codex binary probe did not succeed.")));
+          return;
+        }
+        const version = parseCodexVersion(output.toString("utf8"));
+        finish(
+          version === undefined
+            ? Effect.fail(failure("protocol", "Codex binary returned an unrecognized version."))
+            : Effect.succeed({ binaryPath, version }),
+        );
+      };
+      const timeout = setTimeout(
+        () => finish(Effect.fail(failure("unavailable", "Codex binary probe timed out."))),
+        timeoutMs,
       );
-    };
-    const timeout = setTimeout(
-      () => finish(Effect.fail(failure("unavailable", "Codex binary probe timed out."))),
-      timeoutMs,
-    );
 
-    child.stdout.on("data", onOutput);
-    child.stderr.on("data", onOutput);
-    child.once("error", onError);
-    child.once("close", onClose);
+      child.stdout.on("data", onStdout);
+      child.stderr.on("data", onStderr);
+      child.once("error", onError);
+      child.once("close", onClose);
 
-    return cleanupEffect(async () => {
-      if (settled) return;
-      settled = true;
-      cleanupListeners();
-      await terminate();
+      return cleanupEffect(async () => {
+        if (settled) return;
+        settled = true;
+        cleanupListeners();
+        await terminate();
+      });
     });
   });
 }
@@ -579,6 +621,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
     shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     stderrBytes: options.stderrBytes,
+    versionProbeConfinement: options.versionProbeConfinement,
   };
 
   return {
@@ -593,6 +636,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 : { inheritedEnvironment: resolved.inheritedEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
+              ...(resolved.versionProbeConfinement === undefined
+                ? {}
+                : { confinement: resolved.versionProbeConfinement }),
             });
             const managed = yield* acquireCodexAppServer(
               binaryPath,
