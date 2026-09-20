@@ -36,10 +36,15 @@ measured on macOS 27 against this builder's profile:
   the runtime's configuration directory, its secure-storage directory when the
   host names one, and a temporary directory made for that launch alone. That
   directory is created inside the ambient temporary root, handed to the runtime
-  as its `TMPDIR`, and removed when the runtime exits or the launch is refused.
-  The shared temporary root is never granted, so a Plan runtime cannot name
-  another thread's scratch files. There is no unconfined fallback: a builder
-  that cannot prepare the launch fails the turn.
+  as its `TMPDIR` and `CLAUDE_CODE_TMPDIR`, and removed when the runtime exits
+  or the launch is refused. The runtime keeps its own scratch in a
+  `claude-<uid>` tree under the second of those, which defaults to the shared
+  `/tmp`; pointing it at the launch's folder keeps that scratch private rather
+  than granting a tree every Claude process of the user shares. The shared
+  temporary root is never granted, so a Plan runtime cannot name another
+  thread's scratch files, and a launch whose temporary root lies inside the
+  checkout is refused before anything is created there. There is no unconfined
+  fallback: a builder that cannot prepare the launch fails the turn.
 - A readiness probe carries no thread, so it binds an empty folder only that
   probe can name, removed when the probe closes. It does not bind the server's
   working directory, which the builder refuses when it is an ancestor of a
@@ -69,7 +74,14 @@ measured on macOS 27 against this builder's profile:
   applies its own per-item rules and returns only what that binary is already
   trusted for. This is a scoped exception to the same rule of 0009 that 0126
   scoped for trust evaluation, and unlike that one it does reach private
-  credential material, so it is set per launch and never for a tool.
+  credential material, so it is set per launch and never for a tool. A launch
+  that carries an API key does not resolve a credential from the store, and the
+  same binary may be trusted for a stored subscription item it has no use for,
+  so the lookup stays closed there.
+- The Linux builder masks the host executable directories in a launch that
+  may not exec or fork, and binds back the program and, for a `#!` script, its
+  interpreter, as the Seatbelt builder lists the same programs. Without it a
+  Claude entry point that is a script cannot start under Plan on Linux.
 - Full access stays unconfined. 0009 calls it a genuine, user-selected,
   unrestricted posture, so it is outside this rule rather than an exception
   to it.

@@ -10,7 +10,7 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 
 import type {
   Options as ClaudeAgentSdkOptions,
@@ -385,9 +385,7 @@ function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): Readon
   const configuration =
     environment.CLAUDE_CONFIG_DIR ??
     (environment.HOME === undefined ? undefined : join(environment.HOME, ".claude"));
-  const userId = process.getuid?.();
-  const scratch = userId === undefined ? undefined : join("/tmp", `claude-${userId}`);
-  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR, scratch].filter(
+  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
     (path): path is string => path !== undefined && isAbsolute(path),
   );
 }
@@ -422,11 +420,28 @@ function confineClaudeLaunch(
   // directory read and write handed a Plan runtime every sibling temporary
   // file on the machine, including other threads' scratch checkouts. A folder
   // only this launch can name is what the design asked for.
+  let temporaryRoot: string;
+  try {
+    temporaryRoot = realpathSync(spawnOptions.env.TMPDIR ?? tmpdir());
+  } catch {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement could not create a private temporary directory.",
+    );
+  }
+  // A temporary root inside the checkout would put the launch's writable
+  // folder in a tree the launch may only read, and the write grant for a
+  // folder the caller named outranks the bound root's denial. Refuse it before
+  // anything is created there.
+  if (temporaryRoot === boundRoot || temporaryRoot.startsWith(`${boundRoot}${sep}`)) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement requires a temporary directory outside the checkout.",
+    );
+  }
   let temporaryDirectory: string;
   try {
-    temporaryDirectory = realpathSync(
-      mkdtempSync(join(realpathSync(spawnOptions.env.TMPDIR ?? tmpdir()), "octant-claude-plan-")),
-    );
+    temporaryDirectory = realpathSync(mkdtempSync(join(temporaryRoot, "octant-claude-plan-")));
   } catch {
     throw new SeatbeltConfinementError(
       "invalid-configuration",
@@ -471,15 +486,26 @@ function confineClaudeLaunch(
       // Subscription authentication keeps its credential in the platform secret
       // store rather than in the provider home, so a launch without this reports
       // itself signed out and the turn never starts. The store's files stay
-      // denied; only the lookup opens (0143).
-      allowProviderCredentialLookup: true,
+      // denied; only the lookup opens (0143). An API-key launch already carries
+      // its credential and never resolves one from the store, and the same
+      // binary may be trusted for a stored subscription item it has no use for,
+      // so the lookup stays closed there.
+      allowProviderCredentialLookup: spawnOptions.env.ANTHROPIC_API_KEY === undefined,
     });
     return {
       spawnOptions: {
         ...spawnOptions,
         command: launch.command,
         args: [...launch.args],
-        env: { ...spawnOptions.env, TMPDIR: temporaryDirectory },
+        // The runtime keeps its own scratch under `claude-<uid>` beneath
+        // `CLAUDE_CODE_TMPDIR`, which defaults to the shared `/tmp`. Pointing it
+        // at the launch's folder keeps that scratch private too, instead of
+        // granting the tree every Claude process of the user shares.
+        env: {
+          ...spawnOptions.env,
+          TMPDIR: temporaryDirectory,
+          CLAUDE_CODE_TMPDIR: temporaryDirectory,
+        },
       },
       release,
     };
