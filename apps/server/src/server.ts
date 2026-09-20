@@ -1652,6 +1652,7 @@ export function startOctantServer(
     const startedAt = Date.now();
     const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
     const processAuthorityClock = new ProcessAuthorityClock();
+    const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const machineChangeFeed = new MachineChangeFeed();
     const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
       machineChangeFeed.publishCommitted(append),
@@ -1694,6 +1695,7 @@ export function startOctantServer(
       (windowId) => {
         revokeShellWindow?.(windowId);
         codeApprovalStore.revokeWindow(windowId);
+        simulatorInputGrants.revokeWindow(String(windowId));
         extensionToolApprovalService.revokeWindow(windowId);
         browserToolApprovalService?.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
@@ -3937,7 +3939,7 @@ export function startOctantServer(
             const evidence = await appleToolchainService.execute(request, context);
             // An agent's shutdown closes a Simulator to every thread, and its
             // input keeps a live grant open, the same as the pane's.
-            simulatorInputGrants.settle(request, evidence, context);
+            simulatorInputGrants.settle(String(windowId), request, evidence, context);
             await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
@@ -4212,7 +4214,6 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => appleProcess.reconcile());
-    const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     // Present only under the desktop app, which owns the native device helper.
     const simulatorDevice = createDesktopSimulatorDevicePort(process.env);
     const appleToolchainService = new AppleToolchainService({
@@ -4309,18 +4310,29 @@ export function startOctantServer(
         approvalValid = false;
       } else if (
         inputSimulatorId !== undefined &&
-        simulatorInputGrants.isOpen(String(thread.id), String(inputSimulatorId))
+        simulatorInputGrants.isOpen({
+          windowId: String(windowId),
+          threadId: String(thread.id),
+          simulatorId: String(inputSimulatorId),
+        })
       ) {
-        // One approved input opened this Simulator to the thread; confirming
-        // every tap made the live device unusable. The policy accepts the
-        // grant in place of a one-shot approval on the request.
+        // One approved input opened this Simulator to this window on this
+        // thread; confirming every tap made the live device unusable. The grant
+        // is the window's, like the approval it came from, so another client on
+        // the thread does not ride it. The policy accepts the grant in place of
+        // a one-shot approval on the request.
         approvalValid = true;
         inputGranted = true;
       } else {
         approvalValid =
           (await codeOperationRuntime?.validateAppleApproval(windowId, action)) ?? false;
-        if (approvalValid && inputSimulatorId !== undefined)
-          simulatorInputGrants.open(String(thread.id), String(inputSimulatorId));
+        if (approvalValid && inputSimulatorId !== undefined) {
+          simulatorInputGrants.open({
+            windowId: String(windowId),
+            threadId: String(thread.id),
+            simulatorId: String(inputSimulatorId),
+          });
+        }
       }
       return {
         authority: scope.authority,
@@ -4338,9 +4350,10 @@ export function startOctantServer(
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
-      afterAction: (request, evidence, context) =>
-        simulatorInputGrants.settle(request, evidence, context),
-      inputGrants: (threadId) => simulatorInputGrants.list(String(threadId)),
+      afterAction: (windowId, request, evidence, context) =>
+        simulatorInputGrants.settle(String(windowId), request, evidence, context),
+      inputGrants: (windowId, threadId) =>
+        simulatorInputGrants.list(String(windowId), String(threadId)),
       ...(simulatorDevice === undefined
         ? {}
         : {

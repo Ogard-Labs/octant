@@ -30,16 +30,18 @@ export interface AppleToolchainRouteDependencies {
     envelope: AppleRpcEnvelope,
   ) => Promise<AppleExecutionContext | undefined> | AppleExecutionContext | undefined;
   /**
-   * Called with what an action came to, after it ran. The host's input grants
-   * follow what was delivered rather than what was asked.
+   * Called with what an action came to, after it ran, and the window that asked.
+   * The host's input grants follow what was delivered rather than what was asked.
    */
   readonly afterAction?: (
+    windowId: WindowId,
     request: AppleActionRequest,
     evidence: AppleBuildEvidence,
     context: AppleExecutionContext,
   ) => void;
-  /** Simulators the thread may send input to without a new approval. */
+  /** Simulators the window may send input to on the thread without a new approval. */
   readonly inputGrants?: (
+    windowId: WindowId,
     threadId: AppleExecutionContext["threadId"],
   ) => ReadonlyArray<{ readonly simulatorId: string; readonly expiresAt: string }>;
   /**
@@ -185,7 +187,7 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         case "apple-action-request": {
           const startedAt = nowIso();
           const evidence = await dependencies.service.execute(envelope.request, context);
-          dependencies.afterAction?.(envelope.request, evidence, context);
+          dependencies.afterAction?.(windowId, envelope.request, evidence, context);
           await dependencies.recordEvidence?.(evidence, startedAt);
           return encoded(
             {
@@ -206,7 +208,7 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
             origin,
           );
         case "apple-snapshot-request": {
-          const inputGrants = dependencies.inputGrants?.(context.threadId) ?? [];
+          const inputGrants = dependencies.inputGrants?.(windowId, context.threadId) ?? [];
           return encoded(
             {
               kind: "apple-runtime-snapshot",

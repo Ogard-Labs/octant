@@ -161,7 +161,7 @@ describe("Apple toolchain routes", () => {
       kind: "apple-runtime-snapshot",
       snapshot: { sequence: 4, inputGrants: grants },
     });
-    expect(inputGrants).toHaveBeenCalledWith(scope.threadId);
+    expect(inputGrants).toHaveBeenCalledWith(windowId, scope.threadId);
 
     // No grant, no field: the pane asks as it always did.
     inputGrants.mockReturnValue([]);
@@ -218,6 +218,7 @@ describe("Apple toolchain routes", () => {
     expect(response?.status).toBe(200);
     expect(afterAction).toHaveBeenCalledTimes(1);
     expect(afterAction).toHaveBeenCalledWith(
+      windowId,
       expect.objectContaining({ kind: "tap" }),
       evidence,
       context,
