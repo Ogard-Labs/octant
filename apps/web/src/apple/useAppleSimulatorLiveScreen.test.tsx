@@ -306,6 +306,48 @@ describe("the live Simulator screen", () => {
     });
   });
 
+  it("gives up on a view whose first picture is still being decoded at the deadline, and discards it when it comes", async () => {
+    vi.useFakeTimers();
+    const late: Array<(frame: { width: number; height: number; close: () => void }) => void> = [];
+    const closed = vi.fn();
+    const slow = vi.fn(
+      () =>
+        new Promise<{ width: number; height: number; close: () => void }>((resolve) => {
+          late.push(resolve);
+        }),
+    );
+    const watchScreen = vi.fn(async (_request: unknown, signal?: AbortSignal) => {
+      async function* frames() {
+        yield Uint8Array.from([1]);
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+      }
+      return {
+        status: "watching" as const,
+        screen: { width: 1206, height: 2622 },
+        frames: frames(),
+      };
+    });
+    const client = clientWatching(watchScreen);
+    const { result } = renderHook(() =>
+      useAppleSimulatorLiveScreen({ client, request, enabled: true, decode: slow }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(watchScreen).toHaveBeenCalledTimes(4);
+    expect(result.current.status).toBe("unavailable");
+
+    // The pictures arrive long after their views were given up.
+    await act(async () => {
+      for (const resolve of late) resolve({ width: 506, height: 1_100, close: closed });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    expect(result.current.status).toBe("unavailable");
+    expect(closed).toHaveBeenCalledTimes(late.length);
+  });
+
   it("gives up on a view that keeps dying right after its first frame, so the still can show", async () => {
     vi.useFakeTimers();
     async function* oneFrameThenGone() {
