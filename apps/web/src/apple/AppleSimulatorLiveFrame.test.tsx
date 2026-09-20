@@ -59,7 +59,30 @@ describe("AppleSimulatorLiveFrameView", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
-  it("hides the evidence dump and Type field on the in-app device pane", () => {
+  it("keeps the Type field on the in-app device pane when the still fallback is showing", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "The destination is live.",
+    };
+    render(
+      <AppleSimulatorLiveFrameView
+        chrome="device"
+        frame={frame}
+        inputEnabled
+        onInput={vi.fn()}
+        screenUrl="https://octant.test/apple-screenshot-live"
+      />,
+    );
+    expect(screen.getByLabelText("Type into Simulator")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Home" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Lock" })).toBeVisible();
+  });
+
+  it("hides the evidence dump and Type field on a streamed in-app device pane", () => {
     const frame: AppleSimulatorLiveFrame = {
       status: "live",
       simulatorId,

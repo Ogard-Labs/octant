@@ -678,6 +678,49 @@ describe("AppleToolchainService lifecycle", () => {
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
 
+  it("puts a Simulator back to shutdown when boot does not become ready, so Boot can be offered again", async () => {
+    const execute = discoveryExecutor();
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockResolvedValue(processResult("ok\n"));
+    await service.execute(
+      simulatorRequest({
+        kind: "shutdown",
+        actionId: "30000000-0000-4000-8000-000000000021" as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+    execute.mockResolvedValue(processResult("", { exitCode: 1, stderr: "Unable to boot" }));
+    const failed = await service.execute(
+      simulatorRequest({
+        kind: "boot",
+        actionId: "30000000-0000-4000-8000-000000000022" as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    expect(failed.outcome).not.toBe("succeeded");
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+    execute.mockResolvedValue(processResult("ok\n"));
+    const retried = await service.execute(
+      simulatorRequest({
+        kind: "boot",
+        actionId: "30000000-0000-4000-8000-000000000023" as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    expect(retried.outcome).toBe("succeeded");
+    expect(service.snapshot(context).simulators[0]?.state).toBe("booted");
+  });
+
   it("stamps an in-app pane request on the snapshot for that thread only", async () => {
     const service = new AppleToolchainService({
       execute: discoveryExecutor(),

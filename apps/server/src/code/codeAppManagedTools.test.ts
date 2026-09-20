@@ -1319,7 +1319,7 @@ describe("the Apple capability as an agent tool", () => {
   it("opens the in-app Simulator pane instead of launching Apple's Simulator application", async () => {
     const simulatorId = "80000000-0000-4000-8000-000000000001";
     const snapshot = vi.fn(async () => ({
-      ...appleSnapshot(),
+      ...(appleSnapshot() as Record<string, unknown>),
       simulators: [
         {
           simulatorId,
@@ -1359,7 +1359,7 @@ describe("the Apple capability as an agent tool", () => {
   it("boots a shut-down Simulator when opening the in-app pane, and still does not launch Simulator.app", async () => {
     const simulatorId = "80000000-0000-4000-8000-000000000001";
     const snapshot = vi.fn(async () => ({
-      ...appleSnapshot(),
+      ...(appleSnapshot() as Record<string, unknown>),
       simulators: [
         {
           simulatorId,
@@ -1371,7 +1371,7 @@ describe("the Apple capability as an agent tool", () => {
       ],
     }));
     const requestPaneOpen = vi.fn(async () => snapshot());
-    const execute = vi.fn(async () => ({
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => ({
       ...(appleEvidence() as unknown as Record<string, unknown>),
       kind: "boot",
       outcome: "succeeded",

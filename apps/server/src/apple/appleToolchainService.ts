@@ -607,20 +607,27 @@ export class AppleToolchainService {
     try {
       if (request.kind === "boot") {
         this.#advance(active, "preparing-destination");
+        const previous = this.#simulatorState(request.simulatorId);
         this.#setSimulatorState(request.simulatorId, "booting");
-        terminal = await this.#command(
-          ["xcrun", "simctl", "boot", request.simulatorId],
-          context,
-          request.timeoutMs,
-          signal,
-        );
-        if (succeeded(terminal)) {
+        try {
           terminal = await this.#command(
-            ["xcrun", "simctl", "bootstatus", request.simulatorId, "-b"],
+            ["xcrun", "simctl", "boot", request.simulatorId],
             context,
             request.timeoutMs,
             signal,
           );
+          if (succeeded(terminal)) {
+            terminal = await this.#command(
+              ["xcrun", "simctl", "bootstatus", request.simulatorId, "-b"],
+              context,
+              request.timeoutMs,
+              signal,
+            );
+          }
+          this.#settleBoot(request.simulatorId, previous, succeeded(terminal));
+        } catch (error) {
+          this.#settleBoot(request.simulatorId, previous, false);
+          throw error;
         }
       } else if (request.kind === "shutdown") {
         this.#advance(active, "cleaning-up");
@@ -841,9 +848,6 @@ export class AppleToolchainService {
         throw new Error("Apple action kind is unsupported.");
       }
       outputs.push(terminal.stdout, terminal.stderr);
-      if (succeeded(terminal) && request.kind === "boot") {
-        this.#setSimulatorState(request.simulatorId, "booted");
-      }
       if (succeeded(terminal) && request.kind === "shutdown") {
         this.#setSimulatorState(request.simulatorId, "shutdown");
       }
@@ -916,22 +920,31 @@ export class AppleToolchainService {
       this.#setSimulatorState(simulatorId, "booted");
       return result;
     }
+    const previous = this.#simulatorState(simulatorId);
     this.#setSimulatorState(simulatorId, "booting");
-    result = await this.#command(
-      ["xcrun", "simctl", "boot", simulatorId],
-      context,
-      timeoutMs,
-      signal,
-    );
-    if (!succeeded(result)) return result;
-    result = await this.#command(
-      ["xcrun", "simctl", "bootstatus", simulatorId, "-b"],
-      context,
-      timeoutMs,
-      signal,
-    );
-    if (succeeded(result)) this.#setSimulatorState(simulatorId, "booted");
-    return result;
+    try {
+      result = await this.#command(
+        ["xcrun", "simctl", "boot", simulatorId],
+        context,
+        timeoutMs,
+        signal,
+      );
+      if (!succeeded(result)) {
+        this.#settleBoot(simulatorId, previous, false);
+        return result;
+      }
+      result = await this.#command(
+        ["xcrun", "simctl", "bootstatus", simulatorId, "-b"],
+        context,
+        timeoutMs,
+        signal,
+      );
+      this.#settleBoot(simulatorId, previous, succeeded(result));
+      return result;
+    } catch (error) {
+      this.#settleBoot(simulatorId, previous, false);
+      throw error;
+    }
   }
 
   #findCompletedInput(
@@ -1098,6 +1111,27 @@ export class AppleToolchainService {
     if (this.#options.writeArtifact === undefined) return;
     const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
     await this.#options.writeArtifact(reference, new Uint8Array(bytes));
+  }
+
+  #simulatorState(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+  ): AppleSimulatorRecord["state"] | undefined {
+    return this.#lastSimulators.find(
+      (record) => String(record.simulatorId) === String(simulatorId),
+    )?.state;
+  }
+
+  /**
+   * The in-app pane treats booting as in-flight and offers Boot only from
+   * shutdown. A failed, cancelled, or timed-out boot must not leave the
+   * destination stuck, or a retry is refused as destination-not-shutdown.
+   */
+  #settleBoot(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+    previous: AppleSimulatorRecord["state"] | undefined,
+    ready: boolean,
+  ): void {
+    this.#setSimulatorState(simulatorId, ready ? "booted" : (previous ?? "shutdown"));
   }
 
   #setSimulatorState(
