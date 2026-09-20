@@ -255,6 +255,31 @@ describe("Simulator device helpers", () => {
     helpers.dispose();
   });
 
+  it("does not stop a helper that is still typing just because the last viewer left", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd: vi.fn() },
+      5_000,
+    );
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+    if (watch.status === "watching") watch.stop();
+    // The helper answers in order, so the stream cannot be stopped until the
+    // typing is done; that wait must not be what stops the helper.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 2, ok: true });
+
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+    helpers.dispose();
+  });
+
   it("hands every viewer each whole frame, however the bytes arrive", async () => {
     const fake = fakeChild();
     const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });

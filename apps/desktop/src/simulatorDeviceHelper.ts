@@ -109,6 +109,8 @@ interface RunningHelper {
 const SIMULATOR_ID = /^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/;
 const MAXIMUM_REPLY_BYTES = 262_144;
 const MAXIMUM_FRAME_BYTES = 8 * 1024 * 1024;
+/** The longest budget the input contract allows. */
+const LONGEST_INPUT_MS = 10 * 60 * 1_000;
 const DEFAULT_IDLE_MS = 120_000;
 
 function frame(value: Record<string, unknown>): Buffer {
@@ -388,7 +390,12 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
           helper.streaming = undefined;
           helper.latestFrame = undefined;
           if (running.get(simulatorId) === helper) {
-            void ask(simulatorId, helper, { op: "stream-stop" }, 5_000);
+            // The helper answers in order, so this waits behind any input still
+            // being delivered. It gets the longest an input may take: a short
+            // deadline here would stop the helper under that input, which may
+            // already have typed part of its text. A helper that truly hangs is
+            // stopped by the input's own deadline.
+            void ask(simulatorId, helper, { op: "stream-stop" }, LONGEST_INPUT_MS);
           }
         },
       };
