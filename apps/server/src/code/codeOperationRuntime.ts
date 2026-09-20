@@ -1262,8 +1262,8 @@ interface ActiveTurn {
   cursor: number;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   lastPersistedState?: CodeTurnOutcome;
-  /** Set once the turn's change list has been attempted, so two terminal outcomes record one. */
-  changedFilesRecorded?: boolean;
+  /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
+  changedFilesRecording?: Promise<void>;
   launch?: () => void;
 }
 
@@ -1859,8 +1859,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
       ),
     )
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (active.state !== "running") return;
+        await this.#recordChangedFiles(active);
         try {
           this.#persistOutcome(active, "failed", evidenceCapacityFailure(error));
         } catch {
@@ -1948,43 +1949,46 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * person needs to see.
    */
   async #recordChangedFiles(active: ActiveTurn): Promise<void> {
-    if (active.changedFilesRecorded) return;
-    active.changedFilesRecorded = true;
-    try {
-      const replay = this.#events.replay({
-        threadId: active.thread.id,
-        operationId: active.operationId,
-        afterCursor: 0,
-        limit: 256,
-      });
-      if (replay.status !== "ok") return;
-      const started = replay.frames.find(
-        (frame) => frame.event.kind === "conversation-turn-started",
-      );
-      const from =
-        started?.event.kind === "conversation-turn-started"
-          ? started.event.checkpoint?.worktree
-          : undefined;
-      if (from === undefined) return;
-      const result = await this.#git.changesSince({
-        checkoutId: String(active.thread.checkoutId),
-        checkoutRoot: active.checkoutRoot,
-        from,
-        executionPolicy: active.thread.executionPolicy,
-      });
-      if (result.status !== "ready") return;
-      const changedFiles = turnChangedFiles(result.changes);
-      if (changedFiles === undefined) return;
-      const frame = this.#events.append({
-        threadId: active.thread.id,
-        operationId: active.operationId,
-        expectedCursor: active.cursor,
-        event: { kind: "conversation-turn-changed-files", changedFiles },
-      });
-      active.cursor = frame.cursor;
-    } catch {
-      // Evidence only; see above.
-    }
+    if (active.changedFilesRecording !== undefined) return active.changedFilesRecording;
+    active.changedFilesRecording = (async () => {
+      try {
+        const replay = this.#events.replay({
+          threadId: active.thread.id,
+          operationId: active.operationId,
+          afterCursor: 0,
+          limit: 256,
+        });
+        if (replay.status !== "ok") return;
+        const started = replay.frames.find(
+          (frame) => frame.event.kind === "conversation-turn-started",
+        );
+        const from =
+          started?.event.kind === "conversation-turn-started"
+            ? started.event.checkpoint?.worktree
+            : undefined;
+        if (from === undefined) return;
+        const effective = this.#effectiveThread(active.windowId, active.thread.id);
+        const result = await this.#git.changesSince({
+          checkoutId: String(active.thread.checkoutId),
+          checkoutRoot: active.checkoutRoot,
+          from,
+          executionPolicy: effective?.executionPolicy ?? active.thread.executionPolicy,
+        });
+        if (result.status !== "ready") return;
+        const changedFiles = turnChangedFiles(result.changes);
+        if (changedFiles === undefined) return;
+        const frame = this.#events.append({
+          threadId: active.thread.id,
+          operationId: active.operationId,
+          expectedCursor: active.cursor,
+          event: { kind: "conversation-turn-changed-files", changedFiles },
+        });
+        active.cursor = frame.cursor;
+      } catch {
+        // Evidence only; see above.
+      }
+    })();
+    return active.changedFilesRecording;
   }
 
   #persistOutcome(

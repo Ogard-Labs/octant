@@ -1143,6 +1143,7 @@ describe("CodeOperationRuntime", () => {
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
+      gitTreeChanges: [{ path: "src/app.ts", insertions: 2, deletions: 0, binary: false }],
       evidencePut: () => {
         throw new CodeEvidenceCapacityExceeded();
       },
@@ -1178,7 +1179,44 @@ describe("CodeOperationRuntime", () => {
           }),
         ]),
       );
+      const kinds = frames.map((frame) =>
+        frame.event.kind === "operation-state" ? `state:${frame.event.state}` : frame.event.kind,
+      );
+      expect(kinds.indexOf("conversation-turn-changed-files")).toBeGreaterThan(-1);
+      expect(kinds.indexOf("conversation-turn-changed-files")).toBeLessThan(
+        kinds.indexOf("state:failed"),
+      );
     });
+    fixture.close();
+  });
+
+  it("captures the settle tree under the thread's current access, even when the turn started with more", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      gitTreeChanges: [{ path: "src/app.ts", insertions: 1, deletions: 0, binary: false }],
+    });
+    const startOperation = operationId(32);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      expect(frames.some((frame) => frame.event.kind === "conversation-turn-changed-files")).toBe(
+        true,
+      );
+    });
+    expect(fixture.snapshotPolicies.at(-1)).toBe("plan");
     fixture.close();
   });
 
@@ -2059,6 +2097,7 @@ function runtimeFixture(options: {
     });
   }
   let activeThread = thread();
+  const snapshotPolicies: Array<string | undefined> = [];
   const checkout = decodeCodeCheckoutIdentity({
     id: checkoutId,
     repositoryId: activeThread.repositoryId,
@@ -2200,14 +2239,16 @@ function runtimeFixture(options: {
       push: async () => ({ status: "failed" as const }),
       discard: async () => ({ status: "failed" as const }),
       revertCommit: async () => ({ status: "failed" as const }),
-      snapshotWorkingTree: async () =>
-        options.gitTreeChanges === undefined
+      snapshotWorkingTree: async (input: { readonly executionPolicy?: string }) => {
+        snapshotPolicies.push(input.executionPolicy);
+        return options.gitTreeChanges === undefined
           ? { status: "failed" as const }
           : {
               status: "captured" as const,
               snapshot: { worktree: "d".repeat(40), index: "e".repeat(40) },
               anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
-            },
+            };
+      },
       restoreWorkingTree: async () => ({ status: "failed" as const }),
       releaseCheckpoint: async () => {},
     },
@@ -2221,6 +2262,7 @@ function runtimeFixture(options: {
     setThread: (next: CodeThread) => {
       activeThread = next;
     },
+    snapshotPolicies,
     /** Fire the shell's own exit, the way a `exit` typed into it would. */
     exitTerminal: () => exitTerminal?.(),
     /** Every runtime work state this runtime journalled, oldest first. */

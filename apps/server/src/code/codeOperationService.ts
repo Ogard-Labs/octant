@@ -2781,6 +2781,9 @@ function sameConversationStart(
  * durable launch/stream evidence after conversation-turn-started. Returning
  * that cached result would leave the thread permanently idle after a crash
  * between the operation-result append and RuntimeTurnController.launch.
+ * `conversation-turn-changed-files` is settlement evidence: the turn had
+ * already begun to settle, so a crash before the terminal state must not
+ * launch it again.
  */
 function isStaleRunningProviderTurn(
   result: CodeOperationResult,
@@ -2801,6 +2804,7 @@ function isDurableProviderLaunchEvidence(event: CodeOperationEvent): boolean {
     case "task-progress":
     case "usage":
     case "child-activity":
+    case "conversation-turn-changed-files":
       return true;
     case "operation-result":
       return (
