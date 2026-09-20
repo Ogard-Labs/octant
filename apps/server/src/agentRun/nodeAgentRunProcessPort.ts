@@ -6,6 +6,7 @@ import {
   reconcileProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
+import { childProcessEnvironment } from "../childProcessEnvironment";
 
 export interface NodeAgentRunCommand {
   readonly command: string;
@@ -39,7 +40,7 @@ export function createNodeAgentRunProcessPort(
       const child = spawn(command.command, [...command.args], {
         ...(command.cwd === undefined ? {} : { cwd: command.cwd }),
         detached: process.platform !== "win32",
-        env: command.env ?? options.environment ?? process.env,
+        env: childProcessEnvironment(command.env ?? options.environment ?? process.env),
         stdio: "ignore",
       });
       return createHandle(child, shutdownTimeoutMs, options);

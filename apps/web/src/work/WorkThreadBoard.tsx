@@ -636,7 +636,10 @@ function WorkBoardCardView(props: {
         ).map((fact) => (
           <span className={fact.className ?? "fact"} key={fact.key} title={fact.title ?? fact.text}>
             {fact.icon}
-            {fact.text}
+            {/* The fact is a flex row, and an ellipsis never applies to a flex
+                container's bare text: the reason was cut mid-letter instead
+                ("…stale or ambiguou"). The text truncates in a box of its own. */}
+            <span className="fact__text">{fact.text}</span>
           </span>
         ))}
       </span>

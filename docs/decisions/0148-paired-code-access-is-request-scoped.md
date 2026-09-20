@@ -1,4 +1,4 @@
-# 0138. Paired Code access is request-scoped
+# 0148. Paired Code access is request-scoped
 
 **Status:** Accepted
 

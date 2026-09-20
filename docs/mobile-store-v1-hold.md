@@ -25,7 +25,7 @@ phases ([mobile-maturity-phases.md](mobile-maturity-phases.md)) without opening
 a public listing.
 
 The iOS internal TestFlight slice is now authorized by
-[0137](decisions/0137-internal-testflight-carries-the-existing-remote-client.md).
+[0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
 It creates the private App Store Connect record needed for build processing but
 does not prepare or publish a public product page.
 

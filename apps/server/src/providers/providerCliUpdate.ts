@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { dirname } from "node:path";
 import type { ProviderFailure } from "@octant/contracts";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
+import { childProcessEnvironment } from "../childProcessEnvironment";
 
 export { providerCliUpdateArgs } from "@octant/domain";
 
@@ -53,7 +54,11 @@ export async function runProviderCliUpdate(
     const child = spawn(input.binaryPath, [...input.args], {
       cwd: dirname(input.binaryPath),
       detached: process.platform !== "win32",
-      env: input.environment ?? process.env,
+      // A provider's updater is third-party code. It gets the host's
+      // environment without the broker addresses, tokens and bridge secret the
+      // desktop handed this server: with them it could call a broker directly
+      // and act outside every approval and evidence path.
+      env: childProcessEnvironment(input.environment ?? process.env),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const pid = child.pid;

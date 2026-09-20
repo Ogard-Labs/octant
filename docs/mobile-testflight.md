@@ -1,7 +1,7 @@
 # Octant Mobile internal TestFlight
 
 This is the operator runbook for the internal TestFlight track authorized by
-[0137](decisions/0137-internal-testflight-carries-the-existing-remote-client.md).
+[0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
 It does not open a public App Store listing or submit an app version to App
 Review.
 
@@ -114,7 +114,7 @@ any of these missing adapters.
 
 ## Code connection validation
 
-A paired device uses authenticated request-scoped Code Project access (ADR 0138).
+A paired device uses authenticated request-scoped Code Project access (ADR 0148).
 The host checks active Projects and the thread's checkout, provider, and approval
 policy without creating a desktop workspace for the device. Code prompt evidence
 uses the route's bounded plain-text upload with the ordinary device proof.

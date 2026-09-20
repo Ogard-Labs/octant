@@ -118,6 +118,113 @@ describe("Apple toolchain routes", () => {
     expect(service.discover).toHaveBeenCalledWith(expect.any(Object), context);
   });
 
+  it("tells the pane which Simulators the thread may send input to without a new approval", async () => {
+    const snapshot = {
+      sequence: 4,
+      snapshotAt: "2026-09-19T20:00:03.000Z",
+      toolchain: {
+        toolchainId: "60000000-0000-4000-8000-000000000007",
+        available: true,
+        sdks: [],
+        discoveredAt: "2026-09-19T20:00:00.000Z",
+      },
+      simulators: [],
+      active: [],
+      recentEvidence: [],
+    };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(() => snapshot),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const grants = [
+      {
+        simulatorId: "60000000-0000-4000-8000-00000000000a",
+        expiresAt: "2026-09-19T20:15:00.000Z",
+      },
+    ];
+    const inputGrants = vi.fn(() => grants);
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: async () => context,
+      service,
+      inputGrants,
+      now: () => 2,
+    });
+    const body = { kind: "apple-snapshot-request", authority, ...scope };
+
+    const granted = await handler(request(body));
+    expect(granted?.status).toBe(200);
+    await expect(granted?.json()).resolves.toMatchObject({
+      kind: "apple-runtime-snapshot",
+      snapshot: { sequence: 4, inputGrants: grants },
+    });
+    expect(inputGrants).toHaveBeenCalledWith(windowId, scope.threadId);
+
+    // No grant, no field: the pane asks as it always did.
+    inputGrants.mockReturnValue([]);
+    const ungranted = await (await handler(request(body)))?.json();
+    expect(ungranted.snapshot.inputGrants).toBeUndefined();
+  });
+
+  it("tells the host what an action came to, so a grant follows what was delivered rather than what was asked", async () => {
+    const evidence = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      kind: "tap",
+      outcome: "failed",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      diagnostics: [{ severity: "note", message: "tap failed" }],
+      artifacts: [],
+      cleanup: "not-required",
+      durationMs: 5,
+      completedAt: "2026-09-19T20:00:01.000Z",
+    };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(async () => evidence),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const afterAction = vi.fn();
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: async () => context,
+      service,
+      afterAction,
+      now: () => 2,
+      nowIso: () => "2026-09-19T20:00:00.000Z",
+    });
+    const action = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "tap",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      point: { x: 1, y: 2 },
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "not-required" },
+    };
+
+    const response = await handler(request({ kind: "apple-action-request", request: action }));
+
+    expect(response?.status).toBe(200);
+    expect(afterAction).toHaveBeenCalledTimes(1);
+    expect(afterAction).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ kind: "tap" }),
+      evidence,
+      context,
+    );
+  });
+
   it("fails closed before service access for invalid window authority", async () => {
     const service = {
       discover: vi.fn(),
@@ -237,5 +344,100 @@ describe("Apple toolchain routes", () => {
     expect(response?.headers.get("content-type")).toBe("image/png");
     expect(new Uint8Array(await response!.arrayBuffer())).toEqual(png);
     expect(service.readScreenshotArtifact).toHaveBeenCalledWith("apple-screenshot-1", context);
+  });
+
+  describe("the live Simulator screen", () => {
+    const simulatorId = "7E29846E-F920-438E-8AB2-930C1A0F7FB7";
+    const streamRequest = (body: unknown, token = capability) =>
+      new Request("http://127.0.0.1:13773/api/apple/screen-stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": token,
+          origin: "http://127.0.0.1:5173",
+        },
+        body: JSON.stringify(body),
+      });
+    const body = { kind: "apple-screen-stream-request", authority, ...scope, simulatorId };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+
+    it("streams the desktop's frames to an authorized window and names the screen's size", async () => {
+      const frames = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from([0, 0, 0, 2, 0xff, 0xd8]));
+          controller.close();
+        },
+      });
+      const watchSimulator = vi.fn(async (_simulatorId: string, _signal: AbortSignal) => ({
+        kind: "watching" as const,
+        screen: { width: 1206, height: 2622 },
+        frames,
+      }));
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => context),
+        now: () => 2,
+        watchSimulator,
+      });
+
+      const response = await handler(streamRequest(body));
+
+      expect(response?.status).toBe(200);
+      expect(response?.headers.get("x-octant-simulator-screen")).toBe("1206x2622");
+      expect(response?.headers.get("access-control-expose-headers")).toContain(
+        "x-octant-simulator-screen",
+      );
+      expect([...new Uint8Array(await response!.arrayBuffer())]).toEqual([0, 0, 0, 2, 0xff, 0xd8]);
+      expect(watchSimulator.mock.calls[0]?.[0]).toBe(simulatorId);
+    });
+
+    it("refuses a window with no authority over the thread before the desktop is asked", async () => {
+      const watchSimulator = vi.fn();
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => undefined),
+        now: () => 2,
+        watchSimulator,
+      });
+
+      expect((await handler(streamRequest(body)))?.status).toBe(403);
+      expect((await handler(streamRequest(body, "B".repeat(43))))?.status).toBe(401);
+      expect(watchSimulator).not.toHaveBeenCalled();
+    });
+
+    it("says a host without the desktop app has no live view, and passes on the helper's refusal", async () => {
+      const headless = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => context),
+        now: () => 2,
+      });
+      const unavailable = await headless(streamRequest(body));
+      expect(unavailable?.status).toBe(404);
+      expect(JSON.stringify(await unavailable?.json())).toContain("desktop app");
+
+      const refusing = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        service,
+        resolveContext: vi.fn(async () => context),
+        now: () => 2,
+        watchSimulator: vi.fn(async () => ({
+          kind: "refused" as const,
+          reason: "not-booted",
+          message: "the Simulator is Shutdown",
+        })),
+      });
+      const refused = await refusing(streamRequest(body));
+      expect(refused?.status).toBe(409);
+      expect(JSON.stringify(await refused?.json())).toContain("the Simulator is Shutdown");
+    });
   });
 });

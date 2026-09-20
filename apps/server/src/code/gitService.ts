@@ -7,6 +7,7 @@ import type {
   GitObservationResult,
   GitScopedDiffResult,
   GitStatusEntry,
+  GitTreeChangesResult,
 } from "./gitObservationPort";
 
 interface ObservationPort {
@@ -27,6 +28,14 @@ interface ObservationPort {
     input: Parameters<GitObservationPort["compareBranch"]>[0],
     signal?: AbortSignal,
   ) => Promise<GitBranchComparisonResult>;
+  /**
+   * Optional: an observation fake without it reports no change list rather
+   * than being unusable.
+   */
+  readTreeChanges?: (
+    input: Parameters<GitObservationPort["readTreeChanges"]>[0],
+    signal?: AbortSignal,
+  ) => Promise<GitTreeChangesResult>;
 }
 
 interface MutationPort {
@@ -336,6 +345,68 @@ export class GitService {
       return snapshot.status === "captured"
         ? { status: "captured", snapshot: snapshot.snapshot }
         : { status: "unavailable" };
+    });
+  }
+
+  /**
+   * What differs between an earlier capture and the checkout as it stands now.
+   *
+   * The present is captured the same way the earlier moment was, so a file that
+   * did not exist then, and one Git is still not tracking, both count. That
+   * capture exists only to be compared: its anchor is released as soon as the
+   * answer is read, where a turn's own checkpoint is kept for as long as the
+   * turn can be restored.
+   *
+   * Queued with the checkout's other Git work, because it writes objects and a
+   * scratch index like any capture.
+   */
+  changesSince(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      /** The `worktree` tree of the earlier capture. */
+      readonly from: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
+      /** Re-read immediately before the queued capture writes; the grant can drop to Plan while waiting. */
+      readonly resolveExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitTreeChangesResult> {
+    const read = this.#observation.readTreeChanges?.bind(this.#observation);
+    if (read === undefined) return Promise.resolve({ status: "unavailable" });
+    const resolvedPolicy = (): ProviderExecutionPolicy | undefined =>
+      input.resolveExecutionPolicy?.() ?? input.executionPolicy;
+    // The capture copies a scratch index into `.git`. Plan is read-only, so a
+    // turn that is Plan now must not snapshot, even if it started writable.
+    if (resolvedPolicy() === "plan") return Promise.resolve({ status: "unavailable" });
+    return this.#serialized(input.checkoutId, async () => {
+      const executionPolicy = resolvedPolicy();
+      if (executionPolicy === "plan") return { status: "unavailable" as const };
+      const now = await this.#mutation.snapshotWorkingTree(
+        {
+          checkoutRoot: input.checkoutRoot,
+          checkoutId: input.checkoutId,
+          ...mutationPolicy(executionPolicy),
+        },
+        signal,
+      );
+      if (now.status !== "captured") return { status: "unavailable" };
+      try {
+        return await read(
+          { checkoutRoot: input.checkoutRoot, from: input.from, to: now.snapshot.worktree },
+          signal,
+        );
+      } finally {
+        await this.#mutation.releaseCheckpoint(
+          {
+            checkoutRoot: input.checkoutRoot,
+            checkoutId: input.checkoutId,
+            anchorId: now.anchorId,
+            ...mutationPolicy(executionPolicy),
+          },
+          signal,
+        );
+      }
     });
   }
 

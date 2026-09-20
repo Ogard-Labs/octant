@@ -6,7 +6,7 @@ export function Empty({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-3 rounded-[var(--octant-radius-panel)] bg-card p-5 text-left text-card-foreground shadow-[var(--octant-shadow-sm)]",
+        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-3 rounded-xl bg-card p-5 text-left text-card-foreground shadow-[var(--octant-shadow-sm)]",
         className,
       )}
       data-slot="empty"
@@ -16,13 +16,15 @@ export function Empty({ className, ...props }: ComponentProps<"section">) {
 }
 
 const emptyStateMediaVariants = cva(
-  "grid size-8 shrink-0 place-items-center rounded-[var(--octant-radius-control)] border border-border bg-secondary text-muted-foreground",
+  "grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-secondary text-muted-foreground",
   {
     variants: {
       tone: {
+        // One tone. A state, empty, or error message's mark says what happened
+        // by its shape; ink never does, in any theme. The warning and
+        // destructive tones made one yellow or red glyph the loudest thing on
+        // an otherwise neutral screen, and nothing asks for them any more.
         neutral: "",
-        warning: "text-[var(--octant-warning-text)]",
-        destructive: "text-destructive",
       },
     },
     defaultVariants: { tone: "neutral" },
@@ -48,7 +50,9 @@ export function EmptyHeader({ className, ...props }: ComponentProps<"div">) {
 export function EmptyEyebrow({ className, ...props }: ComponentProps<"span">) {
   return (
     <span
-      className={cn("mb-1 block font-mono text-xs text-muted-foreground", className)}
+      // The interface face, like the title under it. In the code face this was
+      // the one line of chrome not set in the font a person chose.
+      className={cn("mb-1 block text-xs text-muted-foreground", className)}
       data-slot="empty-eyebrow"
       {...props}
     />

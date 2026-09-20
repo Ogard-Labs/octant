@@ -104,10 +104,24 @@ native receipts; desktop admin routes are loopback-only.
 - **Code** starts approval-gated; Plan mode is strictly read-only, auto-accept
   edits waives only in-root file writes, and Full access must be explicitly
   selected. A per-message posture may only narrow the thread's grant; the
-  server clamps composer intent. Full access is still confined to the
-  bound folder for user work; merge authority is never granted.
-- Provider execution and app-managed filesystem and shell tools cross an
-  Octant-owned sandbox boundary; path checks alone are insufficient.
+  server clamps composer intent. Full access is what it says: the provider
+  runtime runs without Octant's deny-default sandbox, so keep it for folders
+  and providers you trust. Merge authority is never granted, in any posture.
+- App-managed filesystem and shell tools cross an Octant-owned sandbox
+  boundary; path checks alone are insufficient. Most provider runtimes cross it
+  too.
+- The Codex and Claude runtimes do not run inside it today, so the shell those
+  two run falls to the provider's own sandbox. One Codex process serves every
+  thread, which Octant cannot bind to a single folder and posture; Claude is
+  simply not wrapped yet. Codex carries a sandbox on every posture except Full
+  access, which you select explicitly and which is unsandboxed by design.
+  Claude carries one on approval-gated and auto-accept-edits turns; a Claude
+  Plan turn is held read-only by the runtime's own setting rather than by a
+  sandbox.
+- Every app-managed tool those two threads reach is still confined, and
+  approvals still gate every app-managed action and every provider callback
+  that reaches Octant. A write one of those runtimes makes inside its own
+  sandbox without announcing it is not one Octant can prompt for.
 - Extensions stay quarantined until explicitly reviewed and trusted.
   Installation never implies trust, activation, enablement, or authority.
 - Browser automation uses per-thread incognito contexts with an origin

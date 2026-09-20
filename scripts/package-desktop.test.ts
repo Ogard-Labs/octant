@@ -215,6 +215,7 @@ describe("desktop packaging boundary", () => {
     expect(REQUIRED_DARWIN_HELPER_FILES).toEqual([
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
+      "Octant.app/Contents/Resources/native/octant-device-helper",
       "Octant.app/Contents/Resources/native/cua-driver",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -226,6 +227,7 @@ describe("desktop packaging boundary", () => {
     ]);
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-keychain-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-code-file-helper");
+    expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-device-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain(
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     );
@@ -237,6 +239,7 @@ describe("desktop packaging boundary", () => {
     expect(PACKAGED_ARM64_FILES).toEqual([
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
+      "native/octant-device-helper",
       "native/cua-driver",
       "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
@@ -249,7 +252,10 @@ describe("desktop packaging boundary", () => {
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
     );
-    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(2);
+    expect(FORBIDDEN_PACKAGED_FILES).toContain(
+      "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
+    );
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(3);
     expect(FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS).toEqual([
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk\/(?:vendor\/)?claude(?:\.exe)?$/,
@@ -342,6 +348,7 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
+      "Octant.app/Contents/Resources/native/octant-device-helper",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
@@ -500,13 +507,13 @@ describe("desktop packaging boundary", () => {
     ]);
   });
 
-  it("builds both native helpers after the desktop JavaScript bundle", async () => {
+  it("builds every native helper after the desktop JavaScript bundle", async () => {
     const desktopPackage = JSON.parse(
       await readFile(resolve(repositoryRoot, "apps/desktop/package.json"), "utf8"),
     ) as { readonly scripts: { readonly build: string } };
 
     expect(desktopPackage.scripts.build).toBe(
-      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts",
+      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-device-helper.ts",
     );
   });
 

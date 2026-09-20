@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODE_OPERATION_COMMAND_KINDS,
   decodeCodeConversationPage,
+  MAX_CODE_TURN_CHANGED_PATHS,
   decodeCodeOperationCommand,
   decodeCodeOperationEventFrame,
   decodeCodeEvidenceBatchRequest,
@@ -739,6 +740,71 @@ describe("Code operation contracts", () => {
     // access the turn actually ran under.
     expect(() => decodeCodeConversationPage({ ...page, version: 2 })).toThrow();
     expect(() => decodeCodeConversationPage({ ...page, version: 4 })).toThrow();
+  });
+
+  it("carries what changed while a turn ran as a bounded, relative, honest record", () => {
+    const turn = {
+      operationId: ids.operation,
+      providerInstanceId: ids.providerInstance,
+      modelId: "model-one",
+      sessionId: ids.providerSession,
+      prompt: { contentId: ids.content, digest: "d".repeat(64), byteLength: 42 },
+      assistant: [],
+      status: "failed",
+      startedAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:01:00.000Z",
+    } as const;
+    const page = { version: 3, threadId: ids.thread, turns: [turn], nextCursor: 1, hasMore: false };
+    const changedFiles = {
+      files: [
+        { path: "src/app.ts", insertions: 12, deletions: 3 },
+        { path: "assets/logo.png", insertions: 0, deletions: 0, binary: true },
+      ],
+      total: 2,
+      truncated: false,
+    } as const;
+    const withRecord = (record: unknown) => ({
+      ...page,
+      turns: [{ ...turn, changedFiles: record }],
+    });
+
+    // A failed turn keeps its record: it may still have changed files.
+    expect(decodeCodeConversationPage(withRecord(changedFiles)).turns[0]?.changedFiles).toEqual(
+      changedFiles,
+    );
+    expect(
+      decodeCodeOperationEventFrame({
+        threadId: ids.thread,
+        operationId: ids.operation,
+        cursor: 9,
+        occurredAt: "2026-07-21T12:01:00.000Z",
+        event: { kind: "conversation-turn-changed-files", changedFiles },
+      }).event,
+    ).toEqual({ kind: "conversation-turn-changed-files", changedFiles });
+
+    const file = changedFiles.files[0];
+    expect(() =>
+      decodeCodeConversationPage(
+        withRecord({ ...changedFiles, files: [{ ...file, deletions: -1 }] }),
+      ),
+    ).toThrow();
+    // A path that leaves the checkout is refused, never normalized.
+    expect(() =>
+      decodeCodeConversationPage(
+        withRecord({ ...changedFiles, files: [{ ...file, path: "../outside.ts" }] }),
+      ),
+    ).toThrow();
+    expect(() =>
+      decodeCodeConversationPage(
+        withRecord({
+          ...changedFiles,
+          files: Array.from({ length: MAX_CODE_TURN_CHANGED_PATHS + 1 }, (_, index) => ({
+            ...file,
+            path: `src/file-${index}.ts`,
+          })),
+        }),
+      ),
+    ).toThrow();
   });
 
   it("owns the strict durable review-finding entity and journal event", () => {

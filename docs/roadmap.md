@@ -58,7 +58,7 @@ Hardening in progress for the preview:
 - Dogfood-driven fixes as they surface.
 - Internal TestFlight packaging for the existing mobile remote client: signing,
   protected CI, Apple processing, and real-device acceptance are separate
-  gates under [0137](decisions/0137-internal-testflight-carries-the-existing-remote-client.md).
+  gates under [0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
 
 ## Next
 

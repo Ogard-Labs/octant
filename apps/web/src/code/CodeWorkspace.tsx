@@ -9,8 +9,10 @@ import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-d
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
 import {
+  appleInputGrantIsLive,
   appleLiveFrameIsStaleAfterRestart,
   decidesCodeEffectsByApproval,
+  isAppleSimulatorInputKind,
   latestAppleScreenshotEvidence,
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
@@ -53,6 +55,7 @@ import type { CodeTerminalId } from "@octant/contracts/code";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWorkbenchPane";
 import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
+import { useAppleSimulatorLiveScreen } from "../apple/useAppleSimulatorLiveScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 
 const MonacoEditorPane = lazy(() =>
@@ -495,6 +498,27 @@ function AppleWorkbenchSurface(props: {
     enabled: liveFrame.status === "live",
     ...(screenshotRequest === undefined ? {} : { request: screenshotRequest }),
   });
+  const liveSimulatorId = liveFrame.status === "live" ? liveFrame.simulatorId : undefined;
+  const screenStreamRequest = useMemo(
+    () =>
+      liveSimulatorId === undefined
+        ? undefined
+        : {
+            kind: "apple-screen-stream-request" as const,
+            authority,
+            threadId: props.thread.id,
+            checkoutId: props.checkoutId,
+            simulatorId: liveSimulatorId,
+          },
+    [authority, liveSimulatorId, props.checkoutId, props.thread.id],
+  );
+  // A frame is "live" only on a client that can attach one, so a remote or
+  // headless client never opens a stream it could not be given.
+  const liveScreen = useAppleSimulatorLiveScreen({
+    client: props.client,
+    enabled: liveFrame.status === "live",
+    ...(screenStreamRequest === undefined ? {} : { request: screenStreamRequest }),
+  });
 
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
@@ -517,7 +541,14 @@ function AppleWorkbenchSurface(props: {
         // the bound checkout and goes through the same native confirmation the
         // rest of Code uses.
         let request = base;
-        if (approvalGated && intent.kind !== "screenshot") {
+        // One approved input opens its Simulator to this thread for a while;
+        // the host says so in the snapshot, and asking again for every tap
+        // would raise a confirmation the host no longer requires.
+        const inputGranted =
+          isAppleSimulatorInputKind(intent.kind) &&
+          "simulatorId" in intent &&
+          appleInputGrantIsLive(controller.runtime, String(intent.simulatorId), Date.now());
+        if (approvalGated && intent.kind !== "screenshot" && !inputGranted) {
           if (requestApproval === undefined) {
             setActionMessage(
               "This window cannot confirm Apple actions. Approve from the desktop app.",
@@ -587,6 +618,7 @@ function AppleWorkbenchSurface(props: {
       busy={busy}
       liveFrame={liveFrame}
       {...(screenUrl === undefined ? {} : { screenUrl })}
+      liveScreen={liveScreen}
       status={controller.status}
       {...(controller.discovery === undefined ? {} : { discovery: controller.discovery })}
       {...(controller.runtime === undefined ? {} : { runtime: controller.runtime })}
@@ -660,6 +692,17 @@ function appleActionRequest(input: {
         requestedBy: localUserActor(),
         point: intent.point,
         ...(intent.target === undefined ? {} : { target: intent.target }),
+        timeoutMs: 30_000,
+      };
+    case "swipe":
+      return {
+        ...base,
+        kind: "swipe",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        point: intent.point,
+        toPoint: intent.toPoint,
+        durationMs: intent.durationMs,
         timeoutMs: 30_000,
       };
     case "type-text":
@@ -854,7 +897,7 @@ function PullRequestWorkspaceSurface(
 function GitObservationLoading() {
   return (
     <OctantEmptyRoot role="status">
-      <OctantEmptyMedia tone="neutral">
+      <OctantEmptyMedia>
         <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
       </OctantEmptyMedia>
       <OctantEmptyHeader>

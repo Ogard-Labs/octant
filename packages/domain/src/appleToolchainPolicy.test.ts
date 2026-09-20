@@ -421,12 +421,51 @@ describe("Simulator frame input", () => {
     approvalValid: true,
   };
 
+  it("lets a Simulator the host holds open take input without a one-shot approval, and nothing else", () => {
+    const granted = { ...scope, inputGranted: true };
+    const withoutToken = { ...tap, approval: { kind: "not-required" as const } };
+    const decide = (request: unknown, scoped: unknown) =>
+      ApplePolicy.evaluateAppleSimulatorRequest(request as never, scoped as never, [booted]);
+
+    // The pane sends no approval when the host says the Simulator is open.
+    expect(decide(withoutToken, granted)).toEqual({ kind: "allowed" });
+    // Without the host's grant the same request is refused, as before.
+    expect(decide(withoutToken, scope)).toMatchObject({ reason: "approval-required" });
+    // The grant covers input. Shutting the Simulator down still asks.
+    const shutdown = {
+      ...withoutToken,
+      kind: "shutdown" as const,
+      point: undefined,
+      requestedBy: undefined,
+    };
+    expect(decide(shutdown, granted)).toMatchObject({ reason: "approval-required" });
+    // A denial still wins, and Plan mode is still read-only.
+    expect(
+      decide({ ...withoutToken, approval: { kind: "denied" as const } }, granted),
+    ).toMatchObject({ reason: "approval-denied" });
+    expect(decide(withoutToken, { ...granted, executionPolicy: "plan" as const })).toMatchObject({
+      reason: "read-only-policy",
+    });
+  });
+
   it("treats tap, type-text, and key-press as destination effects that need a booted Simulator", () => {
     expect(isAppleSimulatorInputKind("tap")).toBe(true);
     expect(evaluateAppleSimulatorRequest(tap, scope, [booted])).toEqual({ kind: "allowed" });
     expect(
       evaluateAppleSimulatorRequest(tap, scope, [{ ...booted, state: "shutdown" }]),
     ).toMatchObject({ kind: "denied", reason: "destination-not-booted" });
+  });
+
+  it("treats a swipe as input like a tap, and records where it went without anything typed", () => {
+    const swipe = { ...tap, kind: "swipe" as const, toPoint: { x: 12, y: 300 } };
+    expect(isAppleSimulatorInputKind("swipe")).toBe(true);
+    expect(evaluateAppleSimulatorRequest(swipe, scope, [booted])).toEqual({ kind: "allowed" });
+    expect(
+      evaluateAppleSimulatorRequest(swipe, { ...scope, executionPolicy: "plan" }, [booted]),
+    ).toMatchObject({ kind: "denied", reason: "read-only-policy" });
+    expect(redactedAppleInputDiagnostic(swipe).message).toBe(
+      "swipe completed (x=12, y=34 to x=12, y=300)",
+    );
   });
 
   it("refuses Plan mode and missing actor attribution for injected input", () => {
@@ -487,5 +526,23 @@ describe("isToolchainAvailable", () => {
 
   it("returns false for unavailable toolchain", () => {
     expect(isToolchainAvailable(unavailableToolchain)).toBe(false);
+  });
+});
+
+describe("Simulator input grant", () => {
+  it("reads a live grant for one Simulator from the host's snapshot and nothing from an expired or absent one", async () => {
+    const { appleInputGrantIsLive } = await import("./appleToolchainPolicy");
+    const now = Date.parse("2026-09-19T20:00:00.000Z");
+    const snapshot = {
+      inputGrants: [
+        { simulatorId: "sim-live", expiresAt: "2026-09-19T20:10:00.000Z" },
+        { simulatorId: "sim-expired", expiresAt: "2026-09-19T19:59:59.000Z" },
+      ],
+    } as never;
+    expect(appleInputGrantIsLive(snapshot, "sim-live", now)).toBe(true);
+    expect(appleInputGrantIsLive(snapshot, "sim-expired", now)).toBe(false);
+    expect(appleInputGrantIsLive(snapshot, "sim-other", now)).toBe(false);
+    expect(appleInputGrantIsLive(undefined, "sim-live", now)).toBe(false);
+    expect(appleInputGrantIsLive({} as never, "sim-live", now)).toBe(false);
   });
 });

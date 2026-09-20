@@ -2,8 +2,9 @@ import type {
   AppleBuildEvidence,
   AppleBuildRequest,
   ApplePlatform,
-  AppleSimulatorRequest,
+  AppleRuntimeSnapshot,
   AppleSimulatorRecord,
+  AppleSimulatorRequest,
   AppleToolchainDiscovery,
   ToolActionAuthority,
 } from "@octant/contracts";
@@ -21,9 +22,34 @@ export interface AppleExecutionScope {
   readonly checkoutId: CodeCheckoutId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvalValid: boolean;
+  /**
+   * The host holds this thread's Simulator open to input (0142). Input is then
+   * allowed without a one-shot approval on the request; the pane sends none,
+   * because it only ever learns of the grant, and cannot make one.
+   */
+  readonly inputGranted?: boolean;
 }
 
-const SIMULATOR_INPUT_KINDS = new Set(["tap", "type-text", "key-press"]);
+const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
+
+/**
+ * How long one approved input keeps a Simulator open to further input on its
+ * thread. Confirming every tap made the live device unusable, so an approval
+ * covers the Simulator for this long after each delivered input instead of
+ * covering one action.
+ */
+export const APPLE_INPUT_GRANT_MS = 15 * 60_000;
+
+/** Whether the host's snapshot says this Simulator is open to input right now. */
+export function appleInputGrantIsLive(
+  snapshot: Pick<AppleRuntimeSnapshot, "inputGrants"> | undefined,
+  simulatorId: string,
+  nowMs: number,
+): boolean {
+  return (snapshot?.inputGrants ?? []).some(
+    (grant) => String(grant.simulatorId) === simulatorId && Date.parse(grant.expiresAt) > nowMs,
+  );
+}
 
 export function isAppleSimulatorInputKind(
   kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
@@ -70,7 +96,12 @@ export function evaluateAppleSimulatorRequest(
   // terminating an app, and injecting tap/text/keys do change it, and go
   // through approval like any other Code effect.
   const readOnly = request.kind === "logs" || request.kind === "screenshot";
-  const scoped = evaluateScope(request, scope, !readOnly);
+  const scoped = evaluateScope(
+    request,
+    scope,
+    !readOnly,
+    isAppleSimulatorInputKind(request.kind) && scope.inputGranted === true,
+  );
   if (scoped.kind === "denied") return scoped;
   if (isAppleSimulatorInputKind(request.kind) && request.requestedBy === undefined) {
     return { kind: "denied", reason: "actor-required" };
@@ -103,6 +134,7 @@ function evaluateScope(
   >,
   scope: AppleExecutionScope,
   sideEffect: boolean,
+  coveredByGrant = false,
 ): AppleToolchainPolicyDecision {
   if (request.authority.extension.kind !== "core") {
     return { kind: "denied", reason: "core-capability-required" };
@@ -121,6 +153,7 @@ function evaluateScope(
   if (
     sideEffect &&
     decidesCodeEffectsByApproval(scope.executionPolicy) &&
+    !(coveredByGrant && scope.approvalValid) &&
     (request.approval.kind !== "approved" || !scope.approvalValid)
   ) {
     return { kind: "denied", reason: "approval-required" };
@@ -177,8 +210,14 @@ export function isToolchainAvailable(toolchain: AppleToolchainDiscovery): boolea
  * evidence still shows that an input ran; the characters do not.
  */
 export function redactedAppleInputDiagnostic(
-  request: Pick<AppleSimulatorRequest, "kind" | "text" | "key" | "target" | "point">,
+  request: Pick<AppleSimulatorRequest, "kind" | "text" | "key" | "target" | "point" | "toPoint">,
 ): { readonly severity: "note"; readonly message: string } {
+  if (request.kind === "swipe" && request.point !== undefined && request.toPoint !== undefined) {
+    return {
+      severity: "note",
+      message: `swipe completed (x=${request.point.x}, y=${request.point.y} to x=${request.toPoint.x}, y=${request.toPoint.y})`,
+    };
+  }
   if (request.kind === "type-text") {
     const length = request.text?.length ?? 0;
     return {

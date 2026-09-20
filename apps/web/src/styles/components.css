@@ -33,7 +33,7 @@
 .octant-card {
   background: var(--octant-surface-raised);
   border: 0;
-  border-radius: var(--octant-radius-panel, 16px);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-sm);
 }
 
@@ -51,7 +51,7 @@
   color: var(--oct-muted);
   background: transparent;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill, 999px);
+  border-radius: var(--oct-radius-pill);
   font-size: var(--oct-text-xs);
   font-weight: 500;
 }
@@ -215,10 +215,10 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   gap: 0;
   padding: 0;
   overflow: hidden;
-  background: var(--octant-floating);
-  border: 1px solid var(--octant-border-strong);
+  /* Fill, edge, and shadow are the shared dialog's. A strong border plus the
+     overlay's ring gave search a 2px edge the command palette beside it does
+     not have. */
   border-radius: var(--oct-radius-lg);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .thread-search__field {

@@ -83,6 +83,21 @@ const OWNER_MODE_LABELS: Readonly<Record<HostControlStatus["identity"]["serviceM
 
 const BACKUP_LABEL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
+const policyUpdatedFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/**
+ * When the startup policy last changed, as a person would say it. The row used
+ * to print the host's ISO timestamp as it arrived ("2026-08-11T12:00:00.000Z").
+ * A value that is not a date is shown as it is rather than hidden.
+ */
+function policyUpdatedLabel(updatedAt: string): string {
+  const date = new Date(updatedAt);
+  return Number.isNaN(date.getTime()) ? updatedAt : policyUpdatedFormatter.format(date);
+}
+
 export function HostSettingsSection({
   client,
   automationNotifications,
@@ -264,8 +279,8 @@ export function HostSettingsSection({
             description={
               policy.kind === "known"
                 ? policy.enabled
-                  ? `Automatic startup is enabled (updated ${policy.updatedAt}).`
-                  : `Automatic startup is disabled (updated ${policy.updatedAt}).`
+                  ? `Automatic startup is enabled (updated ${policyUpdatedLabel(policy.updatedAt)}).`
+                  : `Automatic startup is disabled (updated ${policyUpdatedLabel(policy.updatedAt)}).`
                 : `Startup policy is unavailable. ${policy.reason}`
             }
             label="Automatic startup"

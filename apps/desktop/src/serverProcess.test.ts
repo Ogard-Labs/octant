@@ -295,8 +295,12 @@ describe("serverSpawnSpec", () => {
         PATH: "/usr/bin",
         OCTANT_COMPUTER_USE_BROKER_URL: "http://127.0.0.1:49999/v1/computer-use",
         OCTANT_COMPUTER_USE_BROKER_TOKEN: "inherited-token",
+        OCTANT_SIMULATOR_DEVICE_BROKER_URL: "http://127.0.0.1:49998/v1/simulator-device",
+        OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN: "inherited-token",
       },
     });
+    expect(spec.env.OCTANT_SIMULATOR_DEVICE_BROKER_URL).toBeUndefined();
+    expect(spec.env.OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN).toBeUndefined();
     expect(spec.env.OCTANT_CREDENTIAL_BROKER_URL).toBeUndefined();
     expect(spec.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBeUndefined();
     expect(spec.env.OCTANT_CODE_FILE_HELPER_PATH).toBeUndefined();
@@ -323,6 +327,8 @@ describe("serverSpawnSpec", () => {
         codeFileHelperPath: "/repo/apps/desktop/dist/native/octant-code-file-helper",
         credentialBrokerToken: "broker-token",
         credentialBrokerUrl: "http://127.0.0.1:41000/",
+        simulatorDeviceBrokerToken: "device-token",
+        simulatorDeviceBrokerUrl: "http://127.0.0.1:43000/v1/simulator-device",
         desktopBridgeSecret: "desktop-secret",
         root: "/repo",
         port: 13_773,
@@ -338,6 +344,8 @@ describe("serverSpawnSpec", () => {
         PATH: "/development/bin",
         OCTANT_BROWSER_BROKER_TOKEN: "browser-token",
         OCTANT_BROWSER_BROKER_URL: "http://127.0.0.1:42000/",
+        OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN: "device-token",
+        OCTANT_SIMULATOR_DEVICE_BROKER_URL: "http://127.0.0.1:43000/v1/simulator-device",
         OCTANT_CODE_FILE_HELPER_PATH: "/repo/apps/desktop/dist/native/octant-code-file-helper",
         OCTANT_SERVER_INSTANCE_ID: "managed-instance",
         OCTANT_SERVER_PORT: "13773",

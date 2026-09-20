@@ -40,7 +40,7 @@
 | T1  | Lost/stolen phone with unlocked vault access     | SecureStore-backed keys; biometric gate for merge/revoke; host revoke-self removes device; other clients stay up            |
 | T2  | Lost phone with lock-screen push previews        | Redacted push payloads only (`buildRedactedPushNotification`); no secrets/paths/prompts                                     |
 | T3  | Jailbroken/rooted device exfiltrates SecureStore | Fail-soft integrity heuristic + soft warn UI; do not brick pairing; host revoke remains available                           |
-| T4  | Screenshots / app switcher leak thread detail    | Screenshot privacy mode preference + port (native FLAG_SECURE / blur residual); scrub UI strings for secretish/path content |
+| T4  | Screenshots / app switcher leak thread detail    | Native capture blocking unavailable in the current client; scrub UI strings for secretish/path content and disclose the limit in Settings |
 | T5  | Stale host still accepts phone mutations         | Session health + host mutation gate; stale presentation copy; zero queued mutations when not ready                          |
 | T6  | Concurrent desktop + phone; revoke wrong client  | Device-scoped revoke; concurrent-session tests (Mobile A)                                                                   |
 | T7  | Push token reused across hosts/devices           | Token store keyed by `{ hostId, deviceId }`; clear on revoke path residual                                                  |

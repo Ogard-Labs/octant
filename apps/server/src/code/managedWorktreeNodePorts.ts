@@ -12,10 +12,13 @@ import type {
   ManagedWorktreeGitPort,
   ManagedWorktreeRepositoryPort,
 } from "./managedWorktreeService";
+import { childProcessEnvironment } from "../childProcessEnvironment";
 
 const execFileAsync = promisify(execFile);
+// Git runs hooks and configured programs from the repository it is pointed at,
+// so it gets the host's environment without the desktop's broker coordinates.
 const gitEnvironment = {
-  ...process.env,
+  ...childProcessEnvironment(process.env),
   GIT_CONFIG_NOSYSTEM: "1",
   GIT_TERMINAL_PROMPT: "0",
   GCM_INTERACTIVE: "Never",
