@@ -4264,6 +4264,10 @@ function LaunchedShell(
       // so it was never sent and must not stay in the transcript as a message.
       if (firstPromptAnnouncedFor !== undefined) {
         codeThreadControllers.announceFirstPrompt(firstPromptAnnouncedFor, undefined);
+        // The thread is already open, so the words go back into its composer,
+        // as they do when the first turn is refused. Withdrawn from the
+        // transcript and restored nowhere, the person's prompt was simply gone.
+        codeThreadControllers.get(firstPromptAnnouncedFor)?.setPendingDraft(input.prompt);
       }
       setDraftError(
         error instanceof Error && error.message !== ""
