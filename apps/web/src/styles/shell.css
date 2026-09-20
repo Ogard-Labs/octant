@@ -1106,8 +1106,63 @@ html[data-octant-native-host="true"]
   /* Without a pointer to hover with, the one overflow action is always shown,
      so its room is always kept and the status stays visible beside it. */
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+    > .sidebar-navigation__thread,
+  /* The hover, focus, and open-menu rules above are more specific than the
+     line before this one and make room for two actions. Touch browsers keep a
+     hover after a tap, and a narrow window still has a keyboard, so they are
+     restated here at the room one action needs. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      [aria-expanded="true"]
+    )
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-lineage
+    ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
     > .sidebar-navigation__thread {
     padding-inline-end: 32px;
+  }
+
+  /* A forked row's mark stands left of the status, and here the status stands
+     left of the action that is always shown. Left at its desktop place the mark
+     sat on top of the status. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+    .sidebar-navigation__thread-lineage,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
+      :hover,
+      :focus-within,
+      :has([aria-expanded="true"]),
+      :has([data-popup-open])
+    )
+    .sidebar-navigation__thread-lineage {
+    right: 50px;
+  }
+
+  /* With the status hidden the mark takes the status's place beside the action,
+     and the row keeps room for both. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-lineage
+    ):not(:has(.sidebar-navigation__thread-status)):is(
+      *,
+      :hover,
+      :focus-within,
+      :has([aria-expanded="true"]),
+      :has([data-popup-open])
+    )
+    .sidebar-navigation__thread-lineage {
+    right: 32px;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-lineage
+    ):is(*, :hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+    > .sidebar-navigation__thread:not(:has(.sidebar-navigation__thread-status)) {
+    padding-inline-end: 54px;
   }
 
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)

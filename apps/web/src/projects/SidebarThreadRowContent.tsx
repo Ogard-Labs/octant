@@ -42,7 +42,13 @@ export function SidebarThreadRowContent(props: {
     );
   return (
     <>
-      {props.provider === undefined ? null : (
+      {/* The column is kept when a thread's provider is not resolved. Dropped,
+          that row's title began one icon column to the left of its neighbours.
+          The preference that hides provider icons hides this slot on every row
+          alike, so alignment holds there too. */}
+      {props.provider === undefined ? (
+        <span aria-hidden="true" className="sidebar-navigation__thread-provider" />
+      ) : (
         <span className="sidebar-navigation__thread-provider" title={props.provider.displayName}>
           <ProviderGlyph
             displayName={props.provider.displayName}
