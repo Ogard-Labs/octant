@@ -39,7 +39,10 @@ struct SimulatorBridge {
     /// keyboard has been shown yet. Read from the device's own preference files;
     /// nil when neither is there.
     var keyboardIdentifier: String? {
-        guard let dataPath = device.value(forKey: "dataPath") as? String else { return nil }
+        // CoreSimulator has vended this as a path string and as a file URL in
+        // different releases; either names the same directory.
+        let vended = device.value(forKey: "dataPath")
+        guard let dataPath = (vended as? String) ?? (vended as? URL)?.path else { return nil }
         let preferences = (dataPath as NSString).appendingPathComponent("Library/Preferences")
         let keyboard = NSDictionary(
             contentsOfFile: (preferences as NSString).appendingPathComponent(
