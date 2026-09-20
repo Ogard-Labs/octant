@@ -263,14 +263,14 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer is offered to `approval-gated` only. 0104 delegates "prompts
-    // Octant would otherwise surface", and under `auto-accept-edits` an in-root
-    // file write is not one of those — 0018 already settled it in the user's
-    // favour. Codex's reviewer is thread-wide, so delegating here would route
-    // the escalation `read-only` now creates for a patch edit to a risk-based
-    // reviewer that can deny it, turning a waiver the user chose into a verdict.
-    // Keeping the reviewer off that posture costs delegation of its command
-    // prompts and keeps the guarantee.
+    // The reviewer is offered to `approval-gated` only (0137). Codex's reviewer
+    // is thread-wide, so under `read-only` it would answer the escalation an
+    // in-root patch edit now raises — a write 0018 waives — and may deny it,
+    // turning the posture the user chose into a per-write verdict. 0137 is the
+    // scoped exception to 0104's rule that delegation reaches both prompting
+    // postures, and it records what that costs: this posture no longer
+    // delegates its command prompts either, because the reviewer cannot be
+    // scoped to a class.
     return {
       approvalPolicy: "on-request",
       sandbox: "read-only",
