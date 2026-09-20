@@ -44,6 +44,16 @@ export interface CodeThreadControllers {
 }
 
 export interface CodeThreadControllerRegistry extends CodeThreadControllers {
+  /**
+   * Tells a newly created thread which prompt is on its way, or withdraws it.
+   *
+   * The window opens a new thread before it starts that thread's first turn,
+   * so the thread's own controller reads an honestly empty journal. Without
+   * the prompt it painted the empty-thread copy and the project setup offers
+   * for a moment, then a loading notice, then the message. Queued like a
+   * refresh, because React may not have published the controller slot yet.
+   */
+  readonly announceFirstPrompt: (threadId: CodeThreadId, prompt: string | undefined) => void;
   readonly publish: (threadId: CodeThreadId, controller: CodeController) => void;
   readonly refreshConversation: (threadId: CodeThreadId) => void;
   readonly release: (threadId: CodeThreadId) => void;
@@ -52,17 +62,33 @@ export interface CodeThreadControllerRegistry extends CodeThreadControllers {
 export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const byThread = new Map<string, CodeController>();
   const refreshWhenPublished = new Set<string>();
+  const firstPromptWhenPublished = new Map<string, string>();
   const listeners = new Set<() => void>();
   const announce = () => {
     for (const listener of listeners) listener();
   };
   return {
+    announceFirstPrompt: (threadId, prompt) => {
+      const key = String(threadId);
+      const controller = byThread.get(key);
+      if (controller !== undefined) {
+        controller.announceFirstPrompt(prompt);
+        return;
+      }
+      if (prompt === undefined) firstPromptWhenPublished.delete(key);
+      else firstPromptWhenPublished.set(key, prompt);
+    },
     get: (threadId) => byThread.get(String(threadId)),
     publish: (threadId, controller) => {
       const key = String(threadId);
       if (byThread.get(key) !== controller) {
         byThread.set(key, controller);
         announce();
+      }
+      const firstPrompt = firstPromptWhenPublished.get(key);
+      if (firstPrompt !== undefined) {
+        firstPromptWhenPublished.delete(key);
+        controller.announceFirstPrompt(firstPrompt);
       }
       if (!refreshWhenPublished.delete(key)) return;
       controller.refreshConversation();
@@ -79,6 +105,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
     release: (threadId) => {
       const key = String(threadId);
       refreshWhenPublished.delete(key);
+      firstPromptWhenPublished.delete(key);
       if (!byThread.delete(key)) return;
       announce();
     },

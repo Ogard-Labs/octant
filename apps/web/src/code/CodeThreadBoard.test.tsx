@@ -445,6 +445,15 @@ describe("CodeThreadBoard", () => {
     expect(within(waiting).getByText("Recovering thread")).toBeVisible();
     expect(within(waiting).getByText(/Project projection missing/)).toBeVisible();
     expect(screen.queryByRole("region", { name: /Recovery/ })).not.toBeInTheDocument();
+    // The reason truncates in a box of its own. As bare text in the flex fact
+    // it could not take an ellipsis and was cut mid-letter; the full sentence
+    // stays on the fact's title.
+    const reason = within(waiting).getByText(/Project projection missing/);
+    expect(reason).toHaveClass("fact__text");
+    expect(reason.parentElement).toHaveAttribute(
+      "title",
+      expect.stringMatching(/Project projection missing/),
+    );
   });
 
   it("keeps a specific Waiting reason visible in the narrow grouped list", async () => {
