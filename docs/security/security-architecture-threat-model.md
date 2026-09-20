@@ -287,8 +287,12 @@ window, or approves an action class the host policy reserves for the local user.
   provider home, binary/runtime directories and temp; write scoped to provider home and temp, plus
   the root only for non-plan, non-chat sessions; deny rules enumerate the rest of the user's home.
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
-  `apps/server/src/providers/piProcess.ts`, `vibeProcess.ts`, `kiloProcess.ts`, `kimiProcess.ts`,
-  `devinProcess.ts`. Environments are allowlist-sanitized (`SAFE_ENVIRONMENT` plus declared
+  `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts` — the runtimes
+  whose process carries exactly one thread's root, mode, and execution policy. The Codex
+  app-server and the Claude Agent SDK launch do not and are not wrapped, a scoped exception
+  recorded in `docs/decisions/0138-confinement-wraps-a-runtime-that-carries-one-thread.md` with
+  its residual risk; the tools those threads reach are confined either way.
+  Environments are allowlist-sanitized (`SAFE_ENVIRONMENT` plus declared
   provider credentials), and `apps/server/src/childProcessEnvironment.ts` strips the broker URLs,
   broker tokens, and desktop bridge secret from every child.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
