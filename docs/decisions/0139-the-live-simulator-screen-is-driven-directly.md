@@ -8,8 +8,10 @@
 of milliseconds. The pane still offered a device the way a form would: click
 for a tap, a text box with a **Type** button, and buttons for Return and
 Escape. Nothing could be scrolled, because 0062 named tap, typed text and a
-hardware key as the input kinds and a swipe is none of them. The maintainer
-asked for a device surface a person can simply use.
+hardware key as the input kinds and a swipe is none of them, and 0137 lists
+swipes as a workbench action among its non-goals. This record supersedes that
+one item in 0137 and extends 0062's input kinds; every other rule in them
+stands. The maintainer asked for a device surface a person can simply use.
 
 Two things bound how direct it can be. 0062 keeps input on one channel, with
 one request and one evidence record per input, decided by the server; a
