@@ -1,8 +1,20 @@
 import {
   decodeSimulatorDeviceInputResult,
+  SIMULATOR_SCREEN_HEADER,
   type SimulatorDeviceInput,
   type SimulatorDeviceInputResult,
+  type SimulatorDeviceWatch,
 } from "@octant/contracts/simulator-device";
+
+export type SimulatorScreenWatch =
+  | {
+      readonly kind: "watching";
+      /** The device's screen in pixels; frames are scaled down from it. */
+      readonly screen: { readonly width: number; readonly height: number };
+      /** Length-prefixed JPEG frames, until the reader cancels or the helper stops. */
+      readonly frames: ReadableStream<Uint8Array>;
+    }
+  | Exclude<SimulatorDeviceInputResult, { readonly kind: "delivered" }>;
 
 /** The desktop's native device helper, as the server reaches it. */
 export interface DesktopSimulatorDevicePort {
@@ -10,6 +22,10 @@ export interface DesktopSimulatorDevicePort {
     input: SimulatorDeviceInput,
     signal?: AbortSignal,
   ) => Promise<SimulatorDeviceInputResult>;
+  readonly watch: (
+    watch: SimulatorDeviceWatch,
+    signal?: AbortSignal,
+  ) => Promise<SimulatorScreenWatch>;
 }
 
 const PATH = "/v1/simulator-device";
@@ -66,6 +82,35 @@ export function createDesktopSimulatorDevicePort(
         throw new Error("The Simulator device result exceeds its limit.");
       }
       return decodeSimulatorDeviceInputResult(JSON.parse(new TextDecoder().decode(bytes)));
+    },
+    watch: async (watch, signal) => {
+      const response = await fetchImpl(`${endpoint}/stream`, {
+        method: "POST",
+        redirect: "error",
+        credentials: "omit",
+        ...(signal === undefined ? {} : { signal }),
+        headers: {
+          "content-type": "application/json",
+          "x-octant-simulator-device-token": token,
+        },
+        body: JSON.stringify({ watch }),
+      });
+      if (response.status === 409) {
+        const refusal = decodeSimulatorDeviceInputResult(await response.json());
+        if (refusal.kind !== "delivered") return refusal;
+      }
+      const size = /^(\d{1,5})x(\d{1,5})$/.exec(
+        response.headers.get(SIMULATOR_SCREEN_HEADER) ?? "",
+      );
+      if (!response.ok || response.body === null || size === null) {
+        await response.body?.cancel();
+        throw new Error("The desktop's Simulator device broker refused the call.");
+      }
+      return {
+        kind: "watching",
+        screen: { width: Number(size[1]), height: Number(size[2]) },
+        frames: response.body,
+      };
     },
   };
 }

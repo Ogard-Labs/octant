@@ -229,4 +229,87 @@ describe("AppleSimulatorLiveFrameView", () => {
     render(<AppleSimulatorLiveFrameView frame={frame} inputEnabled onInput={vi.fn()} />);
     expect(screen.queryByLabelText("Simulator input")).not.toBeInTheDocument();
   });
+
+  describe("with a live view", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 17",
+      // No capture has been taken: the live view needs none.
+      screen: { kind: "pending" },
+      title: "Live · iPhone 17",
+      message: "The destination is live.",
+    };
+
+    it("shows the streamed screen on a canvas without waiting for a capture", () => {
+      const attach = vi.fn();
+      render(
+        <AppleSimulatorLiveFrameView
+          frame={frame}
+          liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach }}
+        />,
+      );
+
+      const canvas = screen.getByLabelText("iPhone 17 live screen");
+      expect(canvas.tagName).toBe("CANVAS");
+      expect(attach).toHaveBeenCalledWith(canvas);
+      expect(document.querySelector("img")).toBeNull();
+    });
+
+    it("sends a tap as a point on the device's own screen, whatever size the canvas is shown at", () => {
+      const onInput = vi.fn();
+      render(
+        <AppleSimulatorLiveFrameView
+          frame={frame}
+          inputEnabled
+          liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
+          onInput={onInput}
+        />,
+      );
+      const canvas = screen.getByLabelText("iPhone 17 live screen");
+      vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 20, 402, 874));
+
+      fireEvent.click(screen.getByLabelText("Tap on iPhone 17 Simulator screen"), {
+        clientX: 10 + 201,
+        clientY: 20 + 437,
+      });
+
+      expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 1311 } });
+    });
+
+    it("ignores a click beside the streamed screen instead of sending a point that is not on it", () => {
+      const onInput = vi.fn();
+      render(
+        <AppleSimulatorLiveFrameView
+          frame={frame}
+          inputEnabled
+          liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
+          onInput={onInput}
+        />,
+      );
+      const canvas = screen.getByLabelText("iPhone 17 live screen");
+      // The pane's height cap binds: the canvas is centred with room either side.
+      vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 20, 402, 874));
+
+      fireEvent.click(screen.getByLabelText("Tap on iPhone 17 Simulator screen"), {
+        clientX: 40,
+        clientY: 20 + 437,
+      });
+
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the captured still when the host has no live view", () => {
+      render(
+        <AppleSimulatorLiveFrameView
+          frame={{ ...frame, screen: { kind: "screenshot", reference: "apple-screenshot-live" } }}
+          liveScreen={{ status: "unavailable", message: "The live Simulator view stopped." }}
+          screenUrl="blob:https://octant.local/screen"
+        />,
+      );
+
+      expect(screen.getByRole("img", { name: "iPhone 17 screen" })).toBeDefined();
+      expect(screen.queryByLabelText("iPhone 17 live screen")).toBeNull();
+    });
+  });
 });

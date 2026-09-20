@@ -12,7 +12,7 @@ type InjectSimulatorInput = NonNullable<AppleToolchainServiceOptions["injectSimu
  * reads as unavailable rather than failed.
  */
 export function simulatorInputThroughDesktop(
-  desktop: DesktopSimulatorDevicePort,
+  desktop: Pick<DesktopSimulatorDevicePort, "deliver">,
 ): InjectSimulatorInput {
   return async (request, _context, timeoutMs, signal) => {
     const input = simulatorDeviceInput(request, timeoutMs);

@@ -15,6 +15,7 @@ function frame(value: unknown): Buffer {
 function fakeChild() {
   const requests: Array<Record<string, unknown>> = [];
   let emitData: (chunk: Uint8Array) => void = () => undefined;
+  let emitFrames: (chunk: Uint8Array) => void = () => undefined;
   const listeners = new Map<string, () => void>();
   let failStdin: () => void = () => undefined;
   const child: DeviceHelperChild = {
@@ -34,6 +35,11 @@ function fakeChild() {
         emitData = listener;
       },
     },
+    frames: {
+      on: (event, listener) => {
+        if (event === "data") emitFrames = listener as (chunk: Uint8Array) => void;
+      },
+    },
     on: (event, listener) => {
       listeners.set(event, listener);
     },
@@ -49,6 +55,9 @@ function fakeChild() {
       emitData(bytes.subarray(3));
     },
     exit: () => listeners.get("exit")?.(),
+    frames: (...chunks: ReadonlyArray<Uint8Array>) => {
+      for (const chunk of chunks) emitFrames(chunk);
+    },
     breakPipe: () => failStdin(),
   };
 }
@@ -223,5 +232,265 @@ describe("Simulator device helpers", () => {
     await expect(
       helpers.send(simulator, { op: "tap", x: 0.1, y: 0.1 }, 500),
     ).resolves.toMatchObject({ status: "unavailable" });
+  });
+
+  it("shares one screen stream between viewers and stops it with the last one", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+
+    const first = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const firstWatch = await first;
+    const secondWatch = await helpers.watch(
+      simulator,
+      options,
+      { onFrame: vi.fn(), onEnd: vi.fn() },
+      5_000,
+    );
+    expect(firstWatch.status).toBe("watching");
+    expect(secondWatch.status).toBe("watching");
+    expect(fake.requests).toEqual([{ op: "stream-start", ...options, id: 1 }]);
+
+    if (firstWatch.status === "watching") firstWatch.stop();
+    expect(fake.requests).toHaveLength(1);
+    if (secondWatch.status === "watching") secondWatch.stop();
+    expect(fake.requests.at(-1)).toMatchObject({ op: "stream-stop" });
+    helpers.dispose();
+  });
+
+  it("shows a viewer the screen as it already is, even when nothing on it moves again", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const jpeg = Buffer.from([0xff, 0xd8, 0x07, 0xff, 0xd9]);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(jpeg.length);
+
+    const first = vi.fn();
+    const watching = helpers.watch(simulator, options, { onFrame: first, onEnd: vi.fn() }, 5_000);
+    // The helper sends the current screen before it answers the request.
+    fake.frames(Buffer.concat([header, jpeg]));
+    fake.answer({ id: 1, ok: true });
+    await watching;
+    expect(first).toHaveBeenCalledTimes(1);
+
+    // A second viewer joins a still device: no new frame will ever be presented.
+    const second = vi.fn();
+    await helpers.watch(simulator, options, { onFrame: second, onEnd: vi.fn() }, 5_000);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(Buffer.from(second.mock.calls[0]?.[0] as Uint8Array)).toEqual(jpeg);
+    helpers.dispose();
+  });
+
+  it("does not stop a helper that is still typing just because the last viewer left", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd: vi.fn() },
+      5_000,
+    );
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+    if (watch.status === "watching") watch.stop();
+    // The helper answers in order, so the stream cannot be stopped until the
+    // typing is done; that wait must not be what stops the helper.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 2, ok: true });
+
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+    helpers.dispose();
+  });
+
+  it("does not stop a helper that is still typing just because a viewer's start had to wait behind it", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+
+    // The pane opens while the text is still going in. The helper answers in
+    // order, so the stream cannot start until the typing is done.
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd: vi.fn() },
+      5_000,
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 1, ok: true });
+    fake.answer({ id: 2, ok: true });
+
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+    await expect(watching).resolves.toMatchObject({ status: "watching" });
+    helpers.dispose();
+  });
+
+  it("holds a returning viewer's start to its own deadline when only the old stream's stop is waiting", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const watching = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+    if (watch.status === "watching") watch.stop();
+
+    // The helper hangs while stopping, and the pane reopens. No input is being
+    // delivered, so nothing else would ever end this wait.
+    const again = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    await vi.advanceTimersByTimeAsync(5_100);
+
+    await expect(again).resolves.toMatchObject({ status: "unavailable" });
+    expect(fake.child.kill).toHaveBeenCalled();
+    helpers.dispose();
+  });
+
+  it("starts a waiting start's clock when the input ahead of it is done, so a stop that hangs cannot hold it", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const watching = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+    if (watch.status === "watching") watch.stop();
+    const again = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+
+    // While the text is going in, neither the stop nor the start may end the helper.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 2, ok: true });
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+
+    // The stop then hangs. Its clock and the start's began when the typing ended.
+    await vi.advanceTimersByTimeAsync(21_000);
+    await expect(again).resolves.toMatchObject({ status: "unavailable" });
+    expect(fake.child.kill).toHaveBeenCalled();
+    helpers.dispose();
+  });
+
+  it("does not stop a helper that is still typing because a screen lookup had to wait behind it", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const typing = helpers.send(simulator, { op: "text", text: "a long passage" }, 120_000);
+
+    // A live view opens and first asks how big the screen is. That sends
+    // nothing to the device, and it waits behind the text.
+    const lookup = helpers.send(simulator, { op: "hello" }, 5_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.answer({ id: 1, ok: true });
+    fake.answer({ id: 2, ok: true, screen: { width: 1206, height: 2622 } });
+
+    await expect(typing).resolves.toEqual({ status: "delivered" });
+    await expect(lookup).resolves.toMatchObject({ status: "delivered" });
+    helpers.dispose();
+  });
+
+  it("does not show a returning viewer a frame the stopping stream sent after everyone had left", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const options = { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 };
+    const framed = (...bytes: number[]) => {
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(bytes.length);
+      return Buffer.concat([header, Buffer.from(bytes)]);
+    };
+    const watching = helpers.watch(simulator, options, { onFrame: vi.fn(), onEnd: vi.fn() }, 5_000);
+    fake.answer({ id: 1, ok: true });
+    const watch = await watching;
+    if (watch.status === "watching") watch.stop();
+    // The stop is only queued; the old stream presents once more before it ends.
+    fake.frames(framed(0xff, 0xd8, 0x01, 0xff, 0xd9));
+    fake.answer({ id: 2, ok: true });
+
+    const returning = vi.fn();
+    const again = helpers.watch(simulator, options, { onFrame: returning, onEnd: vi.fn() }, 5_000);
+    // This time the answer comes before the new stream's own first frame.
+    fake.answer({ id: 3, ok: true });
+    await again;
+    fake.frames(framed(0xff, 0xd8, 0x02, 0xff, 0xd9));
+
+    expect(returning.mock.calls.map(([jpeg]) => (jpeg as Uint8Array)[2])).toEqual([0x02]);
+    helpers.dispose();
+  });
+
+  it("hands every viewer each whole frame, however the bytes arrive", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const onFrame = vi.fn();
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame, onEnd: vi.fn() },
+      5_000,
+    );
+    fake.answer({ id: 1, ok: true });
+    await watching;
+
+    const jpeg = Buffer.from([0xff, 0xd8, 0x01, 0x02, 0x03, 0xff, 0xd9]);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(jpeg.length);
+    const wire = Buffer.concat([header, jpeg, header, jpeg]);
+    fake.frames(wire.subarray(0, 6), wire.subarray(6, 13), wire.subarray(13));
+
+    expect(onFrame).toHaveBeenCalledTimes(2);
+    expect(Buffer.from(onFrame.mock.calls[0]?.[0] as Uint8Array)).toEqual(jpeg);
+    helpers.dispose();
+  });
+
+  it("tells viewers when the helper stops, and keeps a watched helper past the idle window", async () => {
+    vi.useFakeTimers();
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({
+      helperPath: "/h",
+      spawn: () => fake.child,
+      idleMs: 1_000,
+    });
+    const onEnd = vi.fn();
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd },
+      500,
+    );
+    fake.answer({ id: 1, ok: true });
+    await watching;
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    fake.exit();
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the helper's refusal to stream and keeps no viewer", async () => {
+    const fake = fakeChild();
+    const helpers = createSimulatorDeviceHelpers({ helperPath: "/h", spawn: () => fake.child });
+    const onEnd = vi.fn();
+
+    const watching = helpers.watch(
+      simulator,
+      { maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+      { onFrame: vi.fn(), onEnd },
+      5_000,
+    );
+    fake.answer({ id: 1, ok: false, code: "not-booted", message: "the Simulator is Shutdown" });
+
+    await expect(watching).resolves.toEqual({
+      status: "refused",
+      code: "not-booted",
+      message: "the Simulator is Shutdown",
+    });
+    fake.exit();
+    expect(onEnd).not.toHaveBeenCalled();
   });
 });
