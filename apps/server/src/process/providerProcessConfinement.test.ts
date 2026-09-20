@@ -11,21 +11,23 @@ import { describe, expect, it } from "vitest";
  * that stops doing so: a driver that spawns its runtime directly is green,
  * shipped, and visible only to a grep. Three provider process modules had
  * drifted out of the rule that way with nothing recording it, which is what
- * 0138 settles.
+ * 0139 settles.
  *
  * What this proves: a provider process module either uses the shared builder or
- * appears in {@link UNWRAPPED} with a reason, and 0138 names each one that does
+ * appears in {@link UNWRAPPED} with a reason, and 0139 names each one that does
  * not. What it does not prove: that every launch inside a wrapped module goes
  * through the builder. A wrapped module still spawns directly for its version
  * probe, and on Full access returns the binary unwrapped by design, so a
  * per-launch claim would need each module to declare its launches in a manifest
  * this gate could read rather than a source scan. The observed failure was
  * whole modules never adopting the builder, and that is the failure this
- * catches.
+ * catches. Its reach is the provider runtime modules only: discovery scans run
+ * candidate executables from `discoveryService`, which this never reads, and
+ * the threat model carries that gap instead.
  *
- * {@link UNWRAPPED}, not 0138, is the live set. An accepted record keeps its
+ * {@link UNWRAPPED}, not 0139, is the live set. An accepted record keeps its
  * history — a later ADR supersedes it rather than editing it — so reading the
- * live set out of 0138 would make confining Codex fail this suite until someone
+ * live set out of 0139 would make confining Codex fail this suite until someone
  * deleted that history. Confining a runtime deletes its entry here instead.
  */
 const UNWRAPPED: ReadonlyArray<{ readonly file: string; readonly reason: string }> = [
@@ -53,7 +55,7 @@ const decisionPath = join(
   "..",
   "docs",
   "decisions",
-  "0138-confinement-wraps-a-runtime-that-carries-one-thread.md",
+  "0139-confinement-wraps-a-runtime-that-carries-one-thread.md",
 );
 
 function providerProcessModules(): ReadonlyArray<string> {

@@ -295,7 +295,7 @@ window, or approves an action class the host policy reserves for the local user.
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server and the
   Claude Agent SDK launch are not wrapped, a scoped exception recorded in
-  `docs/decisions/0138-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
+  `docs/decisions/0139-confinement-wraps-a-runtime-that-carries-one-thread.md`. Octant-owned tools
   those threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
@@ -311,10 +311,14 @@ window, or approves an action class the host policy reserves for the local user.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
-- **Version probes run the configured executable unconfined.** `probeOpenCodeBinary`,
-  `probeAcpBinary`, `inspectVersion` and `probeCodexBinary` each spawn the user-configured binary
-  for `--version` before any confined launch. This does not satisfy 0009 and is not excepted by
-  0138; it is a standing gap across every provider family.
+- **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
+  `inspectVersion` and `probeCodexBinary` each spawn the user-configured binary for `--version`
+  before any confined launch. `scanDescriptor` in `apps/server/src/providers/discoveryService.ts`
+  goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
+  found on `PATH` or in an approved directory, so the executable is not even one the user named.
+  Both bound the timeout and output and sanitize the environment, and neither is confined. This
+  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0139 does not
+  except it: it is a standing gap across every provider family and across discovery.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,

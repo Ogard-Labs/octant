@@ -1,4 +1,4 @@
-# 0138. Confinement wraps a provider runtime that carries one thread's authority
+# 0139. Confinement wraps a provider runtime that carries one thread's authority
 
 **Status:** Accepted
 
@@ -63,8 +63,9 @@ are theirs and not a gap in the rule.
   closing this exception for Claude has to fix that first. And 0009 holds that
   a provider's permission layer is a signal and not the boundary, so a defect
   in the posture Octant maps into it is a write inside the checkout with no
-  Octant prompt — observed on a Codex Code thread whose approval-gated posture
-  mapped to `workspace-write`.
+  Octant prompt — observed, and since fixed, on a Codex Code thread whose
+  approval-gated posture mapped to `workspace-write`. What the missing boundary
+  leaves standing is the class, not that one instance.
 - Process receipts, group termination, broker-coordinate stripping, the
   tool-call policy choke point, the approval categories, and untrusted-content
   taint stand unchanged for both runtimes.

@@ -63,10 +63,14 @@ export interface CodexThreadStartInput {
   readonly approvalPolicy: "never" | "on-request";
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
   /**
-   * Routes approval requests to the harness's built-in reviewer instead of
-   * the host callback. Only sent when `autoApprove` is effective (0104).
+   * Who answers approval requests: the host (`user`) or the harness's own
+   * reviewer (`auto_review`, 0104). Always sent, never omitted — Codex
+   * documents this as an override for "this thread and subsequent turns", so
+   * leaving it out keeps whatever the thread was last told, and a thread that
+   * once delegated would go on delegating after taint or after the user turned
+   * it off.
    */
-  readonly approvalsReviewer?: "auto_review";
+  readonly approvalsReviewer: "auto_review" | "user";
   /** app-server `thread/start` `serviceTier`: the model's declared speed tier. */
   readonly serviceTier?: string;
   /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
@@ -85,6 +89,12 @@ export type CodexTurnInputItem =
 export interface CodexTurnStartInput {
   readonly threadId: string;
   readonly input: readonly CodexTurnInputItem[];
+  readonly approvalPolicy: "never" | "on-request";
+  readonly sandboxPolicy:
+    | { readonly type: "dangerFullAccess" }
+    | { readonly type: "workspaceWrite" }
+    | { readonly type: "readOnly" };
+  readonly approvalsReviewer: "auto_review" | "user";
 }
 
 export interface CodexApprovalResponse {
@@ -127,6 +137,7 @@ interface SessionState {
   readonly projectRoot: string;
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly autoApprove: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   activeTurnId?: string;
@@ -238,21 +249,67 @@ export function codexExecutionSettings(
   autoApprove?: boolean,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
-    return { approvalPolicy: "never", sandbox: "danger-full-access" };
+    return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
-    // Codex confines writes to the workspace either way; which of those writes
-    // Octant asks about is decided by the driver's approval handler (auto-accept
-    // edits answers project-confined file changes itself), not by this mapping.
-    // When the user opts into harness-delegated approvals, the reviewer answers
-    // prompts Octant would otherwise surface; the sandbox is unchanged (0104).
+    // `on-request` lets the model decide when to escalate, so the sandbox — not
+    // this policy — settles what Octant is ever asked about. Measured against
+    // codex-cli 0.154.0: under `workspace-write` an in-root write just succeeds
+    // and Codex sends no request at all, which silently waived the
+    // `shell-commands` class 0009 keeps independent and 0018 keeps prompting
+    // under both of these postures. Under `read-only` the same write escalates,
+    // so the approval handler below decides it: a patch edit arrives as
+    // `file-change` (auto-accept edits answers those itself) and a shell write
+    // arrives as `command`, which neither posture waives. Reads still need no
+    // escalation, so only writes and network reach a person.
+    //
+    // A `command` is never auto-accepted from its text: Codex reports
+    // `commandActions` as `unknown` for a plain `> file` redirect, so "this
+    // command only writes in-root" is not something either side can prove.
+    //
+    // The reviewer is offered to `approval-gated` only (0138). Codex's reviewer
+    // is thread-wide, so under `read-only` it would answer the escalation an
+    // in-root patch edit now raises — a write 0018 waives — and may deny it,
+    // turning the posture the user chose into a per-write verdict. 0138 is the
+    // scoped exception to 0104's rule that delegation reaches both prompting
+    // postures, and it records what that costs: this posture no longer
+    // delegates its command prompts either, because the reviewer cannot be
+    // scoped to a class. `user` is sent rather than nothing whenever delegation
+    // is off: omitting the field leaves a thread that once delegated still
+    // routing to the reviewer after taint, after the user turns it off, or on a
+    // resume under this posture.
     return {
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
-      ...(autoApprove === true ? { approvalsReviewer: "auto_review" as const } : {}),
+      sandbox: "read-only",
+      approvalsReviewer:
+        autoApprove === true && policy === "approval-gated" ? "auto_review" : "user",
     };
   }
-  return { approvalPolicy: "never", sandbox: "read-only" };
+  return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
+}
+
+/**
+ * The same authority as `codexExecutionSettings`, in the shape `turn/start`
+ * takes. It is re-sent every turn because `thread/start` settles a thread once:
+ * a thread created under an earlier mapping keeps that mapping through
+ * `thread/resume`, which accepts the fields and ignores them (measured against
+ * codex-cli 0.154.0). `sandboxPolicy` is the tagged form of the same value and
+ * is documented as overriding "this turn and subsequent turns", so a thread
+ * created before this posture existed is brought under it on its next turn
+ * rather than keeping a writable sandbox for the rest of its life.
+ */
+export function codexTurnExecutionSettings(
+  policy: ProviderExecutionPolicy,
+  autoApprove?: boolean,
+): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
+  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove);
+  const sandboxPolicy =
+    sandbox === "danger-full-access"
+      ? ({ type: "dangerFullAccess" } as const)
+      : sandbox === "workspace-write"
+        ? ({ type: "workspaceWrite" } as const)
+        : ({ type: "readOnly" } as const);
+  return { ...rest, sandboxPolicy };
 }
 
 /**
@@ -927,6 +984,7 @@ function makeConnection(
       input: {
         readonly sessionId: ProviderSessionId;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly autoApprove?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -944,6 +1002,7 @@ function makeConnection(
         projectRoot,
         modelId,
         executionPolicy: input.executionPolicy,
+        autoApprove: input.autoApprove,
         threadId: thread.thread.id,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
@@ -1024,9 +1083,12 @@ function makeConnection(
           Effect.gen(function* () {
             ensureSubscribed();
             const thread = yield* request(() =>
-              client.threadResume({
-                threadId: input.resumeCursor.value,
-              }),
+              // `ThreadResumeParams` also declares `approvalPolicy` and
+              // `sandbox`, but codex-cli 0.154.0 accepts them here and keeps
+              // the settings the thread was created with: a thread resumed with
+              // `read-only` still wrote in-root without asking. The posture is
+              // re-asserted per turn instead, where it does take effect.
+              client.threadResume({ threadId: input.resumeCursor.value }),
             ).pipe(
               Effect.mapError(() =>
                 failure("stale-resume", "Codex thread is no longer available for resume."),
@@ -1065,6 +1127,7 @@ function makeConnection(
                     const turn = await client.turnStart({
                       threadId: state.threadId,
                       input: codexTurnInput(input),
+                      ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
                     });
                     if (state.activeTurnId !== undefined && state.activeTurnId !== turn.turn.id) {
                       throw failure(
