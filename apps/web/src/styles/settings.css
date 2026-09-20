@@ -13,7 +13,7 @@
   --oct-settings-gutter: clamp(32px, 5vw, 64px);
   --oct-settings-reading-width: 920px;
   --oct-settings-control: 180px;
-  --oct-settings-control-height: 32px;
+  --oct-settings-control-height: 28px;
 }
 
 .settings-view__sidebar {
@@ -745,7 +745,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    once here and every value control in the surface takes it. */
 .settings-view {
   --oct-settings-control: 180px;
-  --oct-settings-control-height: 32px;
+  --oct-settings-control-height: 28px;
 }
 
 /* One centered reading column keeps long Settings pages balanced at wide widths. */
@@ -1283,7 +1283,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-family: var(--oct-font-display);
 }
 
-/* One row height. The controls are all 32px now, so the rows that hold them
+/* One control height across Settings: 28px, the recipe's own default. The older
+   field rows set 32px here while the newer sections took the recipe's 28px, so
+   a select was 32px on Appearance and 28px on Threads, and a default button
+   beside a field was 4px shorter than it.
+
+   One row height. The controls are all one height now, so the rows that hold them
    differed only by whatever their control's recipe happened to measure — 38 for
    a switch, 48 for a stepper, 53 for a select — and the group read as three
    rhythms stacked on top of each other. */
@@ -1735,17 +1740,20 @@ textarea.settings-view__text-input {
   background: var(--octant-control-hover);
 }
 
+/* The stepper's 1px edge is outside these, so its parts are the shared control
+   height less that edge; at a fixed 30px the stepper stood 32px beside 28px
+   fields. */
 .octant-number-stepper__button {
   width: 30px;
-  height: 30px;
-  min-height: 30px;
+  height: calc(var(--oct-settings-control-height, 28px) - 2px);
+  min-height: calc(var(--oct-settings-control-height, 28px) - 2px);
   padding: 0;
   border-radius: 0;
 }
 
 .octant-number-stepper__input {
   width: 100%;
-  height: 30px;
+  height: calc(var(--oct-settings-control-height, 28px) - 2px);
   padding: 0 2px;
   appearance: textfield;
   border: 0;
