@@ -1,4 +1,4 @@
-# 0144. A version read launches confined, with no root, no home, and no network
+# 0146. A version read launches confined, with no root, no home, and no network
 
 **Status:** Accepted
 
@@ -106,4 +106,4 @@ given that fits it.
 - 0009 Sandbox confinement and approvals
 - 0122 Provider readiness probes reach provider endpoints (one rule superseded
   in scope)
-- 0142 Confinement wraps a runtime that carries one thread's authority
+- 0143 Confinement wraps a runtime that carries one thread's authority
