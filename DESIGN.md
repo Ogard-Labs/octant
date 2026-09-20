@@ -560,7 +560,13 @@ height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
 view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
-rather than left as a gap. A hovered row takes the soft ink wash and the row
+rather than left as a gap. The Project tree and the Activity feed draw the same
+row: the provider mark in the icon column every navigation row uses, the title
+alone on its line, and the shown facts on one line beneath it in a fixed order
+(Project, pull request, branch, then the age at the end); with no facts shown
+the age sits beside the status instead of opening a line of its own. Thread rows
+are not indented under their Project, so every row's fill sits the same
+distance from both edges of the sidebar. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. One fixed trailing

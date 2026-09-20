@@ -1049,7 +1049,6 @@ h6 {
 }
 
 .activity-nav__group > .sidebar-section {
-  padding-inline: 6px;
   color: var(--octant-text-secondary);
 }
 
@@ -1099,43 +1098,10 @@ h6 {
   gap: 2px;
 }
 
-.sidebar-navigation__thread.activity-nav__thread {
-  min-height: 48px;
-  align-items: flex-start;
-  padding: 6px;
-}
-
 .sidebar-navigation__thread-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
-}
-
-/* The feed row holds the title line plus whichever properties the view is
-   currently showing beneath it, so the rows are counted rather than fixed at
-   two; the button's own min-height still keeps a one-line row from collapsing. */
-.activity-nav__thread .sidebar-navigation__thread-copy {
-  flex: 1 1 auto;
-  grid-auto-rows: minmax(16px, auto);
-  gap: 2px;
-}
-
-.activity-nav__thread .sidebar-navigation__thread-title,
-.activity-nav__thread .sidebar-navigation__thread-project {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-navigation__thread-project {
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .code-project-views__new {
@@ -1216,10 +1182,11 @@ h6 {
      so neither reading won. */
   gap: 0;
   margin: 2px 0 0;
-  /* Enough to read as nested under its Project, and no more: the row inside
-     adds its own inset, and the two together were pushing thread titles most
-     of the way across the sidebar before the first letter. */
-  padding-left: var(--oct-space-2);
+  /* No indent of its own. An indented list made a thread's selection fill
+     start 16px from the sidebar's edge and end 8px from it, while every other
+     row's fill sat 8px from both; the Project's heavier name and the rows'
+     provider marks are what say these threads belong to it. */
+  padding-left: 0;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -10081,11 +10048,6 @@ ul.board-col-body {
   height: auto;
   flex: 1 1 auto;
   min-width: 0;
-}
-.activity-nav__pr {
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 4px;
 }
 
 .projects-page-layer {
