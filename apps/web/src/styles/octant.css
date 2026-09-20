@@ -878,9 +878,6 @@ h4 {
   background: var(--oct-danger-soft);
   border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
 }
-.callout-danger svg {
-  color: var(--oct-danger-fg);
-}
 
 /* ─── thread column ─────────────────────────────────────────────────────
    The centered column a conversation surface lays its pieces in. Header

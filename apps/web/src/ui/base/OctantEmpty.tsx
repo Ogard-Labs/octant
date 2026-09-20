@@ -27,7 +27,6 @@ export interface OctantEmptyProps {
   readonly message: ReactNode;
   readonly role?: "alert" | "status";
   readonly title: string;
-  readonly tone?: "neutral" | "warning" | "destructive";
 }
 
 /** Icon + eyebrow + title + message + action recipe for connection/error/empty states. */
@@ -39,12 +38,11 @@ export function OctantEmpty({
   message,
   role,
   title,
-  tone = "neutral",
 }: OctantEmptyProps) {
   const hasIcon = icon !== undefined;
   return (
     <Empty className={className} role={role}>
-      {hasIcon ? <EmptyMedia tone={tone}>{icon}</EmptyMedia> : null}
+      {hasIcon ? <EmptyMedia>{icon}</EmptyMedia> : null}
       <EmptyHeader className={hasIcon ? undefined : "col-span-2"}>
         {eyebrow === undefined ? null : <EmptyEyebrow>{eyebrow}</EmptyEyebrow>}
         <EmptyTitle>{title}</EmptyTitle>

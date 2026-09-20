@@ -20,9 +20,11 @@ const emptyStateMediaVariants = cva(
   {
     variants: {
       tone: {
+        // One tone. A state, empty, or error message's mark says what happened
+        // by its shape; ink never does, in any theme. The warning and
+        // destructive tones made one yellow or red glyph the loudest thing on
+        // an otherwise neutral screen, and nothing asks for them any more.
         neutral: "",
-        warning: "text-[var(--octant-warning-text)]",
-        destructive: "text-destructive",
       },
     },
     defaultVariants: { tone: "neutral" },

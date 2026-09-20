@@ -854,7 +854,7 @@ function PullRequestWorkspaceSurface(
 function GitObservationLoading() {
   return (
     <OctantEmptyRoot role="status">
-      <OctantEmptyMedia tone="neutral">
+      <OctantEmptyMedia>
         <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
       </OctantEmptyMedia>
       <OctantEmptyHeader>

@@ -310,9 +310,9 @@ for labels and the surface role for a background; never rely on hue alone:
 Routine Waiting, idle, and unselected states use neutral text and marks.
 Pending approval requests use a neutral surface and muted icon, without a
 warning stripe. Warning colour is reserved for an actionable warning, not
-every thread that can be resumed. A full-surface state (unavailable,
-disconnected, loading) draws its mark in neutral ink: its glyph and title carry
-the meaning, and nothing on that screen is coloured. Success, failure, diffs, provider marks,
+every thread that can be resumed. A state, empty, or error message draws its mark in neutral ink, whatever went
+wrong: its glyph and title carry the meaning, and the message recipe offers no
+coloured tone. Success, failure, diffs, provider marks,
 and categorical data may retain semantic colour alongside a label or shape.
 
 | Meaning       | Surface                                                      | Text/border                                                                                 |
