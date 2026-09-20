@@ -255,14 +255,19 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultLight: "#0f6144",
     defaultDark: "#6bb299",
   },
+  // The default preset is monochrome, so its warning role carries no hue: the
+  // control fill, a border that still reads at 3:1 on it, and the primary ink.
+  // A warning is told apart by its mark and its words, which the contract
+  // already requires beside any status colour. A theme that wants an amber
+  // warning sets these three roles.
   {
     id: "warning-surface",
     displayName: "Warning surface",
     category: "status",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#f0dea8",
-    defaultDark: "#342b0e",
+    defaultLight: "#f0f0ef",
+    defaultDark: "#2b2b2b",
   },
   {
     id: "warning-border",
@@ -270,8 +275,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "ui",
-    defaultLight: "#987405",
-    defaultDark: "#a3801f",
+    defaultLight: "#6e6e6e",
+    defaultDark: "#8a8a8a",
   },
   {
     id: "warning-text",
@@ -279,8 +284,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "normal-text",
-    defaultLight: "#6f5300",
-    defaultDark: "#edbc26",
+    defaultLight: "#1b1b1b",
+    defaultDark: "#f0f0f0",
   },
   {
     // Targeted at `floating`, not `workspace`: status text sits inside

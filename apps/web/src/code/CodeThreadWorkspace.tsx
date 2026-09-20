@@ -238,8 +238,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
   const displayReady = props.controller.conversationHistory === "loaded";
+  const firstPromptInFlight = props.controller.firstPromptInFlight;
+  // A thread whose first prompt is on its way is not empty: asking the host
+  // for scaffolds and workspace presets there fetched offers nobody could use.
   const emptyConversation =
-    props.controller.conversationHistory === "loaded" && props.controller.conversation.length === 0;
+    props.controller.conversationHistory === "loaded" &&
+    props.controller.conversation.length === 0 &&
+    firstPromptInFlight === undefined;
   const plan = useThreadPlan()?.plan;
   // The board observation is the host's changed-file evidence. Ask only when
   // the plan surface will render it: a thread with no plan has nowhere to put
@@ -575,12 +580,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // belongs at the end of the transcript, where every other sent message is,
   // rather than parked in the composer waiting to be administered. It sits
   // outside the virtualized list because it is the surface's own intent, not
-  // part of the host's authoritative conversation.
+  // part of the host's authoritative conversation. A new thread's first prompt
+  // is the same kind of thing: sent, but not yet in the journal this surface
+  // read, so it shows here rather than letting the thread call itself empty.
+  const awaitedPrompt =
+    steered.pending?.prompt ?? (messages.length === 0 ? firstPromptInFlight : undefined);
   const pendingMessage =
-    steered.pending === undefined ? null : (
+    awaitedPrompt === undefined ? null : (
       <article aria-label="Your message" className="code-thread-workspace__message turn-user">
         <div className="bubble">
-          <TrackerReferenceText asParagraph text={steered.pending.prompt} />
+          <TrackerReferenceText asParagraph text={awaitedPrompt} />
         </div>
       </article>
     );
@@ -1654,6 +1663,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   props.controller.setPendingDraft?.(next, next.length);
                 }}
               />
+              {/* Two groups with space between: what the person adds sits left,
+                  how the turn runs sits right beside send. The model used to
+                  hug the attach button, so it jumped sides between a new task
+                  and the thread it became. */}
+              <span aria-hidden="true" className="composer-gap" />
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}

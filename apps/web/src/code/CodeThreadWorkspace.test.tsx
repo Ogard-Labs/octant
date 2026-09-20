@@ -62,6 +62,28 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByText("Reviewer")).toBeNull();
   });
 
+  it("keeps the model beside send in a thread, apart from what the person attaches", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    // A new task's composer already reads attach, space, model, access, send.
+    // The thread's composer put the model beside attach, so it changed sides
+    // the moment a task became a thread.
+    const gap = screen.getByLabelText("Thread context").querySelector(".composer-gap");
+    const model = screen.getByRole("button", { name: "Provider and model" });
+    const access = screen.getByRole("button", { name: "Next turn access" });
+    expect(gap).not.toBeNull();
+    const follows = (before: Node, after: Node) =>
+      (before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(screen.getByRole("button", { name: "Add attachment" }), gap as Node)).toBe(true);
+    expect(follows(gap as Node, model)).toBe(true);
+    expect(follows(model, access)).toBe(true);
+  });
+
   it("renders the conversation center and sends follow-ups through the controller", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
@@ -117,6 +139,47 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
+  });
+
+  it("shows the prompt a new thread is about to run instead of calling the thread empty", () => {
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "loaded",
+          firstPromptInFlight: "Fix the failing test",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("article", { name: "Your message" })).toHaveTextContent(
+      "Fix the failing test",
+    );
+    expect(
+      screen.queryByText("No messages yet. Send a prompt to start this thread."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
+
+    // Starting the turn re-reads the transcript. The prompt stays where it is
+    // rather than giving way to a loading notice for a message already on screen.
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "loading",
+          firstPromptInFlight: "Fix the failing test",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("article", { name: "Your message" })).toHaveTextContent(
+      "Fix the failing test",
+    );
+    expect(screen.queryByRole("heading", { name: "Loading conversation" })).not.toBeInTheDocument();
   });
 
   it("does not send a steered follow-up while the provider is waiting", async () => {

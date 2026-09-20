@@ -26,13 +26,6 @@ const stateIcons: Record<ShellStateKind, LucideIcon> = {
   warning: TriangleAlert,
 };
 
-const stateTones: Record<ShellStateKind, "neutral" | "warning"> = {
-  disconnected: "neutral",
-  loading: "neutral",
-  neutral: "neutral",
-  warning: "warning",
-};
-
 export interface ShellStateProps {
   readonly action?: { readonly label: string; readonly onClick: () => void };
   readonly eyebrow?: string;
@@ -51,7 +44,10 @@ export function ShellState(props: ShellStateProps) {
       data-state={props.state}
       role={props.role ?? (props.state === "loading" ? "status" : undefined)}
     >
-      <OctantEmptyMedia tone={stateTones[props.state]}>
+      {/* Every state's mark is neutral ink. The default look is monochrome, and
+          a warning-coloured triangle was the only hue on a screen whose glyph
+          and title already say what is wrong. */}
+      <OctantEmptyMedia>
         <StateIcon
           aria-hidden="true"
           className={props.state === "loading" ? "shell-state__spinner" : undefined}

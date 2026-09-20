@@ -105,10 +105,13 @@
   opacity: 1;
 }
 
+/* The one icon control that keeps a fill and an edge: it floats over terminal
+   output, where a ghost button would sit on top of text. Its box is the rail
+   button's, like every other panel control. */
 .code-terminal-pane__actions-trigger {
-  width: 26px;
-  height: 26px;
-  min-height: 26px;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
   padding: 0;
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);

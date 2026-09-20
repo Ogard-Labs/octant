@@ -265,7 +265,9 @@ html[data-octant-native-host="true"]
   padding: 0 7px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-muted);
+  /* Outlined, not filled. The fill named here was a token nothing defined, so
+     this control has always drawn clear; the rule now says what is rendered. */
+  background: transparent;
   color: var(--oct-fg-2);
   cursor: pointer;
 }
@@ -299,7 +301,6 @@ html[data-octant-native-host="true"]
 
 .window-chrome__new-thread {
   color: var(--oct-fg-2);
-  background: var(--oct-surface-muted);
   border-color: var(--oct-border);
 }
 
@@ -664,16 +665,17 @@ html[data-octant-native-host="true"]
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  /* The marker, the provider mark, and the title are one identifying phrase,
-     not three controls, so they sit at glyph spacing. At list spacing the row
-     spent 46px before the first letter of the title. */
-  gap: var(--oct-space-1);
+  /* The provider mark sits in the icon column every navigation row uses and
+     the title in the text column beside it, so a thread's name starts where
+     "Inbox" and "Board" start. Measured before this, the sidebar had seven
+     left edges: titles at 42px, destinations at 45px, feed rows at 14px. */
+  gap: var(--oct-space-2);
   /* Visible properties add lines; the button recipe's fixed height would
      let those lines overlap the next thread instead of growing this row. */
   height: auto;
   min-height: var(--oct-nav-row-h);
   padding-block: 4px;
-  padding-inline: 8px;
+  padding-inline: var(--oct-nav-inset);
   color: var(--oct-muted);
   background: transparent;
   border: 0;
@@ -684,10 +686,19 @@ html[data-octant-native-host="true"]
   text-align: left;
 }
 
-/* Keep the row's trailing actions in a reserved gutter. They are revealed on
-   hover/focus, so the title and timestamp must occupy the same width in both
-   states instead of sliding under the action buttons. */
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+/* Hover-only actions take no width until their row is hovered or focused. The
+   room for them used to be reserved at all times, which left 56px of nothing
+   at the end of every row: the age and the status dot floated mid-row and a
+   title had about 70px of a 232px sidebar. The room is made only while the
+   actions show, and the age and status give their place to them, so nothing
+   is seen to slide. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
+  > .sidebar-navigation__thread,
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
+  > .sidebar-navigation__thread,
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
+  > .sidebar-navigation__thread,
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
   > .sidebar-navigation__thread {
   padding-inline-end: 56px;
 }
@@ -740,15 +751,41 @@ html[data-octant-native-host="true"]
   gap: 1px;
 }
 
+/* The facts under a title: Project, pull request, branch, then the age at the
+   end. Names give way before numbers do, so a long Project or branch
+   truncates while the pull request number and the age stay whole. */
+.sidebar-navigation__thread-facts {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+}
+
+.sidebar-navigation__thread-project,
 .sidebar-navigation__thread-checkout {
   display: inline-flex;
   min-width: 0;
-  max-width: 100%;
+  flex: 0 1 auto;
   align-items: center;
   gap: 3px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.3;
+}
+
+.sidebar-navigation__thread-project > svg,
+.sidebar-navigation__thread-checkout > svg {
+  flex: none;
+}
+
+.sidebar-navigation__thread-project-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-navigation__thread-checkout-label {
@@ -809,7 +846,9 @@ html[data-octant-native-host="true"]
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 14px;
+  /* As wide as a destination's icon, so the title beside it starts in the
+     same text column; the 14px glyph sits centred inside. */
+  width: var(--oct-icon-md);
   height: 14px;
   opacity: 0.78;
 }
@@ -884,14 +923,61 @@ html[data-octant-native-host="true"]
   min-width: 0;
 }
 
-/* Fork mark sits beside the status dot as its own control. Sizing only:
-   colour, focus, and hover stay on the ghost-icon recipe. */
+/* Fork mark sits beside the status dot as its own control. It is a sibling of
+   the row's button, because a button cannot hold another, and as a flex item
+   in front of that button it pushed the button in: a forked thread's fill
+   began 28px from the sidebar's edge while every other row's began 8px from
+   it. It now floats over the row's end, in room the status makes for it.
+   Sizing only otherwise: colour, focus, and hover stay on the ghost-icon
+   recipe. */
 .sidebar-navigation__thread-lineage {
-  flex: none;
+  position: absolute;
+  top: 50%;
+  right: calc(var(--oct-nav-inset) + 18px);
+  z-index: 1;
   width: 18px;
   height: 18px;
   min-height: 18px;
   padding: 0;
+  transform: translateY(-50%);
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
+  .sidebar-navigation__thread-status {
+  margin-inline-start: 22px;
+}
+
+/* A view that hides the status leaves no slot to stand beside, so the room is
+   kept at the row's end instead. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
+  > .sidebar-navigation__thread:not(:has(.sidebar-navigation__thread-status)) {
+  padding-inline-end: calc(var(--oct-nav-inset) + 22px);
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage):not(
+    :has(.sidebar-navigation__thread-status)
+  )
+  .sidebar-navigation__thread-lineage {
+  right: var(--oct-nav-inset);
+}
+
+/* While the row's actions show, the mark steps left of them rather than
+   sitting under them, and the row makes that much more room. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+    .sidebar-navigation__thread-lineage
+  ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+  > .sidebar-navigation__thread {
+  padding-inline-end: 78px;
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
+    :hover,
+    :focus-within,
+    :has([aria-expanded="true"]),
+    :has([data-popup-open])
+  )
+  .sidebar-navigation__thread-lineage {
+  right: 58px;
 }
 
 .thread-lineage {
@@ -954,12 +1040,32 @@ html[data-octant-native-host="true"]
   pointer-events: auto;
 }
 
-/* The age gives its place to the actions, so neither is ever drawn over the
-   other. */
-.sidebar-navigation__thread-row:hover .sidebar-navigation__thread-meta,
-.sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-meta,
-.sidebar-navigation__thread-row:has([aria-expanded="true"]) .sidebar-navigation__thread-meta,
-.sidebar-navigation__thread-row:has([data-popup-open]) .sidebar-navigation__thread-meta {
+/* The age and the status give their place to the actions, so neither is ever
+   drawn over the other. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
+  :is(
+    .sidebar-navigation__thread-meta,
+    .sidebar-navigation__thread-age,
+    .sidebar-navigation__thread-status
+  ),
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
+  :is(
+    .sidebar-navigation__thread-meta,
+    .sidebar-navigation__thread-age,
+    .sidebar-navigation__thread-status
+  ),
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
+  :is(
+    .sidebar-navigation__thread-meta,
+    .sidebar-navigation__thread-age,
+    .sidebar-navigation__thread-status
+  ),
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
+  :is(
+    .sidebar-navigation__thread-meta,
+    .sidebar-navigation__thread-age,
+    .sidebar-navigation__thread-status
+  ) {
   opacity: 0;
 }
 
@@ -989,6 +1095,76 @@ html[data-octant-native-host="true"]
   .sidebar-navigation__thread-actions {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* Without a pointer to hover with, the one overflow action is always shown,
+     so its room is always kept and the status stays visible beside it. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+    > .sidebar-navigation__thread,
+  /* The hover, focus, and open-menu rules above are more specific than the
+     line before this one and make room for two actions. Touch browsers keep a
+     hover after a tap, and a narrow window still has a keyboard, so they are
+     restated here at the room one action needs. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      [aria-expanded="true"]
+    )
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
+    > .sidebar-navigation__thread,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-lineage
+    ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+    > .sidebar-navigation__thread {
+    padding-inline-end: 32px;
+  }
+
+  /* A forked row's mark stands left of the status, and here the status stands
+     left of the action that is always shown. Left at its desktop place the mark
+     sat on top of the status. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+    .sidebar-navigation__thread-lineage,
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
+      :hover,
+      :focus-within,
+      :has([aria-expanded="true"]),
+      :has([data-popup-open])
+    )
+    .sidebar-navigation__thread-lineage {
+    right: 50px;
+  }
+
+  /* With the status hidden the mark takes the status's place beside the action,
+     and the row keeps room for both. */
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-lineage
+    ):not(:has(.sidebar-navigation__thread-status)):is(
+      *,
+      :hover,
+      :focus-within,
+      :has([aria-expanded="true"]),
+      :has([data-popup-open])
+    )
+    .sidebar-navigation__thread-lineage {
+    right: 32px;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-lineage
+    ):is(*, :hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+    > .sidebar-navigation__thread:not(:has(.sidebar-navigation__thread-status)) {
+    padding-inline-end: 54px;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+    :is(
+      .sidebar-navigation__thread-age,
+      .sidebar-navigation__thread-status:not([data-activity="idle"])
+    ) {
+    opacity: 1;
   }
 
   .sidebar-navigation__thread-action--inline {
@@ -2059,10 +2235,10 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   width: min(320px, calc(100vw - 32px));
   overflow: hidden;
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border-strong);
+  /* Fill and edge come from the popover recipe. Setting a workspace fill and a
+     strong border here on top of the overlay's own ring made this the one
+     popup with a darker face and a 2px edge. */
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .code-branch-selector__list {
@@ -2486,7 +2662,7 @@ form > .work-composer-adapter__attachments {
 
 .code-home__suggestions > button:hover:not(:disabled),
 .draft-thread__intent-cards > button:hover:not(:disabled) {
-  border-color: var(--oct-border-strong);
+  border-color: var(--octant-border-strong);
   background: var(--octant-card);
   box-shadow: var(--octant-shadow-xs);
   transform: translateY(-1px);
@@ -2623,7 +2799,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__card:hover:not(:disabled) {
-  border-color: var(--oct-border-strong);
+  border-color: var(--octant-border-strong);
   background: var(--octant-card);
 }
 
@@ -2891,18 +3067,12 @@ form > .work-composer-adapter__attachments {
   padding: 0;
 }
 
-/* The row's second line of truth: a pull request number beside the title, the
-   request's state as a small glyph at the edge, and how long ago the thread
-   last moved. Colour is spent on the state only. */
-.sidebar-navigation__thread-headline {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 5px;
-}
-
+/* A pull request on the facts line: its state glyph and its number read as one
+   mark. Colour is spent on the state only. */
 .sidebar-navigation__thread-pr {
   flex: none;
+  align-items: center;
+  gap: 2px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;

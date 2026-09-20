@@ -10,11 +10,19 @@ describe("CodeWorkspaceSelector", () => {
     const trigger = screen.getByRole("button", { name: "Workspace" });
     expect(trigger).toHaveTextContent("Current checkout");
     fireEvent.click(trigger);
-    expect(screen.getByRole("option", { name: /Managed worktree/ })).toHaveTextContent(
-      "Create an isolated worktree for this thread.",
-    );
-    fireEvent.click(screen.getByRole("option", { name: /Managed worktree/ }));
+    // The shared menu names a choice by its label and describes it with its
+    // sentence, so the two are never read as one run-together string.
+    const managed = screen.getByRole("menuitemradio", { name: "Managed worktree" });
+    expect(managed).toHaveAccessibleDescription("Create an isolated worktree for this thread.");
+    expect(screen.getByRole("menuitemradio", { name: "Current checkout" })).toBeChecked();
+    fireEvent.click(managed);
 
     expect(onChange).toHaveBeenCalledWith("managed-worktree");
+  });
+
+  it("does not open while the composer is already creating a thread", () => {
+    render(<CodeWorkspaceSelector disabled onChange={vi.fn()} value="current-checkout" />);
+
+    expect(screen.getByRole("button", { name: "Workspace" })).toBeDisabled();
   });
 });

@@ -1055,7 +1055,9 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               <SliderField
                 aria-label="Sidebar width"
                 className="settings-view__range"
-                format={(value) => `${String(value)}px`}
+                // A width saved by dragging the sidebar's edge is fractional, and
+                // the read-out showed all of it: "357.890625px".
+                format={(value) => `${String(Math.round(value))}px`}
                 max={420}
                 min={220}
                 onChange={(event) =>

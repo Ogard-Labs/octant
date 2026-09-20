@@ -77,7 +77,6 @@
   --octant-accent: #f0f0f0;
   --octant-accent-foreground: #171717;
   --octant-accent-text: #f0f0f0;
-  --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 16%, transparent);
   --octant-divider-strong: #808080;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
@@ -91,19 +90,17 @@
   --octant-shadow-lg:
     0 0 0 1px var(--octant-border), 0 10px 18px -8px rgb(0 0 0 / 50%),
     0 22px 46px -16px rgb(0 0 0 / 68%);
-  --octant-shadow-overlay:
-    0 0 0 1px var(--octant-border-strong), 0 18px 48px -16px rgb(0 0 0 / 72%);
+  /* The overlay's own edge is a hairline, as the popover recipe says and as the
+     light theme already draws it. In dark it used the strong border, so every
+     menu and popover had a heavier edge than a dialog, and a popup that also
+     set a border showed two. */
+  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 18px 48px -16px rgb(0 0 0 / 72%);
   --octant-shadow-pop: 0 18px 48px -16px rgb(0 0 0 / 78%);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
   --octant-glass-border: rgb(255 255 255 / 9%);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 7%);
-  --octant-radius-chip: 9999px;
-  --octant-radius-control: 10px;
-  --octant-radius-panel: 16px;
-  --octant-radius-composer: 20px;
-  --octant-radius-pill: 999px;
   --octant-space-1: 4px;
   --octant-space-2: 8px;
   --octant-space-3: 12px;
@@ -114,9 +111,9 @@
   --octant-context-sidebar-min: 280px;
   --octant-success-surface: #16281f;
   --octant-success-text: #6bb299;
-  --octant-warning-surface: #342b0e;
-  --octant-warning-border: #a3801f;
-  --octant-warning-text: #edbc26;
+  --octant-warning-surface: #2b2b2b;
+  --octant-warning-border: #8a8a8a;
+  --octant-warning-text: #f0f0f0;
   --octant-danger-text: #e17d96;
   --octant-addition-text: #6bb299;
   --octant-deletion-text: #e17d96;
@@ -181,9 +178,9 @@ html[data-octant-theme-mode="light"] {
   --octant-accent-text: #1b1b1b;
   --octant-success-surface: #bfd8cc;
   --octant-success-text: #0f6144;
-  --octant-warning-surface: #f0dea8;
-  --octant-warning-border: #987405;
-  --octant-warning-text: #6f5300;
+  --octant-warning-surface: #f0f0ef;
+  --octant-warning-border: #6e6e6e;
+  --octant-warning-text: #1b1b1b;
   --octant-danger-text: #a8102f;
   --octant-destructive: #a8102f;
   --octant-addition-text: #0f6144;
@@ -202,7 +199,6 @@ html[data-octant-theme-mode="light"] {
   --octant-text-primary-high-contrast: #0e0f11;
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
-  --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
   --octant-scrim: #000000;
   --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
   --octant-shadow-sm:
@@ -241,7 +237,7 @@ html[data-octant-theme-mode="light"] {
   background: var(--octant-border-strong);
   background-clip: padding-box;
   border: 3px solid transparent;
-  border-radius: var(--octant-radius-pill);
+  border-radius: var(--oct-radius-pill);
 }
 
 :where(*)::-webkit-scrollbar-thumb:hover {
@@ -806,8 +802,11 @@ h6 {
   white-space: normal;
 }
 
+/* A check mark says which item is chosen; it is not a focus cue, and the
+   default look spends no hue on it. It used to take the focus colour, which
+   put the only blue on the page into every radio and checkbox menu. */
 .octant-menu__indicator {
-  color: var(--octant-focus-ring);
+  color: var(--octant-text-primary);
 }
 
 .new-project {
@@ -1048,7 +1047,6 @@ h6 {
 }
 
 .activity-nav__group > .sidebar-section {
-  padding-inline: 6px;
   color: var(--octant-text-secondary);
 }
 
@@ -1057,48 +1055,51 @@ h6 {
   gap: 2px;
 }
 
+/* The fold is the group's own heading made pressable. The link variant
+   already has no fill and no height of its own; this only keeps the heading's
+   type and sets the label, count, and chevron at glyph spacing. */
+.activity-nav__fold {
+  /* The recipe's default size still brings a control's height and side
+     padding, which set the word 10px to the right of the group labels above
+     it. */
+  height: auto;
+  min-height: 0;
+  gap: var(--oct-space-1);
+  /* The recipe keeps a 1px transparent border for its outlined variants; the
+     margin takes that pixel back so the word starts where the labels do. */
+  margin-inline-start: -1px;
+  padding: 0;
+  font: inherit;
+}
+
+.activity-nav__fold-count {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-nav__fold > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.activity-nav__fold[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-nav__fold > svg {
+    transition: none;
+  }
+}
+
 .activity-nav__threads {
   display: grid;
   gap: 2px;
-}
-
-.sidebar-navigation__thread.activity-nav__thread {
-  min-height: 48px;
-  align-items: flex-start;
-  padding: 6px;
 }
 
 .sidebar-navigation__thread-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
-}
-
-/* The feed row holds the title line plus whichever properties the view is
-   currently showing beneath it, so the rows are counted rather than fixed at
-   two; the button's own min-height still keeps a one-line row from collapsing. */
-.activity-nav__thread .sidebar-navigation__thread-copy {
-  flex: 1 1 auto;
-  grid-auto-rows: minmax(16px, auto);
-  gap: 2px;
-}
-
-.activity-nav__thread .sidebar-navigation__thread-title,
-.activity-nav__thread .sidebar-navigation__thread-project {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-navigation__thread-project {
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .code-project-views__new {
@@ -1179,10 +1180,11 @@ h6 {
      so neither reading won. */
   gap: 0;
   margin: 2px 0 0;
-  /* Enough to read as nested under its Project, and no more: the row inside
-     adds its own inset, and the two together were pushing thread titles most
-     of the way across the sidebar before the first letter. */
-  padding-left: var(--oct-space-2);
+  /* No indent of its own. An indented list made a thread's selection fill
+     start 16px from the sidebar's edge and end 8px from it, while every other
+     row's fill sat 8px from both; the Project's heavier name and the rows'
+     provider marks are what say these threads belong to it. */
+  padding-left: 0;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1225,6 +1227,10 @@ h6 {
   transition: opacity var(--oct-motion-fast) ease;
 }
 
+/* Hover-only while there are Projects to look at. An empty section has one
+   next step, adding a Project, and hiding it behind a hover left a new Code
+   or Work sidebar with no visible way to start. */
+.project-section[data-empty="true"] .project-section__header-actions,
 .project-section:hover .project-section__header-actions,
 .project-section:focus-within .project-section__header-actions,
 .project-section__header-actions:has([aria-expanded="true"]),
@@ -1416,7 +1422,9 @@ h6 {
 .project-row__action--icon {
   width: 0;
   min-width: 0;
-  height: var(--oct-nav-row-h);
+  /* Square, like a thread row's actions. At the row's own height the hover
+     fill was a 24px by 30px slab beside 24px squares one row down. */
+  height: 24px;
   min-height: 0;
   padding: 0;
   overflow: hidden;
@@ -2262,7 +2270,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .settings-view__text-input[type="color"] {
   min-width: 46px;
   width: 46px;
-  height: 32px;
+  height: var(--oct-settings-control-height, 28px);
   padding: 2px;
 }
 
@@ -2643,7 +2651,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-settings__local-mark {
   display: inline-flex;
   margin-inline-start: 6px;
-  color: var(--oct-success-text);
   vertical-align: -2px;
 }
 
@@ -3848,7 +3855,6 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-provider-policy__default {
   flex: none;
-  color: var(--oct-success-text);
   font-size: var(--oct-text-xs);
 }
 
@@ -4711,7 +4717,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .environment-subagents__row:hover,
 .environment-subagents__row:focus-visible,
 .environment-subagents__row[aria-expanded="true"] {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
   color: var(--oct-fg);
 }
 
@@ -6424,10 +6430,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
-  background: var(--octant-surface);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
+  /* Size and place only. The popover recipe paints the fill, the edge, and the
+     corner; this rule used to repaint all three, and its fill was the
+     workspace's, so it was the one darker popup beside the menus. */
 }
 
 /* The chosen model's effort/reasoning level, one tap from the list. The
@@ -6461,14 +6466,17 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   overflow: hidden;
   color: var(--octant-accent-text);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-semibold);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .composer-model-picker__level-slider {
   position: relative;
-  width: 100%;
+  /* The knob is centred on its stop, so half of it overhangs each end of the
+     track. At full width the first and last stops pushed it into the popover's
+     padding, where the rounded corner cut it off. */
+  width: calc(100% - 16px);
   height: 18px;
   cursor: pointer;
 }
@@ -6484,7 +6492,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   height: 4px;
   translate: 0 -50%;
   background: var(--octant-accent);
-  border-radius: var(--octant-radius-pill);
+  border-radius: var(--oct-radius-pill);
 }
 
 .composer-model-picker__level-knob {
@@ -6494,7 +6502,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   height: 16px;
   translate: -50% -50%;
   background: var(--octant-text-primary);
-  border-radius: var(--octant-radius-pill);
+  border-radius: var(--oct-radius-pill);
   box-shadow: var(--octant-shadow-xs);
   transition: inset-inline-start var(--oct-motion-fast) var(--oct-ease-standard);
 }
@@ -6586,7 +6594,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__rail-item--active {
   color: var(--octant-text-primary);
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
   box-shadow: none;
 }
 
@@ -6720,7 +6728,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__catalog--on {
   color: var(--octant-text-primary);
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
   border-color: var(--octant-border-strong);
 }
 
@@ -6756,6 +6764,10 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .composer-model-picker__row {
   display: grid;
+  /* The list is a column flexbox inside a fixed-height scroller. A row that may
+     shrink gives up height before the list scrolls, and its two lines then
+     stand taller than the fill painted behind them. */
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) 30px;
   align-items: center;
   border-radius: var(--oct-radius-sm);
@@ -6767,7 +6779,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__row--selected {
-  background: var(--octant-accent-tint);
+  background: var(--octant-selection);
 }
 
 .composer-model-picker__model {
@@ -6776,13 +6788,17 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
+  /* The button recipe fixes a one-line control height. A model row holds a name
+     and a provider line, which measured 34px inside that 32px box, so the text
+     stood proud of the row's hover and selection fill. */
+  height: auto;
+  min-height: 40px;
   min-width: 0;
-  padding: 4px 4px 4px 9px;
+  padding: 5px 4px 5px 9px;
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-sm) 0 0 9px;
+  border-radius: var(--oct-radius-sm) 0 0 var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: var(--oct-text-sm);
@@ -7437,9 +7453,16 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .scaffolds__entry-button {
   display: flex;
   flex-direction: column;
+  /* The button recipe is a centred, one-line, fixed-height control. Left as it
+     was, each entry kept that 32px box while its name and summary ran to two
+     lines, so one entry's name printed over the summary above it. */
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 2px;
   width: 100%;
+  height: auto;
   padding: 8px;
+  white-space: normal;
   border: 1px solid var(--octant-border-subtle);
   border-radius: var(--oct-radius-sm);
   background: transparent;
@@ -7762,7 +7785,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 
 .model-picker__search {
   width: 100%;
-  height: var(--oct-settings-control-height, 32px);
+  height: var(--oct-settings-control-height, 28px);
   margin-bottom: var(--oct-space-2);
 }
 
@@ -8237,7 +8260,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   display: grid;
   gap: 0.5rem;
   padding: 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--oct-radius-sm);
   border: 1px solid var(--octant-border);
   background: var(--octant-surface-raised);
 }
@@ -8253,7 +8276,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-sm);
   padding: 0.2rem 0.4rem;
-  border-radius: 0.3rem;
+  border-radius: 4px;
   background: var(--octant-surface);
 }
 
@@ -8271,6 +8294,19 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-sm);
   color: var(--octant-text-secondary);
   user-select: none;
+}
+
+/* Above a start screen's composer the host sits in a row of tray controls,
+   which are 12px at weight 500. At its own 14px it was the one larger word in
+   the row on every start screen. */
+.composer-tray .host-selector,
+.draft-thread__context-strip .host-selector,
+/* With more than one host the name is a select, which sets its own size, so
+   the ancestor alone left the multi-host row at the larger size. */
+.composer-tray .host-selector__select,
+.draft-thread__context-strip .host-selector__select {
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 .host-selector__dot {
@@ -8347,7 +8383,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   max-width: 14rem;
   height: 1.6rem;
   border: 1px solid color-mix(in srgb, var(--octant-border) 80%, transparent);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--octant-surface) 88%, transparent);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
@@ -8458,7 +8494,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   min-width: 12rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--octant-border);
-  border-radius: 0.375rem;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
 }
 
@@ -8529,7 +8565,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   gap: 1rem;
   padding: 1rem;
   border: 1px solid var(--octant-border);
-  border-radius: 0.65rem;
+  border-radius: var(--oct-radius-md);
   background: var(--octant-surface-raised);
 }
 
@@ -8552,7 +8588,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .validation-pane__timeline-entry {
   min-width: 0;
   padding: 0.7rem;
-  border-radius: 0.45rem;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-muted);
 }
 
@@ -9025,8 +9061,13 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.code-board .board-card-facts .fact__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Waiting remains a server-derived status, but the board no longer turns
@@ -9679,7 +9720,7 @@ ul.board-col-body {
 
 .code-project-pull-requests__row:hover,
 .code-project-pull-requests__row:focus-visible {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
 }
 
 .code-project-pull-requests__icon {
@@ -9899,7 +9940,7 @@ ul.board-col-body {
 
 .linear-issues__row:hover,
 .linear-issues__row:focus-visible {
-  background: var(--oct-surface-muted);
+  background: var(--octant-surface-muted);
 }
 
 .linear-issues__row[aria-pressed="true"],
@@ -9975,7 +10016,7 @@ ul.board-col-body {
 
 .model-picker__group--octant {
   border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-  border-radius: 0.75rem;
+  border-radius: var(--oct-radius-sm);
   padding: 0.25rem 0.5rem 0.5rem;
 }
 
@@ -10006,11 +10047,6 @@ ul.board-col-body {
   height: auto;
   flex: 1 1 auto;
   min-width: 0;
-}
-.activity-nav__pr {
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 4px;
 }
 
 .projects-page-layer {

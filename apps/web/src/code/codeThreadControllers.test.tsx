@@ -139,6 +139,29 @@ describe("CodeThreadControllerSlots", () => {
     expect(refreshConversation).toHaveBeenCalledOnce();
   });
 
+  it("hands a new thread its first prompt even when the prompt is announced before the controller exists", () => {
+    const registry = createCodeThreadControllers();
+    const announceFirstPrompt = vi.fn();
+
+    registry.announceFirstPrompt(threadA, "Fix the failing test");
+    registry.publish(threadA, { announceFirstPrompt } as never);
+    registry.publish(threadA, { announceFirstPrompt } as never);
+
+    expect(announceFirstPrompt).toHaveBeenCalledOnce();
+    expect(announceFirstPrompt).toHaveBeenCalledWith("Fix the failing test");
+  });
+
+  it("does not deliver a first prompt that was withdrawn before the controller existed", () => {
+    const registry = createCodeThreadControllers();
+    const announceFirstPrompt = vi.fn();
+
+    registry.announceFirstPrompt(threadA, "Fix the failing test");
+    registry.announceFirstPrompt(threadA, undefined);
+    registry.publish(threadA, { announceFirstPrompt } as never);
+
+    expect(announceFirstPrompt).not.toHaveBeenCalled();
+  });
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(
