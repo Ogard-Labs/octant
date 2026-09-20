@@ -3,23 +3,23 @@ import { DEFAULT_THEME_SETTINGS, type ThemeTypography } from "@octant/contracts/
 export const DEFAULT_UI_TYPOGRAPHY: UiTypographyProjection = {
   fontFamily: DEFAULT_THEME_SETTINGS.typography.ui.family,
   fontSize: DEFAULT_THEME_SETTINGS.typography.ui.size,
-  fontWeight: 400,
+  fontWeight: DEFAULT_THEME_SETTINGS.typography.ui.weight,
 };
 
 export const DEFAULT_EDITOR_TYPOGRAPHY: EditorTypographyProjection = {
-  fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
-  fontSize: 13,
-  fontWeight: 400,
-  lineHeight: 1.5,
-  fontLigatures: true,
+  fontFamily: DEFAULT_THEME_SETTINGS.typography.editor.family,
+  fontSize: DEFAULT_THEME_SETTINGS.typography.editor.size,
+  fontWeight: DEFAULT_THEME_SETTINGS.typography.editor.weight,
+  lineHeight: DEFAULT_THEME_SETTINGS.typography.editor.lineHeight,
+  fontLigatures: DEFAULT_THEME_SETTINGS.typography.editor.ligatures,
 };
 
 export const DEFAULT_TERMINAL_TYPOGRAPHY: TerminalTypographyProjection = {
   fontFamily: DEFAULT_THEME_SETTINGS.typography.terminal.family,
-  fontSize: 12,
-  fontWeight: 400,
-  lineHeight: 1.4,
-  fontLigatures: false,
+  fontSize: DEFAULT_THEME_SETTINGS.typography.terminal.size,
+  fontWeight: DEFAULT_THEME_SETTINGS.typography.terminal.weight,
+  lineHeight: DEFAULT_THEME_SETTINGS.typography.terminal.lineHeight,
+  fontLigatures: DEFAULT_THEME_SETTINGS.typography.terminal.ligatures,
 };
 
 export interface UiTypographyProjection {
@@ -78,7 +78,7 @@ export function resolveTypographyProjection(
 
   // Settings saved before the renderer shipped its own interface face hold
   // the old system stack verbatim. That string meant "the default", so it
-  // keeps meaning the default instead of pinning those users to the old face.
+  // keeps meaning the default instead of pinning those users to a bundled face.
   const uiFamily = resolveFamily(
     sourceUi.family === LEGACY_DEFAULT_UI_FAMILY
       ? DEFAULT_UI_TYPOGRAPHY.fontFamily

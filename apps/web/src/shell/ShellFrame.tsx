@@ -107,7 +107,7 @@ export function ShellFrame(props: ShellFrameProps) {
           }`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
           data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
-          data-transcript-text-size={props.transcriptTextSize ?? "medium"}
+          data-transcript-text-size={props.transcriptTextSize ?? "small"}
           data-transcript-width={props.transcriptWidth ?? "narrow"}
           style={
             {
