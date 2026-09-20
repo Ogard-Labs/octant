@@ -108,13 +108,18 @@ native receipts; desktop admin routes are loopback-only.
   bound folder for user work; merge authority is never granted.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
-  too. The Codex and Claude runtimes do not — neither process is one Octant can
-  bind to a single thread's folder and posture — so their shell runs under the
-  provider's own sandbox instead: Codex on every turn, Claude on approval-gated
-  and auto-accept-edits turns. A Claude Plan turn is held read-only by the
-  runtime's own setting rather than by a sandbox. Octant's approvals still gate
-  what those threads ask for, and every app-managed tool they reach stays
-  confined.
+  too.
+- The Codex and Claude runtimes do not: neither process is one Octant can bind
+  to a single thread's folder and posture, so the shell those two run falls to
+  the provider's own sandbox. Codex carries one on every posture except Full
+  access, which you select explicitly and which is unsandboxed by design.
+  Claude carries one on approval-gated and auto-accept-edits turns; a Claude
+  Plan turn is held read-only by the runtime's own setting rather than by a
+  sandbox.
+- Every app-managed tool those two threads reach is still confined, and
+  approvals still gate every app-managed action and every provider callback
+  that reaches Octant. A write one of those runtimes makes inside its own
+  sandbox without announcing it is not one Octant can prompt for.
 - Extensions stay quarantined until explicitly reviewed and trusted.
   Installation never implies trust, activation, enablement, or authority.
 - Browser automation uses per-thread incognito contexts with an origin

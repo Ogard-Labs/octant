@@ -5,11 +5,10 @@
 ## Context
 
 0009 says every Octant-spawned subprocess that can execute arbitrary code
-launches through the shared Seatbelt profile builder, and that there is no
-unconfined fallback. `acpProcess`, `openCodeProcess`, and `piProcess` do. The
-Codex and Claude runtimes do not, and no record says why, so a reader has to
-infer either that the rule is unenforced or that 0132 exempts provider
-runtimes.
+launches through the shared Seatbelt profile builder, with no unconfined
+fallback. `acpProcess`, `openCodeProcess`, and `piProcess` do. The Codex and
+Claude runtimes do not, and no record says why, so a reader has to infer that
+the rule is unenforced or that 0132 exempts provider runtimes.
 
 0132 does not. Its "Octant-owned brokers do not wrap provider-owned processes"
 explains why `provider-endpoints-only` materializes as OS `allow` — the finer
@@ -28,8 +27,13 @@ are theirs and not a gap in the rule.
 
 - Octant wraps a provider runtime launch when the process carries exactly one
   thread's authority: one bound root, one mode, one execution policy, fixed for
-  the life of the process. ACP, OpenCode, and Pi meet that and stay under
-  0009's rule unchanged.
+  the life of the process. The ACP, OpenCode, and Pi turn launches meet that
+  and stay under 0009's rule unchanged.
+- Version probes are outside this record and outside 0009 today. Every family,
+  wrapped or not, runs the configured executable directly for `--version`
+  before any confined launch (`probeOpenCodeBinary`, `probeAcpBinary`,
+  `inspectVersion`, `probeCodexBinary`). That is one uniform gap, not a
+  property of this exception, and it closes in its own change.
 - Every provider process module that launches without the shared builder is
   named here rather than left to a grep. This is a scoped exception to one rule
   of 0009, that every such subprocess launches through that builder:
@@ -46,9 +50,8 @@ are theirs and not a gap in the rule.
     managed home with sessions, tools, extensions, skills, and LSP off, in the
     family 0122 carved out. Its turns run on the wrapped Pi runtime.
 - The exception covers the runtime process only. Octant-owned tools those
-  threads reach — terminal, project-confined test runner, Git helpers,
-  executable extension components, and the brokered tools holding the finer
-  egress allowlist — stay confined exactly as 0009 requires.
+  threads reach — terminal, test runner, Git helpers, executable extension
+  components, brokered tools — stay confined exactly as 0009 requires.
 - The residual risk is stated by posture, not simulated away. Codex carries a
   sandbox on every `thread/start` (`read-only` on Plan). Claude carries one
   only on approval-gated and auto-accept-edits turns, bounded to the project
@@ -66,9 +69,9 @@ are theirs and not a gap in the rule.
   argv carrying a credential is refused. The provider's own credential is not —
   API-key authentication resolves `ANTHROPIC_API_KEY` into the runtime's
   environment at launch, as 0009 allows — so a model-generated command inside
-  these two can read it with no OS boundary in the way. Durable process
-  receipts, process-group termination, the tool-call policy choke point, the
-  approval categories, and untrusted-content taint all stand.
+  these two reads it with no OS boundary in the way. Process receipts, group
+  termination, the tool-call policy choke point, the approval categories, and
+  untrusted-content taint all stand.
 - A new provider runtime is wrapped. `providerProcessConfinement.test.ts` keeps
   the live set as a manifest and refuses a module that uses no shared builder
   and claims no entry, an entry whose module has since adopted the builder, and
@@ -85,10 +88,10 @@ are theirs and not a gap in the rule.
 ## Consequences
 
 - The boundary is written where a reader looks for it instead of inferred from
-  which modules happen to import the builder, and the set cannot grow quietly.
-- Octant's approval categories sit above the provider's sandbox for Codex and
-  Claude rather than beneath it, so those two families depend on a correct
-  posture mapping in a way the wrapped runtimes do not.
+  which modules import the builder, and the set cannot grow quietly.
+- Octant's approval categories sit above the provider's sandbox for these two
+  rather than beneath it, so they depend on a correct posture mapping in a way
+  the wrapped runtimes do not.
 
 ## Related
 
