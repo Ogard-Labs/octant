@@ -11,7 +11,7 @@ import type { WorkFileListingClient } from "@octant/client-runtime";
 import { createWorkFileListingClient } from "@octant/client-runtime/work-file-listing-client";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";
 
 type FileEntry = Extract<WorkFileListingEntry, { readonly kind: "file" }>;
@@ -150,17 +150,14 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   return (
     <div className="work-files-panel">
       <div className="work-files-panel__toolbar">
-        <OctantButton
-          aria-label="Refresh files"
+        <OctantIconButton
           disabled={status === "loading"}
+          label="Refresh files"
           onClick={refresh}
-          size="icon"
-          title="Refresh files"
           type="button"
-          variant="ghost"
         >
           <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-        </OctantButton>
+        </OctantIconButton>
       </div>
 
       {status === "loading" ? (

@@ -759,6 +759,13 @@ and Tooltip. Composition rules:
   fill, not a solid one: a red slab reads as the page's subject rather than one
   action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
   Icon-only buttons always have an accessible label and tooltip/title.
+  A standalone icon-only control has two sizes and nothing between: the 28px
+  rail button (`OctantIconButton`, `--oct-rail-button-h`) in a title band,
+  panel head, or toolbar, and a 24px square for an action inside a row. The
+  recipe's `icon` sizes are rem and drift with the interface font size, so a
+  panel control takes `OctantIconButton` rather than a recipe size. Only a
+  control that floats over content, such as the terminal's actions button,
+  keeps a fill and an edge.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.
