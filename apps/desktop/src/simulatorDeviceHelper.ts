@@ -203,7 +203,11 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       simulatorId: string,
       request: DeviceHelperRequest,
       timeoutMs: number,
+      cancelled?: AbortSignal,
     ): Promise<DeviceHelperReply> {
+      if (cancelled?.aborted === true) {
+        return Promise.resolve({ status: "unavailable", message: "The action was cancelled." });
+      }
       if (disposed) {
         return Promise.resolve({ status: "unavailable", message: "The desktop is shutting down." });
       }
@@ -229,11 +233,23 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
       helper.idle = undefined;
       const id = helper.nextId;
       helper.nextId += 1;
-      return new Promise<DeviceHelperReply>((settle) => {
+      return new Promise<DeviceHelperReply>((resolve) => {
         const timer = setTimeout(
           () => stop(simulatorId, helper, "The device helper did not answer in time."),
           timeoutMs,
         );
+        // The helper works through one request at a time and cannot be asked to
+        // drop one. A cancel that arrives before its answer therefore stops the
+        // helper: whatever it had not yet sent to the device is never sent, and
+        // the next request starts a fresh one.
+        const onCancel = () => {
+          if (helper.pending.has(id)) stop(simulatorId, helper, "The action was cancelled.");
+        };
+        cancelled?.addEventListener("abort", onCancel, { once: true });
+        const settle = (reply: DeviceHelperReply) => {
+          cancelled?.removeEventListener("abort", onCancel);
+          resolve(reply);
+        };
         helper.pending.set(id, { settle, timer });
         try {
           helper.child.stdin.write(frame({ ...request, id }));

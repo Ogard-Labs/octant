@@ -37,7 +37,10 @@ export function createSimulatorInputDelivery(
 ) {
   const now = options.now ?? Date.now;
   const screens = new Map<string, { readonly width: number; readonly height: number }>();
-  return async (command: SimulatorDeviceInput): Promise<SimulatorDeviceInputResult> => {
+  return async (
+    command: SimulatorDeviceInput,
+    cancelled?: AbortSignal,
+  ): Promise<SimulatorDeviceInputResult> => {
     const budgetMs = command.budgetMs - ANSWER_MARGIN_MS;
     // The answer has to be back before the server gives the action up. A
     // deadline with no room for that is refused: stretching it would let the
@@ -54,7 +57,9 @@ export function createSimulatorInputDelivery(
     // server had already given the action up, and a retried action tapped twice.
     const deadline = now() + budgetMs;
     if (command.kind === "type-text") {
-      return result(await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs));
+      return result(
+        await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs, cancelled),
+      );
     }
     if (command.kind === "key-press") {
       const key = command.key.toLowerCase();
@@ -63,12 +68,13 @@ export function createSimulatorInputDelivery(
           command.udid,
           key === "home" || key === "lock" ? { op: "button", button: key } : { op: "key", key },
           budgetMs,
+          cancelled,
         ),
       );
     }
     let screen = screens.get(command.udid);
     if (screen === undefined) {
-      const described = await helpers.send(command.udid, { op: "hello" }, budgetMs);
+      const described = await helpers.send(command.udid, { op: "hello" }, budgetMs, cancelled);
       if (described.status !== "delivered") return result(described);
       if (described.screen === undefined) {
         return {
@@ -97,12 +103,15 @@ export function createSimulatorInputDelivery(
         message: `The point is outside the ${screen.width}×${screen.height} screen.`,
       };
     }
-    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs));
+    return result(await helpers.send(command.udid, { op: "tap", x, y }, remainingMs, cancelled));
   };
 }
 
 export function simulatorDeviceBrokerHandler(
-  deliver: (command: SimulatorDeviceInput) => Promise<SimulatorDeviceInputResult>,
+  deliver: (
+    command: SimulatorDeviceInput,
+    cancelled?: AbortSignal,
+  ) => Promise<SimulatorDeviceInputResult>,
   token: string,
 ) {
   return async (request: Request, peer = "127.0.0.1"): Promise<Response> => {
@@ -124,7 +133,7 @@ export function simulatorDeviceBrokerHandler(
       if (bytes.byteLength > MAX_BODY_BYTES) return failure(413);
       const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (typeof body !== "object" || body === null || !("input" in body)) return failure(400);
-      return Response.json(await deliver(decodeSimulatorDeviceInput(body.input)));
+      return Response.json(await deliver(decodeSimulatorDeviceInput(body.input), request.signal));
     } catch (error) {
       return failure(ParseResult.isParseError(error) || error instanceof SyntaxError ? 400 : 503);
     }
@@ -148,6 +157,14 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
   const token = randomBytes(32).toString("base64url");
   const handle = simulatorDeviceBrokerHandler(createSimulatorInputDelivery(helpers), token);
   const server = createServer((incoming, outgoing) => {
+    // The server cancels an action by dropping this connection. That has to
+    // reach the helper, or a cold one would finish getting ready and deliver
+    // the input seconds after the action was recorded as cancelled.
+    const disconnected = new AbortController();
+    incoming.once("aborted", () => disconnected.abort());
+    outgoing.once("close", () => {
+      if (!outgoing.writableEnded) disconnected.abort();
+    });
     void (async () => {
       const body = await readBody(incoming);
       if (body === undefined) return failure(413);
@@ -160,6 +177,7 @@ export async function startSimulatorDeviceBroker(helpers: SimulatorDeviceHelpers
         new Request(`http://127.0.0.1${incoming.url ?? "/"}`, {
           method: incoming.method ?? "POST",
           headers,
+          signal: disconnected.signal,
           ...(incoming.method === "GET" || incoming.method === "HEAD"
             ? {}
             : { body: Buffer.from(body) }),

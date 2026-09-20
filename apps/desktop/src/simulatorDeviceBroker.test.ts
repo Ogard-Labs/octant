@@ -15,8 +15,12 @@ const udid = "7E29846E-F920-438E-8AB2-930C1A0F7FB7";
 
 function helpers(answer: (request: DeviceHelperRequest) => DeviceHelperReply) {
   const send = vi.fn(
-    async (_simulatorId: string, request: DeviceHelperRequest, _timeoutMs: number) =>
-      answer(request),
+    async (
+      _simulatorId: string,
+      request: DeviceHelperRequest,
+      _timeoutMs: number,
+      _signal?: AbortSignal,
+    ) => answer(request),
   );
   const fake: SimulatorDeviceHelpers = { send, busy: () => false, dispose: vi.fn() };
   return { fake, send };
@@ -134,6 +138,22 @@ describe("Simulator input delivery", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("hands the caller's cancel to every step it asks of the helper", async () => {
+    const { fake, send } = helpers((sent) =>
+      sent.op === "hello"
+        ? { status: "delivered", screen: { width: 1206, height: 2622 } }
+        : { status: "delivered" },
+    );
+    const cancelled = new AbortController();
+
+    await createSimulatorInputDelivery(fake)(
+      { kind: "tap", udid, budgetMs: 30_000, point: { x: 10, y: 10 } },
+      cancelled.signal,
+    );
+
+    expect(send.mock.calls.map((call) => call[3])).toEqual([cancelled.signal, cancelled.signal]);
+  });
+
   it("tells a helper's refusal from a helper that never answered", async () => {
     const refusing = helpers(() => ({
       status: "refused",
@@ -205,11 +225,9 @@ describe("private Simulator device broker", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ kind: "delivered" });
-    expect(deliver).toHaveBeenCalledWith({
-      kind: "key-press",
-      udid,
-      budgetMs: 30_000,
-      key: "home",
-    });
+    expect(deliver).toHaveBeenCalledWith(
+      { kind: "key-press", udid, budgetMs: 30_000, key: "home" },
+      expect.any(AbortSignal),
+    );
   });
 });
