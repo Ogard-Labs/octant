@@ -305,6 +305,42 @@ describe("the Simulator screen stream", () => {
     abort.abort();
   });
 
+  it("catches a slow viewer up to the newest screen once it can take more", async () => {
+    const { watching, frame } = watchable();
+    const written: number[][] = [];
+    const listeners = new Map<string, () => void>();
+    let accepting = true;
+    const outgoing = {
+      writeHead: vi.fn(),
+      flushHeaders: vi.fn(),
+      end: vi.fn(),
+      once: (event: string, listener: () => void) => {
+        listeners.set(event, listener);
+      },
+      write: (chunk: Uint8Array) => {
+        written.push([...chunk]);
+        return accepting;
+      },
+    };
+    await createSimulatorScreenStream(watching)({ watch }, outgoing as never);
+    written.length = 0;
+
+    // The viewer stops keeping up: this frame fills its buffer...
+    accepting = false;
+    frame([0xff, 0x01]);
+    // ...and these two arrive while it is still draining. The last is the
+    // screen the device then stays on.
+    frame([0xff, 0x02]);
+    frame([0xff, 0x03]);
+    accepting = true;
+    listeners.get("drain")?.();
+
+    expect(written.filter((chunk) => chunk[0] === 0xff)).toEqual([
+      [0xff, 0x01],
+      [0xff, 0x03],
+    ]);
+  });
+
   it("stops watching when the viewer hangs up", async () => {
     const { watching, stop } = watchable();
     const url = await serve(watching);

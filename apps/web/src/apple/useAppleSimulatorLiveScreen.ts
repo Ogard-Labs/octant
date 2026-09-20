@@ -86,6 +86,13 @@ export function useAppleSimulatorLiveScreen(options: {
           } catch {
             continue;
           }
+          // Decoding took time, and the pane may have moved to another thread
+          // or Simulator meanwhile. A picture of the old one must not be drawn
+          // on the new pane's canvas or set the size its taps are measured by.
+          if (signal.aborted) {
+            frame.close();
+            return;
+          }
           latestRef.current?.close();
           latestRef.current = frame;
           if (canvasRef.current !== null) paint(canvasRef.current, frame);
