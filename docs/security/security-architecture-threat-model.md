@@ -306,14 +306,18 @@ window, or approves an action class the host policy reserves for the local user.
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
     Codex does not: `sanitizeCodexEnvironment` drops only `OCTANT_*`, `ELECTRON_RUN_AS_NODE` and
     `NODE_OPTIONS`, so every other inherited variable — a `GITHUB_TOKEN` or a cloud key among
-    them — reaches it. Under API-key authentication `ANTHROPIC_API_KEY` is resolved into Claude's
-    environment at launch, as 0009 allows.
+    them — reaches it. Under API-key authentication `ANTHROPIC_API_KEY` is written into Claude's
+    child environment at launch and deleted from the in-memory object when the scope closes.
+    0009 reads two ways on that: it says provider credentials are stripped from every child, and
+    that secrets reach a process only as named references resolved at launch. This record states
+    the mechanism rather than settling which clause governs.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
 - **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
-  `inspectVersion` and `probeCodexBinary` each spawn the user-configured binary for `--version`
-  before any confined launch. `scanDescriptor` in `apps/server/src/providers/discoveryService.ts`
+  `inspectVersion`, `probeCodexBinary`, and `runProbe` in `claudeProcess.ts` — the last for both
+  `--version` and `auth status --json` — each spawn the user-configured binary before any
+  confined launch. `scanDescriptor` in `apps/server/src/providers/discoveryService.ts`
   goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
   found on `PATH` or in an approved directory, so the executable is not even one the user named.
   Both bound the timeout and output and sanitize the environment, and neither is confined. This

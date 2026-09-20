@@ -31,11 +31,11 @@ are theirs and not a gap in the rule.
   below Full access and stay under 0009's rule unchanged. On Full access all
   three return the binary unwrapped — 0009's genuine, user-selected,
   unrestricted posture, not a gap; ACP keeps 0006's static denials there.
-- This exception covers whole modules, so it does not reach version probes.
-  Every family, wrapped or not, spawns the configured executable for
-  `--version` before any confined launch. That does not satisfy 0009 and is not
-  excepted here; it is a standing gap across every family, recorded in the
-  threat model and closing in its own change.
+- This exception covers whole modules, so it does not reach probes. Every
+  family spawns the configured executable to read a version or an auth state
+  before any confined launch, and discovery does the same to a candidate it
+  found. That does not satisfy 0009 and is not excepted here: a standing gap,
+  inventoried in the threat model, closing in its own change.
 - Every provider process module that launches without the shared builder is
   named here rather than left to a grep. This is a scoped exception to one rule
   of 0009, that every such subprocess launches through that builder:
@@ -59,8 +59,11 @@ are theirs and not a gap in the rule.
   provider sandbox, what each runtime's environment actually withholds, and
   what a model-generated command inside an unwrapped runtime can therefore
   read. Two entries there bind this record. A Claude Plan turn is read-only by
-  `permissionMode` alone and not at any sandbox, which 0009 requires, so
-  closing this exception for Claude has to fix that first. And 0009 holds that
+  `permissionMode` alone and not at any sandbox, which 0009 requires: this
+  record names that as an open defect and does not authorize it, and closing
+  this exception for Claude has to fix it first. Nothing here supersedes
+  0009's Plan rule — a Claude Plan turn that needs an OS boundary does not have
+  one today, and that is a bug to close, not a posture to sign off. And 0009 holds that
   a provider's permission layer is a signal and not the boundary, so a defect
   in the posture Octant maps into it is a write inside the checkout with no
   Octant prompt — observed, and since fixed, on a Codex Code thread whose
