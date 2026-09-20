@@ -171,6 +171,41 @@ describe("confined version probe", () => {
     expect(existsSync(launch.workingDirectory)).toBe(false);
   });
 
+  it("runs a Linux launch in its own scratch with no network and no host temp", () => {
+    // Bubblewrap cannot be installed here, so this covers what the launch asks
+    // bwrap for, not what the kernel then enforces. The writable-scratch half
+    // is only proved on macOS above: bwrap would bind the scratch writable
+    // either way, because the temporary-directory bind replaces the bound
+    // root's read-only one at the same mount point.
+    const target = host();
+    const bwrap = join(target.root, "bwrap");
+    writeFileSync(bwrap, '#!/bin/sh\nexec "$@"\n', { mode: 0o700 });
+    chmodSync(bwrap, 0o700);
+    const probe = prepareConfinedVersionProbe({
+      binaryPath: target.binaryPath,
+      displayName: "Example",
+      environment: () => ({ PATH: "/usr/bin:/bin" }),
+      confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrap }),
+      temporaryRoot: target.temporaryRoot,
+      homeDirectory: target.home,
+    });
+    if (probe.status === "refused") throw new Error(`Unexpected refusal: ${probe.message}`);
+    const { launch } = probe;
+    const args = [...launch.args];
+
+    expect(args).toContain("--unshare-all");
+    expect(args).not.toContain("--share-net");
+    // The scratch is the root the launch binds, so bwrap chdirs into it and
+    // binds it rather than leaving the read in the host's working directory.
+    expect(args.slice(args.indexOf("--chdir"), args.indexOf("--chdir") + 2)).toEqual([
+      "--chdir",
+      launch.workingDirectory,
+    ]);
+    expect(args[args.indexOf("--bind") + 2]).toBe(launch.workingDirectory);
+    expect(args.slice(-2)).toEqual([target.binaryPath, "--version"]);
+    launch.release();
+  });
+
   it.skipIf(process.platform !== "darwin")(
     "reads the version from a program that starts another program, and refuses its writes outside the scratch",
     () => {
