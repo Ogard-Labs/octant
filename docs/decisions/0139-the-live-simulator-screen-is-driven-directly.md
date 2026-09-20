@@ -40,7 +40,9 @@ And the host runs one Simulator action at a time.
   disabled while the host is busy, because a disabled control drops focus and
   the keys being typed with it. What a person does meanwhile waits and is
   sent as each action finishes; an input that never makes the pane busy stops
-  being waited for after a second.
+  being waited for after a second. What waits belongs to one Simulator: it
+  outlives a live view that reconnects, and is dropped when the frame moves to
+  another Simulator.
 - **Home and Lock are buttons in the pane**, sent as the hardware keys the
   channel already carries.
 - **A host without the device helper reports a swipe unavailable.** The
