@@ -23,8 +23,11 @@ And the host runs one Simulator action at a time.
   with where the finger goes down (`point`), where it comes up (`toPoint`) and
   how long it takes (`durationMs`, 50–5000). It is input like a tap: same
   authority, approval, actor attribution, booted-destination rule and Plan
-  refusal. Evidence records both ends and nothing typed. The `octant_apple`
-  tool gains the same operation, so an agent scrolls the way a person does.
+  refusal. A swipe that was sent toward the device records both ends, whether
+  it was delivered or not. One that never ran — refused by policy, or cut off
+  by a host restart — records why, exactly as a tap does; its points are not
+  kept. The `octant_apple` tool gains the same operation, so an agent scrolls
+  the way a person does.
 - **The pane reads a press and a release.** Less than ten pixels apart, it is
   a tap where the press began. Further, it is one swipe sent at release, as
   long as the drag took, held between 80 ms and 2 s. A press that began
