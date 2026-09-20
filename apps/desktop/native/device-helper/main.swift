@@ -58,8 +58,24 @@ private func writeResponse(_ response: [String: Any]) {
     }
 }
 
+/// A JSON number, and not a JSON boolean: `JSONSerialization` hands both back
+/// as `NSNumber`, so `true` would otherwise pass for 1.
+private func number(_ value: Any?) -> NSNumber? {
+    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
+        return nil
+    }
+    return number
+}
+
+/// A whole number in `range`; a fraction is refused rather than truncated.
+private func whole(_ value: Any?, in range: ClosedRange<Double>) -> UInt64? {
+    guard let raw = number(value)?.doubleValue, raw.isFinite, raw == raw.rounded(), range.contains(raw)
+    else { return nil }
+    return UInt64(raw)
+}
+
 private func unit(_ request: [String: Any], _ key: String) throws -> Double {
-    guard let value = (request[key] as? NSNumber)?.doubleValue, value.isFinite, (0...1).contains(value)
+    guard let value = number(request[key])?.doubleValue, value.isFinite, (0...1).contains(value)
     else { throw Refusal(code: "malformed", message: "\(key) must be a number from 0 to 1") }
     return value
 }
@@ -124,7 +140,7 @@ private final class Session {
             let fromY = try unit(request, "fromY")
             let toX = try unit(request, "toX")
             let toY = try unit(request, "toY")
-            let duration = min(max((request["durationMs"] as? NSNumber)?.doubleValue ?? 250, 50), 5_000)
+            let duration = min(max(number(request["durationMs"])?.doubleValue ?? 250, 50), 5_000)
             let steps = max(Int((duration / 1_000) / swipeStep), 2)
             let input = try connection()
             try input.touch(phase: .start, x: fromX, y: fromY)
@@ -146,14 +162,24 @@ private final class Session {
                     throw Refusal(code: "unsupported-key", message: "no key is named \(name)")
                 }
                 usage = named
-            } else if let raw = (request["usage"] as? NSNumber)?.uint64Value, raw > 0, raw < 0x100 {
+            } else if let raw = whole(request["usage"], in: 1...255) {
                 usage = raw
             } else {
-                throw Refusal(code: "malformed", message: "key or usage is required")
+                throw Refusal(code: "malformed", message: "key, or a whole usage from 1 to 255, is required")
             }
-            let modifiers = (request["modifiers"] as? [NSNumber] ?? []).map(\.uint64Value)
-            guard modifiers.allSatisfy({ (224...231).contains($0) }) else {
-                throw Refusal(code: "malformed", message: "modifiers must be usages 224 to 231")
+            // Absent means none. Present but not a list of whole usages is a
+            // mistake, not a request for no modifiers.
+            var modifiers: [UInt64] = []
+            if let given = request["modifiers"] {
+                guard let list = given as? [Any] else {
+                    throw Refusal(code: "malformed", message: "modifiers must be a list")
+                }
+                for item in list {
+                    guard let usage = whole(item, in: 224...231) else {
+                        throw Refusal(code: "malformed", message: "modifiers must be whole usages 224 to 231")
+                    }
+                    modifiers.append(usage)
+                }
             }
             let input = try connection()
             for modifier in modifiers { try input.key(usage: modifier, state: .down) }
