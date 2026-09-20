@@ -1124,6 +1124,39 @@ describe("AppleToolchainService lifecycle", () => {
     ).toBe(true);
   });
 
+  it("comes back for a leftover that was too young to judge when the service started", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+      const young = join(
+        captureDirectory,
+        "octant-apple-capture-local-30000000-0000-4000-8000-0000000000ee.png",
+      );
+      await writeFile(young, new Uint8Array([1]));
+
+      new AppleToolchainService({
+        execute: discoveryExecutor(),
+        captureDirectory,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      // Seconds old at start, so the first pass leaves it; no capture follows.
+      // The pass runs off the event loop, so it is given real time to finish
+      // before the file is aged — otherwise the pass itself would see it as old.
+      const firstPassDone = Date.now() + 200;
+      while (Date.now() < firstPassDone) await new Promise((resolve) => setImmediate(resolve));
+      expect(existsSync(young)).toBe(true);
+      const old = new Date(Date.now() - 5 * 60_000);
+      await utimes(young, old, old);
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await vi.waitFor(() => expect(existsSync(young)).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sweeps only its own host's captures when two hosts share a temporary directory", async () => {
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
     const mine = join(

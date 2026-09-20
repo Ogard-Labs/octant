@@ -203,13 +203,19 @@ export class AppleToolchainService {
     this.#captureDirectory = options.captureDirectory ?? defaultTemporaryDirectory();
     const owner = (options.captureOwner ?? "local").replace(/[^A-Za-z0-9]/g, "").slice(0, 32);
     this.#capturePrefix = `${CAPTURE_FILE_PREFIX}${owner.length === 0 ? "local" : owner}-`;
-    // Whatever a previous run could not come back for is cleared now.
-    void sweepStaleCaptures(
-      this.#captureDirectory,
-      this.#capturePrefix,
-      Date.now(),
-      this.#capturesInProgress,
-    );
+    // Whatever a previous run could not come back for is cleared now, and
+    // again later: a leftover seconds old at start is too young to judge, the
+    // run that made it is gone with its timers, and no capture is promised.
+    for (const delayMs of [0, ...CAPTURE_RETURN_VISITS_MS]) {
+      setTimeout(() => {
+        void sweepStaleCaptures(
+          this.#captureDirectory,
+          this.#capturePrefix,
+          Date.now(),
+          this.#capturesInProgress,
+        );
+      }, delayMs).unref();
+    }
     this.#lastToolchain = unavailableToolchain(options.newId(), options.now());
   }
 
