@@ -105,6 +105,12 @@ export interface AppleToolchainServiceOptions {
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
   /**
+   * Told which Simulators each successful discovery found, and in what state.
+   * The host closes what it granted to a Simulator that is no longer booted,
+   * however it came to shut down, including from Xcode or `simctl`.
+   */
+  readonly observeSimulators?: (simulators: ReadonlyArray<AppleSimulatorRecord>) => void;
+  /**
    * Where a screen capture lands before it becomes an artifact. Xcode 27's
    * `simctl io … screenshot -` no longer means stdout: it writes a file named
    * `-` into the working directory — the checkout — and reports nothing, so
@@ -319,6 +325,7 @@ export class AppleToolchainService {
     );
     this.#lastToolchain = toolchain;
     this.#lastSimulators = simulators;
+    this.#options.observeSimulators?.(simulators);
     this.#sequence += 1;
     return { kind: "discovered", ...entry };
   }
@@ -330,7 +337,7 @@ export class AppleToolchainService {
     const startedAt = this.#options.now();
     if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
       const prior = this.#findCompletedInput(request, context);
-      if (prior !== undefined) return prior;
+      if (prior !== undefined) return replayedFrom(prior);
     }
     const cached = this.#findDiscovery(request);
     const decision = isBuildRequest(request)
@@ -1503,6 +1510,24 @@ function evidence(
     durationMs: elapsed(startedAt, completedAt),
     completedAt,
   });
+}
+
+/**
+ * Evidence that answered a request again from memory. Nothing was delivered
+ * this time, so a caller that reacts to what happened on a device — renewing an
+ * input grant, say — must be able to tell it from a real delivery without
+ * comparing timestamps, which a clock change can reorder.
+ */
+const replayedEvidence = new WeakSet<object>();
+
+export function replayedFrom<Evidence extends object>(value: Evidence): Evidence {
+  const replay = { ...value };
+  replayedEvidence.add(replay);
+  return replay;
+}
+
+export function isReplayedEvidence(value: object): boolean {
+  return replayedEvidence.has(value);
 }
 
 export function withInputMustReissueNote(value: AppleBuildEvidence): AppleBuildEvidence {
