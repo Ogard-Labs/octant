@@ -50,7 +50,9 @@ export function EmptyHeader({ className, ...props }: ComponentProps<"div">) {
 export function EmptyEyebrow({ className, ...props }: ComponentProps<"span">) {
   return (
     <span
-      className={cn("mb-1 block font-mono text-xs text-muted-foreground", className)}
+      // The interface face, like the title under it. In the code face this was
+      // the one line of chrome not set in the font a person chose.
+      className={cn("mb-1 block text-xs text-muted-foreground", className)}
       data-slot="empty-eyebrow"
       {...props}
     />
