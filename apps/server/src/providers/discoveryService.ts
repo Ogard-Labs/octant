@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, open, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -6,7 +5,7 @@ import type { DiscoveryCandidate, DiscoverySnapshot, ProviderDriverKind } from "
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery";
 import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
-import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import { execVersionRead, prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
@@ -512,22 +511,11 @@ function sanitizeProbeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 // ── Default ports ───────────────────────────────────────────────────────────
 
 const defaultExec: DiscoveryExecPort = (file, args, options) =>
-  new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      file,
-      [...args],
-      {
-        timeout: options.timeout,
-        maxBuffer: options.maxBuffer,
-        env: options.env,
-        ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-        shell: false,
-      },
-      (error, stdout, stderr) => {
-        if (error !== null) rejectPromise(error);
-        else resolvePromise({ stdout, stderr });
-      },
-    );
+  execVersionRead(file, args, {
+    timeout: options.timeout,
+    maxBuffer: options.maxBuffer,
+    env: options.env ?? {},
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
 
 /**

@@ -61,7 +61,11 @@ given that fits it.
   shim that runs the real CLI through `/bin/sh` — and a denial there is silent:
   the read is reported `unavailable` and the provider disappears from the
   picker on a host where it is installed and working. A child the read starts
-  inherits this profile and reaches no more than the read does.
+  inherits this profile and reaches no more than the read does, and the read
+  leads its own process group and ends it when the read settles, so a program
+  that forks a background process and exits does not leave it running after its
+  scratch is gone. A descendant that starts a session of its own leaves the
+  group, the same limit the runtime launches have.
 - A confined launch may stat the directories on the way into the roots it was
   granted, even where those directories sit beneath a denied subtree. The
   builder emits metadata-only rules for them; neither the listing nor the

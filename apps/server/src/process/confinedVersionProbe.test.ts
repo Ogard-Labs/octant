@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -11,9 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { prepareConfinedVersionProbe } from "./confinedVersionProbe";
+import { execVersionRead, prepareConfinedVersionProbe } from "./confinedVersionProbe";
 import { makeSeatbeltConfinementLive, seatbeltAllowRule } from "./seatbeltProfile";
 
 const directories: string[] = [];
@@ -343,4 +344,59 @@ describe("confined version probe", () => {
       expect(wroteInside).toBe(true);
     },
   );
+
+  describe("execVersionRead", () => {
+    const options = { env: { PATH: "/usr/bin:/bin" }, timeout: 5_000, maxBuffer: 1_024 };
+
+    function program(body: string): string {
+      const path = join(temporaryRoot(), "program");
+      writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+      chmodSync(path, 0o755);
+      return path;
+    }
+
+    function isRunning(pid: number): boolean {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+    }
+
+    it("ends a background process the program leaves behind when it exits", async () => {
+      // The program forks a process, closes the pipes it inherited, and exits.
+      // `execFile` settles on that exit and never looks at the descendant, which
+      // then outlives the scratch directory the read was confined to.
+      const pidFile = join(temporaryRoot(), "background.pid");
+      const path = program(`sleep 60 >/dev/null 2>&1 &\necho $! > '${pidFile}'\nprintf '1.2.3\\n'`);
+
+      const read = await execVersionRead(path, [], options);
+      const background = Number(readFileSync(pidFile, "utf8"));
+
+      expect(read.stdout).toBe("1.2.3\n");
+      await vi.waitFor(() => expect(isRunning(background)).toBe(false), { timeout: 3_000 });
+    });
+
+    it("ends the whole group when the read times out", async () => {
+      const pidFile = join(temporaryRoot(), "background.pid");
+      const path = program(`sleep 60 &\necho $! > '${pidFile}'\nsleep 60`);
+
+      await expect(execVersionRead(path, [], { ...options, timeout: 300 })).rejects.toThrow(
+        /timed out/,
+      );
+      const background = Number(readFileSync(pidFile, "utf8"));
+
+      await vi.waitFor(() => expect(isRunning(background)).toBe(false), { timeout: 3_000 });
+    });
+
+    it("rejects a non-zero exit and output past the limit, as execFile does", async () => {
+      await expect(execVersionRead(program("exit 3"), [], options)).rejects.toThrow(
+        /exited with 3/,
+      );
+      await expect(
+        execVersionRead(program("head -c 4096 /dev/zero | tr '\\0' x"), [], options),
+      ).rejects.toThrow(/output limit/);
+    });
+  });
 });

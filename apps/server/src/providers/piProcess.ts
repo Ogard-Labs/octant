@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
   chmodSync,
@@ -30,6 +30,7 @@ import {
   type SeatbeltConfinementPort,
 } from "../process/seatbeltProfile";
 import {
+  execVersionRead,
   prepareConfinedVersionProbe,
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
@@ -639,24 +640,19 @@ async function terminate(child: ChildProcess, timeoutMs: number): Promise<void> 
   signalGroup(child, "SIGKILL");
 }
 
-function inspectVersion(launch: ConfinedVersionProbeLaunch, timeoutMs: number): Promise<string> {
-  return new Promise((resolveVersion, reject) => {
-    execFile(
-      launch.command,
-      [...launch.args],
-      {
-        cwd: launch.workingDirectory,
-        env: launch.environment,
-        timeout: timeoutMs,
-        maxBuffer: 1024,
-      },
-      (error, stdout) => {
-        const version = stdout.trim();
-        if (error !== null || !/^\d+\.\d+\.\d+$/.test(version)) reject(new Error());
-        else resolveVersion(version);
-      },
-    );
+async function inspectVersion(
+  launch: ConfinedVersionProbeLaunch,
+  timeoutMs: number,
+): Promise<string> {
+  const { stdout } = await execVersionRead(launch.command, launch.args, {
+    cwd: launch.workingDirectory,
+    env: launch.environment,
+    timeout: timeoutMs,
+    maxBuffer: 1024,
   });
+  const version = stdout.trim();
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error();
+  return version;
 }
 
 export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort {

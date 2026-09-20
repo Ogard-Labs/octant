@@ -1,9 +1,10 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 import {
+  execVersionRead,
   prepareConfinedVersionProbe,
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
@@ -138,24 +139,19 @@ function validateBinary(binaryPath: string): ProviderFailure | undefined {
   return undefined;
 }
 
-function inspectVersion(launch: ConfinedVersionProbeLaunch, timeoutMs: number): Promise<string> {
-  return new Promise((resolveVersion, reject) => {
-    execFile(
-      launch.command,
-      [...launch.args],
-      {
-        cwd: launch.workingDirectory,
-        env: launch.environment,
-        timeout: timeoutMs,
-        maxBuffer: 1024,
-      },
-      (error, stdout) => {
-        const version = stdout.trim().replace(/^omp\//, "");
-        if (error !== null || !/^\d+\.\d+\.\d+$/.test(version)) reject(new Error());
-        else resolveVersion(version);
-      },
-    );
+async function inspectVersion(
+  launch: ConfinedVersionProbeLaunch,
+  timeoutMs: number,
+): Promise<string> {
+  const { stdout } = await execVersionRead(launch.command, launch.args, {
+    cwd: launch.workingDirectory,
+    env: launch.environment,
+    timeout: timeoutMs,
+    maxBuffer: 1024,
   });
+  const version = stdout.trim().replace(/^omp\//, "");
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error();
+  return version;
 }
 
 async function readReadyFrame(

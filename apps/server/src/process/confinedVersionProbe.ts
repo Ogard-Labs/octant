@@ -39,6 +39,7 @@
  * it is installed and working. A child the probe starts inherits this profile,
  * so it reaches no more than the probe does.
  */
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -171,6 +172,83 @@ export function prepareConfinedVersionProbe(
           ? error.message
           : `${name} version probe confinement could not be prepared.`,
     };
+  }
+}
+
+export interface ExecVersionReadOptions {
+  readonly cwd?: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly timeout: number;
+  readonly maxBuffer: number;
+}
+
+/**
+ * `execFile` for a version read that owns everything the program starts.
+ *
+ * `execFile` tracks only the direct child. A program that forks a background
+ * process, closes the pipes it inherited, and exits settles the read while the
+ * descendant runs on — after the scratch it was confined to is gone, and, when
+ * the program was found by a scan rather than named, with nobody having chosen
+ * to run it. The child leads its own process group and the group is ended when
+ * the read settles, on success, failure and timeout alike, which is what the
+ * spawn-based reads already do. A descendant that starts a session of its own
+ * leaves the group; that is the same limit those reads have.
+ *
+ * It settles the way `execFile` does: a non-zero exit, a timeout, or more than
+ * `maxBuffer` bytes on either stream is a rejection.
+ */
+export function execVersionRead(
+  command: string,
+  args: ReadonlyArray<string>,
+  options: ExecVersionReadOptions,
+): Promise<{ readonly stdout: string; readonly stderr: string }> {
+  return new Promise((resolveRead, rejectRead) => {
+    const child = spawn(command, [...args], {
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      env: options.env,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      endProcessGroup(child);
+      settle();
+    };
+    const timer = setTimeout(
+      () => finish(() => rejectRead(new Error("The version read timed out."))),
+      options.timeout,
+    );
+    const capture = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+      if (stream === "stdout") stdout += chunk.toString("utf8");
+      else stderr += chunk.toString("utf8");
+      if (stdout.length > options.maxBuffer || stderr.length > options.maxBuffer) {
+        finish(() => rejectRead(new Error("The version read exceeded its output limit.")));
+      }
+    };
+    child.stdout.on("data", capture("stdout"));
+    child.stderr.on("data", capture("stderr"));
+    child.once("error", (error) => finish(() => rejectRead(error)));
+    child.once("close", (code) =>
+      finish(() =>
+        code === 0
+          ? resolveRead({ stdout, stderr })
+          : rejectRead(new Error(`The version read exited with ${String(code)}.`)),
+      ),
+    );
+  });
+}
+
+function endProcessGroup(child: ChildProcess): void {
+  if (child.pid === undefined || process.platform === "win32") return;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // ESRCH: nothing is left in the group, which is the outcome wanted.
   }
 }
 
