@@ -63,10 +63,14 @@ export interface CodexThreadStartInput {
   readonly approvalPolicy: "never" | "on-request";
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
   /**
-   * Routes approval requests to the harness's built-in reviewer instead of
-   * the host callback. Only sent when `autoApprove` is effective (0104).
+   * Who answers approval requests: the host (`user`) or the harness's own
+   * reviewer (`auto_review`, 0104). Always sent, never omitted — Codex
+   * documents this as an override for "this thread and subsequent turns", so
+   * leaving it out keeps whatever the thread was last told, and a thread that
+   * once delegated would go on delegating after taint or after the user turned
+   * it off.
    */
-  readonly approvalsReviewer?: "auto_review";
+  readonly approvalsReviewer: "auto_review" | "user";
   /** app-server `thread/start` `serviceTier`: the model's declared speed tier. */
   readonly serviceTier?: string;
   /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
@@ -90,7 +94,7 @@ export interface CodexTurnStartInput {
     | { readonly type: "dangerFullAccess" }
     | { readonly type: "workspaceWrite" }
     | { readonly type: "readOnly" };
-  readonly approvalsReviewer?: "auto_review";
+  readonly approvalsReviewer: "auto_review" | "user";
 }
 
 export interface CodexApprovalResponse {
@@ -245,7 +249,7 @@ export function codexExecutionSettings(
   autoApprove?: boolean,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
-    return { approvalPolicy: "never", sandbox: "danger-full-access" };
+    return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
     // `on-request` lets the model decide when to escalate, so the sandbox — not
@@ -270,16 +274,18 @@ export function codexExecutionSettings(
     // scoped exception to 0104's rule that delegation reaches both prompting
     // postures, and it records what that costs: this posture no longer
     // delegates its command prompts either, because the reviewer cannot be
-    // scoped to a class.
+    // scoped to a class. `user` is sent rather than nothing whenever delegation
+    // is off: omitting the field leaves a thread that once delegated still
+    // routing to the reviewer after taint, after the user turns it off, or on a
+    // resume under this posture.
     return {
       approvalPolicy: "on-request",
       sandbox: "read-only",
-      ...(autoApprove === true && policy === "approval-gated"
-        ? { approvalsReviewer: "auto_review" as const }
-        : {}),
+      approvalsReviewer:
+        autoApprove === true && policy === "approval-gated" ? "auto_review" : "user",
     };
   }
-  return { approvalPolicy: "never", sandbox: "read-only" };
+  return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
 }
 
 /**

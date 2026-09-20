@@ -834,6 +834,7 @@ describe("Codex thread and turn lifecycle", () => {
       model: "gpt-5.4",
       approvalPolicy: "on-request",
       sandbox: "read-only",
+      approvalsReviewer: "user",
       serviceTier: "fast",
       config: { model_reasoning_effort: "low" },
     });
@@ -842,6 +843,7 @@ describe("Codex thread and turn lifecycle", () => {
       model: "gpt-5.4",
       approvalPolicy: "on-request",
       sandbox: "read-only",
+      approvalsReviewer: "user",
     });
     await acquired.close();
   });
@@ -876,6 +878,7 @@ describe("Codex thread and turn lifecycle", () => {
       model: "gpt-5.4",
       approvalPolicy: "on-request",
       sandbox: "read-only",
+      approvalsReviewer: "user",
     } satisfies Partial<CodexThreadStartInput>);
     await Effect.runPromise(
       acquired.connection.send({
@@ -895,6 +898,7 @@ describe("Codex thread and turn lifecycle", () => {
       input: [{ type: "text", text: "Explain the repository." }],
       approvalPolicy: "on-request",
       sandboxPolicy: { type: "readOnly" },
+      approvalsReviewer: "user",
     });
     await Effect.runPromise(acquired.connection.interrupt(sessionId));
     expect(f.calls.at(-1)).toEqual({
@@ -1104,6 +1108,7 @@ describe("Codex thread and turn lifecycle", () => {
       ],
       approvalPolicy: "on-request",
       sandboxPolicy: { type: "readOnly" },
+      approvalsReviewer: "user",
     });
     await acquired.close();
   });
@@ -1546,18 +1551,22 @@ describe("Codex execution authority and approvals", () => {
     expect(codexExecutionSettings("full-access")).toEqual({
       approvalPolicy: "never",
       sandbox: "danger-full-access",
+      approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("approval-gated")).toEqual({
       approvalPolicy: "on-request",
       sandbox: "read-only",
+      approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("auto-accept-edits")).toEqual({
       approvalPolicy: "on-request",
       sandbox: "read-only",
+      approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("plan")).toEqual({
       approvalPolicy: "never",
       sandbox: "read-only",
+      approvalsReviewer: "user",
     });
   });
 
@@ -1611,7 +1620,26 @@ describe("Codex execution authority and approvals", () => {
     expect(codexTurnExecutionSettings(policy)).toEqual({
       approvalPolicy,
       sandboxPolicy: { type: sandboxType },
+      approvalsReviewer: "user",
     });
+  });
+
+  it("routes approvals back to the user rather than leaving the reviewer set", () => {
+    // Codex documents `approvalsReviewer` as an override for "this thread and
+    // subsequent turns", so omitting it keeps whatever the thread was last
+    // told. A thread that once delegated would still route to the reviewer
+    // after taint, after the user turns delegation off, or on a resume under a
+    // posture that must not delegate — with the host never seeing the request.
+    // Every path states the value, so the absence of delegation is sent rather
+    // than implied.
+    for (const policy of ["full-access", "approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(codexExecutionSettings(policy).approvalsReviewer).toBe("user");
+      expect(codexTurnExecutionSettings(policy).approvalsReviewer).toBe("user");
+      expect(codexExecutionSettings(policy, false).approvalsReviewer).toBe("user");
+    }
+    expect(codexTurnExecutionSettings("approval-gated", true).approvalsReviewer).toBe(
+      "auto_review",
+    );
   });
 
   it("never delegates the edit waiver to the harness reviewer", () => {
@@ -1622,6 +1650,7 @@ describe("Codex execution authority and approvals", () => {
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "on-request",
       sandbox: "read-only",
+      approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("approval-gated", true)).toEqual({
       approvalPolicy: "on-request",
@@ -1646,6 +1675,7 @@ describe("Codex execution authority and approvals", () => {
         model: "gpt-5.4",
         approvalPolicy,
         sandbox,
+        approvalsReviewer: "user",
       });
       await acquired.close();
     },
