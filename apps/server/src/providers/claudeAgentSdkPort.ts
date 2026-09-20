@@ -787,7 +787,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   }),
               // The SDK composes the launch and its `SpawnOptions` carry no
               // bound root or posture, so this query's own are bound to the
-              // callback here (0142, 0143).
+              // callback here (0143, 0145).
               spawnClaudeCodeProcess: options.spawnClaudeCodeProcess({
                 projectRoot: input.projectRoot,
                 executionPolicy: input.executionPolicy,

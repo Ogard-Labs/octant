@@ -58,4 +58,4 @@ control plane to produce a turn.
 - 0006 ACP agent drivers
 - 0009 Sandbox confinement and approvals (one rule superseded in scope)
 - 0122 Provider readiness probes reach provider endpoints
-- 0143 A Plan turn is confined by Octant (one rule superseded)
+- 0145 A Plan turn is confined by Octant (one rule superseded)

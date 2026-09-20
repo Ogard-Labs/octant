@@ -62,4 +62,4 @@ process denial.
 
 - 0009 Sandbox confinement and approvals (two rules scoped)
 - 0122 Provider readiness probes reach provider endpoints
-- 0143 A Plan turn is confined by Octant (the same read rule scoped again)
+- 0145 A Plan turn is confined by Octant (the same read rule scoped again)

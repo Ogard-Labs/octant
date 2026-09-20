@@ -976,7 +976,7 @@ mechanisms are:
   scoped exception to 0009 recorded in
   [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md)
   and extended by
-  [decisions/0143-a-plan-turn-is-confined-by-octant.md](decisions/0143-a-plan-turn-is-confined-by-octant.md):
+  [decisions/0145-a-plan-turn-is-confined-by-octant.md](decisions/0145-a-plan-turn-is-confined-by-octant.md):
   the process producing a plan still has to ask the model for it, while the
   tools that thread reaches keep `none`.
   A provider runtime launch is wrapped when the process carries exactly one
@@ -984,14 +984,14 @@ mechanisms are:
   Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
   and the two Claude postures that write are not. That set is named and pinned
   by
-  [decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0142-confinement-wraps-a-runtime-that-carries-one-thread.md)
-  and narrowed by 0143, and the tools those threads reach stay confined either
+  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
+  and narrowed by 0145, and the tools those threads reach stay confined either
   way. A bound root a launch may not write is denied in the profile, so a
   checkout under that launch's own temporary directory is not writable through
   it. The `--version` read every family and the discovery scan perform before a
   runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
-  [decisions/0144-a-version-read-launches-confined.md](decisions/0144-a-version-read-launches-confined.md).
+  [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

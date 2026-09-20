@@ -8,7 +8,7 @@
  * family wrapped: the binary path is user-configured — and, in discovery, not
  * even named by the user — so a replaced executable ran with the user's whole
  * home and the network before any confined launch happened. 0142 names that as
- * a standing gap across every family, and 0144 closes it here, in one place, so
+ * a standing gap across every family, and 0146 closes it here, in one place, so
  * the read sites cannot drift apart again.
  *
  * A version read needs far less than a turn. It has no thread, so no bound

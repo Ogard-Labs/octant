@@ -6,7 +6,7 @@
 
 0009 says every Octant-spawned subprocess that can execute arbitrary code
 launches through the shared confinement builder, with no unconfined fallback.
-0142 records which runtime launches are wrapped and names the one launch no
+0143 records which runtime launches are wrapped and names the one launch no
 family wrapped: before any confined launch, each family spawns the configured
 executable for `--version`. Discovery goes further — it runs a descriptor's
 version arguments against a candidate it found on `PATH` or in an approved
