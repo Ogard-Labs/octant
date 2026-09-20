@@ -8,6 +8,8 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, isAbsolute, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -2559,6 +2561,31 @@ describe("Claude driver probe", () => {
     expect(f.queries[0]?.accountInfo).toHaveBeenCalledOnce();
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
     expect(f.releasedEnvironments).toHaveLength(2);
+  });
+
+  it("probes from a private empty folder, not the server's working directory", async () => {
+    // The probe binds whatever root it is given as a confined Plan launch. The
+    // working directory is not a project, and from `/` the builder refuses it.
+    const f = harness("subscription");
+    const inner = harness("subscription");
+    let existedWhileOpen = false;
+    let entriesWhileOpen: ReadonlyArray<string> = ["not read"];
+    f.setOpenQuery((input) => {
+      existedWhileOpen = existsSync(input.projectRoot);
+      entriesWhileOpen = readdirSync(input.projectRoot);
+      return inner.sdk.openQuery(input);
+    });
+
+    await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+
+    const root = inner.opens[0]?.projectRoot ?? "";
+    expect(root).not.toBe(resolve(process.cwd()));
+    expect(isAbsolute(root)).toBe(true);
+    expect(basename(root)).toMatch(/^octant-claude-probe-/);
+    expect(existedWhileOpen).toBe(true);
+    expect(entriesWhileOpen).toEqual([]);
+    // Released with the probe, after the query that bound it.
+    expect(existsSync(root)).toBe(false);
   });
 
   it("names models by the versioned clause the runtime keeps in the description", async () => {

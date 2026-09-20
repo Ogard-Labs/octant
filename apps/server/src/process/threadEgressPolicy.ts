@@ -14,8 +14,9 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
  * - Full access / explicit network approval → `unrestricted`
  *
  * Provider-owned runtimes that make their own API call are a scoped
- * exception (0132): Chat and Work turns resolve `provider-endpoints-only`
- * through `resolveProviderRuntimeEgressPolicy`. Tools keep these defaults.
+ * exception (0132, extended by 0145): every posture but Full access resolves
+ * `provider-endpoints-only` through `resolveProviderRuntimeEgressPolicy`.
+ * Tools keep these defaults, Plan included.
  */
 
 export type ThreadEgressPolicy = "none" | "provider-endpoints-only" | "unrestricted";
@@ -87,11 +88,19 @@ export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
 /**
  * The egress a provider runtime may have when it carries a turn.
  *
- * ACP, Pi, and OpenCode call their own control plane. The thread defaults in
- * 0009 would launch those agents with OS `none` on Chat and Work, so the
- * turn never starts. This named policy is the scoped exception (0132): the
- * runtime reaches provider endpoints, tools still follow the thread defaults,
- * and Plan stays `none`.
+ * ACP, Pi, OpenCode, and Claude call their own control plane. The thread
+ * defaults in 0009 would launch those agents with OS `none`, so the turn never
+ * starts. This named policy is the scoped exception (0132, extended by 0145):
+ * the runtime reaches provider endpoints on every posture including Plan, and
+ * tools still follow the thread defaults, Plan included.
+ *
+ * Plan is not an exception here because the model call is not a Plan side
+ * effect. Measured on macOS 27 against this builder's profile: `none` ends the
+ * call with `fetch failed` and no connection, `allow` reaches
+ * api.anthropic.com and returns its status. A Plan runtime on `none` therefore
+ * cannot answer at all — it retries until the turn times out — while what Plan
+ * actually withholds, writing to the checkout and executing a process, is
+ * withheld by the filesystem and process rules rather than by this one.
  */
 export function resolveProviderRuntimeEgressPolicy(
   input: ResolveDefaultThreadEgressPolicyInput,
@@ -99,7 +108,6 @@ export function resolveProviderRuntimeEgressPolicy(
   if (input.explicitNetworkApproval === true || input.executionPolicy === "full-access") {
     return "unrestricted";
   }
-  if (input.executionPolicy === "plan") return "none";
   return "provider-endpoints-only";
 }
 

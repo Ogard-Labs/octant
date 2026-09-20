@@ -1,7 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { accessSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
@@ -9,9 +20,19 @@ import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { makeClaudeProcessLive, type ClaudeProcessOptions } from "./claudeProcess";
+import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
+import type {
+  SeatbeltConfinementPort,
+  SeatbeltConfinementPrepareInput,
+} from "../process/seatbeltProfile";
+import {
+  makeClaudeProcessLive,
+  type ClaudeProcessOptions,
+  type ClaudeRuntimeConfinement,
+} from "./claudeProcess";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeClaudeCli.ts", import.meta.url));
+const planProbePath = fileURLToPath(new URL("./fixtures/confinedPlanProbe.sh", import.meta.url));
 const directories: string[] = [];
 
 function fixture(mode = "ready"): {
@@ -100,12 +121,17 @@ function makePort(
   });
 }
 
+/** A posture whose launch Octant does not confine, so the spawn runs unwrapped. */
+function approvalGated(target: ReturnType<typeof fixture>): ClaudeRuntimeConfinement {
+  return { projectRoot: target.root, executionPolicy: "approval-gated" };
+}
+
 function spawnTarget(
   target: ReturnType<typeof fixture>,
   overrides: Omit<ClaudeProcessOptions, "inheritedEnvironment"> = {},
 ): { readonly process: SpawnedProcess; readonly controller: AbortController } {
   const controller = new AbortController();
-  const process = makePort(target, overrides).spawn({
+  const process = makePort(target, overrides).spawn(approvalGated(target))({
     command: target.binaryPath,
     args: ["sdk-test"],
     cwd: target.root,
@@ -146,7 +172,7 @@ describe("ClaudeProcessPort probes", () => {
       message: "Claude binary path must be absolute.",
     });
     expect(() =>
-      port.spawn({
+      port.spawn(approvalGated(target))({
         command: "claude",
         args: ["sdk-test"],
         env: target.environment,
@@ -292,7 +318,7 @@ describe("ClaudeProcessPort spawn", () => {
     const credential = "broker-resolved-argument-sentinel";
 
     expect(() =>
-      makePort(target).spawn({
+      makePort(target).spawn(approvalGated(target))({
         command: target.binaryPath,
         args: ["sdk-test", `--credential=${credential}`],
         cwd: target.root,
@@ -380,4 +406,283 @@ describe("ClaudeProcessPort spawn", () => {
     expect(diagnostics).toContain("Claude runtime stderr captured (64 bytes, truncated).");
     expect(diagnostics.join(" ")).not.toMatch(/private-runtime|sentinel/);
   });
+});
+
+describe("Claude runtime confinement", () => {
+  function recordingConfinement(): {
+    readonly port: SeatbeltConfinementPort;
+    readonly prepared: SeatbeltConfinementPrepareInput[];
+    readonly sandboxPath: string;
+  } {
+    const fake = createFakeSandboxConfinement("octant-claude-confinement-");
+    directories.push(fake.root);
+    const prepared: SeatbeltConfinementPrepareInput[] = [];
+    return {
+      prepared,
+      sandboxPath: fake.sandboxPath,
+      port: {
+        prepare: (input) => {
+          prepared.push(input);
+          return fake.confinement.prepare(input);
+        },
+      },
+    };
+  }
+
+  it("binds a Plan turn's checkout to a read-only launch that may reach its provider", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test"],
+      cwd: target.root,
+      env: target.environment,
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    expect(launch.boundRoot).toBe(realpathSync(target.root));
+    expect(launch.writeBoundRoot).toBe(false);
+    expect(launch.allowProcessExec).toBe(false);
+    expect(launch.allowProcessFork).toBe(false);
+    // The runtime answers a Plan turn by calling its own control plane, which a
+    // `none` egress would refuse before the first token (0132, 0145).
+    expect(launch.networkEgress).toBe("allow");
+  });
+
+  it("gives a Plan turn a temporary directory only that launch can name, and removes it after the runtime exits", async () => {
+    const target = fixture();
+    const ambient = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-ambient-")));
+    directories.push(ambient);
+    // Another thread's scratch file in the shared temp root: the runtime must not be able to name it.
+    writeFileSync(join(ambient, "neighbour.txt"), "another thread\n");
+    const reporter = join(target.root, "report-tmpdir.sh");
+    writeFileSync(
+      reporter,
+      "#!/bin/sh\nprintf 'tmpdir=%s\\n' \"$TMPDIR\"\nprintf 'scratch=%s\\n' \"$CLAUDE_CODE_TMPDIR\"\n[ -d \"$TMPDIR\" ] && printf 'present=yes\\n'\n",
+    );
+    chmodSync(reporter, 0o755);
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: reporter,
+      args: [],
+      cwd: target.root,
+      env: { ...target.environment, TMPDIR: ambient },
+      signal: new AbortController().signal,
+    });
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      output += chunk.toString();
+    });
+    await waitForExit(child);
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    // A fresh folder inside the ambient root, never the ambient root itself.
+    expect(launch.temporaryDirectory).not.toBe(ambient);
+    expect(dirname(launch.temporaryDirectory ?? "")).toBe(ambient);
+    expect(basename(launch.temporaryDirectory ?? "")).toMatch(/^octant-claude-plan-/);
+    expect(launch.readRoots).toContain(launch.temporaryDirectory);
+    expect(launch.readRoots).not.toContain(ambient);
+    expect(launch.privateHomeAllowPaths).not.toContain(ambient);
+    // The runtime is told to use that folder, so it never falls back to the shared one.
+    expect(output).toContain(`tmpdir=${launch.temporaryDirectory}`);
+    expect(output).toContain("present=yes");
+    // The runtime's own scratch defaults to a `claude-<uid>` tree in the shared
+    // `/tmp`; it is moved into the launch's folder rather than granted.
+    expect(output).toContain(`scratch=${launch.temporaryDirectory}`);
+    const sharedScratch = join("/tmp", `claude-${process.getuid?.() ?? 0}`);
+    expect(launch.additionalWriteRoots ?? []).not.toContain(sharedScratch);
+    expect(launch.readRoots ?? []).not.toContain(sharedScratch);
+    // The folder goes with the runtime; the shared root and its other files stay.
+    expect(existsSync(launch.temporaryDirectory ?? "")).toBe(false);
+    expect(readdirSync(ambient)).toEqual(["neighbour.txt"]);
+  });
+
+  it("removes a Plan turn's temporary directory when the launch is refused", () => {
+    const target = fixture();
+    const ambient = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-ambient-")));
+    directories.push(ambient);
+
+    expect(() =>
+      makePort(target, {
+        confinement: {
+          prepare: () => {
+            throw new Error("no sandbox runtime");
+          },
+        },
+      }).spawn({ projectRoot: target.root, executionPolicy: "plan" })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, TMPDIR: ambient },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("no sandbox runtime");
+    expect(readdirSync(ambient)).toEqual([]);
+  });
+
+  it("opens the credential-store lookup for a subscription launch and not for an API-key one", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    for (const environment of [
+      target.environment,
+      { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+    ]) {
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: environment,
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGTERM");
+    }
+
+    expect(confinement.prepared.map((launch) => launch.allowProviderCredentialLookup)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("refuses a Plan turn whose project root is also a runtime state directory", () => {
+    const target = fixture();
+    const configHome = join(target.root, ".claude");
+    mkdirSync(configHome);
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: configHome,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: configHome,
+        env: { ...target.environment, HOME: configHome, CLAUDE_CONFIG_DIR: configHome },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("also a runtime state directory");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(configHome)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose temporary directory is inside the checkout", () => {
+    const target = fixture();
+    const inside = join(target.root, "scratch");
+    mkdirSync(inside);
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, TMPDIR: inside },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("outside the checkout");
+    // Nothing is created in the tree the turn may only read, and nothing starts.
+    expect(readdirSync(inside)).toEqual([]);
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("leaves a posture that still writes on the runtime's own sandbox", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy,
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: target.environment,
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGTERM");
+    }
+
+    expect(confinement.prepared).toEqual([]);
+  });
+
+  it("refuses a Plan turn that has no checkout to bind rather than launching unwrapped", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: join(target.root, "no-such-checkout"),
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: target.environment,
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("existing absolute project root");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it.skipIf(process.platform !== "darwin")(
+    "lets the operating system refuse a Plan turn's write and its process execution",
+    async () => {
+      const target = fixture();
+      const readable = join(target.root, "readable.txt");
+      const escapeTarget = join(target.root, "plan-must-not-exist.txt");
+      writeFileSync(readable, "in-the-checkout\n");
+
+      const child = makeClaudeProcessLive({ shutdownTimeoutMs: 500 }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: planProbePath,
+        args: [],
+        cwd: target.root,
+        env: {
+          ...target.environment,
+          OCTANT_PROBE_TARGET: escapeTarget,
+          OCTANT_PROBE_READABLE: readable,
+        },
+        signal: new AbortController().signal,
+      });
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        output += chunk.toString();
+      });
+      await waitForExit(child);
+
+      expect(output).toContain("write=refused");
+      expect(existsSync(escapeTarget)).toBe(false);
+      // The checkout is readable; only writing and running something is not.
+      expect(output).toContain("read=in-the-checkout");
+      // The probe asks for a child process last. Under this posture the kernel
+      // refuses the fork before the exec, so the shell dies there — it never
+      // reaches the line that would report an allowed exec.
+      expect(output).not.toContain("exec=allowed");
+      expect(child.exitCode).toBe(128);
+    },
+  );
 });

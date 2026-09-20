@@ -971,17 +971,24 @@ mechanisms are:
   after those denials. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
   Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
-  Linux) fails closed. Provider runtimes that make their own API call resolve
-  provider-endpoints-only on Chat and Work turns, a scoped exception to 0009
-  recorded in [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md).
+  Linux) fails closed. A provider runtime that makes its own API call resolves
+  provider-endpoints-only on every posture below Full access, Plan included, a
+  scoped exception to 0009 recorded in
+  [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md)
+  and extended by
+  [decisions/0145-a-plan-turn-is-confined-by-octant.md](decisions/0145-a-plan-turn-is-confined-by-octant.md):
+  the process producing a plan still has to ask the model for it, while the
+  tools that thread reaches keep `none`.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
-  Full access. The Codex app-server carries every thread on a provider instance
-  and is a named exception; the Claude Agent SDK launch carries one thread per
-  query and is unwrapped anyway, a gap and not an exception. That set is named
-  and pinned by
-  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md),
-  and the tools those threads reach stay confined either way.
+  Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
+  and the two Claude postures that write are not. That set is named and pinned
+  by
+  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
+  and narrowed by 0145, and the tools those threads reach stay confined either
+  way. A bound root a launch may not write is denied in the profile, so a
+  checkout under that launch's own temporary directory is not writable through
+  it.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent
