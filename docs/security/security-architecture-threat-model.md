@@ -290,7 +290,11 @@ window, or approves an action class the host policy reserves for the local user.
   `apps/server/src/providers/piProcess.ts`, `vibeProcess.ts`, `kiloProcess.ts`, `kimiProcess.ts`,
   `devinProcess.ts`. Environments are allowlist-sanitized (`SAFE_ENVIRONMENT` plus declared
   provider credentials), and `apps/server/src/childProcessEnvironment.ts` strips the broker URLs,
-  broker tokens, and desktop bridge secret from every child.
+  broker tokens, and desktop bridge secret from every child. `codexProcess.ts` applies the same
+  environment allowlist to its probe and long-lived app-server; that runtime is not itself wrapped
+  by Octant confinement, so the allowlist is the only boundary between a host secret and a
+  model-generated shell command. A model provider's own credential crosses (`OPENAI_API_KEY`, the
+  Bedrock bearer token); a general-purpose one (a GitHub token, AWS IAM access keys) never does.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
