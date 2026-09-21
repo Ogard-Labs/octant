@@ -160,6 +160,7 @@ distilled successor of the earlier long-form design specifications.
 | [0146](0146-a-version-read-launches-confined.md) | A version read launches confined, with no root, no home, and no network | Accepted |
 | [0147](0147-internal-testflight-carries-the-existing-remote-client.md) | Internal TestFlight carries the existing remote client | Accepted |
 | [0148](0148-paired-code-access-is-request-scoped.md) | Paired Code access is request-scoped | Accepted |
+| [0149](0149-a-thread-over-the-application-ground-wears-glass.md) | A thread over the application ground wears glass | Accepted |
 
 ## Adding an ADR
 

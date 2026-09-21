@@ -243,7 +243,8 @@ above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. The one exception is a workspace with no reading surface
 under it (the application ground behind everything, or a translucent
-workspace), where a reply carries a reading card. Running text keeps a 72ch
+workspace), where a reply carries a reading card; over the application
+ground that card, the bubble, and the composer are glass (0149). Running text keeps a 72ch
 measure; tables and code blocks run the column's width, ending on the same edge
 as the composer; markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
@@ -957,10 +958,11 @@ When adding or touching UI:
 - Feature styles position product surfaces; adapters paint shared controls.
   When migrating an old control, remove the replaced paint rules rather than
   keeping a parallel recipe.
-- Glass is the material for a surface with a ground behind it: the phone, and
-  Zen on the desktop (0107). Its tint, stroke, and highlight are theme roles
-  like every other colour; what those two surfaces get is a different
-  material, not a second palette. Do not copy mobile atmosphere or phone radii
+- Glass is the material for a surface with a ground behind it: the phone, Zen
+  on the desktop (0107), and a thread over the application ground, where the
+  reply card, the person's bubble, and the composer wear it (0149). Its tint,
+  stroke, and highlight are theme roles like every other colour; what those
+  surfaces get is a different material, not a second palette. Do not copy mobile atmosphere or phone radii
   into a flat desktop pane, and do not bring a blur onto a pane that has no
   ground under it.
 
