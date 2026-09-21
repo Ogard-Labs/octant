@@ -743,6 +743,15 @@ function renderCodeTab(
       : codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(tab.threadId),
         );
+  const checkoutAvailability =
+    activeThread === undefined
+      ? undefined
+      : codeController.activeView !== undefined &&
+          String(codeController.activeView.thread.id) === String(tab.threadId)
+        ? codeController.activeView.checkout.availability
+        : codeController.bootstrap?.checkouts.find(
+            (checkout) => String(checkout.id) === String(activeThread.checkoutId),
+          )?.availability;
   const providerInstanceId = activeThread?.providerInstanceId;
   const harnessAutoReviewSupported =
     providerInstanceId === undefined
@@ -871,6 +880,7 @@ function renderCodeTab(
           <CodeThreadEnvironment
             active={paneIsActive(props, paneId)}
             observe={codeController.conversationHistory === "loaded"}
+            checkoutAvailability={checkoutAvailability}
             {...(props.environmentDockOpen === undefined
               ? {}
               : { environmentOpen: props.environmentDockOpen })}

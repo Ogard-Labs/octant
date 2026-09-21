@@ -8,6 +8,7 @@ import type {
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type {
+  CodeCheckoutIdentity,
   CodeCommand,
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
@@ -48,6 +49,12 @@ export interface CodeThreadEnvironmentProps {
   readonly active?: boolean;
   /** Defers filesystem and Git observation until the primary transcript is ready. */
   readonly observe?: boolean;
+  /**
+   * Whether the host has reconnected this thread's checkout. The host starts
+   * every checkout Waiting after a launch and refuses to observe one until it
+   * is back, so a read sent earlier fails and is never repeated.
+   */
+  readonly checkoutAvailability?: CodeCheckoutIdentity["availability"] | undefined;
   readonly project?: ProjectSummary | undefined;
   readonly projectClient?: ProjectClient | undefined;
   readonly serverUrl?: string;
@@ -104,7 +111,10 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const environmentOpen = props.environmentOpen === true;
   const controller = useCodeEnvironmentController({
     ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
-    enabled: props.project !== undefined && props.observe !== false,
+    enabled:
+      props.project !== undefined &&
+      props.observe !== false &&
+      props.checkoutAvailability !== "waiting",
     project: props.project,
     threadId: props.tab.threadId,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
