@@ -1190,16 +1190,11 @@ h6 {
 }
 
 /* A Project name is a section header over its thread rows, not a row among
-   them: generous room above each header, none below, and no per-row seams.
-
-   2px was the same step the thread rows inside a Project use, so a sidebar of
-   several Projects read as one unbroken list and a Project header looked like
-   another thread. The gap between Projects is now wide enough to group at a
-   glance, and the rows inside one are pulled tighter than that gap, so the
-   two readings do not compete: the eye finds the Project first, then its
-   threads. The three levels stay ordered: rows, Projects, sections. */
+   them. Keep the gap between folders visible, but small enough that collapsed
+   folders still read as a compact list. The three levels stay ordered: rows,
+   Projects, sections. */
 .project-block + .project-block {
-  margin-top: var(--oct-space-4);
+  margin-top: var(--oct-space-2);
 }
 
 /* Projects, then Chats: two flat groups parted by one hairline, never cards. */
@@ -1222,11 +1217,18 @@ h6 {
      so neither reading won. */
   gap: 0;
   margin: 2px 0 0;
-  /* No indent of its own. An indented list made a thread's selection fill
-     start 16px from the sidebar's edge and end 8px from it, while every other
-     row's fill sat 8px from both; the Project's heavier name and the rows'
-     provider marks are what say these threads belong to it. */
+  /* Unfiled and archive lists stay aligned to their owning section. Folder
+     children add the relationship cue below without changing those lists. */
   padding-left: 0;
+}
+
+/* A short rail and one inset make a thread list read as the contents of the
+   folder above it. The rail belongs to the list, so it also covers its quiet
+   folding control without adding a card around every thread. */
+.project-block > .project-threads {
+  margin-inline-start: var(--oct-space-2);
+  padding-inline-start: var(--oct-space-2);
+  border-inline-start: 1px solid var(--oct-hairline);
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2

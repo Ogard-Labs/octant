@@ -907,15 +907,17 @@ html[data-octant-native-host="true"]
 
 /* Show more and Show less are one quiet row at the end of a folded list. */
 .project-threads__more {
-  min-height: var(--oct-nav-row-h);
-  padding: 0 var(--oct-space-2);
+  min-height: var(--oct-space-6);
+  padding: 0 var(--oct-space-1);
   color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
+  opacity: 0.78;
 }
 
 .project-threads__more:hover,
 .project-threads__more:focus-visible {
   color: var(--oct-fg);
+  opacity: 1;
 }
 
 .sidebar-navigation__thread-row {

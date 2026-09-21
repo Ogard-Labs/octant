@@ -380,8 +380,28 @@ describe("WindowChrome", () => {
 
     // Rows sit flush inside a Project; the Project gap is what the eye finds.
     expect(rows).toContain("gap: 0;");
-    expect(projects).toContain("margin-top: var(--oct-space-4);");
+    expect(projects).toContain("margin-top: var(--oct-space-2);");
     expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
+
+    // The nested list is a folder child: a small inset and rail make that
+    // relationship visible without giving every thread its own card.
+    const nestedRows = cssRule(".project-block > .project-threads");
+    expect(nestedRows).toContain("padding-inline-start: var(--oct-space-2);");
+    expect(nestedRows).toContain("margin-inline-start: var(--oct-space-2);");
+    expect(nestedRows).toContain("border-inline-start: 1px solid var(--oct-hairline);");
+
+    // Folding is a navigation aid, so its control should recede below a
+    // normal thread row while remaining keyboard reachable.
+    const more = cssRule(".project-threads__more");
+    expect(more).toContain("min-height: var(--oct-space-6);");
+    expect(more).toContain("font-size: var(--oct-text-xs);");
+    expect(more).toContain("opacity: 0.78;");
+
+    // Project actions are available on hover/focus, not as permanent noise
+    // beside every folder.
+    const projectActions = cssRule(".project-row__action--icon");
+    expect(projectActions).toContain("width: 0;");
+    expect(projectActions).toContain("opacity: 0;");
   });
 
   it("keeps the ground behind the start screen rather than over its cards", () => {
