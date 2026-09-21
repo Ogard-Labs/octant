@@ -157,6 +157,40 @@ describe("ACP managed tool bridge", () => {
           })
         ).status,
       ).toBe(404);
+      await fetch(bridge.server.url, { method: "DELETE", headers });
+      const reinitialized = await fetch(bridge.server.url, {
+        method: "POST",
+        headers: commonHeaders,
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 7,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "test-acp-reconnect", version: "1" },
+          },
+        }),
+      });
+      expect(reinitialized.status).toBe(200);
+      for (let index = 0; index < 8; index += 1) {
+        const extra = await fetch(bridge.server.url, {
+          method: "POST",
+          headers: commonHeaders,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 8 + index,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "test-acp-bound", version: "1" },
+            },
+          }),
+        });
+        expect(extra.status).toBe(index < 7 ? 200 : 429);
+        await extra.text();
+      }
     } finally {
       await bridge.close();
       await bridge.close();

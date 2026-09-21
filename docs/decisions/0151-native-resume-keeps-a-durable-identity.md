@@ -60,6 +60,21 @@ A resumed turn can also have a different allowed tool catalogue.
   Same-connection replacement closes its idle predecessor before process startup.
   Starting reservations exclude runtime changes; shutdown waits for startup and
   destroys its resources before completing. Failed cleanup retains ownership.
+- ACP's authenticated loopback MCP endpoint accepts successive transport sessions,
+  including a provider that lists tools in one session and calls them in another.
+  It holds at most eight concurrent MCP sessions and closes all with the bridge.
+  Request admission still captures a revocable turn binding before body upload.
+- Vibe ACP 2.25.0 implements HTTP MCP but omits its initialize declaration. The
+  profile records this exact natively verified release as a compatibility case;
+  an explicit refusal or an unverified release still requires negotiation.
+  Tool catalogue attestation remains mandatory before any turn starts.
+- Vibe ACP 2.25.0 retains a successfully completed process in the same bounded
+  idle pool. Warm reuse requires identical task, provider, executable, managed
+  home, root, mode, model and reasoning options, execution policy, authentication
+  mode, and complete tool catalogue. Each turn registers fresh event and approval
+  state and a new bridge executor. Interrupted, failed, unfinished-tool, or idle
+  unexpectedly active runtimes are destroyed. Other ACP versions cold-resume
+  their existing native history until their retention lifecycle is verified.
 - Pi 0.85.1 can retain a successfully settled process for 30 seconds, with at
   most four idle native runtimes across the host. Warm reuse requires identical
   executable, managed home, root, mode, model, execution policy, and full tool

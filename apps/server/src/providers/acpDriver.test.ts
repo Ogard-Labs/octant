@@ -162,14 +162,16 @@ function fixture(
   overrides: Partial<Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory">> & {
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
+    readonly runtimeVersion?: string;
   } = {},
 ) {
   const client = new FakeClient(profile);
   const starts: Array<Record<string, unknown>> = [];
   let active = 0;
+  let peakActive = 0;
   let released = 0;
   const connection = {
-    version: "7.4.11",
+    version: overrides.runtimeVersion ?? "7.4.11",
     pid: 311,
     root: managedHome,
     initialized: {
@@ -196,6 +198,7 @@ function fixture(
       return Effect.acquireRelease(
         Effect.sync(() => {
           active += 1;
+          peakActive = Math.max(peakActive, active);
           return { ...connection, root: input.root };
         }),
         () =>
@@ -236,6 +239,7 @@ function fixture(
     starts,
     credentialResolver,
     active: () => active,
+    peakActive: () => peakActive,
     released: () => released,
   };
 }
@@ -661,10 +665,11 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         };
       },
     );
-    const { driver } = fixture(profiles[0]!, {
+    const { driver, client } = fixture(profiles[0]!, {
       mcpHttp: true,
       managedToolsBridgeFactory: bridgeFactory,
     });
+    client.prompt.mockImplementation(() => new Promise(() => {}));
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
@@ -677,6 +682,12 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
               sessionId,
               modelId,
               executionPolicy: "approval-gated",
+              tools,
+            });
+            yield* connection.send({
+              sessionId,
+              prompt: "use the browser",
+              attachments: [],
               tools,
             });
             if (execute === undefined)
@@ -736,6 +747,143 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       ).then((failure) => failure.category),
     ).resolves.toBe("invalid-configuration");
   });
+
+  if (profile.kind === "mistral-vibe") {
+    it.each([
+      ["2.25.0", undefined, "supported"],
+      ["2.25.1", undefined, "unsupported"],
+      ["2.25.0", false, "unsupported"],
+    ] as const)(
+      "honors HTTP capability evidence for %s with advertisement %s",
+      async (runtimeVersion, http, expected) => {
+        const { driver, connection } = fixture(profile, { runtimeVersion });
+        if (http !== undefined)
+          Object.assign(connection.initialized.agentCapabilities, { mcpCapabilities: { http } });
+        await withProcessPlatform("darwin", async () => {
+          const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+          expect(result.capabilities.appManagedTools).toBe(expected);
+        });
+      },
+    );
+
+    it.each(["approval-gated", "full-access"] as const)(
+      "resumes a settled native conversation under %s without concurrent writers",
+      async (nextPolicy) => {
+        const { driver, client, registry, starts, active, peakActive } = fixture(profile, {
+          runtimeVersion: "2.25.0",
+        });
+        try {
+          const cursor = await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+                const handle = yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                });
+                const events = yield* Effect.fork(
+                  Stream.runCollect(
+                    (yield* connection.subscribe).pipe(
+                      Stream.takeUntil((event) => event.kind === "completed"),
+                    ),
+                  ),
+                );
+                yield* connection.send({
+                  sessionId,
+                  prompt: "remember",
+                  tools: [],
+                  attachments: [],
+                });
+                yield* Fiber.join(events);
+                yield* connection.stop(sessionId);
+                return handle.resumeCursor;
+              }),
+            ),
+          );
+          expect(active()).toBe(1);
+          if (cursor === undefined) throw new Error("Missing cursor");
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+                yield* connection.resume({
+                  sessionId,
+                  resumeCursor: cursor,
+                  executionPolicy: nextPolicy,
+                });
+                expect(starts).toHaveLength(nextPolicy === "approval-gated" ? 1 : 2);
+                if (nextPolicy === "approval-gated") {
+                  expect(client.loadSession).not.toHaveBeenCalled();
+                  expect(client.resumeSession).not.toHaveBeenCalled();
+                } else {
+                  expect(client.loadSession).toHaveBeenCalledWith(cursor.value, projectRoot);
+                }
+                expect(peakActive()).toBe(1);
+                yield* connection.stop(sessionId);
+              }),
+            ),
+          );
+          expect(active()).toBe(0);
+        } finally {
+          await registry.closeAll();
+        }
+      },
+    );
+
+    it
+      .skipIf(profile.kind !== "mistral-vibe")
+      .each(["unfinished-tool", "late-event", "idle-event"] as const)(
+      "destroys a settled process with %s activity",
+      async (activity) => {
+        const { driver, client, registry, active } = fixture(profile, { runtimeVersion: "2.25.0" });
+        const emit = () =>
+          client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: { sessionUpdate: "tool_call", toolCallId: "unfinished", title: "shell" },
+            },
+          });
+        if (activity === "unfinished-tool")
+          client.prompt.mockImplementationOnce(async () => {
+            emit();
+            return { stopReason: "end_turn" };
+          });
+        try {
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+                yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+                const events = yield* Effect.fork(
+                  Stream.runCollect(
+                    (yield* connection.subscribe).pipe(
+                      Stream.takeUntil((event) => event.kind === "completed"),
+                    ),
+                  ),
+                );
+                yield* connection.send({
+                  sessionId,
+                  prompt: "complete",
+                  tools: [],
+                  attachments: [],
+                });
+                yield* Fiber.join(events);
+                if (activity === "late-event") emit();
+                yield* connection.stop(sessionId);
+                if (activity === "idle-event") emit();
+                yield* Effect.promise(() => vi.waitFor(() => expect(active()).toBe(0)));
+              }),
+            ),
+          );
+        } finally {
+          await registry.closeAll();
+        }
+      },
+    );
+  }
 
   it("waits for starting sessions at shutdown and refuses to admit them afterward", async () => {
     const { driver, client, registry, active } = fixture(profile);

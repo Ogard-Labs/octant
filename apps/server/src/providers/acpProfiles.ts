@@ -126,6 +126,10 @@ export interface AcpSessionMetaReasoning {
 }
 
 export interface AcpProviderProfile {
+  /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
+  readonly retainedSessionVersions?: ReadonlyArray<string>;
+  /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
+  readonly unadvertisedHttpMcpVersions?: ReadonlyArray<string>;
   readonly kind: AcpProviderKind;
   readonly displayName: string;
   /** Session config option that toggles reasoning, when the agent exposes one. */
@@ -437,6 +441,10 @@ const devinProfile: AcpProviderProfile = {
 
 const vibeProfile: AcpProviderProfile = {
   kind: "mistral-vibe",
+  retainedSessionVersions: ["2.25.0"],
+  // This release handles HTTP MCP but omits it from initialize. Native evidence
+  // covers tool calls across warm turns and a cold native-session resume.
+  unadvertisedHttpMcpVersions: ["2.25.0"],
   displayName: "Mistral Vibe",
   reasoningOptionId: "thinking",
   // Vibe's ACP mode ids are its agent profile names, and those names moved:

@@ -121,7 +121,7 @@ export async function createAcpManagedToolsBridge(
     binding.controller.abort();
     binding = { execute: next, controller: new AbortController() };
   };
-  const managed = createManagedMcpTools(definitions, async (name, inputJson, signal, context) => {
+  const executeBound: ExecuteManagedTool = async (name, inputJson, signal, context) => {
     const admitted = admittedRequest.getStore();
     if (admitted === undefined || admitted.execute === undefined)
       return { resultJson: '{"error":"tool-unavailable"}', isError: true };
@@ -130,13 +130,46 @@ export async function createAcpManagedToolsBridge(
     return context === undefined
       ? admitted.execute(name, inputJson, boundSignal)
       : admitted.execute(name, inputJson, boundSignal, context);
-  });
-  if (managed.kind !== "ready") throw new Error("ACP tool catalogue is invalid.");
+  };
+  const createServerForSession = () => {
+    const managed = createManagedMcpTools(definitions, executeBound);
+    if (managed.kind !== "ready") throw new Error("ACP tool catalogue is invalid.");
+    return managed.server;
+  };
+  const peers = new Map<StreamableHTTPServerTransport, ReturnType<typeof createServerForSession>>();
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  const createTransport = async () => {
+    const mcp = createServerForSession();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: randomUUID,
+      onsessioninitialized: (id) => {
+        sessions.set(id, transport);
+      },
+      onsessionclosed: async (id) => {
+        sessions.delete(id);
+        peers.delete(transport);
+        await mcp.close();
+      },
+    });
+    peers.set(transport, mcp);
+    try {
+      await mcp.connect(new AcpMcpTransport(transport));
+    } catch (error) {
+      peers.delete(transport);
+      await mcp.close().catch(() => undefined);
+      throw error;
+    }
+    return transport;
+  };
+  const closePeers = async () => {
+    await Promise.all([...peers.values()].map((mcp) => mcp.close().catch(() => undefined)));
+    peers.clear();
+    sessions.clear();
+  };
 
   const token = randomBytes(32).toString("base64url");
   const path = `/mcp/${randomBytes(24).toString("base64url")}`;
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
-  await managed.server.connect(new AcpMcpTransport(transport));
+  let initialTransport: StreamableHTTPServerTransport | undefined = await createTransport();
 
   let closed = false;
   let loopbackHost: string | undefined;
@@ -179,11 +212,45 @@ export async function createAcpManagedToolsBridge(
     const admitted = binding;
     void (async () => {
       const body = request.method === "POST" ? await readRequestBody(request) : undefined;
+      if (closed) {
+        notFound(response);
+        return;
+      }
       let method: unknown;
       if (typeof body === "object" && body !== null && !Array.isArray(body) && "method" in body) {
         method = body.method;
       }
-      await admittedRequest.run(admitted, () => transport.handleRequest(request, response, body));
+      const sessionId = request.headers["mcp-session-id"];
+      let transport = typeof sessionId === "string" ? sessions.get(sessionId) : undefined;
+      if (transport === undefined) {
+        if (sessionId !== undefined) {
+          notFound(response);
+          return;
+        }
+        if (method !== "initialize" || request.method !== "POST") {
+          response.statusCode = 400;
+          response.end();
+          return;
+        }
+        if (initialTransport !== undefined) {
+          transport = initialTransport;
+          initialTransport = undefined;
+        } else {
+          if (peers.size >= 8) {
+            response.statusCode = 429;
+            response.end();
+            return;
+          }
+          transport = await createTransport();
+        }
+      }
+      if (closed) {
+        await closePeers();
+        notFound(response);
+        return;
+      }
+      const selected = transport;
+      await admittedRequest.run(admitted, () => selected.handleRequest(request, response, body));
       if (method === "initialize") observedInitialize = true;
       if (method === "tools/list") observedToolsList = true;
       markAttested();
@@ -212,14 +279,14 @@ export async function createAcpManagedToolsBridge(
       server.listen(0, "127.0.0.1");
     });
   } catch (error) {
-    await managed.server.close().catch(() => undefined);
+    await closePeers();
     throw error;
   }
 
   const address = server.address();
   if (address === null || typeof address === "string") {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await managed.server.close().catch(() => undefined);
+    await closePeers();
     throw new Error("ACP MCP endpoint did not expose a loopback address.");
   }
   loopbackHost = `127.0.0.1:${address.port}`;
@@ -239,8 +306,7 @@ export async function createAcpManagedToolsBridge(
       bind(undefined);
       if (attestationTimer !== undefined) clearTimeout(attestationTimer);
       rejectAttested(new AcpFailure("closed", "ACP MCP bridge closed before runtime attestation."));
-      await transport.close().catch(() => undefined);
-      await managed.server.close().catch(() => undefined);
+      await closePeers();
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => {
         if (!server.listening) {
