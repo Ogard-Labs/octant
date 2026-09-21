@@ -182,7 +182,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("heading", { name: "Loading conversation" })).not.toBeInTheDocument();
   });
 
-  it("does not send a steered follow-up while the provider is waiting", async () => {
+  it("queues a follow-up until the running turn settles without composer instructions", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
     const { rerender } = render(
@@ -192,8 +192,10 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
+    expect(screen.queryByText("Enter sends when this response finishes")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Follow-up message"), "Hold this");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(screen.getByText("Queued")).toBeInTheDocument();
     rerender(
       <CodeThreadWorkspace
         controller={controller({ sendFollowUp, turnStatus: "waiting" })}
@@ -1864,7 +1866,7 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen.getByLabelText("Follow-up message");
     expect(composer).toBeEnabled();
     await user.type(composer, "and then push");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     // The message left the composer and joined the transcript: it was sent,
     // not parked somewhere the user has to go back and release.
@@ -1894,11 +1896,11 @@ describe("CodeThreadWorkspace", () => {
 
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "and then push");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     await user.type(composer, "write the release note");
 
     expect(composer).toHaveValue("write the release note");
-    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
     await user.keyboard("{Enter}");
     expect(sendFollowUp).not.toHaveBeenCalled();
   });
@@ -1946,7 +1948,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     pasteImage(composer, "first.png");
     await screen.findByAltText("first.png");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
 
     rerender(
@@ -2021,7 +2023,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     pasteImage(composer, "superseded.png");
     await screen.findByAltText("superseded.png");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     rerender(
       <CodeThreadWorkspace
@@ -2122,7 +2124,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, " now");
     pasteImage(composer, "origin.png");
     await screen.findByAltText("origin.png");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     rerender(
       <CodeThreadWorkspace
@@ -2180,7 +2182,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "retry after strict mode");
     pasteImage(composer, "strict.png");
     await screen.findByAltText("strict.png");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     rerender(
       <StrictMode>
         <CodeThreadWorkspace
@@ -2269,7 +2271,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, " now");
     pasteImage(composer, "retry.png");
     await screen.findByAltText("retry.png");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     rerender(
       <CodeThreadWorkspace
@@ -2344,7 +2346,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "#Rel");
     await user.click(await screen.findByRole("option", { name: /Release notes/ }));
     await user.type(composer, "first");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     await user.clear(composer);
     await user.type(composer, "newer draft");
     resolveMention({ mentions: [], unavailable: [] });
@@ -2439,7 +2441,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "first");
     pasteImage(composer, "abandoned.png");
     await screen.findByAltText("abandoned.png");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     rerender(
       <CodeThreadWorkspace
@@ -2517,7 +2519,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "ship it");
     pasteImage(composer);
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     rerender(
       <CodeThreadWorkspace
@@ -2549,7 +2551,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.type(screen.getByLabelText("Follow-up message"), "and then push");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     rerender(
       <CodeThreadWorkspace
         controller={controller({ sendFollowUp, turnStatus: "idle" })}
@@ -2585,7 +2587,7 @@ describe("CodeThreadWorkspace", () => {
 
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "retry after the provider recovers");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     expect(composer).toHaveValue("");
 
     rerender(
@@ -2619,7 +2621,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.type(screen.getByLabelText("Follow-up message"), "and then push");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
     rerender(
       <CodeThreadWorkspace
         controller={controller({ sendFollowUp, turnStatus: "idle" })}
@@ -2674,7 +2676,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "retry after the provider recovers");
     pasteImage(composer);
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
 
     rerender(
       <CodeThreadWorkspace

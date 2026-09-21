@@ -1101,3 +1101,26 @@ show individual nodes rather than inventing graph edges across omitted commits.
 Loading, unavailable, no-result, shallow, and truncated states remain explicit.
 Historical file inspection is read-only. Existing unified diffs and Monaco own
 diff presentation; file disclosures mount only their open preview.
+
+### Compact task controls
+
+The right Tools launcher starts directly beneath the window control rail, without
+an extra top spacer. While a Code turn runs, its composer action is **Queue
+message**; an accepted queued message shows **Queued** instead of instructions
+about Enter. The idle action sends normally.
+
+Native Code approvals use a compact 216px surface above the composer, with a
+scrollable action and scope description, collapsible authority details, and a
+fixed Cancel/Allow row. Duration remains in the host description; the button
+does not imply a one-shot grant when the action grants access for the session.
+Keyboard focus has a visible outline. Enter never implicitly grants access.
+
+The Pull requests dock packs its search, freshness, repository heading, and rows
+at the top of its scroll area. In the dock, status badges sit beneath each title
+instead of taking title width; long titles and metadata wrap within the panel.
+
+Main-pane content opens in a closable tab beside its conversation. Files, previews,
+and canvases retain navigation references, and selecting one uses the ordinary
+host-authorized open command. Image creation is a pane-owned view that retains
+its draft while the user switches back to the conversation. The strip occupies
+the existing pane title row rather than adding a second header.

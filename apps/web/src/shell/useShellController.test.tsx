@@ -1602,6 +1602,35 @@ describe("useShellController", () => {
     expect(result.current.announcement).toBe("Project thread opened.");
   });
 
+  it("keeps the task beside opened files and returns to it when the file tab closes", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const pane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    const entries = result.current.contentTabs.get(pane.paneId)!;
+    expect(entries.map((entry) => entry.kind)).toEqual(["code-overview", "code-file"]);
+    const file = entries.find((entry) => entry.kind === "code-file")!;
+    await act(async () => result.current.closeContentTab(pane.paneId, file.id));
+    expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-overview");
+    expect(result.current.contentTabs.get(pane.paneId)?.map((entry) => entry.kind)).toEqual([
+      "code-overview",
+    ]);
+  });
+
   it("opens reviewed Code evidence through the authoritative workspace command path", async () => {
     const server = statefulClient();
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");

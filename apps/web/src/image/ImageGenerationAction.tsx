@@ -1,3 +1,4 @@
+import { useWorkspaceContentView } from "../shell/WorkspaceContentView";
 import type {
   ImageArtifactRef,
   ImageGenerationEnqueueRequest,
@@ -23,6 +24,16 @@ export interface ImageGenerationActionProps {
 }
 
 export function ImageGenerationAction(props: ImageGenerationActionProps) {
+  return <ImageGenerationContent {...props} />;
+}
+
+export function ImageGenerationContent(
+  props: ImageGenerationActionProps & {
+    readonly onCloseWorkspace?: () => void;
+    readonly onEnqueued?: () => void;
+  },
+) {
+  const workspace = useWorkspaceContentView();
   const [open, setOpen] = useState(false);
   const [job, setJob] = useState<ImageJob | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -67,6 +78,7 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
       const queued = await props.client.enqueue(request);
       if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
       setJob(queued);
+      props.onEnqueued?.();
       void poll(queued, pollGeneration);
     } catch (error) {
       if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
@@ -108,11 +120,19 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
 
   return (
     <>
-      {ready ? (
+      {props.onCloseWorkspace !== undefined ? null : ready ? (
         <OctantButton
           aria-label="Create image"
           disabled={props.disabled === true}
           onClick={() => {
+            if (workspace !== undefined) {
+              workspace.open(
+                `image-generation:${props.threadKind}:${props.scopeId}:${props.parentArtifactRef?.attachmentId ?? "new"}`,
+                props.parentArtifactRef === undefined ? "Create image" : "Revise image",
+                (close) => <ImageGenerationContent {...props} onCloseWorkspace={close} />,
+              );
+              return;
+            }
             setOpen(true);
             setJob(undefined);
             setErrorMessage(undefined);
@@ -146,9 +166,10 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
           : { parentArtifactRef: props.parentArtifactRef })}
         {...(errorMessage === undefined ? {} : { errorMessage })}
         onCancelJob={() => void cancel()}
-        onClose={() => setOpen(false)}
+        onClose={props.onCloseWorkspace ?? (() => setOpen(false))}
         onSubmit={(draft) => void submit(draft)}
-        open={open}
+        open={props.onCloseWorkspace !== undefined || open}
+        presentation={props.onCloseWorkspace === undefined ? "dialog" : "workspace"}
         profiles={props.profiles}
         submitting={submitting}
         threadAvailable={threadAvailable}

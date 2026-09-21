@@ -2175,6 +2175,53 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 0;
 }
 
+.workspace-pane__panel[hidden] {
+  display: none;
+}
+
+.workspace-content-tabs {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.workspace-content-tabs__list {
+  width: max-content;
+  max-width: none;
+  gap: 4px;
+}
+
+.workspace-content-tabs__entry {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.workspace-pane__header:has(.workspace-content-tabs) .workspace-pane__window-drag-space {
+  flex: 0 0 12px;
+}
+
+.workspace-content-tabs__entry [role="tab"] {
+  max-width: 220px;
+}
+
+.workspace-content-tabs__entry [role="tab"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-content-view {
+  padding: var(--oct-space-4);
+  align-content: start;
+}
+
+.workspace-content-view > form {
+  width: min(100%, 640px);
+  margin-inline: auto;
+}
+
 .rail-placeholder {
   position: absolute;
   inset: 0;
@@ -9869,6 +9916,7 @@ ul.board-col-body {
    its content, so this root owns the scroll a long Project needs; without it
    the rows past the dock's height were cut off and unreachable. */
 .code-project-pull-requests[data-presentation="dock"] {
+  align-content: start;
   height: 100%;
   min-height: 0;
   overflow: auto;
@@ -9876,6 +9924,7 @@ ul.board-col-body {
 }
 
 .code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__groups {
+  align-content: start;
   gap: var(--oct-space-4);
 }
 
@@ -9886,6 +9935,29 @@ ul.board-col-body {
 .code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row {
   min-height: 0;
   padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .surface-toolbar {
+  flex-wrap: wrap;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__meta {
+  grid-column: 1;
+  grid-row: auto;
+  justify-content: flex-start;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__details {
+  flex-wrap: wrap;
 }
 
 .linear-issues {

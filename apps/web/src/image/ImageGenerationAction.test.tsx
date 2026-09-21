@@ -1,3 +1,6 @@
+import { SplitWorkspace } from "../shell/SplitWorkspace";
+import { splitCallbacks } from "../App.test-fixtures";
+import { decodeWorkspaceLayoutNode } from "@octant/contracts/shell";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -35,6 +38,57 @@ function queuedJob(): ImageJob {
 }
 
 describe("ImageGenerationAction", () => {
+  it("opens image creation as workspace content instead of covering the conversation", async () => {
+    const user = userEvent.setup();
+    const client = {
+      enqueue: vi.fn(),
+      get: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as ImageGenerationClient;
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: "00000000-0000-4000-8000-000000000612",
+      surface: {
+        kind: "chat-thread",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "chat",
+        threadId: scopeId,
+        title: "Conversation",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={() => (
+          <>
+            <p>Conversation content</p>
+            <ImageGenerationAction
+              client={client}
+              profiles={[profile()]}
+              scopeId={scopeId as never}
+              threadKind="chat-thread"
+            />
+          </>
+        )}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Create image" }));
+    expect(screen.getByRole("heading", { name: "Create image" })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Image prompt"), "A quiet forest");
+    await user.click(screen.getByRole("tab", { name: "Conversation" }));
+    expect(screen.getByText("Conversation content")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Create image" }));
+    expect(screen.getAllByRole("tab", { name: "Create image" })).toHaveLength(1);
+    expect(screen.getByLabelText("Image prompt")).toHaveValue("A quiet forest");
+    await user.click(screen.getByRole("button", { name: "Close Create image" }));
+    expect(screen.queryByRole("heading", { name: "Create image" })).not.toBeInTheDocument();
+    expect(screen.getByText("Conversation content")).toBeVisible();
+    expect(client.enqueue).not.toHaveBeenCalled();
+  });
+
   it("does not offer an active Create image action without a client", () => {
     render(
       <ImageGenerationAction

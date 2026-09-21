@@ -102,6 +102,8 @@ describe("Code operation approval view controller", () => {
     expect(html).toContain('id="cancel"');
     expect(html).toContain('id="approve"');
     expect(html).toContain("Show authority details");
+    expect(html).toContain("disabled>Allow</button>");
+    expect(html).not.toContain("Approve once");
     expect(html).toContain("prefers-reduced-motion");
     // Enter must never grant. Three things make that true, and each is the
     // mechanism a later edit would most plausibly undo: a form would give the

@@ -1048,7 +1048,7 @@ function codeApprovalBoundsForAnchor(
     return undefined;
   }
   const width = Math.min(560, Math.max(320, Math.floor(bounds.width)), content.width - 24);
-  const height = Math.min(280, Math.max(180, Math.floor(bounds.y - 44)));
+  const height = Math.min(216, Math.max(180, Math.floor(bounds.y - 44)));
   if (width < 320 || height < 180) return undefined;
   const x = Math.min(Math.max(12, Math.floor(bounds.x)), content.width - width - 12);
   const y = Math.floor(bounds.y - height - 8);
@@ -1062,7 +1062,7 @@ function codeApprovalFallbackBounds(
   if (window.isDestroyed()) return undefined;
   const content = window.getContentBounds();
   const width = Math.min(560, content.width - 24);
-  const height = Math.min(280, content.height - 44);
+  const height = Math.min(216, content.height - 44);
   if (width < 320 || height < 180) return undefined;
   return {
     x: content.width - width - 12,

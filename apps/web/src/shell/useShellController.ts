@@ -1,3 +1,4 @@
+import { rememberWorkspaceContent, type WorkspaceContentTabs } from "./workspaceContentTabs";
 import {
   type WorkThreadId,
   type BrowserContextId,
@@ -196,6 +197,7 @@ interface SideChatSource {
 }
 
 type WorkspaceIntent =
+  | { readonly kind: "reopen-content"; readonly paneId: PaneId; readonly surface: WorkspaceTab }
   | { readonly kind: "activate-pane"; readonly paneId: PaneId }
   | { readonly kind: "clear-focus" }
   | { readonly kind: "close-pane"; readonly paneId: PaneId }
@@ -365,6 +367,7 @@ export function useShellController(options: ShellControllerOptions) {
   const browserActivityAnnouncements = useRef(createBrowserActivityAnnouncementStore()).current;
   const [status, setStatus] = useState<ShellControllerStatus>("loading");
   const [authoritative, setAuthoritative] = useState<AuthoritativeShell>();
+  const [contentTabs, setContentTabs] = useState<WorkspaceContentTabs>(new Map());
   const [errorMessage, setErrorMessage] = useState<string>();
   const [crossContextOffer, setCrossContextOffer] = useState<
     | {
@@ -403,6 +406,10 @@ export function useShellController(options: ShellControllerOptions) {
           );
           if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
           const next = fromBootstrap(bootstrap);
+          const previousWorkspace = committedShell.current?.workspace ?? next.workspace;
+          setContentTabs((tabs) =>
+            rememberWorkspaceContent(tabs, previousWorkspace, next.workspace),
+          );
           committedShell.current = next;
           setAuthoritative(next);
           setResizePreview(undefined);
@@ -518,6 +525,7 @@ export function useShellController(options: ShellControllerOptions) {
         workspaceVersion: result.version,
       };
       committedShell.current = next;
+      setContentTabs((tabs) => rememberWorkspaceContent(tabs, previous.workspace, next.workspace));
       setAuthoritative(next);
       setStatus("ready");
       setErrorMessage(undefined);
@@ -662,6 +670,36 @@ export function useShellController(options: ShellControllerOptions) {
         ...(projectId === undefined ? {} : { projectId }),
       },
     });
+  }
+
+  async function activateContentTab(paneId: PaneId, tabId: WorkspaceTabId): Promise<boolean> {
+    const surface = contentTabs.get(paneId)?.find((entry) => entry.id === tabId);
+    if (surface === undefined) return false;
+    return enqueueMutation({
+      kind: "workspace",
+      intent: { kind: "reopen-content", paneId, surface },
+    });
+  }
+
+  async function closeContentTab(paneId: PaneId, tabId: WorkspaceTabId): Promise<void> {
+    const entries = contentTabs.get(paneId) ?? [];
+    const index = entries.findIndex((entry) => entry.id === tabId);
+    if (index < 0) return;
+    const shell = committedShell.current;
+    const active =
+      shell === undefined ? undefined : findPaneInWorkspace(shell.workspace, paneId)?.surface;
+    if (active?.id === tabId) {
+      const neighbor = entries[index - 1] ?? entries[index + 1];
+      if (neighbor === undefined) {
+        if (!(await closePane(paneId))) return;
+      } else if (!(await activateContentTab(paneId, neighbor.id))) return;
+    }
+    setContentTabs((current) =>
+      new Map(current).set(
+        paneId,
+        (current.get(paneId) ?? []).filter((entry) => entry.id !== tabId),
+      ),
+    );
   }
 
   async function openCodeSurface(tab: CodeSurfaceInput): Promise<void> {
@@ -1100,6 +1138,9 @@ export function useShellController(options: ShellControllerOptions) {
     environmentPresentation: authoritative?.environmentPresentation,
     presentationVersion: authoritative?.presentationVersion,
     closePane,
+    contentTabs,
+    activateContentTab,
+    closeContentTab,
     commitSplitResize,
     crossContextOffer,
     dismissCrossContextOffer,
@@ -1170,6 +1211,15 @@ function createWorkspaceMutation(
   const mode = latest.workspace.activeMode;
   const layout = latest.workspace.layouts[mode];
   switch (intent.kind) {
+    case "reopen-content": {
+      if (findPane(layout, intent.paneId) === undefined)
+        throw { category: "invalid", message: "This pane is no longer open." };
+      return {
+        operation: { kind: "open-surface", mode, paneId: intent.paneId, surface: intent.surface },
+        message: `${intent.surface.title} selected.`,
+        activatedSurfaceId: intent.surface.id,
+      };
+    }
     case "set-mode":
       if (!enabledModes(latest.settings).includes(intent.mode)) {
         throw {

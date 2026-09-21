@@ -1,3 +1,8 @@
+import type { ReactNode } from "react";
+import { useMemo } from "react";
+import type { WorkspaceContentTabs } from "./workspaceContentTabs";
+import { WorkspaceContentViewContext } from "./WorkspaceContentView";
+import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import type {
   LayoutNodeId,
   PaneId,
@@ -51,6 +56,9 @@ export interface SplitWorkspaceProps {
   readonly onActivatePane: (paneId: PaneId) => void;
   readonly onClearFocus: () => void;
   readonly onClosePane: (paneId: PaneId) => void;
+  readonly contentTabs?: WorkspaceContentTabs;
+  readonly onActivateContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
+  readonly onCloseContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
@@ -296,6 +304,33 @@ function clampSplitRatio(value: number): number {
 function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: WorkspacePane }) {
   const pane = props.pane;
   const surface = pane.surface;
+  const [localViews, setLocalViews] = useState<
+    ReadonlyArray<{ readonly key: string; readonly title: string; readonly content: ReactNode }>
+  >([]);
+  const [activeLocalView, setActiveLocalView] = useState<string>();
+  const contentView = useMemo(
+    () => ({
+      open: (key: string, title: string, render: (close: () => void) => ReactNode) => {
+        const close = () => {
+          setLocalViews((views) => views.filter((view) => view.key !== key));
+          setActiveLocalView((activeKey) => (activeKey === key ? undefined : activeKey));
+        };
+        setLocalViews((views) =>
+          views.some((view) => view.key === key)
+            ? views
+            : [...views, { key, title, content: render(close) }],
+        );
+        setActiveLocalView(key);
+      },
+    }),
+    [],
+  );
+  useEffect(() => setActiveLocalView(undefined), [surface.id]);
+  const navigation = props.contentTabs?.get(pane.paneId) ?? [surface];
+  const showTabs =
+    navigation.length > 1 ||
+    localViews.length > 0 ||
+    ["code-file", "preview", "canvas"].includes(surface.kind);
   const active = String(props.activePaneId) === String(pane.paneId);
   const focused = String(props.focusedPaneId) === String(pane.paneId);
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
@@ -319,109 +354,177 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     props.onActivatePane(pane.paneId);
   };
   return (
-    <section
-      aria-current={active ? "true" : undefined}
-      aria-label={`Workspace pane: ${title}`}
-      className="workspace-pane"
-      data-active={active ? "true" : "false"}
-      data-focused={focused ? "true" : "false"}
-      data-header={showHeader ? "true" : "false"}
-      data-workspace-can-split={canSplit ? "true" : "false"}
-      data-workspace-pane-id={pane.paneId}
-      onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
-      onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
-      onPointerDownCapture={(event) => activateUnlessClosing(event.target)}
-    >
-      {showHeader ? (
-        <OctantContextMenuRoot onOpenChange={setMenuOpen}>
-          <OctantContextMenuTrigger
-            aria-expanded={menuOpen}
-            className="workspace-pane__header"
-            render={<div />}
-          >
-            <span
-              className="workspace-pane__grip window-no-drag"
-              onPointerCancel={props.drag.onPointerCancel}
-              onPointerDown={(event) =>
-                props.drag.onPointerDown(event, {
-                  dragKey,
-                  paneId: pane.paneId,
-                  surface,
-                  title,
-                })
-              }
-              onPointerMove={props.drag.onPointerMove}
-              onPointerUp={props.drag.onPointerUp}
-              title="Drag to move or split"
+    <WorkspaceContentViewContext.Provider value={contentView}>
+      <section
+        aria-current={active ? "true" : undefined}
+        aria-label={`Workspace pane: ${title}`}
+        className="workspace-pane"
+        data-active={active ? "true" : "false"}
+        data-focused={focused ? "true" : "false"}
+        data-header={showHeader ? "true" : "false"}
+        data-workspace-can-split={canSplit ? "true" : "false"}
+        data-workspace-pane-id={pane.paneId}
+        onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
+        onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
+        onPointerDownCapture={(event) => activateUnlessClosing(event.target)}
+      >
+        {showHeader || showTabs ? (
+          <OctantContextMenuRoot onOpenChange={setMenuOpen}>
+            <OctantContextMenuTrigger
+              aria-expanded={menuOpen}
+              className="workspace-pane__header"
+              render={<div />}
             >
-              <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
-              {provider === undefined ? null : (
-                <span
-                  aria-hidden="true"
-                  className="workspace-pane__provider"
-                  title={provider.displayName}
-                >
-                  <ProviderGlyph
-                    displayName={provider.displayName}
-                    driverKind={provider.driverKind}
-                    size={14}
+              <span
+                className="workspace-pane__grip window-no-drag"
+                onPointerCancel={props.drag.onPointerCancel}
+                onPointerDown={(event) =>
+                  props.drag.onPointerDown(event, {
+                    dragKey,
+                    paneId: pane.paneId,
+                    surface,
+                    title,
+                  })
+                }
+                onPointerMove={props.drag.onPointerMove}
+                onPointerUp={props.drag.onPointerUp}
+                title="Drag to move or split"
+              >
+                <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+                {provider === undefined ? null : (
+                  <span
+                    aria-hidden="true"
+                    className="workspace-pane__provider"
+                    title={provider.displayName}
+                  >
+                    <ProviderGlyph
+                      displayName={provider.displayName}
+                      driverKind={provider.driverKind}
+                      size={14}
+                    />
+                  </span>
+                )}
+                {pullRequest === undefined ? null : (
+                  <PullRequestChip
+                    className="workspace-pane__pull-request"
+                    number={pullRequest.identity.number}
+                    state={pullRequest.state}
+                    {...(pullRequest.checks === undefined ? {} : { checks: pullRequest.checks })}
+                    {...(selectPullRequest === undefined
+                      ? {}
+                      : { onOpen: () => selectPullRequest(pullRequest.identity) })}
                   />
+                )}
+                {showTabs ? null : <span className="workspace-pane__title">{title}</span>}
+              </span>
+              {showTabs ? (
+                <OctantTabs
+                  className="workspace-content-tabs"
+                  value={activeLocalView ?? surface.id}
+                  onValueChange={(value) => {
+                    if (typeof value !== "string") return;
+                    if (localViews.some((view) => view.key === value)) {
+                      setActiveLocalView(value);
+                      return;
+                    }
+                    const entry = navigation.find((tab) => tab.id === value);
+                    if (entry === undefined) return;
+                    setActiveLocalView(undefined);
+                    if (entry.id !== surface.id)
+                      props.onActivateContentTab?.(pane.paneId, entry.id);
+                  }}
+                >
+                  <OctantTabsList
+                    aria-label="Open content"
+                    className="workspace-content-tabs__list"
+                  >
+                    {navigation.map((entry) => (
+                      <div className="workspace-content-tabs__entry" key={entry.id}>
+                        <OctantTabsTab value={entry.id} title={workspaceSurfaceTitle(entry)}>
+                          <span>{workspaceSurfaceTitle(entry)}</span>
+                        </OctantTabsTab>
+                        <OctantIconButton
+                          label={`Close ${workspaceSurfaceTitle(entry)}`}
+                          onClick={() => props.onCloseContentTab?.(pane.paneId, entry.id)}
+                        >
+                          <X aria-hidden="true" size={12} />
+                        </OctantIconButton>
+                      </div>
+                    ))}
+                    {localViews.map((view) => (
+                      <div className="workspace-content-tabs__entry" key={view.key}>
+                        <OctantTabsTab value={view.key}>
+                          <span>{view.title}</span>
+                        </OctantTabsTab>
+                        <OctantIconButton
+                          label={`Close ${view.title}`}
+                          onClick={() => {
+                            setLocalViews((views) => views.filter((item) => item.key !== view.key));
+                            setActiveLocalView((key) => (key === view.key ? undefined : key));
+                          }}
+                        >
+                          <X aria-hidden="true" size={12} />
+                        </OctantIconButton>
+                      </div>
+                    ))}
+                  </OctantTabsList>
+                </OctantTabs>
+              ) : null}
+              {path === undefined || showTabs ? null : (
+                <span aria-hidden="true" className="workspace-pane__path" title={path}>
+                  {path}
                 </span>
               )}
-              {pullRequest === undefined ? null : (
-                <PullRequestChip
-                  className="workspace-pane__pull-request"
-                  number={pullRequest.identity.number}
-                  state={pullRequest.state}
-                  {...(pullRequest.checks === undefined ? {} : { checks: pullRequest.checks })}
-                  {...(selectPullRequest === undefined
-                    ? {}
-                    : { onOpen: () => selectPullRequest(pullRequest.identity) })}
-                />
-              )}
-              <span className="workspace-pane__title">{title}</span>
-            </span>
-            {path === undefined ? null : (
-              <span aria-hidden="true" className="workspace-pane__path" title={path}>
-                {path}
-              </span>
-            )}
-            <span
-              aria-hidden="true"
-              className="workspace-pane__window-drag-space window-drag-region"
-            />
-            {/* Alone in the window there is nothing to close into; the × is a
+              <span
+                aria-hidden="true"
+                className="workspace-pane__window-drag-space window-drag-region"
+              />
+              {/* Alone in the window there is nothing to close into; the × is a
                 split's control, for giving one pane's room back to the other. */}
-            {props.layout.kind === "pane" ? null : (
-              <OctantIconButton
-                className="workspace-pane__close"
-                label={`Close ${title}`}
-                onClick={() => props.onClosePane(pane.paneId)}
-                type="button"
-              >
-                <X aria-hidden="true" size={14} strokeWidth={1.8} />
-              </OctantIconButton>
-            )}
-          </OctantContextMenuTrigger>
-          <PaneMenu
-            canSplit={canSplit}
-            focused={focused}
-            onClearFocus={props.onClearFocus}
-            onClose={() => props.onClosePane(pane.paneId)}
-            onFocus={() => props.onFocus(pane.paneId)}
-            onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
-            surface={surface}
+              {props.layout.kind === "pane" ? null : (
+                <OctantIconButton
+                  className="workspace-pane__close"
+                  label={`Close ${title}`}
+                  onClick={() => props.onClosePane(pane.paneId)}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                </OctantIconButton>
+              )}
+            </OctantContextMenuTrigger>
+            <PaneMenu
+              canSplit={canSplit}
+              focused={focused}
+              onClearFocus={props.onClearFocus}
+              onClose={() => props.onClosePane(pane.paneId)}
+              onFocus={() => props.onFocus(pane.paneId)}
+              onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
+              surface={surface}
+            />
+          </OctantContextMenuRoot>
+        ) : null}
+        <div className="workspace-pane__panel" hidden={activeLocalView !== undefined}>
+          {props.renderSurface(surface, pane.paneId)}
+        </div>
+        {localViews.map((view) => (
+          <div
+            className="workspace-pane__panel workspace-content-view"
+            role="region"
+            aria-label={view.title}
+            hidden={activeLocalView !== view.key}
+            key={view.key}
+          >
+            {view.content}
+          </div>
+        ))}
+        {props.drag.active === null ? null : (
+          <WorkspaceDropOverlay
+            destination={props.drag.active.destination}
+            targetPaneId={String(pane.paneId)}
           />
-        </OctantContextMenuRoot>
-      ) : null}
-      <div className="workspace-pane__panel">{props.renderSurface(surface, pane.paneId)}</div>
-      {props.drag.active === null ? null : (
-        <WorkspaceDropOverlay
-          destination={props.drag.active.destination}
-          targetPaneId={String(pane.paneId)}
-        />
-      )}
-    </section>
+        )}
+      </section>
+    </WorkspaceContentViewContext.Provider>
   );
 }
 

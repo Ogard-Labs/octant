@@ -224,7 +224,7 @@
    left edge: the body keeps the strip's 8px inset instead of the 16px a
    tool's content gets, and each row's icon then lands under the tab icon. */
 .right-utility-dock__content:has(> .dock-work-map) {
-  padding: var(--oct-space-3) var(--oct-space-2);
+  padding: 0 var(--oct-space-2) var(--oct-space-3);
 }
 
 .dock-work-map {
@@ -238,7 +238,7 @@
 .dock-work-map__header {
   display: grid;
   gap: 2px;
-  padding: 4px 10px 10px;
+  padding: 0 10px 10px;
   /* The rows below are buttons, and the ghost recipe gives each a 1px
      transparent border. Carry the same border here so the section label
      starts on the pixel the tool names start on, not 1px to their left. */

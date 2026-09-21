@@ -1,3 +1,4 @@
+import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import type {
@@ -175,6 +176,9 @@ export interface WorkspaceViewProps {
   /** A pointer landing in a pane makes it the window's active pane. */
   readonly onActivatePane: (paneId: PaneId) => void;
   readonly onClearFocus: () => void;
+  readonly contentTabs?: WorkspaceContentTabs;
+  readonly onActivateContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
+  readonly onCloseContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
   readonly onClosePane: (paneId: PaneId) => Promise<boolean | void> | boolean | void;
   readonly onCreateChat: (
     prompt?: string,
@@ -550,6 +554,14 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       <main className="workspace" hidden={props.hidden}>
         {inlineNotice ? null : contextNotice}
         <SplitWorkspace
+          key={JSON.stringify(props.workspace.contextByMode[props.mode])}
+          {...(props.contentTabs === undefined ? {} : { contentTabs: props.contentTabs })}
+          {...(props.onActivateContentTab === undefined
+            ? {}
+            : { onActivateContentTab: props.onActivateContentTab })}
+          {...(props.onCloseContentTab === undefined
+            ? {}
+            : { onCloseContentTab: props.onCloseContentTab })}
           {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
           paneFactsByThreadId={paneFactsByThreadId}
           drag={props.drag}

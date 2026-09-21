@@ -32,7 +32,11 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 The window is mode-first: Chat, Work, and Code in the sidebar, a central
 workspace, and an optional right dock. A workspace pane holds one surface —
 the thread you are reading, a Project overview, a board, or a welcome — and
-the sidebar is how you switch. Same-authority threads can be pinned or dropped
+the sidebar selects tasks. Files, previews, canvases, and image creation open in
+closable tabs beside the conversation. Switching back keeps an image draft in
+place; closing the image tab does not cancel a running generation job. Use its
+Cancel action to stop the job. Open tabs last for the current app session.
+Same-authority threads can be pinned or dropped
 into split panes; the active pane is marked, and the right dock follows that
 pane's thread and Project. Work and Code have server-derived thread boards;
 Chat has no board.

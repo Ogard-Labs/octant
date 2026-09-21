@@ -27,6 +27,7 @@ export interface ImageGenerationDraft {
 
 export interface ImageGenerationSheetProps {
   readonly open: boolean;
+  readonly presentation?: "dialog" | "workspace";
   readonly onClose: () => void;
   readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
@@ -129,163 +130,167 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
     }
   }
 
-  return (
-    <OctantDialog label="Create image" onClose={props.onClose} open={props.open}>
-      <form
-        className="stack"
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <h2 className="h4">
-          {props.parentArtifactRef === undefined ? "Create image" : "Revise image"}
-        </h2>
-        {profiles.length === 0 ? (
-          <p role="status">
-            No image profile is ready.{" "}
-            {props.onOpenSettings === undefined ? (
-              "Add one in Settings."
-            ) : (
-              <OctantButton onClick={props.onOpenSettings} type="button" variant="link">
-                Open Settings
-              </OctantButton>
-            )}
-          </p>
-        ) : (
-          <>
-            <label>
-              <span>Image profile</span>
-              <OctantSelectField
-                aria-label="Image profile"
-                onValueChange={selectProfile}
-                options={profiles.map((candidate) => ({
-                  id: String(candidate.instanceId),
-                  label: candidate.displayName,
-                }))}
-                value={selectedProfileId}
-              />
-            </label>
-            <label>
-              <span>Model</span>
-              <OctantSelectField
-                aria-label="Image model"
-                onValueChange={setModelId}
-                options={models.map((id) => ({ id: String(id), label: String(id) }))}
-                value={selectedModelId}
-              />
-            </label>
-            <label>
-              <span>Prompt</span>
-              <OctantTextarea
-                aria-label="Image prompt"
-                onChange={(event) => setPrompt(event.currentTarget.value)}
-                placeholder="Describe the image…"
-                rows={4}
-                value={prompt}
-              />
-            </label>
-            {options?.kind === "openai-image-http" ? (
-              <>
-                <label>
-                  <span>Quality</span>
-                  <OctantSelectField
-                    aria-label="Quality"
-                    onValueChange={setQuality}
-                    options={[
-                      { id: OPTION_DEFAULT, label: "Profile default" },
-                      ...options.qualities.map((value) => ({ id: value, label: value })),
-                    ]}
-                    value={quality}
-                  />
-                </label>
-                <label>
-                  <span>Size</span>
-                  <OctantSelectField
-                    aria-label="Size"
-                    onValueChange={setSize}
-                    options={[
-                      { id: OPTION_DEFAULT, label: "Profile default" },
-                      ...options.sizes.map((value) => ({ id: value, label: value })),
-                    ]}
-                    value={size}
-                  />
-                </label>
-              </>
-            ) : null}
-            {options?.kind === "gemini-native-image-http" ? (
-              <>
-                <label>
-                  <span>Aspect ratio</span>
-                  <OctantSelectField
-                    aria-label="Aspect ratio"
-                    onValueChange={setAspectRatio}
-                    options={[
-                      { id: OPTION_DEFAULT, label: "Profile default" },
-                      ...options.aspectRatios.map((value) => ({ id: value, label: value })),
-                    ]}
-                    value={aspectRatio}
-                  />
-                </label>
-                <label>
-                  <span>Resolution</span>
-                  <OctantSelectField
-                    aria-label="Resolution"
-                    onValueChange={setResolution}
-                    options={[
-                      { id: OPTION_DEFAULT, label: "Profile default" },
-                      ...options.resolutions.map((value) => ({ id: value, label: value })),
-                    ]}
-                    value={resolution}
-                  />
-                </label>
-              </>
-            ) : null}
-            <label>
-              <span>Variants</span>
-              <OctantSelectField
-                aria-label="Variant count"
-                onValueChange={setVariantCount}
-                options={Array.from({ length: options?.maxVariants ?? 4 }, (_, index) => {
-                  const count = String(index + 1);
-                  return { id: count, label: count };
-                })}
-                value={variantCount}
-              />
-            </label>
-            {threadAvailable ? null : <p role="status">Start a thread to create an image.</p>}
-            {job === undefined ? null : (
-              <p role="status">
-                {job.status === "queued"
-                  ? "Queued…"
-                  : job.status === "running"
-                    ? "Generating…"
-                    : job.status === "completed"
-                      ? "Completed."
-                      : job.status === "cancelled"
-                        ? "Cancelled."
-                        : (job.safetyRefusal ?? job.failure?.message ?? "Failed.")}
-              </p>
-            )}
-            {props.errorMessage === undefined ? null : <p role="alert">{props.errorMessage}</p>}
-          </>
-        )}
-        <div className="row">
-          {inFlight && props.onCancelJob !== undefined ? (
-            <OctantButton onClick={props.onCancelJob} type="button" variant="secondary">
-              Cancel
-            </OctantButton>
+  const form = (
+    <form
+      className="stack"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <h2 className="h4">
+        {props.parentArtifactRef === undefined ? "Create image" : "Revise image"}
+      </h2>
+      {profiles.length === 0 ? (
+        <p role="status">
+          No image profile is ready.{" "}
+          {props.onOpenSettings === undefined ? (
+            "Add one in Settings."
           ) : (
-            <OctantButton disabled={!canSubmit} type="submit">
-              Generate
+            <OctantButton onClick={props.onOpenSettings} type="button" variant="link">
+              Open Settings
             </OctantButton>
           )}
-          <OctantButton onClick={props.onClose} type="button" variant="ghost">
-            Close
+        </p>
+      ) : (
+        <>
+          <label>
+            <span>Image profile</span>
+            <OctantSelectField
+              aria-label="Image profile"
+              onValueChange={selectProfile}
+              options={profiles.map((candidate) => ({
+                id: String(candidate.instanceId),
+                label: candidate.displayName,
+              }))}
+              value={selectedProfileId}
+            />
+          </label>
+          <label>
+            <span>Model</span>
+            <OctantSelectField
+              aria-label="Image model"
+              onValueChange={setModelId}
+              options={models.map((id) => ({ id: String(id), label: String(id) }))}
+              value={selectedModelId}
+            />
+          </label>
+          <label>
+            <span>Prompt</span>
+            <OctantTextarea
+              aria-label="Image prompt"
+              onChange={(event) => setPrompt(event.currentTarget.value)}
+              placeholder="Describe the image…"
+              rows={4}
+              value={prompt}
+            />
+          </label>
+          {options?.kind === "openai-image-http" ? (
+            <>
+              <label>
+                <span>Quality</span>
+                <OctantSelectField
+                  aria-label="Quality"
+                  onValueChange={setQuality}
+                  options={[
+                    { id: OPTION_DEFAULT, label: "Profile default" },
+                    ...options.qualities.map((value) => ({ id: value, label: value })),
+                  ]}
+                  value={quality}
+                />
+              </label>
+              <label>
+                <span>Size</span>
+                <OctantSelectField
+                  aria-label="Size"
+                  onValueChange={setSize}
+                  options={[
+                    { id: OPTION_DEFAULT, label: "Profile default" },
+                    ...options.sizes.map((value) => ({ id: value, label: value })),
+                  ]}
+                  value={size}
+                />
+              </label>
+            </>
+          ) : null}
+          {options?.kind === "gemini-native-image-http" ? (
+            <>
+              <label>
+                <span>Aspect ratio</span>
+                <OctantSelectField
+                  aria-label="Aspect ratio"
+                  onValueChange={setAspectRatio}
+                  options={[
+                    { id: OPTION_DEFAULT, label: "Profile default" },
+                    ...options.aspectRatios.map((value) => ({ id: value, label: value })),
+                  ]}
+                  value={aspectRatio}
+                />
+              </label>
+              <label>
+                <span>Resolution</span>
+                <OctantSelectField
+                  aria-label="Resolution"
+                  onValueChange={setResolution}
+                  options={[
+                    { id: OPTION_DEFAULT, label: "Profile default" },
+                    ...options.resolutions.map((value) => ({ id: value, label: value })),
+                  ]}
+                  value={resolution}
+                />
+              </label>
+            </>
+          ) : null}
+          <label>
+            <span>Variants</span>
+            <OctantSelectField
+              aria-label="Variant count"
+              onValueChange={setVariantCount}
+              options={Array.from({ length: options?.maxVariants ?? 4 }, (_, index) => {
+                const count = String(index + 1);
+                return { id: count, label: count };
+              })}
+              value={variantCount}
+            />
+          </label>
+          {threadAvailable ? null : <p role="status">Start a thread to create an image.</p>}
+          {job === undefined ? null : (
+            <p role="status">
+              {job.status === "queued"
+                ? "Queued…"
+                : job.status === "running"
+                  ? "Generating…"
+                  : job.status === "completed"
+                    ? "Completed."
+                    : job.status === "cancelled"
+                      ? "Cancelled."
+                      : (job.safetyRefusal ?? job.failure?.message ?? "Failed.")}
+            </p>
+          )}
+          {props.errorMessage === undefined ? null : <p role="alert">{props.errorMessage}</p>}
+        </>
+      )}
+      <div className="row">
+        {inFlight && props.onCancelJob !== undefined ? (
+          <OctantButton onClick={props.onCancelJob} type="button" variant="secondary">
+            Cancel
           </OctantButton>
-        </div>
-      </form>
+        ) : (
+          <OctantButton disabled={!canSubmit} type="submit">
+            Generate
+          </OctantButton>
+        )}
+        <OctantButton onClick={props.onClose} type="button" variant="ghost">
+          Close
+        </OctantButton>
+      </div>
+    </form>
+  );
+  if (props.presentation === "workspace") return props.open ? form : null;
+  return (
+    <OctantDialog label="Create image" onClose={props.onClose} open={props.open}>
+      {form}
     </OctantDialog>
   );
 }

@@ -5801,6 +5801,13 @@ function LaunchedShell(
                     onActivatePane={(paneId) => void controller.activatePane(paneId)}
                     tabActivation={controller.tabActivation}
                     onClearFocus={() => void controller.clearFocus()}
+                    contentTabs={controller.contentTabs}
+                    onActivateContentTab={(paneId, tabId) =>
+                      void controller.activateContentTab(paneId, tabId)
+                    }
+                    onCloseContentTab={(paneId, tabId) =>
+                      void controller.closeContentTab(paneId, tabId)
+                    }
                     onClosePane={controller.closePane}
                     onCommitResize={controller.commitSplitResize}
                     onCreateChat={createChat}

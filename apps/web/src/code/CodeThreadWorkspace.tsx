@@ -1712,7 +1712,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           actions: {
             kind: "send",
             send: {
-              ariaLabel: "Send follow-up",
+              ariaLabel: busy ? "Queue message" : "Send follow-up",
               disabled: !canSend || steered.pending !== undefined,
               onSend: () => void submitFollowUp(),
             },
@@ -1720,15 +1720,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         }}
         footer={
           <div aria-live="polite" className="composer-status">
-            {/* Idle, the line says nothing: Enter sends everywhere else too, and
-                a sentence under every composer read as clutter. */}
-            {providerChanging || steered.pending !== undefined || busy ? (
+            {providerChanging || steered.pending !== undefined ? (
               <span className="composer-status__hint code-thread-workspace__hint">
-                {providerChanging
-                  ? "Checking the selected provider…"
-                  : steered.pending !== undefined
-                    ? "Sent · runs when the response in progress finishes"
-                    : "Enter sends when this response finishes"}
+                {providerChanging ? "Checking the selected provider…" : "Queued"}
               </span>
             ) : null}
             {accessMessage === undefined ? null : (
