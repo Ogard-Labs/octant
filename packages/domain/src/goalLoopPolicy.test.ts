@@ -37,6 +37,7 @@ function facts(overrides: Partial<GoalLoopRoundFacts> = {}): GoalLoopRoundFacts 
     declaredCeiling: fullCeiling,
     liveThreadAuthority: fullCeiling,
     checkpointAvailable: true,
+    roundSpendObserved: true,
     ...overrides,
   };
 }
