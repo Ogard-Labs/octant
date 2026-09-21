@@ -85,6 +85,22 @@ A resumed turn can also have a different allowed tool catalogue.
 - A reconnect may change available tools while retaining the native session.
   Exact-prefix cache reuse still depends on the provider and current authority.
 
+## Verification
+
+The opt-in Pi native smoke uses a temporary managed session, restarts the host
+runtime, resumes the same identity, and asks the provider to recall prior input
+and invoke a newly added Octant tool. Run it with `OCTANT_PI_SMOKE=1`,
+`OCTANT_PI_BINARY` pointing to the installed CLI, and `OCTANT_PI_MODEL` naming the
+exact discovered `provider/model` being verified:
+
+```sh
+bun run --cwd apps/server test:evidence src/providers/piSmoke.integration.test.ts
+```
+
+This verifies native continuity and tool-result delivery for the selected model.
+It does not establish browser approvals, native device input, or support across
+all models exposed by the same CLI.
+
 ## Related
 
 - 0002 Durable event journal and rebuildable projections

@@ -5,6 +5,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type ProviderRuntimeEvent,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -54,22 +55,29 @@ describe("installed Pi runtime", () => {
   );
 
   it.skipIf(!smokeEnabled)(
-    "remembers the first turn after restarting the host runtime with the same native identity",
+    "remembers prior input and invokes newly available tools after a host restart",
     async () => {
       const { temporaryRoot, registry, driver, createDriver } = await fixture();
       const restartedRegistry = new ProviderRuntimeRegistry();
       const marker = `octant-${crypto.randomUUID()}`;
+      const toolMarker = `tool-${crypto.randomUUID()}`;
+      const tool: ProviderToolDefinition = {
+        name: "octant_smoke_observe",
+        description: "Return the current synthetic observation marker. Call once when asked.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      };
       try {
         const cursor = await Effect.runPromise(
           Effect.scoped(
             Effect.gen(function* () {
               const probe = yield* driver.probe({ instanceId });
               const requestedModel = process.env.OCTANT_PI_MODEL;
-              const modelId = (
-                requestedModel === undefined
-                  ? probe.models[0]
-                  : probe.models.find((model) => model.id === requestedModel)
-              )?.id;
+              if (requestedModel === undefined) {
+                throw new Error(
+                  "Set OCTANT_PI_MODEL to the exact model to verify for native tool use.",
+                );
+              }
+              const modelId = probe.models.find((model) => model.id === requestedModel)?.id;
               if (modelId === undefined) throw new Error("Pi smoke model unavailable.");
               const connection = yield* driver.acquire({
                 instanceId,
@@ -110,17 +118,31 @@ describe("installed Pi runtime", () => {
                 sessionId,
                 resumeCursor: cursor,
                 executionPolicy: "full-access",
-                tools: [],
+                tools: [tool],
               });
               expect(resumed.sessionId).toBe(sessionId);
               expect(resumed.resumeCursor?.value).toBe(cursor.value);
-              const completion = yield* Effect.fork(collectTerminal(yield* connection.subscribe));
+              let toolCalls = 0;
+              const stream = (yield* connection.subscribe).pipe(
+                Stream.tap((event) => {
+                  if (event.kind !== "tool-request") return Effect.void;
+                  expect(event.toolName).toBe(tool.name);
+                  toolCalls += 1;
+                  return connection.answerTool({
+                    sessionId,
+                    requestId: event.requestId,
+                    resultJson: JSON.stringify({ marker: toolMarker }),
+                    isError: false,
+                  });
+                }),
+              );
+              const completion = yield* Effect.fork(collectTerminal(stream));
               yield* connection.send({
                 sessionId,
                 prompt:
-                  "What exact marker did I ask you to remember? Reply only with that marker. Do not use tools.",
+                  "Call octant_smoke_observe once. Then reply with both the exact marker I asked you to remember and the marker returned by the tool. Do not use other tools. If the tool fails, quote its exact error instead of guessing its marker.",
                 attachments: [],
-                tools: [],
+                tools: [tool],
               });
               const events = Array.from(yield* Fiber.join(completion));
               expect(events.at(-1)?.kind).toBe("completed");
@@ -128,6 +150,8 @@ describe("installed Pi runtime", () => {
                 .flatMap((event) => (event.kind === "text-delta" ? [event.text] : []))
                 .join("");
               expect(text).toContain(marker);
+              expect(toolCalls).toBe(1);
+              expect(text).toContain(toolMarker);
               yield* connection.stop(sessionId);
             }),
           ),
