@@ -53,3 +53,15 @@ already separate "is there a screen" from "how do I click".
 - 0150 Allow input opens a device to clicks
 - 0053 Computer-use destinations
 - 0043 Simulator follows the active thread
+
+## Runtime integrity
+
+- Runtime activity, evidence, and cancellation are scoped to the requesting task,
+  checkout, and authority. An action ID alone grants no access to another task.
+- Replaying completed input requires current policy authorization and an exact
+  request fingerprint. Reusing an action ID with changed input or while it is
+  running refuses without sending another device input.
+- Frame reads are demand-driven and cancellation stops polling. Oversized PNG
+  frames are rejected whole rather than truncated into invalid image bytes.
+- Emulator console discovery accepts the AVD name followed by its normal `OK`
+  trailer. Actions never guess a serial when the destination cannot be resolved.

@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAndroidEmulatorEvidence,
+  decodeAndroidEmulatorRequest,
+  sameToolActionAuthority,
   decodeAndroidEmulatorId,
   decodeAndroidEmulatorRecord,
   decodeAndroidRuntimeSnapshot,
@@ -93,25 +96,32 @@ export class AndroidToolchainService {
   readonly #options: AndroidToolchainServiceOptions;
   readonly #access: (path: string) => Promise<void>;
   #sequence = 0;
+  readonly #screenWatches = new Set<AbortController>();
   #sdk: AndroidSdkDiscovery = unavailableSdk("1970-01-01T00:00:00.000Z");
   #emulators: ReadonlyArray<AndroidEmulatorRecord> = [];
-  readonly #recent: AndroidEmulatorEvidence[] = [];
+  readonly #recent: Array<{
+    readonly evidence: AndroidEmulatorEvidence;
+    readonly context: AndroidExecutionContext;
+    readonly fingerprint: string;
+  }> = [];
   readonly #active = new Map<
     string,
     {
       readonly controller: AbortController;
+      readonly context: AndroidExecutionContext;
       progress: AndroidActionProgress;
     }
   >();
-  #paneOpenRequest:
-    | {
-        readonly requestId: string;
-        readonly emulatorId: AndroidEmulatorRecord["emulatorId"];
-        readonly requestedAt: string;
-        readonly threadId: AndroidExecutionContext["threadId"];
-        readonly checkoutId: AndroidExecutionContext["checkoutId"];
-      }
-    | undefined;
+  readonly #paneOpenRequests = new Map<
+    string,
+    {
+      readonly requestId: string;
+      readonly emulatorId: AndroidEmulatorRecord["emulatorId"];
+      readonly requestedAt: string;
+      readonly threadId: AndroidExecutionContext["threadId"];
+      readonly checkoutId: AndroidExecutionContext["checkoutId"];
+    }
+  >();
   readonly #artifacts = new Map<
     string,
     { readonly bytes: Uint8Array; readonly threadId: string }
@@ -179,18 +189,29 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
   ): Promise<AndroidEmulatorEvidence> {
     const startedAt = this.#options.now();
-    if (isAndroidEmulatorInputKind(request.kind) || isAndroidEmulatorOpenInputKind(request.kind)) {
-      const prior = this.#findCompleted(request);
-      if (prior !== undefined) return prior;
-    }
     const decision = evaluateAndroidEmulatorRequest(request, context, this.#emulators, this.#sdk);
     if (decision.kind === "denied") {
-      return this.#record(deniedEvidence(request, decision.reason, startedAt, this.#options.now()));
+      return this.#record(
+        deniedEvidence(request, decision.reason, startedAt, this.#options.now()),
+        request,
+        context,
+      );
+    }
+    if (isAndroidEmulatorInputKind(request.kind) || isAndroidEmulatorOpenInputKind(request.kind)) {
+      const prior = this.#findCompleted(request, context);
+      if (prior !== undefined) return prior;
+    }
+    if (this.#active.has(String(request.actionId))) {
+      return deniedEvidence(request, "action-already-running", startedAt, this.#options.now());
     }
     const controller = new AbortController();
-    this.#activate(request, controller);
+    this.#activate(request, controller, context);
     try {
-      return this.#record(await this.#run(request, context, controller.signal, startedAt));
+      return this.#record(
+        await this.#run(request, context, controller.signal, startedAt),
+        request,
+        context,
+      );
     } finally {
       this.#active.delete(String(request.actionId));
     }
@@ -198,23 +219,33 @@ export class AndroidToolchainService {
 
   async cancel(
     cancellation: ToolActionCancellation,
-    _context: AndroidExecutionContext,
+    context: AndroidExecutionContext,
   ): Promise<boolean> {
     const active = this.#active.get(String(cancellation.actionId));
-    if (active === undefined) return false;
+    if (
+      active === undefined ||
+      !androidContextMatches(active.context, context) ||
+      !sameToolActionAuthority(cancellation.authority, context.authority) ||
+      cancellation.correlationId !== active.progress.correlationId
+    )
+      return false;
     active.controller.abort();
     return true;
   }
 
   snapshot(context: AndroidExecutionContext): AndroidRuntimeSnapshot {
-    const pane = this.#paneOpenRequest;
+    const pane = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAndroidRuntimeSnapshot({
       sequence: this.#sequence,
       snapshotAt: this.#options.now(),
       sdk: this.#sdk,
       emulators: this.#emulators,
-      active: [...this.#active.values()].map((entry) => entry.progress),
-      recentEvidence: this.#recent.slice(-MAX_RECENT),
+      active: [...this.#active.values()]
+        .filter((entry) => androidContextMatches(entry.context, context))
+        .map((entry) => entry.progress),
+      recentEvidence: this.#recent
+        .filter((entry) => androidContextMatches(entry.context, context))
+        .map((entry) => entry.evidence),
       ...(pane !== undefined &&
       pane.threadId === context.threadId &&
       pane.checkoutId === context.checkoutId
@@ -233,13 +264,13 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
     emulatorId: AndroidEmulatorRecord["emulatorId"],
   ): AndroidRuntimeSnapshot {
-    this.#paneOpenRequest = {
+    this.#paneOpenRequests.set(String(context.threadId), {
       requestId: this.#options.newId(),
       emulatorId,
       requestedAt: this.#options.now(),
       threadId: context.threadId,
       checkoutId: context.checkoutId,
-    };
+    });
     this.#sequence += 1;
     return this.snapshot(context);
   }
@@ -269,6 +300,8 @@ export class AndroidToolchainService {
   async close(): Promise<void> {
     for (const active of this.#active.values()) active.controller.abort();
     this.#active.clear();
+    for (const watch of this.#screenWatches) watch.abort();
+    this.#screenWatches.clear();
   }
 
   async watchScreen(
@@ -286,43 +319,70 @@ export class AndroidToolchainService {
     if (adb === undefined) {
       return { kind: "unavailable", message: "adb is unavailable on this host." };
     }
-    const first = await this.#screencap(adb, emulator.serial, context, signal);
-    if (first === undefined) {
+    const serial = emulator.serial;
+    const lifetime = new AbortController();
+    this.#screenWatches.add(lifetime);
+    const finish = () => {
+      lifetime.abort();
+      signal.removeEventListener("abort", finish);
+      this.#screenWatches.delete(lifetime);
+    };
+    lifetime.signal.addEventListener(
+      "abort",
+      () => {
+        signal.removeEventListener("abort", finish);
+        this.#screenWatches.delete(lifetime);
+      },
+      { once: true },
+    );
+    signal.addEventListener("abort", finish, { once: true });
+    if (signal.aborted) finish();
+    let first: Uint8Array | undefined;
+    try {
+      if (!lifetime.signal.aborted)
+        first = await this.#screencap(adb, serial, context, lifetime.signal);
+    } catch {
+      finish();
+      return { kind: "unavailable", message: "The emulator screen could not be captured." };
+    }
+    if (first === undefined || lifetime.signal.aborted) {
+      finish();
       return { kind: "unavailable", message: "The emulator screen could not be captured." };
     }
     const size = pngSize(first);
     if (size === undefined) {
+      finish();
       return { kind: "unavailable", message: "The emulator screen capture was not a PNG." };
     }
-    const serial = emulator.serial;
-    let last = first;
-    const frames = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        controller.enqueue(lengthPrefixed(first));
-        const tick = async () => {
-          while (!signal.aborted) {
-            await sleep(SCREEN_POLL_MS, signal);
-            if (signal.aborted) break;
-            const next = await this.#screencap(adb, serial, context, signal);
-            if (next === undefined) continue;
-            if (sameBytes(next, last)) continue;
-            last = next;
-            try {
-              controller.enqueue(lengthPrefixed(next));
-            } catch {
-              break;
-            }
-          }
+    const firstFrame = first;
+    let last = firstFrame;
+    const frames = new ReadableStream<Uint8Array>(
+      {
+        start: (controller) => {
+          controller.enqueue(lengthPrefixed(firstFrame));
+        },
+        pull: async (controller) => {
           try {
+            while (!lifetime.signal.aborted) {
+              await sleep(SCREEN_POLL_MS, lifetime.signal);
+              if (lifetime.signal.aborted) break;
+              const next = await this.#screencap(adb, serial, context, lifetime.signal);
+              if (next === undefined || sameBytes(next, last)) continue;
+              last = next;
+              controller.enqueue(lengthPrefixed(next));
+              return;
+            }
             controller.close();
-          } catch {
-            // Already closed.
+            finish();
+          } catch (error) {
+            finish();
+            controller.error(error);
           }
-        };
-        void tick();
+        },
+        cancel: finish,
       },
-      cancel: () => undefined,
-    });
+      { highWaterMark: 0 },
+    );
     return { kind: "watching", screen: size, frames };
   }
 
@@ -376,8 +436,11 @@ export class AndroidToolchainService {
     }
     if (adb === undefined) return await this.#unavailable(request, startedAt, "adb");
     const serial = this.#serialOf(request.emulatorId);
+    if (serial === undefined) {
+      return deniedEvidence(request, "destination-not-booted", startedAt, this.#options.now());
+    }
     if (request.kind === "shutdown") {
-      const target = serial ?? "emulator-5554";
+      const target = serial;
       const result = await this.#command(
         [adb, "-s", target, "emu", "kill"],
         context,
@@ -386,9 +449,6 @@ export class AndroidToolchainService {
       );
       if (succeeded(result)) this.#setState(request.emulatorId, "shutdown", true);
       return await this.#fromProcess(request, result, startedAt);
-    }
-    if (serial === undefined) {
-      return deniedEvidence(request, "destination-not-booted", startedAt, this.#options.now());
     }
     if (request.kind === "screenshot") {
       const bytes = await this.#screencap(adb, serial, context, signal);
@@ -504,7 +564,13 @@ export class AndroidToolchainService {
   ): Promise<string | undefined> {
     for (const serial of serials) {
       const named = await this.#command([adb, "-s", serial, "emu", "avd", "name"], context, 5_000);
-      if (succeeded(named) && text(named.stdout).trim() === avd) return serial;
+      const lines = text(named.stdout).trim().split(/\r?\n/);
+      if (
+        succeeded(named) &&
+        lines[0] === avd &&
+        (lines.length === 1 || (lines.length === 2 && lines[1] === "OK"))
+      )
+        return serial;
     }
     return undefined;
   }
@@ -551,7 +617,12 @@ export class AndroidToolchainService {
       15_000,
       signal,
     );
-    if (!succeeded(result) || result.stdout.byteLength < 24) return undefined;
+    if (
+      !succeeded(result) ||
+      result.stdout.byteLength < 24 ||
+      result.stdout.byteLength > MAXIMUM_FRAME_BYTES
+    )
+      return undefined;
     return result.stdout;
   }
 
@@ -572,7 +643,11 @@ export class AndroidToolchainService {
     );
   }
 
-  #activate(request: AndroidEmulatorRequest, controller: AbortController) {
+  #activate(
+    request: AndroidEmulatorRequest,
+    controller: AbortController,
+    context: AndroidExecutionContext,
+  ) {
     const progress: AndroidActionProgress = {
       actionId: request.actionId,
       correlationId: request.correlationId,
@@ -583,24 +658,45 @@ export class AndroidToolchainService {
       sequence: 1,
       updatedAt: this.#options.now() as AndroidActionProgress["updatedAt"],
     };
-    const active = { controller, progress };
+    const active = { controller, progress, context };
     this.#active.set(String(request.actionId), active);
     return active;
   }
 
-  #findCompleted(request: AndroidEmulatorRequest): AndroidEmulatorEvidence | undefined {
+  #findCompleted(
+    request: AndroidEmulatorRequest,
+    context: AndroidExecutionContext,
+  ): AndroidEmulatorEvidence | undefined {
     for (let index = this.#recent.length - 1; index >= 0; index -= 1) {
       const entry = this.#recent[index];
-      if (entry === undefined) continue;
-      if (String(entry.actionId) !== String(request.actionId)) continue;
-      if (entry.kind !== request.kind) continue;
-      return replayedFrom(entry);
+      if (entry === undefined || entry.evidence.outcome === "unauthorized") continue;
+      if (String(entry.evidence.actionId) !== String(request.actionId)) continue;
+      if (
+        !androidContextMatches(entry.context, context) ||
+        entry.fingerprint !== androidRequestFingerprint(request)
+      ) {
+        return deniedEvidence(
+          request,
+          "action-identity-conflict",
+          this.#options.now(),
+          this.#options.now(),
+        );
+      }
+      return replayedFrom(entry.evidence);
     }
     return undefined;
   }
 
-  #record(value: AndroidEmulatorEvidence): AndroidEmulatorEvidence {
-    this.#recent.push(value);
+  #record(
+    value: AndroidEmulatorEvidence,
+    request: AndroidEmulatorRequest,
+    context: AndroidExecutionContext,
+  ): AndroidEmulatorEvidence {
+    this.#recent.push({
+      evidence: value,
+      context,
+      fingerprint: androidRequestFingerprint(request),
+    });
     if (this.#recent.length > MAX_RECENT) this.#recent.splice(0, this.#recent.length - MAX_RECENT);
     this.#sequence += 1;
     return value;
@@ -915,11 +1011,9 @@ function pngSize(
 }
 
 function lengthPrefixed(frame: Uint8Array): Uint8Array {
-  const bounded =
-    frame.byteLength > MAXIMUM_FRAME_BYTES ? frame.slice(0, MAXIMUM_FRAME_BYTES) : frame;
-  const out = new Uint8Array(4 + bounded.byteLength);
-  new DataView(out.buffer).setUint32(0, bounded.byteLength);
-  out.set(bounded, 4);
+  const out = new Uint8Array(4 + frame.byteLength);
+  new DataView(out.buffer).setUint32(0, frame.byteLength);
+  out.set(frame, 4);
   return out;
 }
 
@@ -937,14 +1031,29 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       resolveSleep();
       return;
     }
-    const timer = setTimeout(resolveSleep, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolveSleep();
-      },
-      { once: true },
-    );
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolveSleep();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener("abort", finish, { once: true });
   });
+}
+
+function androidContextMatches(
+  left: AndroidExecutionContext,
+  right: AndroidExecutionContext,
+): boolean {
+  return (
+    sameToolActionAuthority(left.authority, right.authority) &&
+    String(left.threadId) === String(right.threadId) &&
+    String(left.checkoutId) === String(right.checkoutId)
+  );
+}
+
+function androidRequestFingerprint(request: AndroidEmulatorRequest): string {
+  return createHash("sha256")
+    .update(JSON.stringify(decodeAndroidEmulatorRequest(request)))
+    .digest("hex");
 }

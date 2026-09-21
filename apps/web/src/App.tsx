@@ -1968,10 +1968,7 @@ function LaunchedShell(
   }, [activeCodeThreadView?.checkout.id, activeCodeThreadView?.thread]);
   const simulatorPaneRequest = useAppleSimulatorPaneOffer({
     ...(appleToolchainClient === undefined ? {} : { client: appleToolchainClient }),
-    enabled:
-      appleToolchainClient !== undefined &&
-      appleProjects[0]?.projectPath !== undefined &&
-      applePaneSnapshotRequest !== undefined,
+    enabled: appleToolchainClient !== undefined && applePaneSnapshotRequest !== undefined,
     watch: appleToolActivity.watch,
     activityKey: appleToolActivity.activityKey,
     ...(applePaneSnapshotRequest === undefined
@@ -2692,7 +2689,7 @@ function LaunchedShell(
     // wait on the transcript, and gating every utility on it made those panels
     // show "Loading thread" for work they never read.
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
-    const appleProjectPath = appleProjects[0]?.projectPath;
+    const appleProjectPath = simulatorPaneRequest?.projectPath ?? appleProjects[0]?.projectPath;
     const writtenDocument = writtenDocumentsByThread.get(dockThreadKey)?.current;
     const writtenDocumentPath = writtenDocument?.kind === "file" ? writtenDocument.path : undefined;
     const writtenCanvasId =

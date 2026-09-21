@@ -2,6 +2,8 @@ import type {
   AppleBuildRequest,
   AppleDiscoveryRequest,
   AppleSimulatorRequest,
+  AppleSimulatorRecord,
+  AppleRuntimeSnapshot,
   ToolActionAuthority,
   ToolActionCancellation,
 } from "@octant/contracts";
@@ -19,6 +21,10 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   ): Promise<any>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   snapshot(context: ExecutionContext): any;
+  requestPaneOpen(
+    context: ExecutionContext,
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+  ): AppleRuntimeSnapshot;
   close(): Promise<void>;
   reconcileAfterRestart(
     receipts: ReadonlyArray<Record<string, unknown>>,
@@ -748,6 +754,7 @@ describe("AppleToolchainService lifecycle", () => {
     expect(opened.paneOpenRequest).toEqual({
       requestId: "30000000-0000-4000-8000-000000000012",
       simulatorId,
+      projectPath: discoveryRequest.projectPath,
       requestedAt: "2026-07-27T20:00:00.000Z",
     });
     expect(
@@ -756,6 +763,10 @@ describe("AppleToolchainService lifecycle", () => {
         threadId: "30000000-0000-4000-8000-000000000099" as never,
       }).paneOpenRequest,
     ).toBeUndefined();
+    const other = { ...context, threadId: "30000000-0000-4000-8000-000000000099" as never };
+    service.requestPaneOpen(other, simulatorId);
+    expect(service.snapshot(context).paneOpenRequest).toEqual(opened.paneOpenRequest);
+    expect(service.snapshot(other).paneOpenRequest).toBeDefined();
   });
 
   it("keeps a shutdown that finished while a slower discovery was still reading", async () => {

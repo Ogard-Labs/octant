@@ -194,19 +194,20 @@ export class AppleToolchainService {
   readonly #captureDirectory: string;
   readonly #capturePrefix: string;
   /**
-   * The in-app pane an agent last asked this process to show. One request at
-   * a time: a later attach replaces it, and a snapshot for another thread
-   * does not see it.
+   * The last requested pane for each task. Concurrent tasks cannot replace
+   * one another's requests; snapshot checkout checks keep requests scoped.
    */
-  #paneOpenRequest:
-    | {
-        readonly threadId: AppleExecutionContext["threadId"];
-        readonly checkoutId: AppleExecutionContext["checkoutId"];
-        readonly requestId: string;
-        readonly simulatorId: AppleSimulatorRecord["simulatorId"];
-        readonly requestedAt: string;
-      }
-    | undefined;
+  readonly #paneOpenRequests = new Map<
+    string,
+    {
+      readonly threadId: AppleExecutionContext["threadId"];
+      readonly checkoutId: AppleExecutionContext["checkoutId"];
+      readonly requestId: string;
+      readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+      readonly projectPath?: AppleWorkspaceDiscovery["projectPath"];
+      readonly requestedAt: string;
+    }
+  >();
   // Files a running capture owns. A capture may run for minutes, so its file's
   // age says nothing about whether it was abandoned; only this does. Shared by
   // every service in the process: a replaced service's later sweeps would
@@ -448,7 +449,7 @@ export class AppleToolchainService {
   }
 
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
-    const paneOpenRequest = this.#paneOpenRequest;
+    const paneOpenRequest = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAppleRuntimeSnapshot({
       sequence: this.#sequence,
       snapshotAt: this.#options.now(),
@@ -467,6 +468,9 @@ export class AppleToolchainService {
             paneOpenRequest: {
               requestId: paneOpenRequest.requestId,
               simulatorId: paneOpenRequest.simulatorId,
+              ...(paneOpenRequest.projectPath === undefined
+                ? {}
+                : { projectPath: paneOpenRequest.projectPath }),
               requestedAt: paneOpenRequest.requestedAt,
             },
           }
@@ -482,13 +486,15 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
     simulatorId: AppleSimulatorRecord["simulatorId"],
   ): AppleRuntimeSnapshot {
-    this.#paneOpenRequest = {
+    const projectPath = this.#findDiscovery(context)?.workspace.projectPath;
+    this.#paneOpenRequests.set(String(context.threadId), {
       threadId: context.threadId,
       checkoutId: context.checkoutId,
       requestId: this.#options.newId(),
       simulatorId,
+      ...(projectPath === undefined ? {} : { projectPath }),
       requestedAt: this.#options.now(),
-    };
+    });
     this.#sequence += 1;
     return this.snapshot(context);
   }
@@ -554,8 +560,12 @@ export class AppleToolchainService {
     await Promise.allSettled(activeActions.map(({ done }) => done));
   }
 
-  #findDiscovery(request: AppleActionRequest): DiscoveryCacheEntry | undefined {
-    if ("projectPath" in request) {
+  #findDiscovery(
+    request: Pick<AppleActionRequest, "threadId" | "checkoutId"> & {
+      readonly projectPath?: string;
+    },
+  ): DiscoveryCacheEntry | undefined {
+    if (request.projectPath !== undefined) {
       return this.#discovery.get(
         discoveryKey(request.threadId, request.checkoutId, request.projectPath),
       );

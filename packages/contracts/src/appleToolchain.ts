@@ -372,6 +372,7 @@ export const AppleRuntimeSnapshot = Schema.Struct({
     Schema.Struct({
       requestId: Schema.UUID,
       simulatorId: AppleSimulatorId,
+      projectPath: Schema.optional(AppleProjectPath),
       requestedAt: UtcTimestamp,
     }).annotations(strict),
   ),

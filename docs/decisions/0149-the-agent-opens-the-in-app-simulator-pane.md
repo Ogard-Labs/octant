@@ -34,7 +34,7 @@ Follow-the-finger input stays a later decision (0140).
 - **`boot`, `run`, and `open` raise Octant's iOS Simulator pane.** An
   agent's `boot` or `run`, and `open` whether the destination was already
   booted, stamp an in-memory pane-open request on the runtime snapshot
-  (`requestId`, `simulatorId`, `requestedAt`) as the action starts, so the
+  (`requestId`, `simulatorId`, `requestedAt`, and the discovered Project path) as the action starts, so the
   pane rises while the destination is coming up. The renderer consumes each
   `requestId` once, the way it offers a written document: it opens the
   dock's iOS Simulator tab without moving composer focus. A tab the person
@@ -59,6 +59,9 @@ Follow-the-finger input stays a later decision (0140).
 - **Watching stays a read.** The pane learns of a request only from the
   snapshot the workbench already reads. The request lives in the server's
   memory, is scoped to the thread and checkout, and dies with the process.
+  Requests from separate tasks coexist. The renderer uses the host-discovered
+  Project path, including nested Xcode projects; a root-only directory listing
+  cannot suppress an agent request.
   It is never journaled. One input confirmation still opens the Simulator
   for fifteen minutes (0142); the pane must not raise that confirmation
   again for a grant the host already admitted.
