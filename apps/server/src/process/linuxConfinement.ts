@@ -243,16 +243,17 @@ export function buildLinuxConfinementLaunch(
     for (const path of hostExecutableSearchPaths) {
       if (existsSync(path)) addMount("tmpfs", "", path);
     }
-    // A `#!` script starts through its interpreter, which the mask above hides
-    // along with everything else in these directories: without it the launch
-    // never reaches its first line. The Seatbelt builder lists the same
-    // programs for the same reason.
-    for (const path of confinedExecutableExecPaths(
-      input.executable,
-      input.interpreterSearchPath ?? process.env.PATH,
-    )) {
-      tryBindReadOnly(path);
-    }
+  }
+  // A `#!` script starts through its interpreter. When process exec is denied
+  // the mask above hides it along with everything else in those directories;
+  // when exec stays allowed a launcher may still resolve its interpreter from
+  // PATH outside the granted install tree, so the interpreter is mounted either
+  // way. The Seatbelt builder lists the same programs for the same reason.
+  for (const path of confinedExecutableExecPaths(
+    input.executable,
+    input.interpreterSearchPath ?? process.env.PATH,
+  )) {
+    tryBindReadOnly(path);
   }
 
   const writeTargets = [

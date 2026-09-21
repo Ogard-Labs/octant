@@ -26,6 +26,7 @@ import {
 } from "./seatbeltProfile";
 
 const directories: string[] = [];
+const REALPATH_PATH = "/bin/realpath";
 
 afterEach(() => {
   for (const directory of directories.splice(0)) {
@@ -71,6 +72,41 @@ describe("shared Seatbelt profile builder", () => {
       expect(denied.status).not.toBe(0);
       expect(denied.stdout).toBe("");
       expect(denied.stderr).toContain("Operation not permitted");
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin" || !existsSync(REALPATH_PATH))(
+    "lets a program resolve a path inside the temporary directory it was granted",
+    () => {
+      // The temporary directory resolves beneath `/private`, which the profile
+      // denies wholesale, and the kernel judges every component of a path. A
+      // program that canonicalises a path inside its own temporary directory
+      // was refused at that component even though the directory itself is
+      // granted in full.
+      const root = temporaryRoot();
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: root,
+        temporaryDirectory: root,
+        networkEgress: "none",
+        allowFileReadStar: true,
+        privateHomeAllowPaths: [],
+      });
+      const inside = join(root, "inside.txt");
+      writeFileSync(inside, "resolvable");
+
+      const resolved = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, REALPATH_PATH, inside], {
+        encoding: "utf8",
+      });
+
+      expect(resolved.stderr).toBe("");
+      expect(resolved.status).toBe(0);
+      expect(resolved.stdout.trim()).toBe(inside);
+      // Stat is all that opens: the denied ancestors keep their contents and
+      // their listings.
+      const listed = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/ls", "/private"], {
+        encoding: "utf8",
+      });
+      expect(listed.status).not.toBe(0);
     },
   );
 

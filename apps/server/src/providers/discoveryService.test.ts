@@ -11,6 +11,16 @@ import {
   type DiscoveryExecPort,
   type DiscoveryFsPort,
 } from "./discoveryService";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+
+/**
+ * These cases assert what the scan finds and what it hands a candidate, not
+ * the profile. The live builder refuses on a host without `sandbox-exec`, and
+ * a wrapped command would no longer match the fake exec's key.
+ */
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
 
 function makeFakeFs(
   existingPaths: Map<string, { file: boolean; symlink?: boolean; target?: string }>,
@@ -78,6 +88,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -110,6 +121,7 @@ describe("discoveryService", () => {
       ),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/bin", HOME: "/Users/test" },
@@ -145,6 +157,7 @@ describe("discoveryService", () => {
     );
 
     const snapshot = await makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/bin", HOME: "/Users/test", SHELL: "/bin/bash" },
@@ -177,6 +190,7 @@ describe("discoveryService", () => {
     const exec = vi.fn<DiscoveryExecPort>();
 
     const snapshot = await makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/bin", HOME: "/Users/test" },
@@ -200,6 +214,7 @@ describe("discoveryService", () => {
     const readFile = vi.fn(fs.readFile);
     const exec = vi.fn<DiscoveryExecPort>();
     const snapshot = await makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs: { ...fs, readFile },
       environment: { PATH: "/usr/bin", HOME: "/Users/test", SHELL: "/bin/bash" },
@@ -232,6 +247,7 @@ describe("discoveryService", () => {
       ),
     );
     const snapshot = await makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/bin", HOME: "/Users/test", SHELL: "/bin/bash" },
@@ -253,6 +269,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec: makeFakeExec(new Map()),
       fs,
       environment: { PATH: "/usr/bin", HOME: "/Users/test" },
@@ -274,6 +291,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/bin", HOME: "/Users/test" },
@@ -312,6 +330,7 @@ describe("discoveryService", () => {
       ]),
     );
     const snapshot = await makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/local/bin", HOME: "/Users/test" },
@@ -343,6 +362,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/bin:/bin", HOME: "/Users/test" },
@@ -379,6 +399,7 @@ describe("discoveryService", () => {
       stderr: "",
     }));
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: {
@@ -393,6 +414,9 @@ describe("discoveryService", () => {
         MISTRAL_API_KEY: "secret",
         OPENAI_API_KEY: "secret",
         ARBITRARY_SECRET: "secret",
+        CODEX_HOME: "/Users/test/.codex",
+        CLAUDE_CONFIG_DIR: "/Users/test/.claude",
+        XDG_CONFIG_HOME: "/Users/test/.config",
       },
       now: () => 1753430400000,
     });
@@ -403,7 +427,6 @@ describe("discoveryService", () => {
     for (const [, , options] of exec.mock.calls) {
       expect(options.env).toEqual(
         expect.objectContaining({
-          HOME: "/Users/test",
           LANG: "en_US.UTF-8",
           PATH: "/usr/local/bin:/usr/bin",
           USER: "test",
@@ -417,6 +440,18 @@ describe("discoveryService", () => {
       expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
       expect(options.env).not.toHaveProperty("ARBITRARY_SECRET");
     }
+    // The version read is confined and answers out of its own scratch, so it
+    // never learns where the user's home is; the readiness read still needs it.
+    const [versionCall, readinessCall] = exec.mock.calls;
+    expect(versionCall?.[2].env?.HOME).not.toBe("/Users/test");
+    expect(versionCall?.[2].env?.HOME).toBe(versionCall?.[2].cwd);
+    expect(readinessCall?.[2].env?.HOME).toBe("/Users/test");
+    // A config-home variable would point the confined read at real provider
+    // state it cannot open, so the read drops them and falls back to its HOME.
+    for (const name of ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME"]) {
+      expect(versionCall?.[2].env).not.toHaveProperty(name);
+    }
+    expect(readinessCall?.[2].env?.CODEX_HOME).toBe("/Users/test/.codex");
   });
 
   it("reports unauthenticated when auth probe fails", async () => {
@@ -428,6 +463,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -446,6 +482,7 @@ describe("discoveryService", () => {
       new Map([["/usr/local/bin/claude --version", { stdout: "1.0.33\n", stderr: "" }]]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -472,6 +509,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -501,6 +539,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/local/bin:/opt/homebrew/bin", HOME: "/Users/test" },
@@ -541,6 +580,7 @@ describe("discoveryService", () => {
       throw new Error("unexpected probe");
     });
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/local/bin:/usr/bin", HOME: "/Users/test" },
@@ -563,6 +603,7 @@ describe("discoveryService", () => {
     };
     const exec = makeFakeExec(new Map());
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs: failingFs,
       environment: baseEnvironment,
@@ -577,6 +618,7 @@ describe("discoveryService", () => {
     const fs = makeFakeFs(new Map([["/usr/local/bin/codex", { file: false }]]));
     const exec = makeFakeExec(new Map());
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -598,6 +640,7 @@ describe("discoveryService", () => {
     );
     // /usr/local/bin is both in PATH and approved locations for codex
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/usr/local/bin", HOME: "/Users/test" },
@@ -613,6 +656,7 @@ describe("discoveryService", () => {
     const fs = makeFakeFs(new Map());
     const exec = makeFakeExec(new Map());
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "relative:$(evil):/usr/local/bin:/usr/bin", HOME: "/Users/test" },
@@ -635,6 +679,7 @@ describe("discoveryService", () => {
     const controller = new AbortController();
     controller.abort();
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -663,6 +708,7 @@ describe("discoveryService", () => {
     );
     // Simulate time passing beyond budget after first descriptor
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -681,6 +727,7 @@ describe("discoveryService", () => {
     const fs = makeFakeFs(new Map());
     const exec = makeFakeExec(new Map());
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -706,6 +753,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: { PATH: "/Users/test/.local/bin", HOME: "/Users/test" },
@@ -735,6 +783,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,
@@ -763,6 +812,7 @@ describe("discoveryService", () => {
       ]),
     );
     const service = makeDiscoveryService({
+      versionProbeConfinement: passthroughConfinement,
       exec,
       fs,
       environment: baseEnvironment,

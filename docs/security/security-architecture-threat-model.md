@@ -286,6 +286,9 @@ window, or approves an action class the host policy reserves for the local user.
   `/usr/bin/sandbox-exec` with a deny-default Seatbelt profile: read scoped to the bound root,
   provider home, binary/runtime directories and temp; write scoped to provider home and temp, plus
   the root only for non-plan, non-chat sessions; deny rules enumerate the rest of the user's home.
+  A launch may stat the directories on the way into its own roots where those sit beneath a denied
+  subtree — macOS resolves every temporary directory beneath `/private` — and nothing more: their
+  listings and contents stay denied.
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
   `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts`, and
   `claudeProcess.ts` on Plan — the runtimes whose process carries exactly one thread's root, mode,
@@ -343,18 +346,27 @@ window, or approves an action class the host policy reserves for the local user.
   launch sets it, and the severity table's "reading Keychain material" still describes reading the
   store rather than this lookup. Which service name a given runtime takes was not measured on the
   authoring host, so both the modern and legacy entry points are opened.
-- **Probes run a candidate executable unconfined.** `probeOpenCodeBinary`, `probeAcpBinary`,
-  `inspectVersion`, `probeCodexBinary`, and `runProbe` in `claudeProcess.ts` — the last for both
-  `--version` and `auth status --json` — each spawn the user-configured binary before any
-  confined launch. `scanDescriptor` in `apps/server/src/providers/discoveryService.ts`
-  goes further: it runs `versionProbeArgs` and an optional `authProbeArgs` against a candidate it
-  found on `PATH` or in an approved directory, so the executable is not even one the user named.
-  Both bound the timeout and output and sanitize the environment, and neither is confined. This
-  does not satisfy 0009, 0122 expects a readiness probe to retain confinement, and 0143 does not
-  except it: it is a standing gap across every provider family and across discovery.
-  The Oh My Pi connection check in `ohMyPiProcess.ts` runs a version check and an RPC probe the
-  same way, against 0122, which exempts a probe from egress only and still requires it to launch
-  under chat-mode confinement.
+- **Version reads are confined; three readiness probes are not.** Every `--version` read prepares
+  its launch through `prepareConfinedVersionProbe`
+  (`apps/server/src/process/confinedVersionProbe.ts`), recorded in
+  `docs/decisions/0146-a-version-read-launches-confined.md`: the six family reads
+  (`probeAcpBinary`, Claude's `runProbe` at `kind: "version"`, `probeCodexBinary`, Oh My Pi's and
+  Pi's `inspectVersion`, `probeOpenCodeBinary`) and `scanDescriptor` in
+  `apps/server/src/providers/discoveryService.ts`. The read binds no project root and no managed
+  home; one throwaway scratch directory is its working directory, `HOME`, `TMPDIR` and only
+  writable path; egress is `none`; reads open the program's own install tree and nothing else
+  beneath the user's home. Its environment is reduced to a fixed set of inherited names plus what
+  the family computed from the scratch, so provider credentials, cloud keys and config-home
+  variables never reach a replaced executable. A host that cannot confine refuses the read rather
+  than running it, and it ends the read's whole process group when the read settles.
+  Process exec and fork stay allowed, a scoped exception to 0122 that 0146 states, because a
+  configured path is routinely a launcher that starts the program that answers; a child inherits
+  the same profile. Three readiness launches stay unconfined, and 0122 expects each to retain
+  confinement: `scanDescriptor`'s optional `authProbeArgs`, which reads the provider's credential
+  state out of the user's home against a candidate found on `PATH`; Claude's `auth status --json`
+  in `runProbe`; and the Oh My Pi connection check's RPC process in `ohMyPiProcess.ts`. Each bounds
+  its timeout and output and sanitizes its environment. Giving them a home they can read is a
+  readiness-probe question under 0122.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,

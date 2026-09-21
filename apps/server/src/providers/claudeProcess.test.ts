@@ -35,6 +35,17 @@ const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeClaudeCli.ts", import.
 const planProbePath = fileURLToPath(new URL("./fixtures/confinedPlanProbe.sh", import.meta.url));
 const directories: string[] = [];
 
+/**
+ * These suites assert probe lifecycle, not the profile. The live builder
+ * refuses on a host without `sandbox-exec`, and a real profile would deny the
+ * fixture the records file it writes beside itself, so the launch is prepared
+ * with the confinement passed straight through. Cases that assert the runtime
+ * profile pass the shimmed builder instead.
+ */
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
+
 function fixture(mode = "ready"): {
   readonly binaryPath: string;
   readonly environment: NodeJS.ProcessEnv;
@@ -114,6 +125,7 @@ function makePort(
 ) {
   return makeClaudeProcessLive({
     inheritedEnvironment: target.environment,
+    confinement: passthroughConfinement,
     probeOutputBytes: 256,
     runtimeStderrBytes: 64,
     shutdownTimeoutMs: 50,
@@ -207,6 +219,27 @@ describe("ClaudeProcessPort probes", () => {
         makePort(missing).probeSubscription(missing.binaryPath, missing.environment),
       ),
     ).resolves.toBe("unauthenticated");
+  });
+
+  it("keeps Claude's required guards on the version read", async () => {
+    // The version read keeps a static guard only when its family names it. The
+    // updater and telemetry switches are Claude's, and a read given no home and
+    // no network can stall or fail on either, which reports it unavailable.
+    const target = fixture();
+    const root = mkdtempSync(join(tmpdir(), "octant-claude-guards-"));
+    directories.push(root);
+    const recorded = join(root, "guards.txt");
+    const binaryPath = join(root, "claude-guards");
+    writeFileSync(
+      binaryPath,
+      `#!/bin/sh\nprintf '%s,%s' "\${DISABLE_AUTOUPDATER-unset}" "\${DISABLE_TELEMETRY-unset}" > '${recorded}'\nprintf '2.1.210\\n'\n`,
+      { mode: 0o755 },
+    );
+    chmodSync(binaryPath, 0o755);
+
+    await Effect.runPromise(makePort(target).probeVersion(binaryPath));
+
+    expect(readFileSync(recorded, "utf8")).toBe("1,1");
   });
 
   it("preserves a fast version probe when receipt persistence loses the exit race", async () => {

@@ -20,6 +20,7 @@ import type {
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect } from "effect";
 
+import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
@@ -29,7 +30,7 @@ import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
-import { sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnClaudeCodeProcess"]>;
@@ -250,119 +251,151 @@ function runProbe(
   const invalid = validateBinaryPath(binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  return Effect.async<string, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, args, {
-      detached: process.platform !== "win32",
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let childExitedObserved = false;
-    const childExited = new Promise<void>((resolveExit) =>
-      child.once("exit", () => {
-        childExitedObserved = true;
-        resolveExit();
-      }),
-    );
-    let ownershipReady: Promise<void> = Promise.resolve();
-    if (child.pid !== undefined && options.onProcessStarted !== undefined) {
-      ownershipReady = options
-        .onProcessStarted({ pid: child.pid, exited: childExited })
-        .then(() => undefined);
-      void ownershipReady.catch(() => undefined);
-    }
-    const terminate = makeProcessTerminator(child, options.shutdownTimeoutMs);
-    let stdout: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
-    let stderr: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
-    let settled = false;
-    let cleanupPromise: Promise<void> | undefined;
+  // Only the version read is confined. The authentication probe reaches the
+  // provider's own control plane out of the user's credential home, which is a
+  // readiness check under 0122 rather than a local string read.
+  // Preparing inside the suspend keeps one scratch directory per run: an
+  // Effect a caller holds and never runs leaves nothing behind, and one it runs
+  // twice does not hand the second run a directory the first already released.
+  return Effect.suspend(() => {
+    const probe =
+      kind === "version"
+        ? prepareConfinedVersionProbe({
+            binaryPath,
+            displayName: "Claude",
+            args,
+            environment: () => environment,
+            guards: REQUIRED_GUARDS,
+            // The same port the runtime launch uses: one builder, two launches.
+            confinement: options.confinement,
+          })
+        : undefined;
+    if (probe?.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
+    const launch = probe?.status === "prepared" ? probe.launch : undefined;
 
-    const cleanupListeners = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onStdout);
-      child.stderr.off("data", onStderr);
-      child.off("error", onError);
-      child.off("close", onClose);
-    };
-    const cleanupProcess = () => {
-      cleanupPromise ??= terminate();
-      return cleanupPromise;
-    };
-    const finish = (result: Effect.Effect<string, ProviderFailure>) => {
-      if (settled) return;
-      settled = true;
-      cleanupListeners();
-      void cleanupProcess().then(
-        async () => {
-          try {
-            await ownershipReady;
-            resume(result);
-          } catch {
-            if (childExitedObserved) resume(result);
-            else
-              resume(
-                Effect.fail(failure("provider-failed", "Claude process receipt is unavailable.")),
-              );
-          }
+    return Effect.async<string, ProviderFailure>((resume) => {
+      const child = spawn(
+        launch?.command ?? binaryPath,
+        launch === undefined ? args : [...launch.args],
+        {
+          ...(launch === undefined ? {} : { cwd: launch.workingDirectory }),
+          detached: process.platform !== "win32",
+          env: launch?.environment ?? environment,
+          stdio: ["ignore", "pipe", "pipe"],
         },
-        () => resume(Effect.fail(failure("provider-failed", "Claude probe cleanup failed."))),
       );
-    };
-    const onStdout = (chunk: Buffer | string) => {
-      stdout = captureChunk(stdout, chunk, options.probeOutputBytes);
-    };
-    const onStderr = (chunk: Buffer | string) => {
-      stderr = captureChunk(stderr, chunk, options.probeOutputBytes);
-    };
-    const onError = () =>
-      finish(Effect.fail(failure("unavailable", `Claude ${kind} probe could not be started.`)));
-    const onClose = (code: number | null) => {
-      if (stdout.overflow || stderr.overflow) {
-        finish(Effect.fail(failure("protocol", `Claude ${kind} probe output exceeded the limit.`)));
-        return;
+      let childExitedObserved = false;
+      const childExited = new Promise<void>((resolveExit) =>
+        child.once("exit", () => {
+          childExitedObserved = true;
+          resolveExit();
+        }),
+      );
+      let ownershipReady: Promise<void> = Promise.resolve();
+      if (child.pid !== undefined && options.onProcessStarted !== undefined) {
+        ownershipReady = options
+          .onProcessStarted({ pid: child.pid, exited: childExited })
+          .then(() => undefined);
+        void ownershipReady.catch(() => undefined);
       }
-      if (kind === "version") {
-        if (code !== 0) {
-          finish(Effect.fail(failure("unavailable", "Claude version probe did not succeed.")));
-          return;
-        }
-        const version = VERSION_PATTERN.exec(stdout.bytes.toString("utf8"))?.[1];
-        finish(
-          version === undefined
-            ? Effect.fail(failure("protocol", "Claude binary returned an unrecognized version."))
-            : Effect.succeed(version),
-        );
-        return;
-      }
+      const terminate = makeProcessTerminator(child, options.shutdownTimeoutMs);
+      let stdout: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
+      let stderr: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
+      let settled = false;
+      let cleanupPromise: Promise<void> | undefined;
 
-      const status = parseAuthenticationStatus(stdout.bytes.toString("utf8"));
-      if (
-        status === undefined ||
-        (status === "authenticated" && code !== 0) ||
-        (status === "unauthenticated" && code !== 1)
-      ) {
-        finish(
-          Effect.fail(failure("protocol", "Claude authentication status response was invalid.")),
-        );
-        return;
-      }
-      finish(Effect.succeed(status));
-    };
-    const timeout = setTimeout(
-      () => finish(Effect.fail(failure("unavailable", `Claude ${kind} probe timed out.`))),
-      options.probeTimeoutMs,
-    );
-
-    child.stdout.on("data", onStdout);
-    child.stderr.on("data", onStderr);
-    child.once("error", onError);
-    child.once("close", onClose);
-
-    return cleanupEffect(async () => {
-      if (!settled) {
+      const cleanupListeners = () => {
+        clearTimeout(timeout);
+        child.stdout.off("data", onStdout);
+        child.stderr.off("data", onStderr);
+        child.off("error", onError);
+        child.off("close", onClose);
+      };
+      const cleanupProcess = () => {
+        // The scratch directory outlives the process it was granted to unless
+        // it goes away with it, and every settle path here runs this.
+        cleanupPromise ??= launch === undefined ? terminate() : terminate().finally(launch.release);
+        return cleanupPromise;
+      };
+      const finish = (result: Effect.Effect<string, ProviderFailure>) => {
+        if (settled) return;
         settled = true;
         cleanupListeners();
-      }
-      await cleanupProcess();
+        void cleanupProcess().then(
+          async () => {
+            try {
+              await ownershipReady;
+              resume(result);
+            } catch {
+              if (childExitedObserved) resume(result);
+              else
+                resume(
+                  Effect.fail(failure("provider-failed", "Claude process receipt is unavailable.")),
+                );
+            }
+          },
+          () => resume(Effect.fail(failure("provider-failed", "Claude probe cleanup failed."))),
+        );
+      };
+      const onStdout = (chunk: Buffer | string) => {
+        stdout = captureChunk(stdout, chunk, options.probeOutputBytes);
+      };
+      const onStderr = (chunk: Buffer | string) => {
+        stderr = captureChunk(stderr, chunk, options.probeOutputBytes);
+      };
+      const onError = () =>
+        finish(Effect.fail(failure("unavailable", `Claude ${kind} probe could not be started.`)));
+      const onClose = (code: number | null) => {
+        if (stdout.overflow || stderr.overflow) {
+          finish(
+            Effect.fail(failure("protocol", `Claude ${kind} probe output exceeded the limit.`)),
+          );
+          return;
+        }
+        if (kind === "version") {
+          if (code !== 0) {
+            finish(Effect.fail(failure("unavailable", "Claude version probe did not succeed.")));
+            return;
+          }
+          const version = VERSION_PATTERN.exec(stdout.bytes.toString("utf8"))?.[1];
+          finish(
+            version === undefined
+              ? Effect.fail(failure("protocol", "Claude binary returned an unrecognized version."))
+              : Effect.succeed(version),
+          );
+          return;
+        }
+
+        const status = parseAuthenticationStatus(stdout.bytes.toString("utf8"));
+        if (
+          status === undefined ||
+          (status === "authenticated" && code !== 0) ||
+          (status === "unauthenticated" && code !== 1)
+        ) {
+          finish(
+            Effect.fail(failure("protocol", "Claude authentication status response was invalid.")),
+          );
+          return;
+        }
+        finish(Effect.succeed(status));
+      };
+      const timeout = setTimeout(
+        () => finish(Effect.fail(failure("unavailable", `Claude ${kind} probe timed out.`))),
+        options.probeTimeoutMs,
+      );
+
+      child.stdout.on("data", onStdout);
+      child.stderr.on("data", onStderr);
+      child.once("error", onError);
+      child.once("close", onClose);
+
+      return cleanupEffect(async () => {
+        if (!settled) {
+          settled = true;
+          cleanupListeners();
+        }
+        await cleanupProcess();
+      });
     });
   });
 }

@@ -40,7 +40,8 @@ const PASSTHROUGH_VARIABLES = new Set([
   "USER",
 ]);
 
-const REQUIRED_GUARDS = {
+/** Static switches every Claude launch sets; the version read keeps them too. */
+export const REQUIRED_GUARDS = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
   CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",

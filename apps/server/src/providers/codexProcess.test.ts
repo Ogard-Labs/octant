@@ -12,11 +12,27 @@ import {
   makeCodexProcessLive,
   probeCodexBinary,
   sanitizeCodexEnvironment,
+  type CodexProbeOptions,
   type CodexProcessOptions,
 } from "./codexProcess";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeCodexCli.ts", import.meta.url));
 const directories: string[] = [];
+
+/**
+ * These suites assert process lifecycle, not the profile. The live builder
+ * refuses on a host without `sandbox-exec`, and a real profile would deny the
+ * fixture the records file it writes beside itself, so the launch is prepared
+ * with the confinement passed straight through.
+ */
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
+
+function probeCodex(binaryPath: string, overrides: CodexProbeOptions = {}) {
+  return probeCodexBinary(binaryPath, { confinement: passthroughConfinement, ...overrides });
+}
 
 function fixture(mode = "ready"): { readonly binaryPath: string; readonly root: string } {
   const root = mkdtempSync(join(tmpdir(), "octant-codex-"));
@@ -84,6 +100,7 @@ async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
 
 function makePort(overrides: CodexProcessOptions = {}) {
   return makeCodexProcessLive({
+    versionProbeConfinement: passthroughConfinement,
     octantVersion: "0.1.0-test",
     startupTimeoutMs: 500,
     shutdownTimeoutMs: 100,
@@ -187,7 +204,7 @@ describe("sanitizeCodexEnvironment", () => {
 
 describe("probeCodexBinary", () => {
   it("validates an absolute executable path", async () => {
-    expect(await failureOf(probeCodexBinary("codex"))).toEqual({
+    expect(await failureOf(probeCodex("codex"))).toEqual({
       category: "invalid-configuration",
       message: "Codex binary path must be absolute.",
     });
@@ -196,23 +213,23 @@ describe("probeCodexBinary", () => {
     directories.push(root);
     const binaryPath = join(root, "codex");
     writeFileSync(binaryPath, "not executable");
-    expect((await failureOf(probeCodexBinary(binaryPath))).category).toBe("invalid-configuration");
+    expect((await failureOf(probeCodex(binaryPath))).category).toBe("invalid-configuration");
   });
 
   it("parses only the exact codex semantic version output", async () => {
     const valid = fixture("version");
-    await expect(Effect.runPromise(probeCodexBinary(valid.binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeCodex(valid.binaryPath))).resolves.toEqual({
       binaryPath: valid.binaryPath,
       version: "0.144.4",
     });
 
     const malformed = fixture("version-malformed");
-    expect((await failureOf(probeCodexBinary(malformed.binaryPath))).category).toBe("protocol");
+    expect((await failureOf(probeCodex(malformed.binaryPath))).category).toBe("protocol");
   });
 
   it("accepts SemVer 2 prerelease and build metadata", async () => {
     const binaryPath = versionFixture("codex-cli 1.2.3-alpha.1+build.005");
-    await expect(Effect.runPromise(probeCodexBinary(binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeCodex(binaryPath))).resolves.toEqual({
       binaryPath,
       version: "1.2.3-alpha.1+build.005",
     });
@@ -222,7 +239,7 @@ describe("probeCodexBinary", () => {
     const binaryPath = versionFixture("codex-cli 0.144.4");
     await expect(
       Effect.runPromise(
-        probeCodexBinary(binaryPath, {
+        probeCodex(binaryPath, {
           onProcessStarted: async () => {
             throw new Error("receipt raced process exit");
           },
@@ -233,7 +250,7 @@ describe("probeCodexBinary", () => {
 
   it("drains stdout that arrives after process exit before parsing the version", async () => {
     const delayed = fixture("version-delayed-output");
-    await expect(Effect.runPromise(probeCodexBinary(delayed.binaryPath))).resolves.toEqual({
+    await expect(Effect.runPromise(probeCodex(delayed.binaryPath))).resolves.toEqual({
       binaryPath: delayed.binaryPath,
       version: "0.144.4",
     });
@@ -242,7 +259,7 @@ describe("probeCodexBinary", () => {
 
   it("rejects trailing output that arrives after process exit", async () => {
     const noisy = fixture("version-delayed-noise");
-    const failure = await failureOf(probeCodexBinary(noisy.binaryPath));
+    const failure = await failureOf(probeCodex(noisy.binaryPath));
     expect(failure).toEqual({
       category: "protocol",
       message: "Codex binary returned an unrecognized version.",
@@ -254,7 +271,7 @@ describe("probeCodexBinary", () => {
     "rejects oversized version output without parsing a truncated prefix: %s",
     async (mode) => {
       const target = fixture(mode);
-      const failure = await failureOf(probeCodexBinary(target.binaryPath));
+      const failure = await failureOf(probeCodex(target.binaryPath));
       expect(failure).toEqual({
         category: "protocol",
         message: "Codex binary version output exceeded the limit.",
@@ -274,7 +291,7 @@ describe("probeCodexBinary", () => {
     "codex-cli 1.2.3+",
     "codex-cli 1.2.3+build..1",
   ])("rejects invalid SemVer 2 output: %s", async (output) => {
-    const failure = await failureOf(probeCodexBinary(versionFixture(output)));
+    const failure = await failureOf(probeCodex(versionFixture(output)));
     expect(failure).toEqual({
       category: "protocol",
       message: "Codex binary returned an unrecognized version.",
@@ -283,11 +300,11 @@ describe("probeCodexBinary", () => {
 
   it("bounds non-zero and timed-out probes and removes their process groups", async () => {
     const nonzero = fixture("version-nonzero");
-    expect((await failureOf(probeCodexBinary(nonzero.binaryPath))).category).toBe("unavailable");
+    expect((await failureOf(probeCodex(nonzero.binaryPath))).category).toBe("unavailable");
 
     const timeout = fixture("version-timeout");
     const failure = await failureOf(
-      probeCodexBinary(timeout.binaryPath, { timeoutMs: 3_000, shutdownTimeoutMs: 50 }),
+      probeCodex(timeout.binaryPath, { timeoutMs: 3_000, shutdownTimeoutMs: 50 }),
     );
     expect(failure).toEqual({
       category: "unavailable",

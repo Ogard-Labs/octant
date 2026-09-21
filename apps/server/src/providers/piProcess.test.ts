@@ -23,7 +23,21 @@ import {
   sanitizePiEnvironment,
   type PiConfinementPort,
 } from "./piProcess";
-import { seatbeltAllowRule, seatbeltDenyRule } from "../process/seatbeltProfile";
+import {
+  seatbeltAllowRule,
+  seatbeltDenyRule,
+  type SeatbeltConfinementPort,
+} from "../process/seatbeltProfile";
+
+/**
+ * These cases assert credential wiring and lifecycle, not the profile. The live
+ * builder refuses on a host with no sandbox runtime — Linux CI has no
+ * bubblewrap — so the version launch is prepared with confinement passed
+ * straight through.
+ */
+const passthroughVersionProbeConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
 
 const roots: string[] = [];
 
@@ -153,6 +167,7 @@ describe("Pi process boundary", () => {
     };
     const port = makePiProcessLive({
       confinement,
+      versionProbeConfinement: passthroughVersionProbeConfinement,
       inheritedEnvironment: {
         PATH: "/usr/bin:/bin",
         ANTHROPIC_API_KEY: "anthropic-key",
