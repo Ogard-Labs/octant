@@ -787,6 +787,59 @@ describe("OpenCode driver", () => {
     ]);
   });
 
+  it("registers current app tools when recovering a native session in a fresh driver", async () => {
+    const fixture = driverFixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "opencode", value: "provider-session" },
+            executionPolicy: "approval-gated",
+            tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+          });
+          yield* connection.send({
+            sessionId,
+            prompt: "Use the browser",
+            attachments: [],
+            tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+          });
+        }),
+      ),
+    );
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("session.create:"))).toBe(false);
+    expect(fixture.calls).toContain("session.promptAsync");
+  });
+
+  it("refuses a replacement native identity returned during resume", async () => {
+    const fixture = driverFixture({ resumedSessionId: "different-session" });
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        Effect.exit(
+          fixture.driver
+            .acquire({ instanceId, projectRoot: "/tmp/project" })
+            .pipe(
+              Effect.flatMap((connection) =>
+                connection.resume({
+                  sessionId,
+                  resumeCursor: { driverKind: "opencode", value: "provider-session" },
+                  executionPolicy: "approval-gated",
+                }),
+              ),
+            ),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("stale-resume");
+    expect(fixture.calls).not.toContain("session.promptAsync");
+  });
+
   it("rejects resume when the source session belongs to another project root", async () => {
     const fixture = driverFixture({ sessionDirectory: "/tmp/other" });
     const exit = await Effect.runPromise(
@@ -1125,6 +1178,7 @@ function driverFixture(
       | "project-default"
       | (() => "current-session" | "project-default");
     readonly sessionDirectory?: string;
+    readonly resumedSessionId?: string;
     readonly processFailure?: {
       readonly category: "invalid-configuration";
       readonly message: string;
@@ -1170,7 +1224,7 @@ function driverFixture(
       calls.push(`session.create:${permission[0]?.action}`);
       return session;
     },
-    getSession: async () => session,
+    getSession: async () => ({ ...session, id: options.resumedSessionId ?? session.id }),
     prompt: async () => {
       calls.push("session.promptAsync");
     },

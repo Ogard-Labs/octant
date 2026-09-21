@@ -28,11 +28,20 @@ A resumed turn can also have a different allowed tool catalogue.
 - Pi resumes an existing native file whose header matches both session and
   root. The create-if-missing session-ID flag is only used for session creation.
   Missing, ambiguous, malformed, or cross-Project histories refuse before input.
-- The SDK identifies provider-owned conversations explicitly. Work follow-ups
+- The SDK identifies provider-owned conversations explicitly. Chat and Work follow-ups
   reuse the persisted native session and omit prior transcript contributions;
-  host-owned API conversations retain their planned history. Work journals the
+  host-owned API conversations retain their planned history. Both modes journal the
   resume cursor before input and refuses incompatible provider, model, or folder
-  bindings without editing earlier turns.
+  bindings without editing earlier turns. Chat retries append an attempt in the
+  same native session; they do not create a replacement conversation. Host-side
+  transcript compaction is not run for provider-owned conversations.
+- Native Chat keeps its confined scratch contents between turns so resuming
+  does not remove files referenced by the native session. Explicit task purge
+  still removes them. Stateless API scratch behavior is unchanged.
+- The SDK does not provide native history rollback. Earlier-message editing
+  therefore refuses for provider-owned Chat, with an instruction to append a
+  correction. It must not fabricate an edited history in a fresh CLI session;
+  host-owned API editing continues to use its explicit superseding-turn model.
 - Code startup reads the newest session binding and at most two turn markers
   through a SQLite expression index derived from the journal. It never scans
   message/tool history to decide whether to resume. The index is rebuildable;

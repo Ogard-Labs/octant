@@ -599,11 +599,15 @@ export class ChatTurnRunner {
           ? { modelOptionValues: input.thread.modelOptionValues }
           : {};
       const startHandle = yield* (
-        input.mode === "resume" && input.resumeCursor !== undefined
+        input.resumeCursor !== undefined
           ? connection.resume({
               sessionId: input.attempt.providerSessionId,
               resumeCursor: input.resumeCursor,
               executionPolicy: "approval-gated",
+              tools: [
+                ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
+                ...(input.appManagedTools?.definitions ?? []),
+              ],
               ...modelOptionValues,
             })
           : connection.start({
@@ -617,6 +621,17 @@ export class ChatTurnRunner {
               ...modelOptionValues,
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
+
+      if (
+        input.driver.conversationOwnership === "provider" &&
+        (String(startHandle.sessionId) !== String(input.attempt.providerSessionId) ||
+          startHandle.resumeCursor === undefined)
+      ) {
+        return yield* persistProviderFailure({
+          category: "stale-resume",
+          message: "Provider did not return the exact resumable Chat session.",
+        });
+      }
 
       if (startHandle.resumeCursor !== undefined) {
         currentAttempt = { ...currentAttempt, resumeCursor: startHandle.resumeCursor };

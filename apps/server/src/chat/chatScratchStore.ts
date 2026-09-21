@@ -25,14 +25,17 @@ export class ChatScratchStore {
     return join(this.root, threadId);
   }
 
-  async acquire(threadId: ChatThreadId): Promise<string> {
+  async acquire(
+    threadId: ChatThreadId,
+    options?: { readonly preserveContents: boolean },
+  ): Promise<string> {
     const chatThreadId = decodeChatThreadId(threadId);
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     await assertPlainDirectory(this.root);
     const threadDir = this.getThreadDir(chatThreadId);
     await ensurePlainDirectory(threadDir);
     await assertDirectoryWithinRoot(this.root, threadDir);
-    await resetDirectoryEntries(threadDir);
+    if (options?.preserveContents !== true) await resetDirectoryEntries(threadDir);
     return threadDir;
   }
 

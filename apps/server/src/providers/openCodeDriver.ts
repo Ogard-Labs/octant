@@ -1053,7 +1053,7 @@ function makeConnection(
                 return Effect.fail(fail("protocol", "A provider session is already active."));
               }
               sessionSetupInFlight = true;
-              const tools = resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
+              const tools = input.tools ?? resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
               const priorSource = sourceBySession.get(input.sessionId);
               const priorState =
                 priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
@@ -1106,6 +1106,11 @@ function makeConnection(
                   );
                 }),
                 Effect.flatMap(({ session }) => {
+                  if (session.id !== input.resumeCursor.value) {
+                    return Effect.fail(
+                      fail("stale-resume", "Provider returned a different native session."),
+                    );
+                  }
                   if (
                     !isAbsolute(session.directory) ||
                     resolve(session.directory) !== projectRoot
@@ -1122,6 +1127,7 @@ function makeConnection(
                   state.sourceId = session.id;
                   sessionsBySource.set(session.id, state);
                   sourceBySession.set(input.sessionId, session.id);
+                  resumeToolCatalogs.set(session.id, tools);
                   activate(state);
                   for (const event of pendingBySource.get(session.id) ?? []) {
                     mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
