@@ -86,6 +86,7 @@ interface SessionState {
   readonly scope: Scope.CloseableScope;
   readonly client: PiClientPort;
   readonly removeEvent: () => void;
+  readonly releaseNativeSession: () => void;
   readonly approvals: Map<string, PendingApproval>;
   readonly tools: Map<string, { terminal: boolean; answered: boolean; name: string }>;
   readonly toolNames: ReadonlySet<string>;
@@ -232,7 +233,6 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const makeRequestId = options.requestId ?? (() => crypto.randomUUID());
   const resumeIdentities = new Map<string, ResumeIdentity>();
-  const ownedSessions = new Set<ProviderSessionId>();
   let appManagedToolsVerified = false;
 
   return {
@@ -318,7 +318,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, projectRoot, mode, resumeIdentities, ownedSessions, {
+      return makeConnection(options, projectRoot, mode, resumeIdentities, {
         clientFactory,
         managedToolsFactory,
         clock,
@@ -340,7 +340,6 @@ function makeConnection(
   projectRoot: string,
   mode: PiSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
-  ownedSessions: Set<ProviderSessionId>,
   factories: {
     readonly clientFactory: (connection: PiRpcConnection) => PiClientPort;
     readonly managedToolsFactory: typeof createPiManagedToolsBridge;
@@ -408,7 +407,7 @@ function makeConnection(
         await Effect.runPromise(Scope.close(state.scope, Exit.void));
       } finally {
         await state.managedTools?.close().catch(() => undefined);
-        ownedSessions.delete(state.sessionId);
+        state.releaseNativeSession();
       }
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
@@ -627,10 +626,11 @@ function makeConnection(
         }
         // Reserve before the first startup await: another scoped connection must
         // never launch a second writer against the same native history file.
-        if (ownedSessions.has(input.sessionId)) {
-          throw failure("protocol", "Pi session already has an active owner.");
-        }
-        ownedSessions.add(input.sessionId);
+        const ownership = options.runtimeRegistry.claimNativeSession(
+          options.instanceId,
+          input.sessionId,
+        );
+        if (ownership.status === "refused") throw ownership.failure;
         // Plan mode refuses browser effects and keeps provider egress closed,
         // so do not register an app-tool bridge that could never reach the
         // host without widening the sandbox network policy.
@@ -709,6 +709,7 @@ function makeConnection(
             scope,
             client: rpc,
             removeEvent,
+            releaseNativeSession: ownership.release,
             approvals: new Map(),
             tools: new Map(
               [...priorToolCalls].map(([toolCallId, name]) => [
@@ -756,7 +757,7 @@ function makeConnection(
             await Effect.runPromise(Scope.close(scope, Exit.void));
           } finally {
             await managedTools?.close().catch(() => undefined);
-            ownedSessions.delete(input.sessionId);
+            ownership.release();
           }
           throw error;
         }

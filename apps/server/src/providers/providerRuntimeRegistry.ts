@@ -95,6 +95,7 @@ export class ProviderRuntimeRegistry {
   readonly #activeSessionsByInstance = new Map<ProviderInstanceId, number>();
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
   readonly #runtimes = new Map<ProviderInstanceId, RuntimeEntry>();
+  readonly #nativeSessions = new Map<ProviderInstanceId, Map<string, symbol>>();
   readonly #invalidationListeners = new Map<ProviderInstanceId, Set<() => void>>();
   readonly #updatingByExecutable = new Map<string, ReadonlySet<string>>();
   readonly #executableByInstance = new Map<string, string>();
@@ -169,6 +170,46 @@ export class ProviderRuntimeRegistry {
     else this.#activeSessionsByInstance.set(instanceId, count);
   }
 
+  claimNativeSession(
+    instanceId: ProviderInstanceId,
+    nativeIdentity: string,
+  ):
+    | { readonly status: "claimed"; readonly release: () => void }
+    | { readonly status: "refused"; readonly failure: ProviderFailure } {
+    if (this.executableUpdateInProgress(instanceId)) {
+      return {
+        status: "refused",
+        failure: {
+          category: "unavailable",
+          message: "Stop the CLI update before starting a session.",
+        },
+      };
+    }
+    const sessions = this.#nativeSessions.get(instanceId) ?? new Map<string, symbol>();
+    if (sessions.has(nativeIdentity)) {
+      return {
+        status: "refused",
+        failure: {
+          category: "protocol",
+          message: "The native session already has an active owner.",
+        },
+      };
+    }
+    const owner = Symbol();
+    sessions.set(nativeIdentity, owner);
+    this.#nativeSessions.set(instanceId, sessions);
+    return {
+      status: "claimed",
+      release: () => {
+        if (sessions.get(nativeIdentity) !== owner) return;
+        sessions.delete(nativeIdentity);
+        if (sessions.size === 0 && this.#nativeSessions.get(instanceId) === sessions) {
+          this.#nativeSessions.delete(instanceId);
+        }
+      },
+    };
+  }
+
   claimExecutableUpdate(
     executableKey: string,
     instanceIds: ReadonlyArray<ProviderInstanceId>,
@@ -179,7 +220,10 @@ export class ProviderRuntimeRegistry {
       );
     }
     for (const instanceId of instanceIds) {
-      if (this.activeSessionCount(instanceId) !== 0) {
+      if (
+        this.activeSessionCount(instanceId) !== 0 ||
+        (this.#nativeSessions.get(instanceId)?.size ?? 0) > 0
+      ) {
         throw new ProviderRuntimeInvalidationRejected(
           "Stop active sessions before updating this provider CLI.",
         );
@@ -305,7 +349,10 @@ export class ProviderRuntimeRegistry {
   }
 
   async invalidateRuntime(instanceId: ProviderInstanceId): Promise<void> {
-    if (this.activeSessionCount(instanceId) !== 0) {
+    if (
+      this.activeSessionCount(instanceId) !== 0 ||
+      (this.#nativeSessions.get(instanceId)?.size ?? 0) > 0
+    ) {
       throw new ProviderRuntimeInvalidationRejected(
         "Stop active sessions before changing this provider runtime.",
       );

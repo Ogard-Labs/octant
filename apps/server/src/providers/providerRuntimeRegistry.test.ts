@@ -30,6 +30,30 @@ const capabilities = {
 } as const;
 
 describe("ProviderRuntimeRegistry", () => {
+  it("excludes updates during native session startup and ignores stale releases", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const first = registry.claimNativeSession(instanceId, "native-session");
+    if (first.status !== "claimed") throw new Error("Expected reservation");
+    expect(registry.claimNativeSession(instanceId, "native-session").status).toBe("refused");
+    expect(() => registry.claimExecutableUpdate("pi", [instanceId])).toThrow(
+      /Stop active sessions/,
+    );
+    await expect(registry.invalidateRuntime(instanceId)).rejects.toThrow(/Stop active sessions/);
+    first.release();
+    const next = registry.claimNativeSession(instanceId, "native-session");
+    if (next.status !== "claimed") throw new Error("Expected next reservation");
+    first.release();
+    expect(registry.claimNativeSession(instanceId, "native-session").status).toBe("refused");
+    next.release();
+    registry.claimExecutableUpdate("pi", [instanceId]);
+    expect(registry.claimNativeSession(instanceId, "native-session")).toMatchObject({
+      status: "refused",
+      failure: { category: "unavailable" },
+    });
+    registry.releaseExecutableUpdate("pi");
+    await expect(registry.invalidateRuntime(instanceId)).resolves.toBeUndefined();
+  });
+
   it("stores observed state independently from durable configuration", () => {
     const registry = new ProviderRuntimeRegistry();
     const observed = decodeProviderObservedState({

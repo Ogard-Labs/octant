@@ -88,7 +88,7 @@ class FakeClient implements PiClientPort {
   }
 }
 
-function fixture(version = "0.80.10") {
+function fixture(version = "0.80.10", registry = new ProviderRuntimeRegistry()) {
   const client = new FakeClient();
   const starts: Array<Record<string, unknown>> = [];
   const lifecycle: string[] = [];
@@ -119,7 +119,6 @@ function fixture(version = "0.80.10") {
           }),
       ),
   };
-  const registry = new ProviderRuntimeRegistry();
   const driver = makePiDriver({
     instanceId,
     binaryPath: "/opt/homebrew/bin/pi",
@@ -207,6 +206,34 @@ describe("Pi provider driver", () => {
       ),
     );
     expect(f.active()).toBe(0);
+  });
+
+  it("keeps native history exclusive when the configured driver is recreated", async () => {
+    const first = fixture();
+    const recreated = fixture("0.80.10", first.registry);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const owner = yield* first.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          const competitor = yield* recreated.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
+          yield* owner.start(input);
+          expect((yield* Effect.either(competitor.start(input)))._tag).toBe("Left");
+          expect(recreated.starts).toHaveLength(0);
+          yield* owner.stop(sessionId);
+          yield* competitor.start(input);
+          expect(recreated.starts).toHaveLength(1);
+        }),
+      ),
+    );
   });
 
   it("releases native history ownership when startup fails", async () => {
