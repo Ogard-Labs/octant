@@ -139,6 +139,18 @@ export function ProviderUsageHistoryWorkspace(props: {
     data !== undefined &&
     (data.totals.requestCount > 0 ||
       data.coverage.some((source) => source.status === "ready" || source.status === "partial"));
+  const tokenTotals = data?.totals;
+  const cacheReadCoverage = tokenTotals?.componentCoverage.cacheRead;
+  const inputCacheHitRate =
+    tokenTotals !== undefined &&
+    tokenTotals.requestCount > 0 &&
+    tokenTotals.inputTokens > 0 &&
+    tokenTotals.cacheReadInputTokens !== undefined &&
+    tokenTotals.cacheReadInputTokens <= tokenTotals.inputTokens &&
+    cacheReadCoverage?.measured === tokenTotals.requestCount &&
+    cacheReadCoverage.total === tokenTotals.requestCount
+      ? tokenTotals.cacheReadInputTokens / tokenTotals.inputTokens
+      : undefined;
   const primary =
     data === undefined || !hasHistorySource
       ? undefined
@@ -324,6 +336,13 @@ export function ProviderUsageHistoryWorkspace(props: {
             loading={busy && data === undefined}
           />
           <Metric
+            label="Input cache hit rate"
+            value={hasHistorySource ? inputCacheHitRate : undefined}
+            format="percent"
+            detail="Cache reads / total input"
+            loading={busy && data === undefined}
+          />
+          <Metric
             label="Uncached input"
             value={hasHistorySource ? data?.totals.uncachedInputTokens : undefined}
             coverage={data?.totals.componentCoverage.uncachedInput}
@@ -459,7 +478,8 @@ function Metric(props: {
   readonly value: number | undefined;
   readonly coverage?: { readonly measured: number; readonly total: number } | undefined;
   readonly loading?: boolean;
-  readonly format?: "money";
+  readonly format?: "money" | "percent";
+  readonly detail?: string;
 }) {
   const partial = props.coverage !== undefined && props.coverage.measured < props.coverage.total;
   return (
@@ -472,8 +492,14 @@ function Metric(props: {
             : "Unavailable"
           : props.format === "money"
             ? dollars(props.value)
-            : compactTokens(props.value)}
+            : props.format === "percent"
+              ? new Intl.NumberFormat(undefined, {
+                  style: "percent",
+                  maximumFractionDigits: 1,
+                }).format(props.value)
+              : compactTokens(props.value)}
       </strong>
+      {props.detail === undefined ? null : <small>{props.detail}</small>}
       {partial && props.value !== undefined ? (
         <small>
           {props.coverage?.measured.toLocaleString()} of {props.coverage?.total.toLocaleString()}{" "}

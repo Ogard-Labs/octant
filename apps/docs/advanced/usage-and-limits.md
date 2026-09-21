@@ -57,6 +57,13 @@ cache savings compare the priced input with the same input at the uncached rate
 for that model and context tier. Negative savings mean cache-write overhead.
 Partial measurement coverage is displayed with the value.
 
+**Input cache hit rate** divides cached input by total processed input in the
+selected local history reading. It is weighted by token counts across requests,
+not an average of model percentages. Cache writes count toward input, not hits.
+The rate is unavailable if any recorded request lacks cache-read measurements,
+if input is zero, or if the counts contradict each other. Source coverage still
+applies: a partial import describes only the records read so far.
+
 ## Remaining capacity
 
 Provider limits show the percentage left and the time until a reset. Absolute

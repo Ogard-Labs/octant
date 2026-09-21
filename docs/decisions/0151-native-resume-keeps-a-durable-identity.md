@@ -142,3 +142,10 @@ all models exposed by the same CLI.
 - 0002 Durable event journal and rebuildable projections
 - 0005 Provider SDK contract
 - 0006 ACP agent drivers
+
+The local provider-history view can report input cache hit rate because 0102
+already normalizes its input denominator to include cache reads and writes.
+Compute the ratio from aggregate token counts only when every recorded request
+has cache-read coverage and input is positive and consistent. Missing counters
+remain unavailable; no historical conversation or journal is rewritten to infer
+that denominator. Partial source coverage continues to bound the reading.
