@@ -803,6 +803,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           );
           expect(active()).toBe(1);
           if (cursor === undefined) throw new Error("Missing cursor");
+          const nativeIdentity = JSON.stringify(["acp-native", profile.kind, cursor.value]);
+          expect(registry.claimNativeSession(instanceId, nativeIdentity).status).toBe("refused");
           await Effect.runPromise(
             Effect.scoped(
               Effect.gen(function* () {
@@ -819,6 +821,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
                 } else {
                   expect(client.loadSession).toHaveBeenCalledWith(cursor.value, projectRoot);
                 }
+                expect(registry.claimNativeSession(instanceId, nativeIdentity).status).toBe(
+                  "refused",
+                );
                 expect(peakActive()).toBe(1);
                 yield* connection.stop(sessionId);
               }),
