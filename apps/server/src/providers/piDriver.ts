@@ -112,6 +112,8 @@ interface SessionState {
   readonly managedTools?: PiManagedToolsBridge;
   correlationId: CorrelationId;
   sequence: number;
+  usage?: Extract<RuntimeEventWithoutEnvelope, { readonly kind: "usage" }>;
+  usageIncomplete?: boolean;
   promptActive: boolean;
   terminal: boolean;
   closed: boolean;
@@ -135,7 +137,7 @@ const capabilities = {
   approvals: "supported",
   userQuestions: "unsupported",
   reasoning: "supported",
-  usage: "unavailable",
+  usage: "supported",
   toolActivity: "supported",
   fileChanges: "unavailable",
   diffs: "unavailable",
@@ -511,6 +513,71 @@ function makeConnection(
     const handleEvent = (state: SessionState, event: PiRpcEvent) => {
       if (state.closed) return;
       if (state.terminal && event.type !== "extension_ui_request") return;
+      if (event.type === "message_end" && state.promptActive) {
+        const message = record(event.message);
+        const usage = record(message?.usage);
+        if (message?.role !== "assistant") return;
+        if (usage === undefined) {
+          state.usageIncomplete = true;
+          return;
+        }
+        const counts = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
+        if (
+          !counts.every(
+            (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+          )
+        ) {
+          state.usageIncomplete = true;
+          return;
+        }
+        const input = usage.input;
+        const output = usage.output;
+        const read = usage.cacheRead;
+        const write = usage.cacheWrite;
+        if (
+          typeof input !== "number" ||
+          typeof output !== "number" ||
+          typeof read !== "number" ||
+          typeof write !== "number"
+        )
+          return;
+        const previous = state.usage;
+        const inputTokens = (previous?.inputTokens ?? 0) + input + read + write;
+        const outputTokens = (previous?.outputTokens ?? 0) + output;
+        const cacheReadInputTokens = (previous?.cacheReadInputTokens ?? 0) + read;
+        const cacheWriteInputTokens = (previous?.cacheWriteInputTokens ?? 0) + write;
+        const contextTokens = input + read + write + output;
+        if (
+          ![
+            inputTokens,
+            outputTokens,
+            cacheReadInputTokens,
+            cacheWriteInputTokens,
+            contextTokens,
+          ].every(Number.isSafeInteger)
+        ) {
+          state.usageIncomplete = true;
+          return;
+        }
+        const cost = record(usage.cost)?.total;
+        const costUsd =
+          typeof cost === "number" &&
+          Number.isFinite(cost) &&
+          cost >= 0 &&
+          (previous === undefined || previous.costUsd !== undefined)
+            ? (previous?.costUsd ?? 0) + cost
+            : undefined;
+        state.usage = {
+          kind: "usage",
+          inputTokens,
+          outputTokens,
+          cacheReadInputTokens,
+          cacheWriteInputTokens,
+          contextTokens,
+          ...(costUsd !== undefined && Number.isFinite(costUsd) ? { costUsd } : {}),
+        };
+        return;
+      }
       if (event.type === "message_update") {
         const update = record(event.assistantMessageEvent);
         const delta = typeof update?.delta === "string" ? update.delta : undefined;
@@ -599,6 +666,7 @@ function makeConnection(
       if (event.type === "agent_settled") {
         if (!state.promptActive)
           return protocolFailure(state, "Pi settled without an active turn.");
+        if (state.usage !== undefined && !state.usageIncomplete) emit(state, state.usage);
         state.promptActive = false;
         state.terminal = true;
         state.completed = true;
@@ -956,6 +1024,8 @@ function makeConnection(
                   return Effect.fail(failure("protocol", "Pi session is terminal."));
                 if (state.promptActive)
                   return Effect.fail(failure("protocol", "Pi already has an active turn."));
+                delete state.usage;
+                delete state.usageIncomplete;
                 state.promptActive = true;
                 state.correlationId = factories.makeCorrelation() as CorrelationId;
                 return request(() =>
@@ -975,6 +1045,8 @@ function makeConnection(
               Effect.tap(() =>
                 Effect.sync(() => {
                   if (!state.terminal) {
+                    if (state.usage !== undefined && !state.usageIncomplete)
+                      emit(state, state.usage);
                     state.promptActive = false;
                     state.terminal = true;
                     cancelPendingTools(state);

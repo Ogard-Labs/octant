@@ -84,6 +84,7 @@ describe("Pi provider conformance", () => {
         "reasoning-delta",
         "tool-start",
         "approval-request",
+        "usage",
         "interrupted",
       ],
       expectedFailureCategories: {
@@ -231,6 +232,18 @@ class ConformanceClient implements PiClientPort {
       emit({
         type: "message_update",
         assistantMessageEvent: { type: "thinking_delta", delta: "think" },
+      });
+      emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          usage: {
+            input: 20,
+            output: 5,
+            cacheRead: 10,
+            cacheWrite: 0,
+          },
+        },
       });
       emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "write" });
       emit({

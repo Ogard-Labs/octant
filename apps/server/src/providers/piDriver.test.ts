@@ -178,6 +178,53 @@ async function terminal(events: Stream.Stream<ProviderRuntimeEvent, ProviderFail
 }
 
 describe("Pi provider driver", () => {
+  it.each([false, true])(
+    "reports complete multi-call usage and leaves incomplete usage unknown (%s)",
+    async (missing) => {
+      const { driver, client } = fixture();
+      const scope = Effect.runSync(Scope.make());
+      const connection = await Effect.runPromise(
+        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      client.emit({
+        type: "message_update",
+        usage: { input: 9999 },
+        assistantMessageEvent: { type: "text_delta", delta: "hello" },
+      });
+      for (const usage of [
+        { input: 20, output: 5, cacheRead: 10, cacheWrite: 0 },
+        missing ? undefined : { input: 3, output: 2, cacheRead: 30, cacheWrite: 2 },
+      ]) {
+        client.emit({
+          type: "message_end",
+          message: { role: "assistant", ...(usage === undefined ? {} : { usage }) },
+        });
+      }
+      client.emit({ type: "agent_settled" });
+      const usage = (await collected).filter((event) => event.kind === "usage");
+      if (missing) expect(usage).toEqual([]);
+      else
+        expect(usage).toEqual([
+          expect.objectContaining({
+            inputTokens: 65,
+            outputTokens: 7,
+            cacheReadInputTokens: 40,
+            cacheWriteInputTokens: 2,
+            contextTokens: 37,
+          }),
+        ]);
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
+
   it("refuses concurrent owners of one native history and releases ownership after stop", async () => {
     const f = fixture();
     await Effect.runPromise(
@@ -237,8 +284,28 @@ describe("Pi provider driver", () => {
                 attachments: [],
                 tools: [],
               });
+              f.client.emit({
+                type: "message_end",
+                message: {
+                  role: "assistant",
+                  usage: {
+                    input: 10 + turn,
+                    output: 2,
+                    cacheRead: 30,
+                    cacheWrite: 0,
+                  },
+                },
+              });
               f.client.emit({ type: "agent_settled" });
-              expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
+              const events = yield* Effect.promise(() => collected);
+              expect(events.at(-1)?.kind).toBe("completed");
+              expect(events.filter((event) => event.kind === "usage")).toEqual([
+                expect.objectContaining({
+                  inputTokens: 40 + turn,
+                  outputTokens: 2,
+                  cacheReadInputTokens: 30,
+                }),
+              ]);
               yield* connection.stop(sessionId);
             }),
           ),
@@ -663,13 +730,35 @@ describe("Pi provider driver", () => {
       isError: false,
       result: {},
     });
+    client.emit({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        usage: {
+          input: 93,
+          output: 3,
+          cacheRead: 3712,
+          cacheWrite: 0,
+          cost: { total: 0.00019168 },
+        },
+      },
+    });
     client.emit({ type: "agent_settled" });
-    expect((await collected).map((event) => event.kind)).toEqual([
+    const events = await collected;
+    expect(events.find((event) => event.kind === "usage")).toMatchObject({
+      inputTokens: 3805,
+      outputTokens: 3,
+      cacheReadInputTokens: 3712,
+      cacheWriteInputTokens: 0,
+      costUsd: 0.00019168,
+    });
+    expect(events.map((event) => event.kind)).toEqual([
       "text-delta",
       "reasoning-delta",
       "tool-start",
       "approval-request",
       "tool-success",
+      "usage",
       "completed",
     ]);
     expect(client.responses).toEqual([{ id: "pi-ui-1", response: { confirmed: true } }]);

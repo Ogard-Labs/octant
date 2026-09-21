@@ -18,6 +18,13 @@ Code settings. The renderer preserves its proposed branch as delivery intent wit
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
 actions continue to report unavailable for plain folders.
 
+Pi usage is accumulated from completed assistant messages, not streaming usage
+snapshots. Input totals include uncached, cache-read, and cache-write tokens; context
+occupancy describes the latest model call. Totals reset for each turn, including
+retained native processes. If a completed assistant message omits valid usage,
+the turn remains unknown rather than presenting a partial total. Only provider-reported
+costs are recorded, and historical turns are not rewritten.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
