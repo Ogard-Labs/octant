@@ -665,6 +665,21 @@ describe("WindowChrome", () => {
     }
   });
 
+  it("lets the ground read through a thread's reply, bubble, and composer unless transparency is reduced", () => {
+    const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\s+/g, " ");
+    const glass =
+      systemStyles.match(
+        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-agent, \.turn-user \.bubble, \.composer\) \{([^}]*)\}/,
+      )?.[1] ?? "";
+    // The floor goes under the tint, as on Zen's cards: without it body text
+    // over a white photo falls under 3:1.
+    expect(glass).toContain("background-color: var(--oct-glass-floor);");
+    expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
+    expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
+  });
+
   it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
     // Each surface paints the opaque workspace colour on its own, so any one
     // of them left filled hides the glass behind the whole workspace.
