@@ -509,7 +509,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             </p>
           ) : null}
           {catalogs.length > 1 ? (
-            <div aria-label="Catalogs" className="composer-model-picker__catalogs" role="group">
+            <div
+              aria-label="Catalogs"
+              className="composer-model-picker__catalogs"
+              // A fresh row per provider: a reused one kept the sideways
+              // offset of the provider before it, so this one's All chip
+              // opened out of view.
+              key={String(activeRailId)}
+              role="group"
+            >
               <OctantButton
                 aria-pressed={filteringCatalog === undefined}
                 className={`composer-model-picker__catalog${filteringCatalog === undefined ? " composer-model-picker__catalog--on" : ""}`}

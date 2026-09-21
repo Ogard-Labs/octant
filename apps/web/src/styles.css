@@ -6503,14 +6503,24 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   content: "";
 }
 
+/* Focus is a fill and ink emphasis, as on every other control (0114): the
+   level row takes the control fill, and its label and chosen range go to full
+   ink. A ring around the knob was the only change, and it measured under 2:1. */
 .composer-model-picker__level-slider:focus-visible {
   outline: none;
 }
 
-.composer-model-picker__level-slider:focus-visible .composer-model-picker__level-knob {
-  box-shadow:
-    0 0 0 2px var(--octant-surface),
-    0 0 0 4px var(--octant-border-strong);
+.composer-model-picker__level:has(.composer-model-picker__level-slider:focus-visible) {
+  background: var(--octant-control-hover);
+}
+
+.composer-model-picker__level:has(.composer-model-picker__level-slider:focus-visible)
+  .composer-model-picker__level-label {
+  color: var(--octant-text-primary);
+}
+
+.composer-model-picker__level-slider:focus-visible .composer-model-picker__level-fill {
+  background: var(--octant-text-primary);
 }
 
 .composer-model-picker__level-fill {
@@ -6734,22 +6744,17 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 /* One line that scrolls sideways. Wrapped into a 52px box, a seventh catalog
    started a second row that the box cut in half, and the list below lost the
-   height the extra row took. The fade says the line goes on. */
+   height the extra row took. The row keeps the app's visible thumb, which is
+   how a mouse user finds and drags the rest of the line. */
 .composer-model-picker__catalogs {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: nowrap;
   gap: 4px;
   margin: 0 8px 4px;
-  padding-inline-end: 24px;
+  padding-bottom: 2px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none;
-  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
-}
-
-.composer-model-picker__catalogs::-webkit-scrollbar {
-  display: none;
 }
 
 .composer-model-picker__catalog {
