@@ -1,6 +1,8 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 
 import {
   decodeProviderFailure,
@@ -595,6 +597,27 @@ function brokerResolve(options: ClaudeDriverOptions): Effect.Effect<string, Prov
   });
 }
 
+/**
+ * The folder a readiness probe binds as its project root.
+ *
+ * A probe is not a thread and has no project. It used to bind the server's
+ * working directory, which a Plan launch now confines: started from `/`, the
+ * shared builder refuses that root as an ancestor of the sensitive paths it
+ * denies, so Claude readiness failed before authentication or model discovery,
+ * and any other directory the server happened to be standing in became the
+ * probe's readable root. An empty folder only this probe can name binds
+ * nothing it did not create.
+ */
+const privateProbeRoot = Effect.acquireRelease(
+  Effect.tryPromise({
+    try: async () => realpath(await mkdtemp(join(tmpdir(), "octant-claude-probe-"))),
+    catch: () =>
+      failure("provider-failed", "Claude probe could not create a private working folder."),
+  }),
+  (directory) =>
+    Effect.promise(() => rm(directory, { recursive: true, force: true }).catch(() => undefined)),
+);
+
 function probeSdk(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
@@ -602,9 +625,11 @@ function probeSdk(
 ): Effect.Effect<readonly ProviderModel[], ProviderFailure, Scope.Scope> {
   return Effect.gen(function* () {
     const environment = yield* environmentFactory(options.authentication, environmentOptions);
+    // Acquired before the query, so it is released after the query closes.
+    const probeRoot = yield* privateProbeRoot;
     const query = yield* options.sdk.openQuery({
       binaryPath: options.binaryPath,
-      projectRoot: resolve(process.cwd()),
+      projectRoot: probeRoot,
       authEnvironment: environment.environment,
       model: PROBE_MODEL,
       executionPolicy: "plan",

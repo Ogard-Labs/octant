@@ -1,4 +1,4 @@
-# 0146. Allow input opens a device to clicks
+# 0150. Allow input opens a device to clicks
 
 **Status:** Accepted
 
@@ -16,7 +16,7 @@ this window may send input to that destination at all.
 - This record supersedes exactly one rule of 0142: that the first tap, typed
   text, or hardware key is the confirmation. The grant, its window/thread/
   destination key, fifteen-minute renewal, shutdown and discovery close, and
-  Full access / Plan rules in 0142 stand. It supersedes 0145's rule that the
+  Full access / Plan rules in 0142 stand. It supersedes 0149's rule that the
   pane may treat that first input as the confirmation.
 - **`open-input` is the confirmation.** On an approval-gated Code thread the
   pane offers **Allow input**. That action is approved through the same native
@@ -33,7 +33,7 @@ this window may send input to that destination at all.
   unavailable under approval-gated postures. A live grant the person opened
   still covers further input from that window on that thread, including an
   agent's, the way 0142 already keyed it.
-- Closing the pane still does not shut the destination down (0145).
+- Closing the pane still does not shut the destination down (0149).
 
 Non-goals: follow-the-finger input, accessibility overlay.
 
@@ -48,6 +48,6 @@ Non-goals: follow-the-finger input, accessibility overlay.
 ## Related
 
 - 0142 One approval opens a Simulator to input (one rule superseded)
-- 0145 The agent opens the in-app Simulator pane (first-input confirmation superseded)
+- 0149 The agent opens the in-app Simulator pane (first-input confirmation superseded)
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0062 Simulator frame input transport

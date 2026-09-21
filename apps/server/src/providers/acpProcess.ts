@@ -18,12 +18,14 @@ import { Effect, type Scope } from "effect";
 import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
   requireSandboxExec,
   seatbeltDenyRule,
   wrapCommandInSandboxExec,
+  type SeatbeltConfinementPort,
 } from "../process/seatbeltProfile";
 import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
@@ -92,6 +94,8 @@ export interface AcpProcessPort {
 
 export interface AcpProcessOptions {
   readonly confinement?: AcpConfinementPort;
+  /** Confinement for the version read, which the runtime's port does not cover. */
+  readonly versionProbeConfinement?: SeatbeltConfinementPort;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly onDiagnostic?: (message: string) => void;
   readonly shutdownTimeoutMs?: number;
@@ -113,6 +117,7 @@ export interface AcpProbeOptions {
   readonly outputBytes?: number;
   readonly shutdownTimeoutMs?: number;
   readonly timeoutMs?: number;
+  readonly confinement?: SeatbeltConfinementPort;
 }
 
 export interface AcpBinaryProbe {
@@ -710,129 +715,165 @@ export function probeAcpBinary(
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
-  return Effect.async<AcpBinaryProbe, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, ["--version"], {
-      detached: process.platform !== "win32",
-      env: sanitizeAcpEnvironment(profile, options.inheritedEnvironment ?? process.env, {
-        managedHome: process.env.TMPDIR ?? "/tmp",
-      }),
-      stdio: ["ignore", "pipe", "pipe"],
+  // Preparing inside the suspend keeps one scratch directory per run: an
+  // Effect a caller holds and never runs leaves nothing behind, and one it runs
+  // twice does not hand the second run a directory the first already released.
+  return Effect.suspend(() => {
+    const probe = prepareConfinedVersionProbe({
+      binaryPath,
+      displayName: name,
+      // The managed home this launch declares is the scratch directory, which
+      // is the only path it may write.
+      environment: (scratchDirectory) =>
+        sanitizeAcpEnvironment(profile, options.inheritedEnvironment ?? process.env, {
+          managedHome: scratchDirectory,
+        }),
+      guards: profile.process.guards,
+      ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
     });
-    let childExitedObserved = false;
-    const childExited = new Promise<void>((resolveExit) =>
-      child.once("exit", () => {
-        childExitedObserved = true;
-        resolveExit();
-      }),
-    );
-    let ownershipReady: Promise<void> = Promise.resolve();
-    if (child.pid !== undefined && options.onProcessStarted !== undefined) {
-      ownershipReady = options
-        .onProcessStarted({ pid: child.pid, exited: childExited })
-        .then(() => undefined);
-      void ownershipReady.catch(() => undefined);
-    }
-    const terminate = makeTerminator(name, child, shutdownTimeoutMs);
-    let output = Buffer.alloc(0);
-    let overflow = false;
-    let settled = false;
-    const cleanupListeners = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onOutput);
-      child.stderr.off("data", onOutput);
-      child.off("error", onError);
-      child.off("close", onClose);
-    };
-    const finish = (result: Effect.Effect<AcpBinaryProbe, ProviderFailure>) => {
-      if (settled) return;
-      settled = true;
-      cleanupListeners();
-      void terminate().then(
-        async () => {
-          try {
-            await ownershipReady;
-            resume(result);
-          } catch {
-            if (childExitedObserved) resume(result);
-            else
-              resume(
-                Effect.fail(failure("provider-failed", `${name} process receipt is unavailable.`)),
-              );
-          }
-        },
-        () => resume(Effect.fail(failure("provider-failed", `${name} probe cleanup failed.`))),
+    if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
+    const { launch } = probe;
+
+    return Effect.async<AcpBinaryProbe, ProviderFailure>((resume) => {
+      const child = spawn(launch.command, [...launch.args], {
+        cwd: launch.workingDirectory,
+        detached: process.platform !== "win32",
+        env: launch.environment,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let childExitedObserved = false;
+      const childExited = new Promise<void>((resolveExit) =>
+        child.once("exit", () => {
+          childExitedObserved = true;
+          resolveExit();
+        }),
       );
-    };
-    const onOutput = (chunk: Buffer | string) => {
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = outputBytes - output.length;
-      if (bytes.length > remaining) overflow = true;
-      if (remaining > 0) output = Buffer.concat([output, bytes.subarray(0, remaining)]);
-    };
-    const onError = () =>
-      finish(
-        Effect.fail(
-          failure("unavailable", `${name} binary could not be started.`, {
-            reason: "runtime-unavailable",
-          }),
-        ),
-      );
-    const onClose = (code: number | null) => {
-      if (overflow) {
-        finish(Effect.fail(failure("protocol", `${name} version output exceeded the limit.`)));
-        return;
+      let ownershipReady: Promise<void> = Promise.resolve();
+      if (child.pid !== undefined && options.onProcessStarted !== undefined) {
+        ownershipReady = options
+          .onProcessStarted({ pid: child.pid, exited: childExited })
+          .then(() => undefined);
+        void ownershipReady.catch(() => undefined);
       }
-      if (code !== 0) {
-        finish(
-          Effect.fail(
-            failure("unavailable", `${name} version probe did not succeed.`, {
-              reason: "runtime-unavailable",
-            }),
-          ),
-        );
-        return;
-      }
-      const parsed = parseVersion(profile, output.toString("utf8").trimEnd());
-      if (parsed === undefined) {
-        finish(
-          Effect.fail(failure("protocol", `${name} returned an unrecognized version response.`)),
-        );
-        return;
-      }
-      if (!parsed.supported) {
-        const minimum = profile.process.minimumVersion.join(".");
-        finish(
-          Effect.fail(
-            failure("incompatible", `${name} ${minimum} or later is required.`, {
-              reason: "runtime-incompatible",
-            }),
-          ),
-        );
-        return;
-      }
-      finish(Effect.succeed({ binaryPath, version: parsed.version }));
-    };
-    const timeout = setTimeout(
-      () =>
-        finish(
-          Effect.fail(
-            failure("unavailable", `${name} version probe timed out.`, {
-              reason: "runtime-unavailable",
-            }),
-          ),
-        ),
-      timeoutMs,
-    );
-    child.stdout.on("data", onOutput);
-    child.stderr.on("data", onOutput);
-    child.once("error", onError);
-    child.once("close", onClose);
-    return cleanupEffect(name, async () => {
-      if (!settled) {
+      const terminateProcess = makeTerminator(name, child, shutdownTimeoutMs);
+      // The scratch directory outlives the process it was granted to unless it
+      // goes away with it, and every settle path here runs the terminator.
+      const terminate = () => terminateProcess().finally(launch.release);
+      // The version is on stdout. Stderr is bounded separately and read only
+      // when stdout carries none, so a warning the program prints given a
+      // throwaway home cannot turn a working install into an unrecognised one.
+      let output = Buffer.alloc(0);
+      let diagnostics = Buffer.alloc(0);
+      let overflow = false;
+      let settled = false;
+      const cleanupListeners = () => {
+        clearTimeout(timeout);
+        child.stdout.off("data", onOutput);
+        child.stderr.off("data", onDiagnostics);
+        child.off("error", onError);
+        child.off("close", onClose);
+      };
+      const finish = (result: Effect.Effect<AcpBinaryProbe, ProviderFailure>) => {
+        if (settled) return;
         settled = true;
         cleanupListeners();
-      }
-      await terminate();
+        void terminate().then(
+          async () => {
+            try {
+              await ownershipReady;
+              resume(result);
+            } catch {
+              if (childExitedObserved) resume(result);
+              else
+                resume(
+                  Effect.fail(
+                    failure("provider-failed", `${name} process receipt is unavailable.`),
+                  ),
+                );
+            }
+          },
+          () => resume(Effect.fail(failure("provider-failed", `${name} probe cleanup failed.`))),
+        );
+      };
+      const onOutput = (chunk: Buffer | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = outputBytes - output.length;
+        if (bytes.length > remaining) overflow = true;
+        if (remaining > 0) output = Buffer.concat([output, bytes.subarray(0, remaining)]);
+      };
+      const onDiagnostics = (chunk: Buffer | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = outputBytes - diagnostics.length;
+        if (bytes.length > remaining) overflow = true;
+        if (remaining > 0) diagnostics = Buffer.concat([diagnostics, bytes.subarray(0, remaining)]);
+      };
+      const onError = () =>
+        finish(
+          Effect.fail(
+            failure("unavailable", `${name} binary could not be started.`, {
+              reason: "runtime-unavailable",
+            }),
+          ),
+        );
+      const onClose = (code: number | null) => {
+        if (overflow) {
+          finish(Effect.fail(failure("protocol", `${name} version output exceeded the limit.`)));
+          return;
+        }
+        if (code !== 0) {
+          finish(
+            Effect.fail(
+              failure("unavailable", `${name} version probe did not succeed.`, {
+                reason: "runtime-unavailable",
+              }),
+            ),
+          );
+          return;
+        }
+        const parsed =
+          parseVersion(profile, output.toString("utf8").trimEnd()) ??
+          parseVersion(profile, diagnostics.toString("utf8").trimEnd());
+        if (parsed === undefined) {
+          finish(
+            Effect.fail(failure("protocol", `${name} returned an unrecognized version response.`)),
+          );
+          return;
+        }
+        if (!parsed.supported) {
+          const minimum = profile.process.minimumVersion.join(".");
+          finish(
+            Effect.fail(
+              failure("incompatible", `${name} ${minimum} or later is required.`, {
+                reason: "runtime-incompatible",
+              }),
+            ),
+          );
+          return;
+        }
+        finish(Effect.succeed({ binaryPath, version: parsed.version }));
+      };
+      const timeout = setTimeout(
+        () =>
+          finish(
+            Effect.fail(
+              failure("unavailable", `${name} version probe timed out.`, {
+                reason: "runtime-unavailable",
+              }),
+            ),
+          ),
+        timeoutMs,
+      );
+      child.stdout.on("data", onOutput);
+      child.stderr.on("data", onDiagnostics);
+      child.once("error", onError);
+      child.once("close", onClose);
+      return cleanupEffect(name, async () => {
+        if (!settled) {
+          settled = true;
+          cleanupListeners();
+        }
+        await terminate();
+      });
     });
   });
 }
@@ -1069,6 +1110,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.onProcessStarted === undefined
             ? {}
             : { onProcessStarted: input.onProcessStarted }),
+          ...(options.versionProbeConfinement === undefined
+            ? {}
+            : { confinement: options.versionProbeConfinement }),
         });
         const environment = sanitizeAcpEnvironment(profile, inheritedEnvironment, {
           managedHome: input.managedHome,

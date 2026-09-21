@@ -24,6 +24,7 @@ import type {
 } from "@octant/contracts";
 import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
+import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
@@ -84,10 +85,32 @@ export interface OpenCodeProcessOptions {
   readonly startupTimeoutMs?: number;
 }
 
+export interface OpenCodeProbeOptions {
+  readonly confinement?: SeatbeltConfinementPort;
+}
+
 export interface OpenCodeProcessDependencies {
   readonly terminateProcessGroup?: (pid: number) => Promise<void>;
   readonly reserveLoopbackPort?: () => Promise<number>;
 }
+
+/**
+ * Static switches every OpenCode launch sets: no updater, no model fetch, no
+ * borrowed Claude Code integration, no default plugins. The version read keeps
+ * them too, since a read with no network and only a scratch home is exactly
+ * where an update or fetch attempt can stall.
+ */
+const OPENCODE_GUARDS = {
+  OPENCODE_DISABLE_AUTOUPDATE: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
+  OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+  OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+  OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+  OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+  OPENCODE_DISABLE_MODELS_FETCH: "1",
+  OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+} as const;
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
@@ -588,15 +611,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      OPENCODE_DISABLE_AUTOUPDATE: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
-      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
-      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
-      OPENCODE_DISABLE_MODELS_FETCH: "1",
-      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+      ...OPENCODE_GUARDS,
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -945,93 +960,126 @@ function safeDiagnostic(handler: OpenCodeProcessOptions["onDiagnostic"], message
 export function probeOpenCodeBinary(
   binaryPath: string,
   onProcessStarted?: ProviderProcessStartedListener,
+  options: OpenCodeProbeOptions = {},
 ): Effect.Effect<OpenCodeBinaryProbe, ProviderFailure> {
   const invalid = validateBinaryPath(binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  return Effect.async<OpenCodeBinaryProbe, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, ["--version"], {
-      detached: process.platform !== "win32",
-      env: childProcessEnvironment(process.env),
-      stdio: ["ignore", "pipe", "pipe"],
+  // Preparing inside the suspend keeps one scratch directory per run: an
+  // Effect a caller holds and never runs leaves nothing behind, and one it runs
+  // twice does not hand the second run a directory the first already released.
+  return Effect.suspend(() => {
+    const probe = prepareConfinedVersionProbe({
+      binaryPath,
+      displayName: "OpenCode",
+      environment: () => ({ ...childProcessEnvironment(process.env), ...OPENCODE_GUARDS }),
+      guards: OPENCODE_GUARDS,
+      ...(options.confinement === undefined ? {} : { confinement: options.confinement }),
     });
-    let childExitedObserved = false;
-    const childExited = new Promise<void>((resolveExit) =>
-      child.once("exit", () => {
-        childExitedObserved = true;
-        resolveExit();
-      }),
-    );
-    let ownershipReady: Promise<void> = Promise.resolve();
-    if (child.pid !== undefined && onProcessStarted !== undefined) {
-      ownershipReady = onProcessStarted({ pid: child.pid, exited: childExited }).then(
-        () => undefined,
-      );
-      void ownershipReady.catch(() => undefined);
-    }
-    const terminate = makeProcessTerminator(child, 250);
-    let output = "";
-    let settled = false;
+    if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
+    const { launch } = probe;
 
-    const cleanup = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onOutput);
-      child.stderr.off("data", onOutput);
-      child.off("error", onError);
-      child.off("exit", onExit);
-    };
-    const finish = (result: Effect.Effect<OpenCodeBinaryProbe, ProviderFailure>) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      void terminate().then(
-        async () => {
-          try {
-            await ownershipReady;
-            resume(result);
-          } catch {
-            if (childExitedObserved) resume(result);
-            else
-              resume(
-                Effect.fail(failure("provider-failed", "OpenCode process receipt is unavailable.")),
-              );
-          }
-        },
-        () => resume(Effect.fail(cleanupFailure())),
+    return Effect.async<OpenCodeBinaryProbe, ProviderFailure>((resume) => {
+      const child = spawn(launch.command, [...launch.args], {
+        cwd: launch.workingDirectory,
+        detached: process.platform !== "win32",
+        env: launch.environment,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let childExitedObserved = false;
+      const childExited = new Promise<void>((resolveExit) =>
+        child.once("exit", () => {
+          childExitedObserved = true;
+          resolveExit();
+        }),
       );
-    };
-    const onOutput = (chunk: Buffer) => {
-      if (output.length < 4_096) output += chunk.toString("utf8", 0, 4_096 - output.length);
-    };
-    const onError = () =>
-      finish(
-        Effect.fail(failure("unavailable", "OpenCode binary could not be started for probing.")),
-      );
-    const onExit = (code: number | null) => {
-      if (code !== 0) {
-        finish(Effect.fail(failure("unavailable", "OpenCode binary probe did not succeed.")));
-        return;
+      let ownershipReady: Promise<void> = Promise.resolve();
+      if (child.pid !== undefined && onProcessStarted !== undefined) {
+        ownershipReady = onProcessStarted({ pid: child.pid, exited: childExited }).then(
+          () => undefined,
+        );
+        void ownershipReady.catch(() => undefined);
       }
-      const version = parseOpenCodeVersion(output)?.version;
-      finish(
-        version === undefined
-          ? Effect.fail(failure("protocol", "OpenCode binary returned an unrecognized version."))
-          : Effect.succeed({ binaryPath, version }),
-      );
-    };
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      finish(Effect.fail(failure("unavailable", "OpenCode binary probe timed out.")));
-    }, VERSION_TIMEOUT_MS);
+      const terminateProcess = makeProcessTerminator(child, 250);
+      // The scratch directory outlives the process it was granted to unless it
+      // goes away with it, and every settle path here runs the terminator.
+      const terminate = () => terminateProcess().finally(launch.release);
+      // The version is on stdout. Stderr is kept apart and read only when
+      // stdout carries none: given a throwaway home the program may warn there
+      // before it answers, and a first line folded in from that warning made a
+      // working install unrecognisable.
+      let output = "";
+      let diagnostics = "";
+      let settled = false;
 
-    child.stdout.on("data", onOutput);
-    child.stderr.on("data", onOutput);
-    child.once("error", onError);
-    child.once("exit", onExit);
+      const cleanup = () => {
+        clearTimeout(timeout);
+        child.stdout.off("data", onOutput);
+        child.stderr.off("data", onDiagnostics);
+        child.off("error", onError);
+        child.off("exit", onExit);
+      };
+      const finish = (result: Effect.Effect<OpenCodeBinaryProbe, ProviderFailure>) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        void terminate().then(
+          async () => {
+            try {
+              await ownershipReady;
+              resume(result);
+            } catch {
+              if (childExitedObserved) resume(result);
+              else
+                resume(
+                  Effect.fail(
+                    failure("provider-failed", "OpenCode process receipt is unavailable."),
+                  ),
+                );
+            }
+          },
+          () => resume(Effect.fail(cleanupFailure())),
+        );
+      };
+      const onOutput = (chunk: Buffer) => {
+        if (output.length < 4_096) output += chunk.toString("utf8", 0, 4_096 - output.length);
+      };
+      const onDiagnostics = (chunk: Buffer) => {
+        if (diagnostics.length < 4_096) {
+          diagnostics += chunk.toString("utf8", 0, 4_096 - diagnostics.length);
+        }
+      };
+      const onError = () =>
+        finish(
+          Effect.fail(failure("unavailable", "OpenCode binary could not be started for probing.")),
+        );
+      const onExit = (code: number | null) => {
+        if (code !== 0) {
+          finish(Effect.fail(failure("unavailable", "OpenCode binary probe did not succeed.")));
+          return;
+        }
+        const version = (parseOpenCodeVersion(output) ?? parseOpenCodeVersion(diagnostics))
+          ?.version;
+        finish(
+          version === undefined
+            ? Effect.fail(failure("protocol", "OpenCode binary returned an unrecognized version."))
+            : Effect.succeed({ binaryPath, version }),
+        );
+      };
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        finish(Effect.fail(failure("unavailable", "OpenCode binary probe timed out.")));
+      }, VERSION_TIMEOUT_MS);
 
-    return cleanupDefect(async () => {
-      cleanup();
-      await terminate();
+      child.stdout.on("data", onOutput);
+      child.stderr.on("data", onDiagnostics);
+      child.once("error", onError);
+      child.once("exit", onExit);
+
+      return cleanupDefect(async () => {
+        cleanup();
+        await terminate();
+      });
     });
   });
 }
@@ -1336,7 +1384,9 @@ export function makeOpenCodeProcessLive(
         // Probe first so the server command and auth identity follow the
         // runtime that actually answered, rather than treating the beta
         // label as a legacy semantic version.
-        const probe = yield* probeOpenCodeBinary(input.binaryPath);
+        const probe = yield* probeOpenCodeBinary(input.binaryPath, undefined, {
+          confinement: resolvedOptions.confinement,
+        });
         const runtime = runtimeForVersion(probe.version);
         const resolver =
           options.runtimeConfigResolver ??

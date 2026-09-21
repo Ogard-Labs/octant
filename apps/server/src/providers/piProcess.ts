@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
   chmodSync,
@@ -24,7 +24,16 @@ import { Effect, type Scope } from "effect";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
-import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
+import {
+  makeSeatbeltConfinementLive,
+  SeatbeltConfinementError,
+  type SeatbeltConfinementPort,
+} from "../process/seatbeltProfile";
+import {
+  execVersionRead,
+  prepareConfinedVersionProbe,
+  type ConfinedVersionProbeLaunch,
+} from "../process/confinedVersionProbe";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -72,6 +81,8 @@ export interface PiProcessPort {
     readonly sessionId: string;
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
+    /** The Pi provider the thread's model runs on; only its credentials reach the process. */
+    readonly modelProvider?: string;
     readonly onProcessStarted?: ProviderProcessStartedListener;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
@@ -88,6 +99,8 @@ export interface PiConfinementOptions {
 
 export interface PiProcessOptions {
   readonly confinement?: PiConfinementPort;
+  /** Confinement for the version read, which the runtime's port does not cover. */
+  readonly versionProbeConfinement?: SeatbeltConfinementPort;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly shutdownTimeoutMs?: number;
   readonly versionTimeoutMs?: number;
@@ -114,22 +127,30 @@ const SAFE_ENVIRONMENT = new Set([
   "TZ",
   "USER",
 ]);
-const PROVIDER_CREDENTIALS = new Set([
-  "AIROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_OAUTH_TOKEN",
-  "AZURE_OPENAI_API_KEY",
-  "AZURE_OPENAI_BASE_URL",
-  "AZURE_OPENAI_RESOURCE_NAME",
-  "DEEPSEEK_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "GROQ_API_KEY",
-  "MISTRAL_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENAI_BASE_URL",
-  "OPENROUTER_API_KEY",
-  "XAI_API_KEY",
+// Keyed by the Pi provider id, the part of a model ID before the "/". A Pi
+// process reads a provider's key from the variables Pi names for that provider,
+// so a thread is handed those and no other provider's: with every key passed, a
+// model-generated command in an Anthropic thread could read `OPENAI_API_KEY`. A
+// provider missing here (an OAuth login kept in `auth.json`, for one) gets no
+// host variable and authenticates from its linked `auth.json`. That includes a
+// custom `models.json` provider whose `apiKey` is `$SOME_VARIABLE`: Pi 0.85.1
+// leaves such a provider's models out of the list when the variable is unset,
+// so it needs a literal `apiKey` or a `/login` to be selectable. A Map, because
+// the key is text from a model ID and must never resolve on the prototype.
+const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ["airouter", ["AIROUTER_API_KEY"]],
+  ["anthropic", ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]],
+  [
+    "azure-openai-responses",
+    ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"],
+  ],
+  ["deepseek", ["DEEPSEEK_API_KEY"]],
+  ["google", ["GEMINI_API_KEY", "GOOGLE_API_KEY"]],
+  ["groq", ["GROQ_API_KEY"]],
+  ["mistral", ["MISTRAL_API_KEY"]],
+  ["openai", ["OPENAI_API_KEY", "OPENAI_BASE_URL"]],
+  ["openrouter", ["OPENROUTER_API_KEY"]],
+  ["xai", ["XAI_API_KEY"]],
 ]);
 const APPROVAL_BRIDGE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -233,21 +254,29 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
+/** Static switches every Pi launch sets; the version read keeps them too. */
+const PI_GUARDS = { PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" } as const;
+
+// `modelProvider` is the Pi provider a thread runs its model on. A discovery
+// run has no thread, so it names none and holds no provider credential.
 export function sanitizePiEnvironment(
   host: NodeJS.ProcessEnv,
   piHome: string,
   approvals: "enabled" | "disabled" = "enabled",
+  modelProvider?: string,
 ): NodeJS.ProcessEnv {
+  const credentials = new Set(
+    modelProvider === undefined ? [] : (PROVIDER_CREDENTIALS.get(modelProvider) ?? []),
+  );
   return Object.fromEntries([
     ...Object.entries(host).filter(
       ([key, value]) =>
         value !== undefined &&
-        (SAFE_ENVIRONMENT.has(key) || PROVIDER_CREDENTIALS.has(key) || key.startsWith("LC_")),
+        (SAFE_ENVIRONMENT.has(key) || credentials.has(key) || key.startsWith("LC_")),
     ),
     ["HOME", piHome],
     ["PI_CODING_AGENT_DIR", piHome],
-    ["PI_TELEMETRY", "0"],
-    ["PI_SKIP_VERSION_CHECK", "1"],
+    ...Object.entries(PI_GUARDS),
     ["OCTANT_PI_APPROVALS", approvals],
     ["NO_COLOR", "1"],
   ]);
@@ -263,8 +292,9 @@ export function piProcessEnvironment(
   host: NodeJS.ProcessEnv,
   piHome: string,
   approvals: "enabled" | "disabled" = "enabled",
+  modelProvider?: string,
 ): NodeJS.ProcessEnv {
-  const sanitized = sanitizePiEnvironment(host, piHome, approvals);
+  const sanitized = sanitizePiEnvironment(host, piHome, approvals, modelProvider);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   const searched = [binaryDirectory, ...approvedHomeBinDirs(host.HOME), ...path];
@@ -627,27 +657,24 @@ async function terminate(child: ChildProcess, timeoutMs: number): Promise<void> 
   signalGroup(child, "SIGKILL");
 }
 
-function inspectVersion(
-  binaryPath: string,
-  environment: NodeJS.ProcessEnv,
+async function inspectVersion(
+  launch: ConfinedVersionProbeLaunch,
   timeoutMs: number,
 ): Promise<string> {
-  return new Promise((resolveVersion, reject) => {
-    execFile(
-      binaryPath,
-      ["--version"],
-      { env: environment, timeout: timeoutMs, maxBuffer: 1024 },
-      (error, stdout) => {
-        const version = stdout.trim();
-        if (error !== null || !/^\d+\.\d+\.\d+$/.test(version)) reject(new Error());
-        else resolveVersion(version);
-      },
-    );
+  const { stdout } = await execVersionRead(launch.command, launch.args, {
+    cwd: launch.workingDirectory,
+    env: launch.environment,
+    timeout: timeoutMs,
+    maxBuffer: 1024,
   });
+  const version = stdout.trim();
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error();
+  return version;
 }
 
 export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort {
   const confinement = options.confinement ?? makePiConfinementLive();
+  const versionProbeConfinement = options.versionProbeConfinement;
   const inherited = options.inheritedEnvironment ?? process.env;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2_000;
   const versionTimeoutMs = options.versionTimeoutMs ?? 5_000;
@@ -660,12 +687,27 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             inherited,
             input.piHome,
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
+            input.modelProvider,
           );
           const launch = yield* confinement.prepare({ ...input, environment: baseEnvironment });
-          const version = yield* Effect.tryPromise({
-            try: () => inspectVersion(input.binaryPath, launch.environment, versionTimeoutMs),
-            catch: () => failure("incompatible", "Pi version could not be verified."),
+          const versionProbe = prepareConfinedVersionProbe({
+            binaryPath: input.binaryPath,
+            displayName: "Pi",
+            // The base environment, not the launch's: that one carries the
+            // per-thread tool-bridge URL and bearer token.
+            environment: () => baseEnvironment,
+            guards: PI_GUARDS,
+            ...(versionProbeConfinement === undefined
+              ? {}
+              : { confinement: versionProbeConfinement }),
           });
+          if (versionProbe.status === "refused") {
+            return yield* Effect.fail(failure(versionProbe.reason, versionProbe.message));
+          }
+          const version = yield* Effect.tryPromise({
+            try: () => inspectVersion(versionProbe.launch, versionTimeoutMs),
+            catch: () => failure("incompatible", "Pi version could not be verified."),
+          }).pipe(Effect.ensuring(Effect.sync(() => versionProbe.launch.release())));
           const child = yield* Effect.try({
             try: () =>
               spawn(launch.command, [...launch.args], {

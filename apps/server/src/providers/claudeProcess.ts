@@ -1,20 +1,65 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { accessSync, constants, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, sep } from "node:path";
 
 import type {
   Options as ClaudeAgentSdkOptions,
   SpawnedProcess,
   SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { ProviderFailure } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect } from "effect";
 
-import { sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import {
+  makeSeatbeltConfinementLive,
+  SeatbeltConfinementError,
+  type SeatbeltConfinementPort,
+} from "../process/seatbeltProfile";
+import {
+  materializeOsNetworkEgress,
+  resolveProviderRuntimeEgressPolicy,
+} from "../process/threadEgressPolicy";
+import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnClaudeCodeProcess"]>;
+
+/**
+ * The one thread's authority a Claude runtime launch carries.
+ *
+ * The Agent SDK composes the launch and hands the spawn callback only command,
+ * args, cwd, env, and a signal, so the bound root and the posture cannot be
+ * read off `SpawnOptions`. They are bound here instead, at the call that opens
+ * the query, which is the only place that knows them (0143, 0145).
+ */
+export interface ClaudeRuntimeConfinement {
+  readonly projectRoot: string;
+  readonly executionPolicy: ProviderExecutionPolicy;
+}
+
+/**
+ * The postures whose Claude runtime launches Octant confines itself.
+ *
+ * Plan is confined because 0009 requires its read-only boundary at the sandbox
+ * rather than in the provider's permission layer. The postures that write still
+ * run on the runtime's own sandbox settings and stay in the exception manifest
+ * of `providerProcessConfinement.test.ts`; Full access is an unrestricted
+ * posture 0009 never confines.
+ */
+export const CONFINED_CLAUDE_EXECUTION_POLICIES: ReadonlySet<ProviderExecutionPolicy> = new Set([
+  "plan",
+]);
 
 export interface ClaudeProcessPort {
   readonly probeVersion: (binaryPath: string) => Effect.Effect<string, ProviderFailure>;
@@ -22,11 +67,13 @@ export interface ClaudeProcessPort {
     binaryPath: string,
     environment: NodeJS.ProcessEnv,
   ) => Effect.Effect<"authenticated" | "unauthenticated", ProviderFailure>;
-  readonly spawn: SpawnClaudeCodeProcess;
+  /** Binds one thread's confinement to the callback the Agent SDK will invoke. */
+  readonly spawn: (confinement: ClaudeRuntimeConfinement) => SpawnClaudeCodeProcess;
 }
 
 export interface ClaudeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
+  readonly confinement?: SeatbeltConfinementPort;
   readonly onDiagnostic?: (message: string) => void;
   readonly probeOutputBytes?: number;
   readonly probeTimeoutMs?: number;
@@ -46,6 +93,7 @@ type ProbeKind = "authentication" | "version";
 
 interface ResolvedClaudeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv;
+  readonly confinement: SeatbeltConfinementPort;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly probeOutputBytes: number;
   readonly probeTimeoutMs: number;
@@ -203,126 +251,325 @@ function runProbe(
   const invalid = validateBinaryPath(binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  return Effect.async<string, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, args, {
-      detached: process.platform !== "win32",
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let childExitedObserved = false;
-    const childExited = new Promise<void>((resolveExit) =>
-      child.once("exit", () => {
-        childExitedObserved = true;
-        resolveExit();
-      }),
-    );
-    let ownershipReady: Promise<void> = Promise.resolve();
-    if (child.pid !== undefined && options.onProcessStarted !== undefined) {
-      ownershipReady = options
-        .onProcessStarted({ pid: child.pid, exited: childExited })
-        .then(() => undefined);
-      void ownershipReady.catch(() => undefined);
-    }
-    const terminate = makeProcessTerminator(child, options.shutdownTimeoutMs);
-    let stdout: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
-    let stderr: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
-    let settled = false;
-    let cleanupPromise: Promise<void> | undefined;
+  // Only the version read is confined. The authentication probe reaches the
+  // provider's own control plane out of the user's credential home, which is a
+  // readiness check under 0122 rather than a local string read.
+  // Preparing inside the suspend keeps one scratch directory per run: an
+  // Effect a caller holds and never runs leaves nothing behind, and one it runs
+  // twice does not hand the second run a directory the first already released.
+  return Effect.suspend(() => {
+    const probe =
+      kind === "version"
+        ? prepareConfinedVersionProbe({
+            binaryPath,
+            displayName: "Claude",
+            args,
+            environment: () => environment,
+            guards: REQUIRED_GUARDS,
+            // The same port the runtime launch uses: one builder, two launches.
+            confinement: options.confinement,
+          })
+        : undefined;
+    if (probe?.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
+    const launch = probe?.status === "prepared" ? probe.launch : undefined;
 
-    const cleanupListeners = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onStdout);
-      child.stderr.off("data", onStderr);
-      child.off("error", onError);
-      child.off("close", onClose);
-    };
-    const cleanupProcess = () => {
-      cleanupPromise ??= terminate();
-      return cleanupPromise;
-    };
-    const finish = (result: Effect.Effect<string, ProviderFailure>) => {
-      if (settled) return;
-      settled = true;
-      cleanupListeners();
-      void cleanupProcess().then(
-        async () => {
-          try {
-            await ownershipReady;
-            resume(result);
-          } catch {
-            if (childExitedObserved) resume(result);
-            else
-              resume(
-                Effect.fail(failure("provider-failed", "Claude process receipt is unavailable.")),
-              );
-          }
+    return Effect.async<string, ProviderFailure>((resume) => {
+      const child = spawn(
+        launch?.command ?? binaryPath,
+        launch === undefined ? args : [...launch.args],
+        {
+          ...(launch === undefined ? {} : { cwd: launch.workingDirectory }),
+          detached: process.platform !== "win32",
+          env: launch?.environment ?? environment,
+          stdio: ["ignore", "pipe", "pipe"],
         },
-        () => resume(Effect.fail(failure("provider-failed", "Claude probe cleanup failed."))),
       );
-    };
-    const onStdout = (chunk: Buffer | string) => {
-      stdout = captureChunk(stdout, chunk, options.probeOutputBytes);
-    };
-    const onStderr = (chunk: Buffer | string) => {
-      stderr = captureChunk(stderr, chunk, options.probeOutputBytes);
-    };
-    const onError = () =>
-      finish(Effect.fail(failure("unavailable", `Claude ${kind} probe could not be started.`)));
-    const onClose = (code: number | null) => {
-      if (stdout.overflow || stderr.overflow) {
-        finish(Effect.fail(failure("protocol", `Claude ${kind} probe output exceeded the limit.`)));
-        return;
+      let childExitedObserved = false;
+      const childExited = new Promise<void>((resolveExit) =>
+        child.once("exit", () => {
+          childExitedObserved = true;
+          resolveExit();
+        }),
+      );
+      let ownershipReady: Promise<void> = Promise.resolve();
+      if (child.pid !== undefined && options.onProcessStarted !== undefined) {
+        ownershipReady = options
+          .onProcessStarted({ pid: child.pid, exited: childExited })
+          .then(() => undefined);
+        void ownershipReady.catch(() => undefined);
       }
-      if (kind === "version") {
-        if (code !== 0) {
-          finish(Effect.fail(failure("unavailable", "Claude version probe did not succeed.")));
-          return;
-        }
-        const version = VERSION_PATTERN.exec(stdout.bytes.toString("utf8"))?.[1];
-        finish(
-          version === undefined
-            ? Effect.fail(failure("protocol", "Claude binary returned an unrecognized version."))
-            : Effect.succeed(version),
-        );
-        return;
-      }
+      const terminate = makeProcessTerminator(child, options.shutdownTimeoutMs);
+      let stdout: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
+      let stderr: BoundedCapture = { bytes: Buffer.alloc(0), overflow: false };
+      let settled = false;
+      let cleanupPromise: Promise<void> | undefined;
 
-      const status = parseAuthenticationStatus(stdout.bytes.toString("utf8"));
-      if (
-        status === undefined ||
-        (status === "authenticated" && code !== 0) ||
-        (status === "unauthenticated" && code !== 1)
-      ) {
-        finish(
-          Effect.fail(failure("protocol", "Claude authentication status response was invalid.")),
-        );
-        return;
-      }
-      finish(Effect.succeed(status));
-    };
-    const timeout = setTimeout(
-      () => finish(Effect.fail(failure("unavailable", `Claude ${kind} probe timed out.`))),
-      options.probeTimeoutMs,
-    );
-
-    child.stdout.on("data", onStdout);
-    child.stderr.on("data", onStderr);
-    child.once("error", onError);
-    child.once("close", onClose);
-
-    return cleanupEffect(async () => {
-      if (!settled) {
+      const cleanupListeners = () => {
+        clearTimeout(timeout);
+        child.stdout.off("data", onStdout);
+        child.stderr.off("data", onStderr);
+        child.off("error", onError);
+        child.off("close", onClose);
+      };
+      const cleanupProcess = () => {
+        // The scratch directory outlives the process it was granted to unless
+        // it goes away with it, and every settle path here runs this.
+        cleanupPromise ??= launch === undefined ? terminate() : terminate().finally(launch.release);
+        return cleanupPromise;
+      };
+      const finish = (result: Effect.Effect<string, ProviderFailure>) => {
+        if (settled) return;
         settled = true;
         cleanupListeners();
-      }
-      await cleanupProcess();
+        void cleanupProcess().then(
+          async () => {
+            try {
+              await ownershipReady;
+              resume(result);
+            } catch {
+              if (childExitedObserved) resume(result);
+              else
+                resume(
+                  Effect.fail(failure("provider-failed", "Claude process receipt is unavailable.")),
+                );
+            }
+          },
+          () => resume(Effect.fail(failure("provider-failed", "Claude probe cleanup failed."))),
+        );
+      };
+      const onStdout = (chunk: Buffer | string) => {
+        stdout = captureChunk(stdout, chunk, options.probeOutputBytes);
+      };
+      const onStderr = (chunk: Buffer | string) => {
+        stderr = captureChunk(stderr, chunk, options.probeOutputBytes);
+      };
+      const onError = () =>
+        finish(Effect.fail(failure("unavailable", `Claude ${kind} probe could not be started.`)));
+      const onClose = (code: number | null) => {
+        if (stdout.overflow || stderr.overflow) {
+          finish(
+            Effect.fail(failure("protocol", `Claude ${kind} probe output exceeded the limit.`)),
+          );
+          return;
+        }
+        if (kind === "version") {
+          if (code !== 0) {
+            finish(Effect.fail(failure("unavailable", "Claude version probe did not succeed.")));
+            return;
+          }
+          const version = VERSION_PATTERN.exec(stdout.bytes.toString("utf8"))?.[1];
+          finish(
+            version === undefined
+              ? Effect.fail(failure("protocol", "Claude binary returned an unrecognized version."))
+              : Effect.succeed(version),
+          );
+          return;
+        }
+
+        const status = parseAuthenticationStatus(stdout.bytes.toString("utf8"));
+        if (
+          status === undefined ||
+          (status === "authenticated" && code !== 0) ||
+          (status === "unauthenticated" && code !== 1)
+        ) {
+          finish(
+            Effect.fail(failure("protocol", "Claude authentication status response was invalid.")),
+          );
+          return;
+        }
+        finish(Effect.succeed(status));
+      };
+      const timeout = setTimeout(
+        () => finish(Effect.fail(failure("unavailable", `Claude ${kind} probe timed out.`))),
+        options.probeTimeoutMs,
+      );
+
+      child.stdout.on("data", onStdout);
+      child.stderr.on("data", onStderr);
+      child.once("error", onError);
+      child.once("close", onClose);
+
+      return cleanupEffect(async () => {
+        if (!settled) {
+          settled = true;
+          cleanupListeners();
+        }
+        await cleanupProcess();
+      });
     });
   });
+}
+
+/**
+ * The directories the Claude runtime writes outside the checkout.
+ *
+ * 0009 scopes a confined launch's writes to the provider home and a private
+ * temp. For this runtime that is its configuration directory, the secure
+ * storage directory when the host names one, and one shared scratch directory
+ * the runtime opens for itself. The last is `/tmp/claude-<uid>` and not
+ * `$TMPDIR`: measured on macOS 27, a launch whose `TMPDIR` pointed at a private
+ * directory still exited before speaking a byte with
+ * `EEXIST: file already exists, mkdir '/tmp/claude-501'`, because the profile
+ * denied the stat that would have found the directory already there. It is
+ * shared with every other use of the runtime on this host, so it is named as a
+ * write root rather than hidden inside the temp grant.
+ */
+function planStateDirectories(
+  boundRoot: string,
+  stateDirectories: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  for (const path of stateDirectories) {
+    if (path === boundRoot) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        "Claude Plan confinement cannot use a project root that is also a runtime state directory.",
+      );
+    }
+  }
+  return stateDirectories;
+}
+
+function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {
+  const configuration =
+    environment.CLAUDE_CONFIG_DIR ??
+    (environment.HOME === undefined ? undefined : join(environment.HOME, ".claude"));
+  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
+    (path): path is string => path !== undefined && isAbsolute(path),
+  );
+}
+
+/**
+ * Wrap a Claude runtime launch in the shared confinement builder.
+ *
+ * The Agent SDK composes the launch, so this is the only point that holds both
+ * the thread's bound root and its posture. A posture outside
+ * {@link CONFINED_CLAUDE_EXECUTION_POLICIES} launches unchanged and stays in
+ * the exception manifest. There is no unconfined fallback for one that is
+ * inside it: a builder that cannot prepare the launch throws, and the turn
+ * fails rather than starting unwrapped (0009).
+ */
+function confineClaudeLaunch(
+  spawnOptions: SpawnOptions,
+  confinement: ClaudeRuntimeConfinement,
+  options: ResolvedClaudeProcessOptions,
+): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
+  if (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)) {
+    return { spawnOptions, release: () => undefined };
+  }
+  if (!isAbsolute(confinement.projectRoot) || !existsSync(confinement.projectRoot)) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement requires an existing absolute project root.",
+    );
+  }
+  const boundRoot = realpathSync(confinement.projectRoot);
+  // The launch's own temporary directory, not the ambient one. `TMPDIR` is
+  // normally the user's shared per-user temp root, and granting that whole
+  // directory read and write handed a Plan runtime every sibling temporary
+  // file on the machine, including other threads' scratch checkouts. A folder
+  // only this launch can name is what the design asked for.
+  let temporaryRoot: string;
+  try {
+    temporaryRoot = realpathSync(spawnOptions.env.TMPDIR ?? tmpdir());
+  } catch {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement could not create a private temporary directory.",
+    );
+  }
+  // A temporary root inside the checkout would put the launch's writable
+  // folder in a tree the launch may only read, and the write grant for a
+  // folder the caller named outranks the bound root's denial. Refuse it before
+  // anything is created there.
+  if (temporaryRoot === boundRoot || temporaryRoot.startsWith(`${boundRoot}${sep}`)) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement requires a temporary directory outside the checkout.",
+    );
+  }
+  let temporaryDirectory: string;
+  try {
+    temporaryDirectory = realpathSync(mkdtempSync(join(temporaryRoot, "octant-claude-plan-")));
+  } catch {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Claude runtime confinement could not create a private temporary directory.",
+    );
+  }
+  const release = () => {
+    try {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    } catch {
+      // Nothing reads the directory again; an entry the operating system holds
+      // open is left to it.
+    }
+  };
+  const stateDirectories = planStateDirectories(
+    boundRoot,
+    claudeRuntimeStateDirectories(spawnOptions.env),
+  );
+  try {
+    const launch = options.confinement.prepare({
+      executable: spawnOptions.command,
+      args: spawnOptions.args,
+      boundRoot,
+      temporaryDirectory,
+      additionalWriteRoots: stateDirectories,
+      readRoots: [boundRoot, temporaryDirectory, ...stateDirectories],
+      privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateDirectories],
+      // The runtime calls its own control plane, so it resolves the runtime
+      // egress policy rather than the thread default (0132, 0145). This driver
+      // carries Code threads, and the policy no longer reads the mode.
+      networkEgress: materializeOsNetworkEgress(
+        resolveProviderRuntimeEgressPolicy({
+          mode: "code",
+          executionPolicy: confinement.executionPolicy,
+        }),
+      ),
+      // Plan is read-only at the sandbox, not only in the provider's permission
+      // layer (0009): the checkout reads and never writes, and the runtime execs
+      // nothing at all. Measured on macOS 27, a session hook under this profile
+      // is refused with `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
+      writeBoundRoot: false,
+      allowProcessExec: false,
+      allowProcessFork: false,
+      allowFileReadStar: true,
+      // Subscription authentication keeps its credential in the platform secret
+      // store rather than in the provider home, so a launch without this reports
+      // itself signed out and the turn never starts. The store's files stay
+      // denied; only the lookup opens (0145). An API-key launch already carries
+      // its credential and never resolves one from the store, and the same
+      // binary may be trusted for a stored subscription item it has no use for,
+      // so the lookup stays closed there.
+      allowProviderCredentialLookup: spawnOptions.env.ANTHROPIC_API_KEY === undefined,
+    });
+    return {
+      spawnOptions: {
+        ...spawnOptions,
+        command: launch.command,
+        args: [...launch.args],
+        // The runtime keeps its own scratch under `claude-<uid>` beneath
+        // `CLAUDE_CODE_TMPDIR`, which defaults to the shared `/tmp`. Pointing it
+        // at the launch's folder keeps that scratch private too, instead of
+        // granting the tree every Claude process of the user shares.
+        env: {
+          ...spawnOptions.env,
+          TMPDIR: temporaryDirectory,
+          CLAUDE_CODE_TMPDIR: temporaryDirectory,
+        },
+      },
+      release,
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
 }
 
 function spawnOwnedClaudeProcess(
   spawnOptions: SpawnOptions,
   options: ResolvedClaudeProcessOptions,
+  release: () => void = () => undefined,
 ): SpawnedProcess {
   const invalid = validateBinaryPath(spawnOptions.command);
   if (invalid !== undefined) throw new Error(invalid.message);
@@ -381,11 +628,13 @@ function spawnOwnedClaudeProcess(
       .then(async () => {
         if (!stderrClosed) await stderrClosedPromise;
         cleanupComplete = true;
+        release();
         events.emit("exit", code, signal);
         resolveExited();
       })
       .catch(() => {
         cleanupComplete = true;
+        release();
         events.emit("error", new Error("Claude process cleanup failed."));
         events.emit("exit", code, signal);
         resolveExited();
@@ -408,7 +657,11 @@ function spawnOwnedClaudeProcess(
     reportStderr();
     resolveStderrClosed();
   });
-  child.once("error", (error) => events.emit("error", error));
+  child.once("error", (error) => {
+    // A process that never started has no exit to release after.
+    release();
+    events.emit("error", error);
+  });
   child.once("exit", onChildExit);
   spawnOptions.signal.addEventListener("abort", onAbort, { once: true });
   if (spawnOptions.signal.aborted) requestTermination("SIGTERM");
@@ -450,6 +703,7 @@ function spawnOwnedClaudeProcess(
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
   const resolved: ResolvedClaudeProcessOptions = {
     inheritedEnvironment: options.inheritedEnvironment ?? process.env,
+    confinement: options.confinement ?? makeSeatbeltConfinementLive(),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,
     probeTimeoutMs: options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
@@ -469,6 +723,14 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
       ),
     probeSubscription: (binaryPath, environment) =>
       runProbe(binaryPath, ["auth", "status", "--json"], environment, "authentication", resolved),
-    spawn: (spawnOptions) => spawnOwnedClaudeProcess(spawnOptions, resolved),
+    spawn: (confinement) => (spawnOptions) => {
+      const confined = confineClaudeLaunch(spawnOptions, confinement, resolved);
+      try {
+        return spawnOwnedClaudeProcess(confined.spawnOptions, resolved, confined.release);
+      } catch (error) {
+        confined.release();
+        throw error;
+      }
+    },
   };
 }

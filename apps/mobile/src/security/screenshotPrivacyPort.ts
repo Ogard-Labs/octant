@@ -1,6 +1,7 @@
 import type { ScreenshotPrivacyMode } from "@octant/domain";
 
 export interface MobileScreenshotPrivacyPort {
+  readonly available: boolean;
   readonly getMode: () => Promise<ScreenshotPrivacyMode>;
   readonly setMode: (mode: ScreenshotPrivacyMode) => Promise<void>;
   /**
@@ -16,6 +17,7 @@ export function createUnavailableScreenshotPrivacyPort(
 ): MobileScreenshotPrivacyPort {
   let mode: ScreenshotPrivacyMode = initial;
   return {
+    available: false,
     async getMode() {
       return mode;
     },

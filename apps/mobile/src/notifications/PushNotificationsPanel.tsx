@@ -21,6 +21,7 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
   const [message, setMessage] = useState<string | undefined>();
 
   const enable = async () => {
+    if (!props.permission.available) return;
     if (props.transport === undefined) {
       setMessage("Connect to a host before enabling notifications.");
       return;
@@ -122,30 +123,41 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
   return (
     <View style={styles.panel} testID="mobile-push-panel">
       <Text style={styles.title}>Notifications</Text>
-      <Text style={styles.help}>
-        Register a per-host push token for completion, waiting, failure, and approval-needed
-        awareness. Payloads stay redacted; live provider delivery needs host credentials.
-      </Text>
-      <Pressable
-        disabled={busy}
-        onPress={() => void enable()}
-        style={[styles.button, busy ? styles.buttonDisabled : null]}
-        testID="mobile-push-enable"
-      >
-        {busy ? (
-          <ActivityIndicator color={colors.sendLabel} />
-        ) : (
-          <Text style={styles.buttonLabel}>Enable on this host</Text>
-        )}
-      </Pressable>
-      <Pressable
-        disabled={busy}
-        onPress={() => void disable()}
-        style={styles.secondary}
-        testID="mobile-push-clear"
-      >
-        <Text style={styles.secondaryLabel}>Clear token on this host</Text>
-      </Pressable>
+      {props.permission.available ? (
+        <>
+          <Text style={styles.help}>
+            Register a per-host push token for completion, waiting, failure, and approval-needed
+            awareness. Payloads stay redacted; live provider delivery needs host credentials.
+          </Text>
+          <Pressable
+            disabled={busy}
+            onPress={() => void enable()}
+            style={[styles.button, busy ? styles.buttonDisabled : null]}
+            testID="mobile-push-enable"
+          >
+            {busy ? (
+              <ActivityIndicator color={colors.sendLabel} />
+            ) : (
+              <Text style={styles.buttonLabel}>Enable on this host</Text>
+            )}
+          </Pressable>
+        </>
+      ) : (
+        <Text style={styles.help} testID="mobile-push-unavailable">
+          Push notifications are unavailable in this build. Open Octant to check for updates from
+          your paired hosts.
+        </Text>
+      )}
+      {props.transport !== undefined ? (
+        <Pressable
+          disabled={busy}
+          onPress={() => void disable()}
+          style={styles.secondary}
+          testID="mobile-push-clear"
+        >
+          <Text style={styles.secondaryLabel}>Clear token on this host</Text>
+        </Pressable>
+      ) : null}
       {message !== undefined ? <Text style={styles.message}>{message}</Text> : null}
     </View>
   );

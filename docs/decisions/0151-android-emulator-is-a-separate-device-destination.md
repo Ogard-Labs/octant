@@ -1,10 +1,10 @@
-# 0147. Android emulator is a separate in-app device destination
+# 0151. Android emulator is a separate in-app device destination
 
 **Status:** Accepted
 
 ## Context
 
-0145 made the iOS Simulator dock tab a device pane and listed Android as a
+0149 made the iOS Simulator dock tab a device pane and listed Android as a
 non-goal. Building a mobile app needs both platforms. Folding Android into
 the Apple helper, `octant_apple`, or CoreSimulator would mix two host
 toolchains and two destination kinds. Computer-use destinations (0053)
@@ -12,8 +12,8 @@ already separate "is there a screen" from "how do I click".
 
 ## Decision
 
-- This record supersedes 0145's non-goal that Android is out of scope. Every
-  other 0145 rule stands, including helper-only iOS input and the iOS pane.
+- This record supersedes 0149's non-goal that Android is out of scope. Every
+  other 0149 rule stands, including helper-only iOS input and the iOS pane.
 - **Android is its own destination.** Discovery, boot, shutdown, screenshot,
   and input use the Android SDK's `emulator` and `adb`, not `simctl` and not
   the iOS device helper. Unavailable SDK tools fail closed as a value.
@@ -23,9 +23,9 @@ already separate "is there a screen" from "how do I click".
   running on the host is attachable; Octant does not own it until it boots
   one, and shutdown of an attached emulator is still explicit.
 - **`boot`, `open`, and a successful `run`/`install`+`launch` raise that
-  pane**, the way 0145 raises the iOS pane. The tool result tells the agent
+  pane**, the way 0149 raises the iOS pane. The tool result tells the agent
   not to launch an external emulator window as the place to look.
-- **Input and Allow input follow 0146**, keyed by the AVD name as the
+- **Input and Allow input follow 0150**, keyed by the AVD name as the
   destination identity (a branded non-UUID string). Taps, swipes, typed
   text, and keys are `adb shell input`. The picture refreshes after input,
   or streams by polling `adb exec-out screencap` while the pane is open. A
@@ -49,7 +49,7 @@ already separate "is there a screen" from "how do I click".
 
 ## Related
 
-- 0145 The agent opens the in-app Simulator pane (Android non-goal superseded)
-- 0146 Allow input opens a device to clicks
+- 0149 The agent opens the in-app Simulator pane (Android non-goal superseded)
+- 0150 Allow input opens a device to clicks
 - 0053 Computer-use destinations
 - 0043 Simulator follows the active thread

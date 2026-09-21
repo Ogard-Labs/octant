@@ -26,6 +26,7 @@ import {
 } from "./seatbeltProfile";
 
 const directories: string[] = [];
+const REALPATH_PATH = "/bin/realpath";
 
 afterEach(() => {
   for (const directory of directories.splice(0)) {
@@ -73,6 +74,217 @@ describe("shared Seatbelt profile builder", () => {
       expect(denied.stderr).toContain("Operation not permitted");
     },
   );
+
+  it.skipIf(process.platform !== "darwin" || !existsSync(REALPATH_PATH))(
+    "lets a program resolve a path inside the temporary directory it was granted",
+    () => {
+      // The temporary directory resolves beneath `/private`, which the profile
+      // denies wholesale, and the kernel judges every component of a path. A
+      // program that canonicalises a path inside its own temporary directory
+      // was refused at that component even though the directory itself is
+      // granted in full.
+      const root = temporaryRoot();
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: root,
+        temporaryDirectory: root,
+        networkEgress: "none",
+        allowFileReadStar: true,
+        privateHomeAllowPaths: [],
+      });
+      const inside = join(root, "inside.txt");
+      writeFileSync(inside, "resolvable");
+
+      const resolved = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, REALPATH_PATH, inside], {
+        encoding: "utf8",
+      });
+
+      expect(resolved.stderr).toBe("");
+      expect(resolved.status).toBe(0);
+      expect(resolved.stdout.trim()).toBe(inside);
+      // Stat is all that opens: the denied ancestors keep their contents and
+      // their listings.
+      const listed = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/ls", "/private"], {
+        encoding: "utf8",
+      });
+      expect(listed.status).not.toBe(0);
+    },
+  );
+
+  it("denies a bound root it may not write even when the temporary directory holds it", () => {
+    // A scratch checkout under `$TMPDIR` — where the provider smokes put theirs
+    // — was writable through the temporary directory's own subpath grant, so a
+    // Plan launch could create a file inside the checkout it may only read.
+    const temporaryDirectory = temporaryRoot();
+    const checkout = join(temporaryDirectory, "checkout");
+    mkdirSync(checkout);
+
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: checkout,
+      temporaryDirectory,
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    });
+
+    const lines = profile.split("\n");
+    expect(lines).toContain(seatbeltDenyRule("file-write*", checkout));
+    expect(lines.indexOf(seatbeltDenyRule("file-write*", checkout))).toBeGreaterThan(
+      lines.indexOf(seatbeltAllowRule("file-write*", temporaryDirectory)),
+    );
+    expect(profile).not.toContain(seatbeltAllowRule("file-write*", checkout));
+  });
+
+  describe("a read-only bound root beneath a write grant", () => {
+    function readOnlyProfile(input: {
+      readonly boundRoot: string;
+      readonly temporaryDirectory: string;
+      readonly additionalWriteRoots?: ReadonlyArray<string>;
+    }): string {
+      return buildDenyDefaultSeatbeltProfile({
+        ...input,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        allowFileReadStar: true,
+        privateHomeAllowPaths: [],
+      });
+    }
+
+    function writeFrom(profile: string, cwd: string, file: string): boolean {
+      spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/sh", "-c", `echo x > '${file}'`], {
+        cwd,
+        encoding: "utf8",
+      });
+      return existsSync(file);
+    }
+
+    it("denies the checkout after a write root above it, not before", () => {
+      // A repository under a configured provider config directory: the write
+      // root is an ancestor of the bound root, and its subpath allow re-opened
+      // the checkout whenever it came after the denial.
+      const root = temporaryRoot();
+      const configHome = join(root, "claude-config");
+      const checkout = join(configHome, "repo");
+      const temporaryDirectory = join(root, "tmp");
+      mkdirSync(checkout, { recursive: true });
+      mkdirSync(temporaryDirectory);
+
+      const lines = readOnlyProfile({
+        boundRoot: checkout,
+        temporaryDirectory,
+        additionalWriteRoots: [configHome],
+      }).split("\n");
+
+      expect(lines.lastIndexOf(seatbeltDenyRule("file-write*", checkout))).toBeGreaterThan(
+        lines.lastIndexOf(seatbeltAllowRule("file-write*", configHome)),
+      );
+    });
+
+    it("re-allows a write grant at or beneath the bound root after denying it", () => {
+      // Chat binds a provider's managed home as its root and lists the same
+      // directory as a write root, so denying last must not take that away.
+      const root = temporaryRoot();
+      const managedHome = join(root, "managed-home");
+      const state = join(managedHome, ".state");
+      const temporaryDirectory = join(root, "tmp");
+      mkdirSync(state, { recursive: true });
+      mkdirSync(temporaryDirectory);
+
+      const lines = readOnlyProfile({
+        boundRoot: managedHome,
+        temporaryDirectory,
+        additionalWriteRoots: [managedHome, state],
+      }).split("\n");
+      const deny = lines.lastIndexOf(seatbeltDenyRule("file-write*", managedHome));
+
+      expect(deny).toBeGreaterThan(-1);
+      expect(lines.lastIndexOf(seatbeltAllowRule("file-write*", managedHome))).toBeGreaterThan(
+        deny,
+      );
+      expect(lines.lastIndexOf(seatbeltAllowRule("file-write*", state))).toBeGreaterThan(deny);
+    });
+
+    it.skipIf(process.platform !== "darwin")(
+      "refuses a write into a checkout that sits under a write root, and still writes the root",
+      () => {
+        const root = temporaryRoot();
+        const configHome = join(root, "claude-config");
+        const checkout = join(configHome, "repo");
+        const temporaryDirectory = join(root, "tmp");
+        mkdirSync(checkout, { recursive: true });
+        mkdirSync(temporaryDirectory);
+        const profile = readOnlyProfile({
+          boundRoot: checkout,
+          temporaryDirectory,
+          additionalWriteRoots: [configHome],
+        });
+
+        expect(writeFrom(profile, root, join(checkout, "planted.txt"))).toBe(false);
+        // The write root is still a write root outside the checkout.
+        expect(writeFrom(profile, root, join(configHome, "state.txt"))).toBe(true);
+      },
+    );
+
+    it.skipIf(process.platform !== "darwin")(
+      "keeps a managed home writable when it is both the bound root and a write root",
+      () => {
+        const root = temporaryRoot();
+        const managedHome = join(root, "managed-home");
+        const temporaryDirectory = join(root, "tmp");
+        mkdirSync(managedHome);
+        mkdirSync(temporaryDirectory);
+        const profile = readOnlyProfile({
+          boundRoot: managedHome,
+          temporaryDirectory,
+          additionalWriteRoots: [managedHome],
+        });
+
+        expect(writeFrom(profile, root, join(managedHome, "session.json"))).toBe(true);
+      },
+    );
+
+    it.skipIf(process.platform !== "darwin")(
+      "keeps a write root beneath the checkout writable and the rest of the checkout read-only",
+      () => {
+        const root = temporaryRoot();
+        const checkout = join(root, "project");
+        const state = join(checkout, ".state");
+        const temporaryDirectory = join(root, "tmp");
+        mkdirSync(state, { recursive: true });
+        mkdirSync(temporaryDirectory);
+        const profile = readOnlyProfile({
+          boundRoot: checkout,
+          temporaryDirectory,
+          additionalWriteRoots: [state],
+        });
+
+        expect(writeFrom(profile, root, join(state, "cache.bin"))).toBe(true);
+        expect(writeFrom(profile, root, join(checkout, "planted.txt"))).toBe(false);
+      },
+    );
+  });
+
+  it("opens a provider's credential lookup without opening the keychain files", () => {
+    const root = temporaryRoot();
+    const input = {
+      boundRoot: root,
+      temporaryDirectory: root,
+      networkEgress: "allow",
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    } as const;
+
+    const withLookup = buildDenyDefaultSeatbeltProfile({
+      ...input,
+      allowProviderCredentialLookup: true,
+    });
+
+    expect(withLookup).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
+    // The daemon opens the store; this process may never read it off disk.
+    expect(withLookup).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
+    expect(withLookup).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
+    expect(buildDenyDefaultSeatbeltProfile(input)).not.toContain("com.apple.SecurityServer");
+  });
 
   it("grants the resolved form of a launch root reached through a symlink", () => {
     const root = temporaryRoot();

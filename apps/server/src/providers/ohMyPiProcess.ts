@@ -1,8 +1,14 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
+import {
+  execVersionRead,
+  prepareConfinedVersionProbe,
+  type ConfinedVersionProbeLaunch,
+} from "../process/confinedVersionProbe";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -36,6 +42,11 @@ export interface OhMyPiProcessOptions {
   readonly shutdownTimeoutMs?: number;
   readonly versionTimeoutMs?: number;
   readonly readyTimeoutMs?: number;
+  /**
+   * Confinement for the version read only. 0142 records that the declaration
+   * probe itself is not wrapped, so this never names that launch.
+   */
+  readonly versionProbeConfinement?: SeatbeltConfinementPort;
 }
 
 const SAFE_ENVIRONMENT = new Set([
@@ -128,23 +139,19 @@ function validateBinary(binaryPath: string): ProviderFailure | undefined {
   return undefined;
 }
 
-function inspectVersion(
-  binaryPath: string,
-  environment: NodeJS.ProcessEnv,
+async function inspectVersion(
+  launch: ConfinedVersionProbeLaunch,
   timeoutMs: number,
 ): Promise<string> {
-  return new Promise((resolveVersion, reject) => {
-    execFile(
-      binaryPath,
-      ["--version"],
-      { env: environment, timeout: timeoutMs, maxBuffer: 1024 },
-      (error, stdout) => {
-        const version = stdout.trim().replace(/^omp\//, "");
-        if (error !== null || !/^\d+\.\d+\.\d+$/.test(version)) reject(new Error());
-        else resolveVersion(version);
-      },
-    );
+  const { stdout } = await execVersionRead(launch.command, launch.args, {
+    cwd: launch.workingDirectory,
+    env: launch.environment,
+    timeout: timeoutMs,
+    maxBuffer: 1024,
   });
+  const version = stdout.trim().replace(/^omp\//, "");
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error();
+  return version;
 }
 
 async function readReadyFrame(
@@ -264,10 +271,22 @@ export function makeOhMyPiProcessLive(options: OhMyPiProcessOptions = {}): OhMyP
             inherited,
             input.managedHome,
           );
-          const version = yield* Effect.tryPromise({
-            try: () => inspectVersion(input.binaryPath, environment, versionTimeoutMs),
-            catch: () => failure("incompatible", "Oh My Pi version could not be verified."),
+          const versionProbe = prepareConfinedVersionProbe({
+            binaryPath: input.binaryPath,
+            displayName: "Oh My Pi",
+            environment: (scratch) =>
+              ohMyPiProcessEnvironment(input.binaryPath, inherited, scratch),
+            ...(options.versionProbeConfinement === undefined
+              ? {}
+              : { confinement: options.versionProbeConfinement }),
           });
+          if (versionProbe.status === "refused") {
+            return yield* Effect.fail(failure(versionProbe.reason, versionProbe.message));
+          }
+          const version = yield* Effect.tryPromise({
+            try: () => inspectVersion(versionProbe.launch, versionTimeoutMs),
+            catch: () => failure("incompatible", "Oh My Pi version could not be verified."),
+          }).pipe(Effect.ensuring(Effect.sync(() => versionProbe.launch.release())));
           if (version !== input.supportedVersion) {
             return yield* Effect.fail({
               category: "incompatible",

@@ -347,7 +347,14 @@ export function createRemoteHttpAuthentication(
       if (options.admission !== undefined && admissionRelease === undefined) {
         throw new RemoteHttpAuthFailure(429, "rate-limited");
       }
-      const handoff = await authenticateRequest(request, sessionId, sessionFacts, facts, options);
+      const handoff = await authenticateRequest(
+        request,
+        sessionId,
+        sessionFacts,
+        facts,
+        options,
+        route,
+      );
 
       // S1: Create the registry abort controller before registration. The
       // combined signal merges client-disconnect (request.signal) with the
@@ -765,6 +772,7 @@ async function authenticateRequest(
   sessionFacts: RemoteSessionFacts,
   transport: RequestTransportFacts,
   options: RemoteHttpAuthenticationOptions,
+  route: RemoteRouteDefinition | undefined,
 ): Promise<RemoteClientPrincipalHandoff> {
   const method = request.method.toUpperCase();
   if (!/^[A-Z][A-Z0-9-]{0,15}$/.test(method)) throw new RemoteHttpAuthFailure(400, "invalid");
@@ -817,7 +825,13 @@ async function authenticateRequest(
   if (safe && body.byteLength > 0) throw new RemoteHttpAuthFailure(400, "invalid");
   if (!safe) {
     const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-    if (contentType === undefined || !BODY_CONTENT_TYPES.has(contentType)) {
+    // The outer route policy owns per-route media types (Code evidence is text).
+    // Keep the conservative defaults for callers without a classified route.
+    const allowed = route?.allowedContentTypes;
+    if (
+      contentType === undefined ||
+      !(allowed === undefined ? BODY_CONTENT_TYPES.has(contentType) : allowed.includes(contentType))
+    ) {
       throw new RemoteHttpAuthFailure(400, "invalid");
     }
   }

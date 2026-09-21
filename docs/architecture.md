@@ -123,7 +123,12 @@ process-local client context on the loopback listener (internally still named
 carrying authenticated remote identity — and runs all mutations through
 services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
-server through `@octant/cli` (`octant server run`, `octant web`).
+server through `@octant/cli` (`octant server run`, `octant web`). For Code,
+verified remote requests carry their principal through an async request scope:
+the paired device may reach existing active Code Projects without a desktop
+workspace, while services retain thread, checkout, provider, and approval checks.
+This admission ends on cancellation or dispatch completion. Local windows retain
+their selected-Project restriction (ADR 0148).
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
@@ -142,7 +147,11 @@ phone creates Chat, Work, and Code threads, reads their transcripts, and sends
 follow-up turns under each thread's own authority (`start-work-thread-turn`
 with the thread's binding; `start-provider-turn` on the thread's checkout).
 Approvals, folder binding, file edits, and shell remain host-only and the
-composer says so.
+composer says so. Native startup supplies WebCrypto for the shared pairing and
+request-proof clients; keys persist in platform secure storage. Native remote
+fetch sends the proof-bound session cookie explicitly and disables the shared
+cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
+unchanged, and native remote requests refuse redirects.
 
 **Local client context.** Opening the canonical host URL directly creates a
 process-local client context through `/api/shell/local-session`; no launcher
@@ -410,10 +419,10 @@ honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app (see
-[decisions/0145-the-agent-opens-the-in-app-simulator-pane.md](decisions/0145-the-agent-opens-the-in-app-simulator-pane.md)).
+[decisions/0149-the-agent-opens-the-in-app-simulator-pane.md](decisions/0149-the-agent-opens-the-in-app-simulator-pane.md)).
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
-([decisions/0147-android-emulator-is-a-separate-device-destination.md](decisions/0147-android-emulator-is-a-separate-device-destination.md)).
+([decisions/0151-android-emulator-is-a-separate-device-destination.md](decisions/0151-android-emulator-is-a-separate-device-destination.md)).
 Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
@@ -422,13 +431,13 @@ attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
-([decisions/0146-allow-input-opens-a-device-to-clicks.md](decisions/0146-allow-input-opens-a-device-to-clicks.md)).
+([decisions/0150-allow-input-opens-a-device-to-clicks.md](decisions/0150-allow-input-opens-a-device-to-clicks.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Without that
 helper every input kind is unavailable; Octant does not script Simulator.app
 to inject a tap, swipe, typed text, or key
-([decisions/0145-the-agent-opens-the-in-app-simulator-pane.md](decisions/0145-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
+([decisions/0149-the-agent-opens-the-in-app-simulator-pane.md](decisions/0149-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
 fourth input kind on the same channel, for the pane and for `octant_apple`
 alike, and the live screen is driven directly: a press and release is a tap, a
 drag is one swipe sent when it ends, keys typed on the focused screen go to
@@ -984,17 +993,27 @@ mechanisms are:
   after those denials. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
   Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
-  Linux) fails closed. Provider runtimes that make their own API call resolve
-  provider-endpoints-only on Chat and Work turns, a scoped exception to 0009
-  recorded in [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md).
+  Linux) fails closed. A provider runtime that makes its own API call resolves
+  provider-endpoints-only on every posture below Full access, Plan included, a
+  scoped exception to 0009 recorded in
+  [decisions/0132-provider-runtimes-reach-provider-endpoints.md](decisions/0132-provider-runtimes-reach-provider-endpoints.md)
+  and extended by
+  [decisions/0145-a-plan-turn-is-confined-by-octant.md](decisions/0145-a-plan-turn-is-confined-by-octant.md):
+  the process producing a plan still has to ask the model for it, while the
+  tools that thread reaches keep `none`.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
-  Full access. The Codex app-server carries every thread on a provider instance
-  and is a named exception; the Claude Agent SDK launch carries one thread per
-  query and is unwrapped anyway, a gap and not an exception. That set is named
-  and pinned by
-  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md),
-  and the tools those threads reach stay confined either way.
+  Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
+  and the two Claude postures that write are not. That set is named and pinned
+  by
+  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
+  and narrowed by 0145, and the tools those threads reach stay confined either
+  way. A bound root a launch may not write is denied in the profile, so a
+  checkout under that launch's own temporary directory is not writable through
+  it. The `--version` read every family and the discovery scan perform before a
+  runtime starts is wrapped too, with no root, no home, no network and one
+  throwaway scratch directory it may write, per
+  [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

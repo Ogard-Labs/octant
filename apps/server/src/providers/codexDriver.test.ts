@@ -1481,6 +1481,13 @@ describe("Codex thread and turn lifecycle", () => {
           octantVersion: "0.1.0-test",
           startupTimeoutMs: 500,
           shutdownTimeoutMs: 50,
+          // This case asserts transport recovery, not the profile: the live
+          // builder refuses on a host without `sandbox-exec`, and a real
+          // profile would deny the fixture the records file it writes beside
+          // itself.
+          versionProbeConfinement: {
+            prepare: (input) => ({ command: input.executable, args: input.args }),
+          },
         }),
         runtimeRegistry: registry,
         idleLeaseMs: 0,

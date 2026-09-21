@@ -1,7 +1,9 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
+import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
 
 /**
  * Confinement gate for provider runtime launches.
@@ -16,24 +18,37 @@ import { describe, expect, it } from "vitest";
  * What this proves: a provider process module either uses the shared builder or
  * appears in {@link UNWRAPPED} with a reason, and 0143 names each one that does
  * not. What it does not prove: that every launch inside a wrapped module goes
- * through the builder. A wrapped module still spawns directly for its version
- * probe, and on Full access drops the deny-default profile by design, so a
- * per-launch claim would need each module to declare its launches in a manifest
- * this gate could read rather than a source scan. The observed failure was
- * whole modules never adopting the builder, and that is the failure this
- * catches. Its reach is the provider runtime modules only: discovery scans run
- * candidate executables from `discoveryService`, which this never reads, and
- * the threat model carries that gap instead.
+ * through the builder. A module drops the deny-default profile on Full access
+ * by design, so a per-launch claim would need each module to declare its
+ * launches in a manifest this gate could read rather than a source scan. The
+ * observed failure was whole modules never adopting the builder, and that is
+ * the failure this catches. Its reach is the runtime launch only: a module's
+ * `--version` read is confined separately through `confinedVersionProbe` under
+ * 0146, which an entry in {@link UNWRAPPED} still reaches and which this gate
+ * does not read, and `discoveryService` runs candidate executables this never
+ * sees.
  *
  * {@link UNWRAPPED}, not 0143, is the live set. An accepted record keeps its
  * history — a later ADR supersedes it rather than editing it — so reading the
  * live set out of 0143 would make confining Codex fail this suite until someone
  * deleted that history. Confining a runtime deletes its entry here instead.
+ *
+ * An exception may also narrow to the postures a module still launches
+ * unwrapped, which is how the Claude exception closes one posture at a time
+ * (0145). Full access is never listed: 0009 calls it a genuine unrestricted
+ * posture, so no runtime confines it and it is outside this rule rather than an
+ * exception to it.
  */
-const UNWRAPPED: ReadonlyArray<{ readonly file: string; readonly reason: string }> = [
+const UNWRAPPED: ReadonlyArray<{
+  readonly file: string;
+  readonly reason: string;
+  /** Postures still launched unwrapped; absent means all of them. */
+  readonly postures?: ReadonlyArray<ProviderExecutionPolicy>;
+}> = [
   {
     file: "claudeProcess.ts",
-    reason: "One process per query, so wrappable; not wired yet. A gap, held and not excused.",
+    postures: ["approval-gated", "auto-accept-edits"],
+    reason: "The runtime's own sandbox settings still answer for the postures that write.",
   },
   {
     file: "codexProcess.ts",
@@ -83,8 +98,21 @@ describe("provider runtime confinement", () => {
   });
 
   it("drops a provider runtime from the exception set once it uses the shared builder", () => {
-    const stale = UNWRAPPED.map(({ file }) => file).filter((file) => usesConfinementBuilder(file));
+    const stale = UNWRAPPED.filter(
+      ({ file, postures }) => postures === undefined && usesConfinementBuilder(file),
+    ).map(({ file }) => file);
     expect(stale).toEqual([]);
+  });
+
+  it("holds a partly confined runtime to the exact postures it still launches unwrapped", () => {
+    const claude = UNWRAPPED.find(({ file }) => file === "claudeProcess.ts");
+    // Every posture but Full access, which 0009 leaves unconfined by design, is
+    // either confined by the module or declared here — never neither, and never
+    // both. Confining one more posture fails this until the entry is narrowed,
+    // and the last narrowing empties the entry away.
+    expect([...(claude?.postures ?? []), ...CONFINED_CLAUDE_EXECUTION_POLICIES].sort()).toEqual<
+      ProviderExecutionPolicy[]
+    >(["approval-gated", "auto-accept-edits", "plan"]);
   });
 
   it("keeps the decision record naming every runtime the exception set still covers", () => {

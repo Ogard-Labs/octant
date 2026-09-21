@@ -9,6 +9,25 @@ import {
   ohMyPiProcessEnvironment,
   sanitizeOhMyPiEnvironment,
 } from "./ohMyPiProcess";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+
+/**
+ * These cases assert the probe's version check and lifecycle, not the profile.
+ * The live builder refuses on a host with no sandbox runtime — Linux CI has no
+ * bubblewrap — so the version launch is prepared with the confinement passed
+ * straight through and the refusal never stands in for the version mismatch
+ * under test.
+ */
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({ command: input.executable, args: input.args }),
+};
+
+function port(overrides: Parameters<typeof makeOhMyPiProcessLive>[0] = {}) {
+  return makeOhMyPiProcessLive({
+    versionProbeConfinement: passthroughConfinement,
+    ...overrides,
+  });
+}
 
 describe("Oh My Pi process probe", () => {
   it("prepends the binary directory and approved home bins so env-shebang runtimes resolve", () => {
@@ -62,7 +81,7 @@ describe("Oh My Pi process probe", () => {
   });
 
   it("rejects relative binaries before spawn", async () => {
-    const processPort = makeOhMyPiProcessLive();
+    const processPort = port();
     const exit = await Effect.runPromiseExit(
       Effect.scoped(
         processPort.startProbe({
@@ -87,7 +106,7 @@ describe("Oh My Pi process probe", () => {
       const failure = await Effect.runPromise(
         Effect.flip(
           Effect.scoped(
-            makeOhMyPiProcessLive().startProbe({
+            port().startProbe({
               binaryPath,
               managedHome: root,
               supportedVersion: "17.2.1",
@@ -126,7 +145,7 @@ describe("Oh My Pi process probe", () => {
     let ownershipStarted = false;
     const connectionPromise = Effect.runPromise(
       Effect.scoped(
-        makeOhMyPiProcessLive({
+        port({
           versionTimeoutMs: 2_000,
           readyTimeoutMs: 2_000,
           shutdownTimeoutMs: 100,
