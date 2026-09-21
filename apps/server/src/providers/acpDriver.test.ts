@@ -270,6 +270,31 @@ async function collectTerminal(
 }
 
 describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
+  it("delivers immediate prompt output to every established subscriber", async () => {
+    const { driver } = fixture(profile);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          const first = yield* connection.subscribe;
+          const second = yield* connection.subscribe;
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const outputs = yield* Effect.all(
+            [first, second].map((events) =>
+              Stream.runCollect(
+                events.pipe(Stream.takeUntil((event) => event.kind === "completed")),
+              ),
+            ),
+            { concurrency: "unbounded" },
+          ).pipe(Effect.timeout("1 second"));
+          expect(Array.from(outputs[0] ?? [])).toEqual(Array.from(outputs[1] ?? []));
+          expect(Array.from(outputs[0] ?? []).at(-1)?.kind).toBe("completed");
+        }),
+      ),
+    );
+  });
+
   it("probes through the managed home and discovers models without a prompt", async () => {
     const { driver, client, registry, active, released, starts } = fixture(profile);
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -653,13 +678,13 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             });
             if (execute === undefined)
               throw new Error("ACP managed tool handler was not registered.");
+            const stream = yield* connection.subscribe;
             const controller = new AbortController();
             const result = execute(
               "octant_browser",
               '{"operation":"read-page"}',
               controller.signal,
             );
-            const stream = yield* connection.subscribe;
             const requestFiber = yield* Effect.fork(
               Stream.runCollect(
                 stream.pipe(

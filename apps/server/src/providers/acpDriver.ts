@@ -25,7 +25,7 @@ import {
   unsupportedAnswerTool,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, Queue, Scope, Stream } from "effect";
+import { Effect, Exit, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
@@ -675,7 +675,7 @@ function makeConnection(
   const request = <A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> =>
     Effect.tryPromise({ try: operation, catch: (error) => providerFailure(profile, error) });
   return Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const queue = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const runtimeRoot =
       mode === "chat" && profile.chatSessionRoot === "managed-home"
@@ -716,12 +716,12 @@ function makeConnection(
       Effect.promise(async () => {
         await Promise.all([...sessions.values()].map(closeState));
         sessions.clear();
-        await Effect.runPromise(Queue.shutdown(queue));
+        await Effect.runPromise(PubSub.shutdown(queue));
       }),
     );
 
     const offer = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(Queue.offer(queue, event));
+      Effect.runFork(PubSub.publish(queue, event));
     };
 
     const requestManagedTool = async (
@@ -1105,7 +1105,7 @@ function makeConnection(
       toolRequestSignal: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingToolAnswers.get(requestId)?.controller.signal ??
         AbortSignal.abort(),
-      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      subscribe: Stream.fromPubSub(queue, { scoped: true }),
       start: (input) =>
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map((state) => ({

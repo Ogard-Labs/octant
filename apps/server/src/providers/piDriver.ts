@@ -21,7 +21,7 @@ import {
   textOnlyInputModalities,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, Queue, Scope, Stream } from "effect";
+import { Effect, Exit, PubSub, Scope, Stream } from "effect";
 import {
   piToolCatalogAttestation,
   type PiProcessPort,
@@ -352,7 +352,7 @@ function makeConnection(
   },
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const queue = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const rememberedToolCalls = new Map<ProviderSessionId, Map<string, string>>();
 
@@ -365,7 +365,7 @@ function makeConnection(
         correlationId: state.correlationId,
         occurredAt: factories.clock() as UtcTimestamp,
       } as ProviderRuntimeEvent;
-      Effect.runFork(Queue.offer(queue, event));
+      Effect.runFork(PubSub.publish(queue, event));
     };
 
     const cancelPendingTools = (state: SessionState): void => {
@@ -417,7 +417,7 @@ function makeConnection(
       Effect.promise(async () => {
         await Promise.all([...sessions.values()].map(closeState));
         sessions.clear();
-        await Effect.runPromise(Queue.shutdown(queue));
+        await Effect.runPromise(PubSub.shutdown(queue));
       }),
     );
 
@@ -750,7 +750,7 @@ function makeConnection(
       toolRequestSignal: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingTools.get(requestId)?.controller.signal ??
         AbortSignal.abort(),
-      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      subscribe: Stream.fromPubSub(queue, { scoped: true }),
       start: (input) =>
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map(() => ({

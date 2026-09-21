@@ -90,6 +90,10 @@ A resumed turn can also have a different allowed tool catalogue.
 ## Consequences
 
 - Restart recovery needs no transcript rewriting or provider history import.
+- ACP and Pi follow the SDK subscription contract: each established subscriber
+  receives the connection events independently, including output published before
+  that subscriber begins reading. Callers subscribe before submitting input or
+  invoking tools; a later subscriber does not replay earlier events.
 - Older sessions without provable identity remain explicitly unrecoverable;
   their histories are preserved.
 - A reconnect may change available tools while retaining the native session.

@@ -221,6 +221,34 @@ describe("Pi provider driver", () => {
     expect(released()).toBe(1);
   });
 
+  it("delivers the same event to each subscription established before reading", async () => {
+    const { driver, client } = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: root, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          const first = yield* connection.subscribe;
+          const second = yield* connection.subscribe;
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          client.emit({
+            type: "tool_execution_start",
+            toolCallId: "shared-tool",
+            toolName: "read",
+          });
+          const events = yield* Effect.all(
+            [
+              Stream.runCollect(first.pipe(Stream.take(1))),
+              Stream.runCollect(second.pipe(Stream.take(1))),
+            ],
+            { concurrency: "unbounded" },
+          ).pipe(Effect.timeout("1 second"));
+          expect(Array.from(events[0] ?? [])).toEqual(Array.from(events[1] ?? []));
+        }),
+      ),
+    );
+  });
+
   it("keeps app-managed tools unsupported when the trusted extension does not attest", async () => {
     const { driver, client } = fixture("0.85.1");
     client.attestation = false;
