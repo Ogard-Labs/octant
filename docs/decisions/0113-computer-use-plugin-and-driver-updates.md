@@ -27,7 +27,10 @@ bundled CuaDriver and automatic upgrades.
   version, manual update checking, and automatic updates. Bundling establishes
   the reviewed first-party package, not permission to control applications.
   Application grants are explicit, bounded to the requesting task and host
-  process, expire, and are revoked on stop or disable.
+  process, expire, and are revoked on stop or disable. Normal turn completion
+  closes the tool handle while retaining the task-scoped app grant until its
+  original expiry. Interrupted work cancels pending approval and native input;
+  a changed task owner or authority revokes the retained session.
 - Provider tools expose bounded observations and structured actions. Every
   action uses an observed application and window, validates its observation
   revision, and is followed by a new observation. Page and application content

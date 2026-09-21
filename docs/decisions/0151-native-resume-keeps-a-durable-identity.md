@@ -25,6 +25,10 @@ A resumed turn can also have a different allowed tool catalogue.
   attaches it through its native load/resume protocol. Removing a selection
   removes that tool on resume; historical tool records remain provider-owned.
   Catalogue presence never substitutes for current server authorization.
+- Browser context approval belongs to the host-owned task context, not a
+  single turn's tool handle. Subsequent turns reuse a still-active context only
+  with the same model and effective authority; expiry, stop, or changed authority
+  requires fresh approval.
 - Pi resumes an existing native file whose header matches both session and
   root. The create-if-missing session-ID flag is only used for session creation.
   Missing, ambiguous, malformed, or cross-Project histories refuse before input.

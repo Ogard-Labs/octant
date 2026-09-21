@@ -118,7 +118,6 @@ const hostPolicy: BrowserContextPolicy = {
 export function createBrowserAppManagedTools(
   options: BrowserAppManagedToolsOptions,
 ): AppManagedToolSet {
-  const rememberedContexts = new Set<string>();
   const initialAuthority = options.resolveAuthority(options.threadId, options.mode);
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
     ? [BROWSER_TOOL_DEFINITION]
@@ -140,7 +139,6 @@ export function createBrowserAppManagedTools(
       if (input.operation === "stop") {
         const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
         if (snapshot.context !== undefined) {
-          rememberedContexts.delete(String(snapshot.context.contextId));
           options.modelBindings.delete(String(snapshot.context.contextId));
         }
         return browserResult(
@@ -152,7 +150,7 @@ export function createBrowserAppManagedTools(
       let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
       const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
       if (existing === undefined && snapshot.context !== undefined) {
-        rememberedContexts.delete(String(snapshot.context.contextId));
+        options.modelBindings.delete(String(snapshot.context.contextId));
       }
       const origin =
         existing === undefined
@@ -165,7 +163,13 @@ export function createBrowserAppManagedTools(
           input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
         );
       }
-      if (existing === undefined || !rememberedContexts.has(String(existing.contextId))) {
+      const existingBinding =
+        existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
+      const contextApproved =
+        existingBinding !== undefined &&
+        String(existingBinding.modelId) === String(options.modelId) &&
+        sameToolActionAuthority(existingBinding.authority, authority);
+      if (existing === undefined || !contextApproved) {
         if (options.approvals === undefined) return failure("browser-approval-required");
         const outcome = await options.approvals.request({
           windowId: options.windowId,
@@ -198,7 +202,6 @@ export function createBrowserAppManagedTools(
         snapshot = created;
         if (created.context?.state === "active") {
           const contextId = String(created.context.contextId);
-          rememberedContexts.add(contextId);
           rememberModelBinding(options.modelBindings, contextId, {
             modelId: options.modelId,
             authority,
@@ -234,7 +237,6 @@ export function createBrowserAppManagedTools(
           authority: refreshed,
         });
       }
-      if (!rememberedContexts.has(contextId)) rememberedContexts.add(String(context.contextId));
       const request = browserAction(input, context);
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
