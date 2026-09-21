@@ -42,6 +42,9 @@ A resumed turn can also have a different allowed tool catalogue.
 - A computer-use window whose native accessibility surface cannot be resolved
   returns an explicit window-unavailable refusal. A screenshot alone does not
   authorize input; revalidation must still resolve that exact window before acting.
+  Tool guidance distinguishes app/window lookup arguments from observation-bound
+  action arguments; actions retain the strict schema and cannot retarget a saved
+  observation by supplying another app or window.
 - Browser context approval belongs to the host-owned task context, not a
   single turn's tool handle. Subsequent turns reuse a still-active context only
   with the same model and effective authority; expiry, stop, or changed authority
