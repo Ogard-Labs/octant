@@ -63,7 +63,10 @@ A resumed turn can also have a different allowed tool catalogue.
 - Code usage preserves optional provider cache-read and cache-write counters
   through the journal, conversation projection, and renderer. Unreported stays
   unknown. Codex thread totals are normalized to a turn's running usage; old
-  native turns and repeated notifications must not be charged again.
+  native turns and repeated notifications must not be charged again. New Claude
+  runtime usage includes uncached input, cache reads, and cache writes in total
+  input; the provider reports these as disjoint counters. Unsafe aggregate totals
+  refuse before event emission. Historical journal usage is not rewritten.
 
 ## Consequences
 
