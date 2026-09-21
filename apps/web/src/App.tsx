@@ -4376,7 +4376,7 @@ function LaunchedShell(
         // The thread is already open on a different controller than the one
         // that started the turn, so restore the prompt onto that transcript.
         const threadController = codeThreadControllers.get(created.thread.id);
-        threadController?.setPendingDraft(input.prompt);
+        codeThreadControllers.restoreDraft(created.thread.id, input.prompt);
         // The reason has to reach the controller that renders the open thread,
         // or the transcript sits empty in front of a refusal nothing explains.
         if (refusal !== undefined) threadController?.showTurnRefusal(refusal);
@@ -4398,7 +4398,7 @@ function LaunchedShell(
         // The thread is already open, so the words go back into its composer,
         // as they do when the first turn is refused. Withdrawn from the
         // transcript and restored nowhere, the person's prompt was simply gone.
-        codeThreadControllers.get(firstPromptAnnouncedFor)?.setPendingDraft(input.prompt);
+        codeThreadControllers.restoreDraft(firstPromptAnnouncedFor, input.prompt);
       }
       setDraftError(
         error instanceof Error && error.message !== ""
@@ -4436,6 +4436,7 @@ function LaunchedShell(
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     setRailPlaceholder(undefined);
+    let firstPromptAnnouncedFor: import("@octant/contracts").CodeThreadId | undefined;
     try {
       if (mode === "chat") {
         const draftSelection = preferredChatSelection;
@@ -4623,6 +4624,7 @@ function LaunchedShell(
           setDraftError("The Code thread could not be created.");
           return;
         }
+        firstPromptAnnouncedFor = created.thread.id;
         codeThreadControllers.announceFirstPrompt(created.thread.id, prompt);
         await controller.openCodeThread(
           created.thread.id,
@@ -4638,7 +4640,7 @@ function LaunchedShell(
         });
         if (!firstTurnStarted) {
           codeThreadControllers.announceFirstPrompt(created.thread.id, undefined);
-          codeThreadControllers.get(created.thread.id)?.setPendingDraft(prompt);
+          codeThreadControllers.restoreDraft(created.thread.id, prompt);
           const refusal = codeController.lastStartRefusal.current;
           setDraftError(
             refusal ?? "The thread was created, but its first provider turn could not be started.",
@@ -4742,6 +4744,10 @@ function LaunchedShell(
       }
       return true;
     } catch (error) {
+      if (firstPromptAnnouncedFor !== undefined) {
+        codeThreadControllers.announceFirstPrompt(firstPromptAnnouncedFor, undefined);
+        codeThreadControllers.restoreDraft(firstPromptAnnouncedFor, prompt);
+      }
       const detail =
         error instanceof Error && error.message.trim() !== ""
           ? error.message

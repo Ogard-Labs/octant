@@ -77,6 +77,10 @@ A resumed turn can also have a different allowed tool catalogue.
   malformed, and oversized captures refuse; origin approvals and task authority
   still apply before capture.
 
+- If first-turn startup fails after opening the task, withdraw its provisional
+  transcript prompt and restore the text to that task’s composer. Restoration
+  waits for controller readiness so initial loading cannot erase the draft.
+
 ## Consequences
 
 - Restart recovery needs no transcript rewriting or provider history import.

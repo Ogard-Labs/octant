@@ -151,6 +151,26 @@ describe("CodeThreadControllerSlots", () => {
     expect(announceFirstPrompt).toHaveBeenCalledWith("Fix the failing test");
   });
 
+  it("restores a failed first prompt once the task controller is ready", () => {
+    const registry = createCodeThreadControllers();
+    const setPendingDraft = vi.fn();
+    registry.restoreDraft(threadA, "Retry this prompt");
+    registry.publish(threadA, { status: "loading", setPendingDraft } as never);
+    expect(setPendingDraft).not.toHaveBeenCalled();
+    registry.publish(threadA, { status: "ready", setPendingDraft } as never);
+    registry.publish(threadA, { status: "ready", setPendingDraft } as never);
+    expect(setPendingDraft).toHaveBeenCalledExactlyOnceWith("Retry this prompt");
+  });
+
+  it("discards a queued prompt restoration when its task tab is released", () => {
+    const registry = createCodeThreadControllers();
+    const setPendingDraft = vi.fn();
+    registry.restoreDraft(threadA, "Closed task prompt");
+    registry.release(threadA);
+    registry.publish(threadA, { status: "ready", setPendingDraft } as never);
+    expect(setPendingDraft).not.toHaveBeenCalled();
+  });
+
   it("does not deliver a first prompt that was withdrawn before the controller existed", () => {
     const registry = createCodeThreadControllers();
     const announceFirstPrompt = vi.fn();
