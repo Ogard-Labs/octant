@@ -821,17 +821,15 @@ describe("OpenCode driver", () => {
     const exit = await Effect.runPromise(
       Effect.scoped(
         Effect.exit(
-          fixture.driver
-            .acquire({ instanceId, projectRoot: "/tmp/project" })
-            .pipe(
-              Effect.flatMap((connection) =>
-                connection.resume({
-                  sessionId,
-                  resumeCursor: { driverKind: "opencode", value: "provider-session" },
-                  executionPolicy: "approval-gated",
-                }),
-              ),
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+            Effect.flatMap((connection) =>
+              connection.resume({
+                sessionId,
+                resumeCursor: { driverKind: "opencode", value: "provider-session" },
+                executionPolicy: "approval-gated",
+              }),
             ),
+          ),
         ),
       ),
     );
