@@ -469,6 +469,7 @@ describe("Code app-managed tools", () => {
       32 * 1024,
     );
     expect(result).toMatchObject({ result: { truncated: true }, isError: false });
+    expect(JSON.stringify(result.result)).not.toContain("data:image");
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 
@@ -775,7 +776,7 @@ describe("Code app-managed tools", () => {
     expect(releaseThread).toHaveBeenCalledWith(windowId, threadId);
   });
 
-  it("returns a bounded screenshot data URL to an agent that requests one", async () => {
+  it("returns a bounded image block to an agent that requests a screenshot", async () => {
     const authority = browserAuthority();
     const active = browserSnapshot(authority);
     const screenshotDataUrl = `data:image/jpeg;base64,${"A".repeat(52 * 1024)}`;
@@ -813,8 +814,10 @@ describe("Code app-managed tools", () => {
 
     expect(result).toMatchObject({
       isError: false,
-      result: { page: { screenshotDataUrl } },
+      images: [{ mimeType: "image/jpeg", data: "A".repeat(52 * 1024) }],
+      result: { page: {} },
     });
+    expect(JSON.stringify(result.result)).not.toContain("data:image");
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 
@@ -902,6 +905,7 @@ describe("Code app-managed tools", () => {
     expect(
       (result.result as { page?: { screenshotDataUrl?: string } }).page?.screenshotDataUrl,
     ).toBe(undefined);
+    expect(JSON.stringify(result.result)).not.toContain("data:image");
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 

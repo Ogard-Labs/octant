@@ -1,3 +1,4 @@
+import { browserToolImage } from "./browserToolImage";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import type {
   BrowserActionRequest,
@@ -9,11 +10,7 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import {
-  MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
-  MAX_BROWSER_TABS_PER_CONTEXT,
-  sameToolActionAuthority,
-} from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
@@ -243,7 +240,10 @@ export function createBrowserAppManagedTools(
       const acted = await options.browser.act({ windowId: options.windowId, request });
       if (signal?.aborted) return failure("tool-interrupted");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
-      if (input.operation === "screenshot" && acted.observation?.screenshotDataUrl === undefined) {
+      if (
+        input.operation === "screenshot" &&
+        browserToolImage(acted.observation?.screenshotDataUrl) === undefined
+      ) {
         return failure("browser-screenshot-unavailable");
       }
       return browserResult(acted, input.operation === "screenshot");
@@ -408,6 +408,9 @@ function allowedOrigin(value: string): string | undefined {
 }
 
 function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
+  const image = includeScreenshot
+    ? browserToolImage(snapshot.observation?.screenshotDataUrl)
+    : undefined;
   const observation = snapshot.observation;
   const text = observation?.extractedText;
   const bounded =
@@ -415,6 +418,7 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
       ? undefined
       : Buffer.from(text, "utf8").subarray(0, MAX_TEXT_RESULT_BYTES).toString("utf8");
   return {
+    ...(image === undefined ? {} : { images: [image] }),
     result: {
       status: snapshot.status,
       ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
@@ -442,11 +446,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(observation.failedRequests === undefined
                 ? {}
                 : { failedRequests: observation.failedRequests }),
-              ...(!includeScreenshot || observation.screenshotDataUrl === undefined
-                ? {}
-                : observation.screenshotDataUrl.length <= MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS
-                  ? { screenshotDataUrl: observation.screenshotDataUrl }
-                  : { screenshotOmitted: "too-large" as const }),
+              ...(includeScreenshot && image === undefined
+                ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
             },
           }),
     },

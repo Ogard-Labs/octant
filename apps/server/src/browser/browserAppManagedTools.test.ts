@@ -425,6 +425,39 @@ describe("browser diagnostics reach the provider-facing result", () => {
     });
   }
 
+  it.each([
+    "data:text/html;base64,aGVsbG8=",
+    "data:image/png;base64,%%%",
+    `data:image/png;base64,${"A".repeat(55 * 1024)}`,
+  ])(
+    "refuses an invalid or oversized screenshot without returning image bytes",
+    async (screenshotDataUrl) => {
+      const tools = toolsFor({ revision: 12, screenshotDataUrl });
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: '{"operation":"screenshot"}',
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        result: { error: "browser-screenshot-unavailable" },
+      });
+      expect(result.images).toBeUndefined();
+    },
+  );
+
+  it("returns screenshots as image blocks without duplicating bytes in text", async () => {
+    const tools = toolsFor({ revision: 12, screenshotDataUrl: "data:image/png;base64,aGVsbG8=" });
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"screenshot"}',
+    });
+    expect(result).toMatchObject({
+      images: [{ mimeType: "image/png", data: "aGVsbG8=" }],
+      isError: false,
+    });
+    expect(JSON.stringify(result.result)).not.toContain("aGVsbG8=");
+  });
+
   it("passes what the page logged and failed to load through to the result", async () => {
     const tools = toolsFor(diagnosticsObservation);
     const result = await tools.execute({

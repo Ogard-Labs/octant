@@ -72,6 +72,11 @@ A resumed turn can also have a different allowed tool catalogue.
   writes; an explicit zero is measured, while an omitted counter is unknown.
   This coverage describes reported turns, not turns with no usage event.
 
+- Browser screenshots use the existing provider image-result channel in Chat,
+  Work, and Code. Encoded image bytes are not duplicated in JSON text. Missing,
+  malformed, and oversized captures refuse; origin approvals and task authority
+  still apply before capture.
+
 ## Consequences
 
 - Restart recovery needs no transcript rewriting or provider history import.

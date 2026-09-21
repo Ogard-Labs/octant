@@ -1,3 +1,4 @@
+import { browserToolImage } from "../browser/browserToolImage";
 import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import type {
   BrowserActionRequest,
@@ -14,10 +15,7 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import {
-  MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
-  MAX_BROWSER_TABS_PER_CONTEXT,
-} from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
@@ -768,7 +766,7 @@ async function browserTool(
   if (acted.kind === "failure") return failure(acted.reason);
   if (
     input.operation === "screenshot" &&
-    acted.snapshot.observation?.screenshotDataUrl === undefined
+    browserToolImage(acted.snapshot.observation?.screenshotDataUrl) === undefined
   ) {
     return failure("browser-screenshot-unavailable");
   }
@@ -1514,7 +1512,11 @@ function terminalSnapshot(
 }
 
 function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
+  const image = includeScreenshot
+    ? browserToolImage(snapshot.observation?.screenshotDataUrl)
+    : undefined;
   return {
+    ...(image === undefined ? {} : { images: [image] }),
     result: {
       status: snapshot.status,
       ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
@@ -1553,12 +1555,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(snapshot.observation.failedRequests === undefined
                 ? {}
                 : { failedRequests: snapshot.observation.failedRequests }),
-              ...(!includeScreenshot || snapshot.observation.screenshotDataUrl === undefined
-                ? {}
-                : snapshot.observation.screenshotDataUrl.length <=
-                    MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS
-                  ? { screenshotDataUrl: snapshot.observation.screenshotDataUrl }
-                  : { screenshotOmitted: "too-large" as const }),
+              ...(includeScreenshot && image === undefined
+                ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
             },
           }),
     },
