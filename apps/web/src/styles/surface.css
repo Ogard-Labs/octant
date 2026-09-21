@@ -597,13 +597,27 @@
   background: color-mix(in srgb, var(--octant-app-background) 92%, transparent);
 }
 
-/* Conversation panes stay on the application ground. Assistant turns carry
-   their own reading card, so the dither remains one continuous atmosphere
-   instead of disappearing behind a second pane-sized wash. */
+/* A conversation needs one quiet reading surface: separate reply cards over
+   the dither made even short answers compete with the composer (0155).
+   Opaque is the fallback, including when transparency is reduced. */
 .shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-thread-workspace,
 .shell--app-backdrop.shell-frame .code-thread-workspace {
-  background: transparent;
+  background: var(--octant-workspace);
+}
+
+@media (prefers-reduced-transparency: no-preference) {
+  html:not([data-octant-reduced-transparency="true"])
+    .shell--app-backdrop.shell-frame
+    :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
+    background: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--octant-workspace) 90%, transparent),
+      color-mix(in srgb, var(--octant-workspace) 97%, transparent) 20%,
+      color-mix(in srgb, var(--octant-workspace) 97%, transparent) 80%,
+      color-mix(in srgb, var(--octant-workspace) 90%, transparent)
+    );
+  }
 }
 
 /* A terminal is a plate of its own: the engine paints the workspace ground

@@ -652,7 +652,7 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("leaves the application ground visible around contained transcript responses", () => {
+  it("gives conversations one legible reading surface over the application ground", () => {
     expect(cssRule(".shell--app-backdrop.shell-frame > .workspace-layer")).toContain(
       "background: transparent;",
     );
@@ -661,17 +661,17 @@ describe("WindowChrome", () => {
       ".shell--app-backdrop.shell-frame .work-thread-workspace",
       ".shell--app-backdrop.shell-frame .code-thread-workspace",
     ]) {
-      expect(cssRule(workspace)).toContain("background: transparent;");
+      expect(cssRule(workspace)).toContain("background: var(--octant-workspace);");
     }
   });
 
-  it("lets the ground read through a thread's reply, bubble, and composer unless transparency is reduced", () => {
+  it("keeps glass on input surfaces without enclosing agent replies", () => {
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\s+/g, " ");
     const glass =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-agent, \.turn-user \.bubble, \.composer\) \{([^}]*)\}/,
+        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-user \.bubble, \.composer\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.
