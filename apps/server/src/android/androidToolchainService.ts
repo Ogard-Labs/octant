@@ -165,6 +165,9 @@ export class AndroidToolchainService {
         },
       };
     }
+    const beforeDiscovery = new Map(
+      this.#emulators.map((emulator) => [emulator.emulatorId, emulator]),
+    );
     const sdk = await this.#discoverSdk();
     this.#sdk = sdk;
     if (!sdk.available || sdk.emulatorPath === undefined || sdk.adbPath === undefined) {
@@ -207,10 +210,17 @@ export class AndroidToolchainService {
         }),
       );
     }
-    this.#emulators = emulators;
-    this.#options.observeEmulators?.(emulators);
+    // A boot, shutdown, or newer discovery may finish while these commands run.
+    // Records are immutable: changed identities carry the newer state and serial.
+    const reconciled = new Map(emulators.map((emulator) => [emulator.emulatorId, emulator]));
+    for (const current of this.#emulators) {
+      if (beforeDiscovery.get(current.emulatorId) !== current)
+        reconciled.set(current.emulatorId, current);
+    }
+    this.#emulators = [...reconciled.values()];
+    this.#options.observeEmulators?.(this.#emulators);
     this.#sequence += 1;
-    return { kind: "discovered", sdk, emulators };
+    return { kind: "discovered", sdk, emulators: this.#emulators };
   }
 
   async execute(

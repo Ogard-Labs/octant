@@ -80,3 +80,7 @@ already separate "is there a screen" from "how do I click".
   Shell metacharacters, substitutions, newlines, and quotes remain input data,
   never additional commands. Host argv boundaries alone do not provide this
   protection because `adb shell` reparses the command on the device.
+
+- Discovery reconciles emulator records changed while SDK commands were pending.
+  A stale device listing cannot undo a completed lifecycle change or restore a
+  serial cleared by shutdown.

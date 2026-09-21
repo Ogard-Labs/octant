@@ -133,6 +133,47 @@ function action(kind: AndroidEmulatorRequest["kind"], extra: Record<string, unkn
 }
 
 describe("AndroidToolchainService", () => {
+  it("preserves a shutdown completed while discovery was reading stale devices", async () => {
+    const base = discoveryExecutor();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let hold = false;
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const result = await base(input);
+      if (hold && input.argv.includes("devices")) await gate;
+      return result;
+    });
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+    });
+    try {
+      await service.discover(discoveryRequest, context);
+      hold = true;
+      const pending = service.discover(discoveryRequest, context);
+      await vi.waitFor(() =>
+        expect(execute.mock.calls.filter(([call]) => call.argv.includes("devices"))).toHaveLength(
+          2,
+        ),
+      );
+      expect((await service.execute(action("shutdown"), context)).outcome).toBe("succeeded");
+      release();
+      const discovered = await pending;
+      expect(discovered.emulators[0]).toMatchObject({ state: "shutdown" });
+      expect(discovered.emulators[0].serial).toBeUndefined();
+    } finally {
+      release();
+      await service.close();
+    }
+  });
+
   it.each([
     "hello world",
     "it's quoted",
