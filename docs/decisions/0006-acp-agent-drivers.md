@@ -60,8 +60,17 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
   outcomes fail as `protocol`. Unknown optional notifications stay bounded and
   cannot promote capabilities. Protocol support is observed at runtime; a
   version string alone proves nothing.
-- Only an opaque provider session reference needed for resume is persisted.
-  Ambiguous resume becomes Waiting, never Done.
+- Code tasks journal the opaque provider session reference before sending the
+  first prompt, bound to the provider, model, checkout, and Octant session.
+  Later turns resume that native session and send only the new message; they do
+  not create replacement sessions or reconstruct CLI history from transcript
+  text. Configured drivers remain owned by the task while the host is running,
+  preserving their adapter-side resume identity across scoped connections.
+- A missing or rejected resume reference fails explicitly without sending the
+  next message into a fresh session. A host restart can resume only when the
+  adapter supports durable identity; adapters with process-local identity refuse
+  after restart. Legacy tasks without a saved reference likewise require a new
+  task rather than silently losing context. Ambiguous resume is never Done.
 - Non-ACP managed-process agents (Pi over its line-delimited RPC, Codex over its
   app-server protocol, Claude through its agent SDK, OpenCode through its
   managed local server) are separate drivers, but they follow the same

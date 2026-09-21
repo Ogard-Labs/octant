@@ -37,6 +37,7 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
+  ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
@@ -1240,7 +1241,17 @@ const ResultEvent = Schema.Struct({
   result: CodeOperationResult,
 }).annotations(strict);
 
+const ProviderSessionReadyEvent = Schema.Struct({
+  kind: Schema.Literal("provider-session-ready"),
+  sessionId: ProviderSessionId,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  checkoutId: CodeCheckoutId,
+  resumeCursor: Schema.optional(ProviderResumeCursor),
+}).annotations(strict);
+
 export const CodeOperationEvent = Schema.Union(
+  ProviderSessionReadyEvent,
   ConversationTurnStartedEvent,
   ConversationTurnChangedFilesEvent,
   OperationStateEvent,

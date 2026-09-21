@@ -25,7 +25,11 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Effect, Queue, Stream } from "effect";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionHandle,
+} from "@octant/provider-sdk/driver";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -694,6 +698,51 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  it("resumes the native session with the next message without replaying conversation text", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(80),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+      const nextPrompt = storedEvidence(82, "main");
+      fixture.evidenceValues.set(nextPrompt.contentId, "main");
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(81),
+        threadId,
+        checkoutId,
+        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000081"),
+        prompt: nextPrompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+      expect(connection.start).toHaveBeenCalledOnce();
+      expect(connection.resume).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "native-code-session" },
+        }),
+      );
+      expect(vi.mocked(connection.send).mock.calls[1]?.[0]).toMatchObject({
+        sessionId,
+        prompt: "main",
+      });
+      expect(vi.mocked(connection.send).mock.calls[1]?.[0].context).toBeUndefined();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 
   it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -2353,8 +2402,15 @@ function runtimeFixture(options: {
 function providerConnection(queue: Queue.Queue<ProviderRuntimeEvent>): ProviderConnection {
   return {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
-    start: vi.fn(() => Effect.succeed({ sessionId })),
-    resume: vi.fn(() => Effect.succeed({ sessionId })),
+    start: vi.fn(() =>
+      Effect.succeed<ProviderSessionHandle>({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "native-code-session" },
+      }),
+    ),
+    resume: vi.fn((input) =>
+      Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor }),
+    ),
     send: vi.fn(() => Effect.void),
     interrupt: vi.fn(() => Effect.void),
     stop: vi.fn(() => Effect.void),

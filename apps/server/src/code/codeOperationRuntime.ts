@@ -36,6 +36,7 @@ import {
   type EventActor,
   type ProviderCapabilities,
   type ProviderRuntimeEvent,
+  type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
   decodeCodeFailure,
@@ -1320,8 +1321,10 @@ interface ActiveTurn {
   readonly thread: CodeThread;
   readonly operationId: CodeOperationId;
   readonly sessionId: string;
+  readonly requestedSessionId: string;
   readonly checkoutRoot: string;
   readonly driver: ProviderDriver;
+  readonly resumeCursor?: ProviderResumeCursor;
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
@@ -1412,7 +1415,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const existing = this.#active.get(key);
     if (
       existing !== undefined &&
-      existing.sessionId === input.sessionId &&
+      existing.requestedSessionId === input.sessionId &&
       existing.checkoutRoot === input.checkoutRoot
     ) {
       // Idempotent recovery: a prior start that returned `running` before
@@ -1441,8 +1444,40 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#active.has(key)
     )
       return failStart();
-    const driver = await this.#options.resolveProviderDriver(input.thread);
-    if (driver === undefined) return failStart();
+    const resolvedDriver = await this.#options.resolveProviderDriver(input.thread);
+    if (resolvedDriver === undefined) return failStart();
+    const history = this.#events.historyForThread(input.thread.id);
+    if (history.status !== "ok")
+      return failStart(
+        "The task's provider session could not be recovered. Retry after reloading the task.",
+      );
+    const sessions = history.frames.filter(
+      (frame) => frame.event.kind === "provider-session-ready",
+    );
+    const previous = sessions.at(-1)?.event;
+    const priorTurn = history.frames.some(
+      (frame) =>
+        frame.event.kind === "conversation-turn-started" &&
+        String(frame.operationId) !== String(command.operationId),
+    );
+    if (
+      previous?.kind === "provider-session-ready" &&
+      (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
+        String(previous.modelId) !== String(input.thread.modelId) ||
+        String(previous.checkoutId) !== String(input.thread.checkoutId))
+    )
+      return failStart(
+        "This task's provider session belongs to a different provider, model, or checkout. Restore that selection or start a new task.",
+      );
+    if (
+      priorTurn &&
+      (previous?.kind !== "provider-session-ready" || previous.resumeCursor === undefined)
+    ) {
+      return failStart(
+        "This task has no resumable provider session. Start a new task; Octant will not silently discard its conversation.",
+      );
+    }
+    const driver = resolvedDriver;
     const browserSelections = command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
     if (
       browserSelections.length > 1 ||
@@ -1483,7 +1518,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       windowId: input.windowId,
       thread: input.thread,
       operationId: command.operationId,
-      sessionId: input.sessionId,
+      sessionId: previous?.kind === "provider-session-ready" ? previous.sessionId : input.sessionId,
+      requestedSessionId: input.sessionId,
+      ...(previous?.kind !== "provider-session-ready" || previous.resumeCursor === undefined
+        ? {}
+        : { resumeCursor: previous.resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       driver,
       secrets,
@@ -1757,6 +1796,32 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#runner.run({
           thread: active.thread,
           sessionId: active.sessionId as never,
+          ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),
+          onSessionReady: (handle) =>
+            Effect.try({
+              try: () => {
+                const frame = this.#events.append({
+                  threadId: active.thread.id,
+                  operationId: active.operationId,
+                  expectedCursor: active.cursor,
+                  event: {
+                    kind: "provider-session-ready",
+                    sessionId: handle.sessionId,
+                    providerInstanceId: active.thread.providerInstanceId,
+                    modelId: active.thread.modelId,
+                    checkoutId: active.thread.checkoutId,
+                    ...(handle.resumeCursor === undefined
+                      ? {}
+                      : { resumeCursor: handle.resumeCursor }),
+                  },
+                });
+                active.cursor = frame.cursor;
+              },
+              catch: () => ({
+                category: "failed" as const,
+                message: "The provider session could not be saved. The message was not sent.",
+              }),
+            }),
           checkoutRoot: active.checkoutRoot,
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
@@ -1917,7 +1982,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   // A typed failure's message is provider-authored text like any
                   // event's, so it takes the same redaction before it is journaled.
                   const message =
-                    failure === undefined || outcome !== "failed"
+                    failure === undefined
                       ? undefined
                       : boundProviderFailureMessage(
                           sanitizeProviderText(

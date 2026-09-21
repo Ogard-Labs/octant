@@ -3116,6 +3116,10 @@ export function startOctantServer(
     });
     projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
+    const codeThreadDrivers = new Map<
+      string,
+      { readonly instanceId: string; readonly version: number; readonly driver: ProviderDriver }
+    >();
     let terminalProcessPort: TerminalProcessPort | undefined;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
@@ -3875,10 +3879,23 @@ export function startOctantServer(
           const instance = persistence.readProviderInstance(thread.providerInstanceId);
           if (instance === undefined || !instance.enabled) return undefined;
           try {
-            return attachWorkRequestRuntime(
+            const key = String(thread.id);
+            const retained = codeThreadDrivers.get(key);
+            if (
+              retained?.instanceId === String(instance.id) &&
+              retained.version === instance.version
+            )
+              return retained.driver;
+            const driver = attachWorkRequestRuntime(
               makeConfiguredProviderDriver(instance, configuredDriverOptions),
               () => workRequestRuntime,
             );
+            codeThreadDrivers.set(key, {
+              instanceId: String(instance.id),
+              version: instance.version,
+              driver,
+            });
+            return driver;
           } catch {
             return undefined;
           }

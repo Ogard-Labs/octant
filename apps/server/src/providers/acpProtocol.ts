@@ -98,6 +98,13 @@ const NewSessionResult = Schema.Struct({
 });
 export type AcpNewSessionResult = typeof NewSessionResult.Type;
 
+// Load/resume acknowledge the requested identity; unlike session/new, ACP
+// does not require them to return a sessionId (Vibe omits it).
+const ExistingSessionResult = Schema.Struct({
+  configOptions: Schema.optional(Schema.Array(SessionConfigOption)),
+  models: Schema.optional(SessionModelState),
+});
+
 const PromptResult = Schema.Struct({ stopReason: Schema.NonEmptyTrimmedString });
 export type AcpPromptResult = typeof PromptResult.Type;
 
@@ -674,14 +681,14 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       request(
         "session/load",
         { sessionId, cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
-        decode(NewSessionResult),
-      ),
+        decode(ExistingSessionResult),
+      ).then((result) => ({ ...result, sessionId })),
     resumeSession: (sessionId, cwd, mcpServers = [], meta) =>
       request(
         "session/resume",
         { sessionId, cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
-        decode(NewSessionResult),
-      ),
+        decode(ExistingSessionResult),
+      ).then((result) => ({ ...result, sessionId })),
     prompt: (sessionId, prompt) =>
       request(
         "session/prompt",

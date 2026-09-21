@@ -223,16 +223,12 @@ describe("ACP protocol boundary", () => {
     stdout.write(
       `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { sessionId: "new", configOptions: [] } })}\n`,
     );
-    stdout.write(
-      `${JSON.stringify({ jsonrpc: "2.0", id: 3, result: { sessionId: "loaded", configOptions: [] } })}\n`,
-    );
-    stdout.write(
-      `${JSON.stringify({ jsonrpc: "2.0", id: 4, result: { sessionId: "resumed", configOptions: [] } })}\n`,
-    );
+    stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, result: { configOptions: [] } })}\n`);
+    stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, result: { configOptions: [] } })}\n`);
     await expect(initialized).resolves.toEqual(initializeResult);
     await expect(created).resolves.toMatchObject({ sessionId: "new" });
-    await expect(loaded).resolves.toMatchObject({ sessionId: "loaded" });
-    await expect(resumed).resolves.toMatchObject({ sessionId: "resumed" });
+    await expect(loaded).resolves.toMatchObject({ sessionId: "agent-session" });
+    await expect(resumed).resolves.toMatchObject({ sessionId: "agent-session" });
     written.dispose();
     await client.close();
   });
