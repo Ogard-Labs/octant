@@ -104,6 +104,8 @@ export class AndroidToolchainService {
   readonly #options: AndroidToolchainServiceOptions;
   readonly #access: (path: string) => Promise<void>;
   #sequence = 0;
+  readonly #lifetime = new AbortController();
+  readonly #commands = new Set<Promise<AndroidProcessResult>>();
   readonly #screenWatches = new Set<AbortController>();
   #sdk: AndroidSdkDiscovery = unavailableSdk("1970-01-01T00:00:00.000Z");
   #emulators: ReadonlyArray<AndroidEmulatorRecord> = [];
@@ -117,6 +119,8 @@ export class AndroidToolchainService {
     {
       readonly controller: AbortController;
       readonly context: AndroidExecutionContext;
+      readonly done: Promise<void>;
+      readonly markDone: () => void;
       progress: AndroidActionProgress;
     }
   >();
@@ -140,6 +144,27 @@ export class AndroidToolchainService {
     request: AndroidDiscoveryRequest,
     context: AndroidExecutionContext,
   ): Promise<AndroidDiscoveryResult> {
+    if (this.#lifetime.signal.aborted) {
+      return {
+        kind: "failure",
+        failure: { category: "unavailable", message: "The Android runtime is closed." },
+      };
+    }
+    if (
+      request.authority.extension.kind !== "core" ||
+      request.authority.mode !== "code" ||
+      !sameToolActionAuthority(request.authority, context.authority) ||
+      request.threadId !== context.threadId ||
+      request.checkoutId !== context.checkoutId
+    ) {
+      return {
+        kind: "failure",
+        failure: {
+          category: "unauthorized",
+          message: "Android discovery is outside this task's authority.",
+        },
+      };
+    }
     const sdk = await this.#discoverSdk();
     this.#sdk = sdk;
     if (!sdk.available || sdk.emulatorPath === undefined || sdk.adbPath === undefined) {
@@ -193,6 +218,16 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
   ): Promise<AndroidEmulatorEvidence> {
     const startedAt = this.#options.now();
+    if (this.#lifetime.signal.aborted)
+      return evidence(
+        request,
+        "unavailable",
+        startedAt,
+        this.#options.now(),
+        [{ severity: "note", message: "The Android runtime is closed." }],
+        [],
+        "not-required",
+      );
     const decision = evaluateAndroidEmulatorRequest(request, context, this.#emulators, this.#sdk);
     if (decision.kind === "denied") {
       return this.#record(
@@ -209,7 +244,7 @@ export class AndroidToolchainService {
       return deniedEvidence(request, "action-already-running", startedAt, this.#options.now());
     }
     const controller = new AbortController();
-    this.#activate(request, controller, context);
+    const active = this.#activate(request, controller, context);
     try {
       return this.#record(
         await this.#run(request, context, controller.signal, startedAt),
@@ -218,6 +253,7 @@ export class AndroidToolchainService {
       );
     } finally {
       this.#active.delete(String(request.actionId));
+      active.markDone();
     }
   }
 
@@ -295,9 +331,11 @@ export class AndroidToolchainService {
   }
 
   async close(): Promise<void> {
-    for (const active of this.#active.values()) active.controller.abort();
-    this.#active.clear();
+    this.#lifetime.abort();
+    const activeActions = [...this.#active.values()];
+    for (const active of activeActions) active.controller.abort();
     for (const watch of this.#screenWatches) watch.abort();
+    await Promise.allSettled([...this.#commands, ...activeActions.map(({ done }) => done)]);
     this.#screenWatches.clear();
   }
 
@@ -306,6 +344,8 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
     signal: AbortSignal,
   ): Promise<AndroidScreenWatch | { readonly kind: "unavailable"; readonly message: string }> {
+    if (this.#lifetime.signal.aborted)
+      return { kind: "unavailable", message: "The Android runtime is closed." };
     const emulator = this.#emulators.find(
       (candidate) => String(candidate.emulatorId) === emulatorId,
     );
@@ -629,15 +669,33 @@ export class AndroidToolchainService {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<AndroidProcessResult> {
-    return await this.#options.execute(
+    const combined =
+      signal === undefined
+        ? this.#lifetime.signal
+        : AbortSignal.any([signal, this.#lifetime.signal]);
+    if (combined.aborted)
+      return {
+        termination: "cancelled",
+        exitCode: null,
+        stdout: new Uint8Array(),
+        stderr: new Uint8Array(),
+        cleanupUncertain: false,
+      };
+    const command = this.#options.execute(
       {
         argv,
         cwd: context.checkoutRoot,
         environment: androidEnv(this.#options.environment?.() ?? {}, this.#sdk),
         timeoutMs,
       },
-      signal,
+      combined,
     );
+    this.#commands.add(command);
+    try {
+      return await command;
+    } finally {
+      this.#commands.delete(command);
+    }
   }
 
   #activate(
@@ -655,7 +713,8 @@ export class AndroidToolchainService {
       sequence: 1,
       updatedAt: this.#options.now() as AndroidActionProgress["updatedAt"],
     };
-    const active = { controller, progress, context };
+    const { promise: done, resolve: markDone } = Promise.withResolvers<void>();
+    const active = { controller, progress, context, done, markDone };
     this.#active.set(String(request.actionId), active);
     return active;
   }

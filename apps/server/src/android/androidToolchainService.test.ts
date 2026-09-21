@@ -132,6 +132,35 @@ function action(kind: AndroidEmulatorRequest["kind"], extra: Record<string, unkn
 }
 
 describe("AndroidToolchainService", () => {
+  it("refuses discovery outside the requesting task authority before probing the SDK", async () => {
+    const execute = discoveryExecutor();
+    const access = vi.fn(async () => undefined);
+    const service = new AndroidToolchainService({
+      execute,
+      access,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+    });
+    const stranger = "30000000-0000-4000-8000-000000000099";
+    for (const request of [
+      { ...discoveryRequest, threadId: stranger as never },
+      { ...discoveryRequest, checkoutId: stranger as never },
+      { ...discoveryRequest, authority: { ...authority, hostId: stranger as never } },
+      { ...discoveryRequest, authority: { ...authority, mode: "chat" as const } },
+    ]) {
+      expect(await service.discover(request, context)).toMatchObject({
+        kind: "failure",
+        failure: { category: "unauthorized" },
+      });
+    }
+    expect(access).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("discovers AVDs the SDK lists and which adb already sees", async () => {
     const execute = discoveryExecutor();
     const service = new AndroidToolchainService({
@@ -371,7 +400,48 @@ describe("AndroidToolchainService", () => {
     }
   });
 
-  it("aborts the first frame capture when the service closes", async () => {
+  it("waits for action cleanup and refuses new work after closing", async () => {
+    const writing = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    const execute = discoveryExecutor();
+    const writeArtifact = vi.fn(async () => {
+      writing.resolve();
+      await finishWrite.promise;
+    });
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+    });
+    await service.discover(discoveryRequest, context);
+    const request = action("tap", { requestedBy: actor, point: { x: 1, y: 2 } });
+    const running = service.execute(request, context);
+    await writing.promise;
+    let closed = false;
+    const closing = service.close().then(() => {
+      closed = true;
+    });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(closed).toBe(false);
+      execute.mockClear();
+      expect((await service.execute(request, context)).outcome).toBe("unavailable");
+      expect(execute).not.toHaveBeenCalled();
+      expect(writeArtifact).toHaveBeenCalledTimes(1);
+    } finally {
+      finishWrite.resolve();
+      await running;
+      await closing;
+    }
+    expect(service.snapshot(context).active).toEqual([]);
+  });
+
+  it("waits for the cancelled first capture to exit before closing", async () => {
     const held = Promise.withResolvers<void>();
     const discovery = discoveryExecutor();
     let signalSeen: AbortSignal | undefined;
@@ -398,8 +468,20 @@ describe("AndroidToolchainService", () => {
     const watching = service.watchScreen("Pixel_8_API_34", context, new AbortController().signal);
     try {
       await vi.waitFor(() => expect(signalSeen).toBeDefined());
-      await service.close();
+      let closed = false;
+      const closing = service.close().then(() => {
+        closed = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(signalSeen?.aborted).toBe(true);
+      expect(closed).toBe(false);
+      held.resolve();
+      await closing;
+      expect(closed).toBe(true);
+      expect(await service.discover(discoveryRequest, context)).toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable" },
+      });
     } finally {
       held.resolve();
       await watching;

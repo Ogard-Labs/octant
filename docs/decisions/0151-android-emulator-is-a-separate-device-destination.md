@@ -71,3 +71,7 @@ already separate "is there a screen" from "how do I click".
   remain untouched and unavailable through scoped reads. Reads reject links and
   oversized files before allocating their contents; no unbounded binary cache
   retains screenshots in the service.
+- SDK discovery verifies Code authority, task, and checkout before filesystem or
+  process access. Closing the runtime cancels capture and action commands and
+  waits for their cleanup before returning; a closed runtime accepts no new
+  discovery, actions, or frame watches.
