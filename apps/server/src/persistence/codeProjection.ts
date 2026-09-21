@@ -965,6 +965,74 @@ export function reconcileCodeRestart(input: {
     });
   }
 
+  // A prior startup may already have reconciled runtime work while leaving
+  // the conversation running. Reconcile both fresh and previously recovered
+  // waits; never replace native session events or invent a completed outcome.
+  const providerWaits = input.connection
+    .prepare(
+      "SELECT * FROM code_runtime_projection WHERE work_kind = 'provider-turn' AND state = 'waiting'",
+    )
+    .all() as ReadonlyArray<CodeRuntimeProjectionRow>;
+  for (const row of providerWaits) {
+    const work = decodeRuntimeRow(row);
+    const stateRow = input.connection
+      .prepare(`
+      SELECT aggregate_version FROM event_journal
+      WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
+        AND (json_extract(payload_json, '$.event.kind') IN ('operation-state', 'conversation-turn-started')
+          OR (json_extract(payload_json, '$.event.kind') = 'operation-result'
+            AND json_extract(payload_json, '$.event.result.kind') IN ('provider-turn-state', 'operation-failed')))
+      ORDER BY aggregate_version DESC LIMIT 1
+    `)
+      .get(work.id) as { readonly aggregate_version: number } | undefined;
+    if (stateRow === undefined) continue;
+    const aggregate = { aggregateType: "code-operation", aggregateId: String(work.id) };
+    const previous = input.journal.replayAggregate({
+      ...aggregate,
+      afterVersion: stateRow.aggregate_version - 1,
+      limit: 1,
+    })[0];
+    if (previous === undefined) continue;
+    const frame = decodeCodeOperationEventFrame(previous.payload);
+    if (String(frame.threadId) !== String(work.threadId)) continue;
+    const event = frame.event;
+    const running =
+      event.kind === "conversation-turn-started" ||
+      (event.kind === "operation-state" && event.state === "running") ||
+      (event.kind === "operation-result" &&
+        event.result.kind === "provider-turn-state" &&
+        event.result.state === "running");
+    if (!running) continue;
+    const head = input.connection
+      .prepare(`
+      SELECT aggregate_version FROM aggregate_heads
+      WHERE aggregate_type = 'code-operation' AND aggregate_id = ?
+    `)
+      .get(work.id) as { readonly aggregate_version: number } | undefined;
+    if (head === undefined) continue;
+    input.journal.append({
+      aggregate,
+      expectedVersion: head.aggregate_version,
+      events: [
+        {
+          eventId: uuid(),
+          eventName: "code.operation-event-recorded@1",
+          eventVersion: 1,
+          correlationId,
+          actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000021" },
+          occurredAt: input.reconciledAt,
+          payload: decodeCodeOperationEventFrame({
+            threadId: work.threadId,
+            operationId: work.id,
+            cursor: head.aggregate_version + 1,
+            occurredAt: input.reconciledAt,
+            event: { kind: "operation-state", state: "waiting" },
+          }),
+        },
+      ],
+    });
+  }
+
   const fileRows = input.connection
     .prepare("SELECT * FROM code_file_projection WHERE state = 'saving'")
     .all() as ReadonlyArray<CodeFileProjectionRow>;

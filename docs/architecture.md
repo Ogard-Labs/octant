@@ -25,6 +25,12 @@ retained native processes. If a completed assistant message omits valid usage,
 the turn remains unknown rather than presenting a partial total. Only provider-reported
 costs are recorded, and historical turns are not rewritten.
 
+On host restart, orphaned running Code turns become Waiting in both runtime
+and conversation state. Recovery appends a status event without replacing prompts,
+provider session cursors, or earlier events. Already settled turns remain settled;
+repeated startup does not append duplicate recovery events. A follow-up resumes
+the retained native identity under the ordinary current-authority checks.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its

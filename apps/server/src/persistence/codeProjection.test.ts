@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeCheckoutId,
+  decodeCodeOperationEventFrame,
   decodeCodeFileId,
   decodeCodeRuntimeWorkId,
   decodeCodeThreadId,
@@ -237,6 +238,94 @@ describe("CodeProjection", () => {
 });
 
 describe("reconcileCodeRestart", () => {
+  it.each([
+    ["running", false],
+    ["running", true],
+    ["waiting", false],
+    ["completed", false],
+    ["interrupted", false],
+    ["failed", false],
+  ] as const)(
+    "recovers a %s provider turn after prior recovery %s without changing recorded events",
+    (state, previouslyReconciled) => {
+      const { connection, journal } = openStore();
+      try {
+        appendFixture(journal);
+        if (previouslyReconciled) {
+          reconcileCodeRestart({ connection, journal, reconciledAt: "2026-07-21T07:00:00.000Z" });
+        }
+        const aggregate = { aggregateType: "code-operation", aggregateId: ids.runtime };
+        journal.append({
+          aggregate,
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: "8100000c-0000-4000-8000-000000000001",
+              eventName: "code.operation-event-recorded@1",
+              eventVersion: 1,
+              correlationId: ids.correlation,
+              actor: { kind: "system", actorId: ids.actor },
+              occurredAt: now,
+              payload: {
+                threadId: ids.thread,
+                operationId: ids.runtime,
+                cursor: 1,
+                occurredAt: now,
+                event: { kind: "operation-state", state },
+              },
+            },
+          ],
+        });
+        const nativeEvent = {
+          kind: "provider-session-ready",
+          sessionId: ids.runtime,
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          checkoutId: ids.checkout,
+          resumeCursor: { driverKind: "pi", value: "original-native-session" },
+        };
+        journal.append({
+          aggregate,
+          expectedVersion: 1,
+          events: [
+            {
+              eventId: "8100000c-0000-4000-8000-000000000002",
+              eventName: "code.operation-event-recorded@1",
+              eventVersion: 1,
+              correlationId: ids.correlation,
+              actor: { kind: "system", actorId: ids.actor },
+              occurredAt: now,
+              payload: {
+                threadId: ids.thread,
+                operationId: ids.runtime,
+                cursor: 2,
+                occurredAt: now,
+                event: nativeEvent,
+              },
+            },
+          ],
+        });
+        const replay = () => journal.replayAggregate({ ...aggregate, afterVersion: 0, limit: 100 });
+        const original = replay();
+        const recovery = { connection, journal, reconciledAt: "2026-07-21T08:00:00.000Z" };
+        reconcileCodeRestart(recovery);
+        const recovered = replay();
+        expect(recovered.slice(0, original.length)).toEqual(original);
+        expect(
+          recovered.map((entry) => decodeCodeOperationEventFrame(entry.payload).event),
+        ).toEqual([
+          { kind: "operation-state", state },
+          nativeEvent,
+          ...(state === "running" ? [{ kind: "operation-state", state: "waiting" }] : []),
+        ]);
+        reconcileCodeRestart(recovery);
+        expect(replay()).toEqual(recovered);
+      } finally {
+        connection.close();
+      }
+    },
+  );
+
   it("keeps turn order and leaves an unresolved outcome unresolved", () => {
     const { connection, journal } = openStore();
     try {
