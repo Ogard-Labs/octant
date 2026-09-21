@@ -161,6 +161,7 @@ function fixture(
   profile: AcpProviderProfile,
   overrides: Partial<Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory">> & {
     readonly mcpHttp?: boolean;
+    readonly nativeResume?: boolean;
   } = {},
 ) {
   const client = new FakeClient(profile);
@@ -176,7 +177,10 @@ function fixture(
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: { image: true, audio: false, embeddedContext: true },
-        sessionCapabilities: { list: {} },
+        sessionCapabilities: {
+          list: {},
+          ...(overrides.nativeResume === true ? { resume: {} } : {}),
+        },
         ...(overrides.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
       },
       authMethods: [{ id: "provider-auth" }],
@@ -1166,6 +1170,33 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             expect(client.loadSession).toHaveBeenCalledWith("agent-session-1", projectRoot);
             expect(client.resumeSession).not.toHaveBeenCalled();
           }
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
+  it("uses negotiated native resume without requesting a transcript replay", async () => {
+    const { driver, client } = fixture(profile, { nativeResume: true });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing resume cursor.");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+          });
+          expect(client.resumeSession).toHaveBeenCalledWith("agent-session-1", projectRoot);
+          expect(client.loadSession).not.toHaveBeenCalled();
+          expect(client.newSession).toHaveBeenCalledTimes(1);
           yield* connection.stop(sessionId);
         }),
       ),

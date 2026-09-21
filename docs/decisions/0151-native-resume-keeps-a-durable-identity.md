@@ -25,6 +25,16 @@ A resumed turn can also have a different allowed tool catalogue.
   attaches it through its native load/resume protocol. Removing a selection
   removes that tool on resume; historical tool records remain provider-owned.
   Catalogue presence never substitutes for current server authorization.
+- When the ACP runtime advertises native `session/resume`, use it rather than
+  `session/load` to avoid replaying the provider transcript into the host on each
+  follow-up. Existing profile-specific resume support remains compatible with
+  older runtimes; load-only runtimes continue to use native load. Neither path
+  creates a replacement conversation or replays user input into a new session.
+- Clarify 0113's task-scoped computer grant lifetime: normal turn completion
+  closes its tool handle while retaining the app grant until its original expiry.
+  Interrupted work cancels pending approval and native input; a changed owner or
+  authority revokes the session. This extends lifecycle handling without changing
+  0113's consent, expiry, disable, and native confinement requirements.
 - Browser context approval belongs to the host-owned task context, not a
   single turn's tool handle. Subsequent turns reuse a still-active context only
   with the same model and effective authority; expiry, stop, or changed authority

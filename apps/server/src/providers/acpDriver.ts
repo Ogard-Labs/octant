@@ -1007,6 +1007,12 @@ function makeConnection(
                   level: requestedLevel,
                 });
           const sourceSessionId = input.sourceSessionId;
+          // Native resume keeps agent context without replaying its growing
+          // transcript. Retain profile compatibility for older runtimes that
+          // implement resume but do not advertise the optional capability.
+          const resumeWithoutReplay =
+            connection.initialized.agentCapabilities.sessionCapabilities?.resume !== undefined ||
+            profile.resumeMethod === "session/resume";
           const source =
             sourceSessionId === undefined
               ? sessionMeta === undefined
@@ -1014,7 +1020,7 @@ function makeConnection(
                   ? await client.newSession(runtimeRoot)
                   : await client.newSession(runtimeRoot, mcpServers)
                 : await client.newSession(runtimeRoot, mcpServers, sessionMeta)
-              : profile.resumeMethod === "session/resume"
+              : resumeWithoutReplay
                 ? sessionMeta === undefined
                   ? mcpServers.length === 0
                     ? await client.resumeSession(sourceSessionId, runtimeRoot)
