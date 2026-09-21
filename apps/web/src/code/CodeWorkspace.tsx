@@ -450,6 +450,8 @@ function AppleWorkbenchSurface(props: {
   // here skips only what the host would already admit.
   const rememberedInputGrants = useRef(new Map<string, number>());
   const inputFlight = useRef(Promise.resolve());
+  // The epoch only wakes this surface after the host records a grant; the
+  // per-Simulator expiry stays in rememberedInputGrants.
   const [rememberedGrantEpoch, setRememberedGrantEpoch] = useState(0);
   const [frameAttach, setFrameAttach] = useState<AppleSimulatorLiveFrameAttach>({
     kind: "not-attachable",
@@ -526,8 +528,7 @@ function AppleWorkbenchSurface(props: {
     !approvalGated ||
     (liveSimulatorId !== undefined &&
       (appleInputGrantIsLive(controller.runtime, String(liveSimulatorId), Date.now()) ||
-        rememberedUntil > Date.now() ||
-        rememberedGrantEpoch > Date.now()));
+        rememberedUntil > Date.now()));
   const needsAllowInput = approvalGated && !inputAllowed;
   const screenStreamRequest = useMemo(
     () =>
