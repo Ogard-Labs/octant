@@ -104,6 +104,8 @@ export class AndroidToolchainService {
   readonly #options: AndroidToolchainServiceOptions;
   readonly #access: (path: string) => Promise<void>;
   #sequence = 0;
+  #discoveryStarted = 0;
+  #discoveryCommitted = 0;
   readonly #lifetime = new AbortController();
   readonly #commands = new Set<Promise<AndroidProcessResult>>();
   readonly #screenWatches = new Set<AbortController>();
@@ -165,23 +167,20 @@ export class AndroidToolchainService {
         },
       };
     }
+    const discovery = ++this.#discoveryStarted;
     const beforeDiscovery = new Map(
       this.#emulators.map((emulator) => [emulator.emulatorId, emulator]),
     );
     const sdk = await this.#discoverSdk();
-    this.#sdk = sdk;
     if (!sdk.available || sdk.emulatorPath === undefined || sdk.adbPath === undefined) {
-      this.#emulators = [];
-      this.#options.observeEmulators?.([]);
-      this.#sequence += 1;
-      return {
-        kind: "failure",
-        failure: {
-          category: "sdk-not-found",
-          message:
-            "The Android SDK is unavailable on this host. Install platform-tools and an emulator, then retry.",
-        },
-      };
+      if (discovery > this.#discoveryCommitted) {
+        this.#discoveryCommitted = discovery;
+        this.#sdk = sdk;
+        this.#emulators = [];
+        this.#options.observeEmulators?.([]);
+        this.#sequence += 1;
+      }
+      return this.#discoverySnapshot();
     }
     const listed = await this.#command([sdk.emulatorPath, "-list-avds"], context, 30_000);
     const names = succeeded(listed)
@@ -210,17 +209,40 @@ export class AndroidToolchainService {
         }),
       );
     }
-    // A boot, shutdown, or newer discovery may finish while these commands run.
+    // An older result must not resurrect devices removed by a newer discovery,
+    // including devices that were not yet in the snapshot when both began.
+    if (discovery < this.#discoveryCommitted) return this.#discoverySnapshot();
+    // A boot or shutdown may finish while these commands run.
     // Records are immutable: changed identities carry the newer state and serial.
     const reconciled = new Map(emulators.map((emulator) => [emulator.emulatorId, emulator]));
     for (const current of this.#emulators) {
       if (beforeDiscovery.get(current.emulatorId) !== current)
         reconciled.set(current.emulatorId, current);
     }
+    this.#discoveryCommitted = discovery;
+    this.#sdk = sdk;
     this.#emulators = [...reconciled.values()];
     this.#options.observeEmulators?.(this.#emulators);
     this.#sequence += 1;
-    return { kind: "discovered", sdk, emulators: this.#emulators };
+    return this.#discoverySnapshot();
+  }
+
+  #discoverySnapshot(): AndroidDiscoveryResult {
+    if (
+      !this.#sdk.available ||
+      this.#sdk.emulatorPath === undefined ||
+      this.#sdk.adbPath === undefined
+    ) {
+      return {
+        kind: "failure",
+        failure: {
+          category: "sdk-not-found",
+          message:
+            "The Android SDK is unavailable on this host. Install platform-tools and an emulator, then retry.",
+        },
+      };
+    }
+    return { kind: "discovered", sdk: this.#sdk, emulators: this.#emulators };
   }
 
   async execute(

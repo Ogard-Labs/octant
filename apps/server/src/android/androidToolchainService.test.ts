@@ -133,6 +133,90 @@ function action(kind: AndroidEmulatorRequest["kind"], extra: Record<string, unkn
 }
 
 describe("AndroidToolchainService", () => {
+  it.each([false, true])(
+    "keeps a newer empty discovery when an older listing finishes (initially populated: %s)",
+    async (populated) => {
+      const base = discoveryExecutor();
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let hold = false;
+      let removed = false;
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        if (removed && input.argv.includes("-list-avds")) return processResult("");
+        const result = await base(input);
+        if (hold && input.argv.includes("devices")) {
+          hold = false;
+          await gate;
+        }
+        return result;
+      });
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        realpath: async (path: string) => path,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        now: () => "2026-09-18T10:00:00.000Z",
+        newId: () => ids.action,
+      });
+      try {
+        if (populated) await service.discover(discoveryRequest, context);
+        hold = true;
+        const pending = service.discover(discoveryRequest, context);
+        await vi.waitFor(() => expect(hold).toBe(false));
+        removed = true;
+        expect(await service.discover(discoveryRequest, context)).toMatchObject({
+          kind: "discovered",
+          emulators: [],
+        });
+        release();
+        expect(await pending).toMatchObject({ kind: "discovered", emulators: [] });
+      } finally {
+        release();
+        await service.close();
+      }
+    },
+  );
+
+  it("does not let an older SDK failure clear a newer successful discovery", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    const service = new AndroidToolchainService({
+      execute: discoveryExecutor(),
+      access: async () => {
+        if (first) {
+          first = false;
+          await gate;
+          throw new Error("missing");
+        }
+      },
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+    });
+    try {
+      const pending = service.discover(discoveryRequest, context);
+      await vi.waitFor(() => expect(first).toBe(false));
+      const latest = await service.discover(discoveryRequest, context);
+      expect(latest).toMatchObject({
+        kind: "discovered",
+        emulators: [{ emulatorId: "Pixel_8_API_34" }],
+      });
+      release();
+      expect(await pending).toEqual(latest);
+    } finally {
+      release();
+      await service.close();
+    }
+  });
+
   it("preserves a shutdown completed while discovery was reading stale devices", async () => {
     const base = discoveryExecutor();
     let release = () => {};

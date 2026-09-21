@@ -83,4 +83,5 @@ already separate "is there a screen" from "how do I click".
 
 - Discovery reconciles emulator records changed while SDK commands were pending.
   A stale device listing cannot undo a completed lifecycle change or restore a
-  serial cleared by shutdown.
+  serial cleared by shutdown. An older discovery cannot overwrite a newer
+  completed discovery, restore devices it removed, or clear its SDK availability.
