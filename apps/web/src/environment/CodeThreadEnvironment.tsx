@@ -8,9 +8,11 @@ import type {
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type {
+  CodeCheckoutIdentity,
   CodeCommand,
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
+  CodeOperationId,
   LocalServerOpenTarget,
   ProjectSummary,
   WorkspaceTab,
@@ -48,8 +50,20 @@ export interface CodeThreadEnvironmentProps {
   readonly active?: boolean;
   /** Defers filesystem and Git observation until the primary transcript is ready. */
   readonly observe?: boolean;
+  /**
+   * Whether the host has reconnected this thread's checkout. The host starts
+   * every checkout Waiting after a launch and refuses to observe one until it
+   * is back, so a read sent earlier fails and is never repeated.
+   */
+  readonly checkoutAvailability?: CodeCheckoutIdentity["availability"] | undefined;
   readonly project?: ProjectSummary | undefined;
   readonly projectClient?: ProjectClient | undefined;
+  /**
+   * The thread's most recent turn to have settled. The checkout is read again
+   * each time this changes, so what the header and the bar under the composer
+   * report includes that turn's edits.
+   */
+  readonly latestSettledTurn?: CodeOperationId | undefined;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly children: ReactNode;
@@ -104,9 +118,13 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const environmentOpen = props.environmentOpen === true;
   const controller = useCodeEnvironmentController({
     ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
-    enabled: props.project !== undefined && props.observe !== false,
+    enabled:
+      props.project !== undefined &&
+      props.observe !== false &&
+      props.checkoutAvailability !== "waiting",
     project: props.project,
     threadId: props.tab.threadId,
+    latestSettledTurn: props.latestSettledTurn,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });

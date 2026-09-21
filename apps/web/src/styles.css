@@ -125,7 +125,8 @@
   --octant-palette-blue: #74b0f3;
   --octant-palette-purple: #ab98f2;
   --octant-palette-pink: #f4809a;
-  --octant-ui-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --octant-ui-font-family:
+    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
   --octant-editor-font-family:
@@ -6423,13 +6424,15 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   grid-template-columns: 40px minmax(0, 1fr);
   /* The inline level control sits under the list, spanning both columns. */
   grid-template-rows: minmax(0, 1fr) auto;
-  width: min(400px, calc(100vw - 24px));
+  width: min(420px, calc(100vw - 24px));
   /* A fixed box, not a cap. The rail switches provider inside one open menu,
      and provider lists differ wildly in length — a twelve-model list next to
      an empty one resized the panel between clicks, so the menu appeared to
      jump under the pointer. A stable height costs some empty space on short
-     lists and buys a menu that holds still. The list pane scrolls. */
-  height: min(42vh, 330px);
+     lists and buys a menu that holds still. The list pane scrolls. At 330px,
+     with search, catalogs, and the level control stacked above and below it,
+     the list showed three and a half models. */
+  height: min(60vh, 440px);
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
@@ -6439,22 +6442,22 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 /* The chosen model's effort/reasoning level, one tap from the list. The
-   declared levels are the slider's stops and the knob snaps to a stop; the
-   reading above it names the level the knob sits on. */
+   declared levels are the slider's stops and the knob snaps to a stop. The
+   reading above names the level the knob sits on, and the ends below name the
+   range it moves in. */
 .composer-model-picker__level {
   grid-column: 1 / -1;
   display: grid;
   gap: 6px;
-  justify-items: center;
-  padding: 8px;
+  padding: 10px 14px 10px;
   border-top: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__level-reading {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: var(--oct-space-2);
-  width: 100%;
 }
 
 .composer-model-picker__level-label {
@@ -6464,10 +6467,12 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   font-weight: var(--oct-weight-medium);
 }
 
+/* Ink, not the accent: the level is a setting read back, not an action, and
+   the default theme spends no hue on a menu's state. */
 .composer-model-picker__level-value {
   min-inline-size: 0;
   overflow: hidden;
-  color: var(--octant-accent-text);
+  color: var(--octant-text-primary);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
@@ -6477,15 +6482,46 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .composer-model-picker__level-slider {
   position: relative;
   /* The knob is centred on its stop, so half of it overhangs each end of the
-     track. At full width the first and last stops pushed it into the popover's
-     padding, where the rounded corner cut it off. */
-  width: calc(100% - 16px);
+     track. Inset by that half, the first and last stops keep the knob inside
+     the popover instead of under its rounded corner. */
+  margin-inline: 7px;
   height: 18px;
   cursor: pointer;
 }
 
-.composer-model-picker__level-slider:focus-visible .composer-model-picker__level-knob {
-  box-shadow: 0 0 0 3px var(--octant-focus-ring);
+/* The whole range is drawn. Without it the only marks were the stops and the
+   knob, so at Default the slider was a lone dot at the left edge. */
+.composer-model-picker__level-slider::before {
+  position: absolute;
+  top: 50%;
+  inset-inline: 0;
+  height: 4px;
+  translate: 0 -50%;
+  /* The control fill measured 1.3:1 on the popover and vanished; the strong
+     edge reads as a track without competing with the knob. */
+  background: var(--octant-border-strong);
+  border-radius: var(--oct-radius-pill);
+  content: "";
+}
+
+/* Focus is a fill and ink emphasis, as on every other control (0114): the
+   level row takes the control fill, and its label and chosen range go to full
+   ink. A ring around the knob was the only change, and it measured under 2:1. */
+.composer-model-picker__level-slider:focus-visible {
+  outline: none;
+}
+
+.composer-model-picker__level:has(.composer-model-picker__level-slider:focus-visible) {
+  background: var(--octant-control-hover);
+}
+
+.composer-model-picker__level:has(.composer-model-picker__level-slider:focus-visible)
+  .composer-model-picker__level-label {
+  color: var(--octant-text-primary);
+}
+
+.composer-model-picker__level-slider:focus-visible .composer-model-picker__level-fill {
+  background: var(--octant-text-primary);
 }
 
 .composer-model-picker__level-fill {
@@ -6494,19 +6530,22 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   inset-inline-start: 0;
   height: 4px;
   translate: 0 -50%;
-  background: var(--octant-accent);
+  background: var(--octant-text-secondary);
   border-radius: var(--oct-radius-pill);
 }
 
 .composer-model-picker__level-knob {
   position: absolute;
+  z-index: 1;
   top: 50%;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   translate: -50% -50%;
   background: var(--octant-text-primary);
   border-radius: var(--oct-radius-pill);
-  box-shadow: var(--octant-shadow-xs);
+  box-shadow:
+    0 0 0 2px var(--octant-surface),
+    var(--octant-shadow-xs);
   transition: inset-inline-start var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
@@ -6516,19 +6555,24 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   }
 }
 
+/* Each stop is a notch in the track, one ink on both the empty and the filled
+   range, so the stops read as places the knob can land. */
 .composer-model-picker__level-stop {
   position: absolute;
   top: 50%;
-  width: 3px;
-  height: 3px;
+  width: 4px;
+  height: 4px;
   translate: -50% -50%;
-  background: var(--octant-text-primary);
-  opacity: 0.35;
+  background: var(--octant-text-muted);
   border-radius: 50%;
 }
 
-.composer-model-picker__level-stop--on {
-  opacity: 0.8;
+.composer-model-picker__level-ends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.2;
 }
 
 .code-branch-selector__search {
@@ -6699,19 +6743,23 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   color: var(--octant-text-muted);
 }
 
+/* One line that scrolls sideways. Wrapped into a 52px box, a seventh catalog
+   started a second row that the box cut in half, and the list below lost the
+   height the extra row took. The row keeps the app's visible thumb, which is
+   how a mouse user finds and drags the rest of the line. */
 .composer-model-picker__catalogs {
   display: flex;
   flex: 0 0 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  max-height: 52px;
   margin: 0 8px 4px;
-  overflow-y: auto;
-  scrollbar-color: var(--octant-border-strong) transparent;
-  scrollbar-width: thin;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .composer-model-picker__catalog {
+  flex: 0 0 auto;
   min-height: 22px;
   padding: 0 8px;
   color: var(--octant-text-secondary);

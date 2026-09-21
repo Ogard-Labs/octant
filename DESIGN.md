@@ -61,9 +61,10 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text uses the platform stack by default: `-apple-system,
-BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`. The bundled variable
-face remains available as an explicit Appearance choice. Code, paths, branches,
+Interface text uses the bundled Inter variable face by default, with the
+platform stack behind it: `'Inter Variable', -apple-system, BlinkMacSystemFont,
+'Segoe UI', system-ui, sans-serif` (0149). The platform face remains an explicit
+Appearance choice, System interface. Code, paths, branches,
 identifiers, and terminal text use the monospace stack. Antialiased,
 `text-rendering: optimizeLegibility`, no synthetic bold.
 
@@ -243,7 +244,8 @@ above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. The one exception is a workspace with no reading surface
 under it (the application ground behind everything, or a translucent
-workspace), where a reply carries a reading card. Running text keeps a 72ch
+workspace), where a reply carries a reading card; over the application
+ground that card, the bubble, and the composer are glass (0150). Running text keeps a 72ch
 measure; tables and code blocks run the column's width, ending on the same edge
 as the composer; markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
@@ -351,7 +353,7 @@ Typography has distinct jobs:
 
 | Job        | Default                                                                                                                   | Usage                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                                    | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                  | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                                                        | Wordmark, section headings, selected navigation labels                             |
 | Transcript | inherits Interface                                                                                                        | Long-running conversation and composer; readable at 13–16px, 13px by default       |
 | Editor     | `'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
@@ -505,7 +507,9 @@ Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Select lists open beside their trigger
 without covering it with the selected item. The model picker anchors to the
 trigger's trailing edge, keeps its dimensions stable while filtering, and
-scrolls its model list internally. Popovers, menus, dialogs, and hover cards use
+scrolls its model list internally. Its catalog filters stay on one line that
+scrolls sideways, and its level slider draws the whole track in ink, with the
+reading above it and both ends named below. Popovers, menus, dialogs, and hover cards use
 the floating surface and the overlay shadow, and have exactly one 1px hairline
 edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
@@ -957,10 +961,11 @@ When adding or touching UI:
 - Feature styles position product surfaces; adapters paint shared controls.
   When migrating an old control, remove the replaced paint rules rather than
   keeping a parallel recipe.
-- Glass is the material for a surface with a ground behind it: the phone, and
-  Zen on the desktop (0107). Its tint, stroke, and highlight are theme roles
-  like every other colour; what those two surfaces get is a different
-  material, not a second palette. Do not copy mobile atmosphere or phone radii
+- Glass is the material for a surface with a ground behind it: the phone, Zen
+  on the desktop (0107), and a thread over the application ground, where the
+  reply card, the person's bubble, and the composer wear it (0150). Its tint,
+  stroke, and highlight are theme roles like every other colour; what those
+  surfaces get is a different material, not a second palette. Do not copy mobile atmosphere or phone radii
   into a flat desktop pane, and do not bring a blur onto a pane that has no
   ground under it.
 

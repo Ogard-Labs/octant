@@ -1,3 +1,4 @@
+import { SYSTEM_UI_FAMILY, savedUiFamily } from "@octant/theme";
 import { Check, ChevronsUpDown } from "lucide-react";
 import {
   OctantCombobox,
@@ -31,10 +32,7 @@ const UI_FONTS: ReadonlyArray<FontOption> = [
     family:
       "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
   },
-  {
-    label: "System interface",
-    family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-  },
+  { label: "System interface", family: SYSTEM_UI_FAMILY },
   { label: "SF Pro", family: "'SF Pro Text', -apple-system, system-ui, sans-serif" },
   { label: "Inter", family: "Inter, system-ui, sans-serif" },
   { label: "Geist", family: "Geist, system-ui, sans-serif" },
@@ -65,10 +63,11 @@ const MONO_FONTS: ReadonlyArray<FontOption> = [
 
 export function FontFamilyPicker(props: FontFamilyPickerProps) {
   const baseOptions = props.surface === "ui" ? UI_FONTS : MONO_FONTS;
-  const known = baseOptions.some((option) => option.family === props.value);
+  const value = props.surface === "ui" ? savedUiFamily(props.value) : props.value;
+  const known = baseOptions.some((option) => option.family === value);
   const options = known
     ? baseOptions
-    : [{ label: "Current custom stack", family: props.value }, ...baseOptions];
+    : [{ label: "Current custom stack", family: value }, ...baseOptions];
   const families = options.map((option) => option.family);
   const labelFor = (family: string) =>
     options.find((option) => option.family === family)?.label ?? "Custom font stack";
@@ -81,7 +80,7 @@ export function FontFamilyPicker(props: FontFamilyPickerProps) {
       onValueChange={(family) => {
         if (family !== null) props.onChange(family);
       }}
-      value={props.value}
+      value={value}
     >
       <OctantComboboxInputGroup className="settings-font-picker">
         <OctantComboboxInput aria-label={props.label} placeholder="Search fonts…" />

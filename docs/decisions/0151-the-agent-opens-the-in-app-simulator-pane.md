@@ -1,4 +1,4 @@
-# 0149. The agent opens the in-app Simulator pane
+# 0151. The agent opens the in-app Simulator pane
 
 **Status:** Accepted
 
@@ -88,5 +88,5 @@ and activating or quitting Simulator.app.
 - 0139 The Simulator frame is a live view streamed through the host
 - 0140 The live Simulator screen is driven directly
 - 0142 One approval opens a Simulator to input
-- 0150 Allow input opens a device to clicks (first-input confirmation superseded)
-- 0151 Android emulator is a separate in-app device destination (Android non-goal superseded)
+- 0152 Allow input opens a device to clicks (first-input confirmation superseded)
+- 0153 Android emulator is a separate in-app device destination (Android non-goal superseded)

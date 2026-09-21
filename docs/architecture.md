@@ -419,10 +419,10 @@ honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app (see
-[decisions/0149-the-agent-opens-the-in-app-simulator-pane.md](decisions/0149-the-agent-opens-the-in-app-simulator-pane.md)).
+[decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
-([decisions/0151-android-emulator-is-a-separate-device-destination.md](decisions/0151-android-emulator-is-a-separate-device-destination.md)).
+([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
 Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
@@ -431,13 +431,13 @@ attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
-([decisions/0150-allow-input-opens-a-device-to-clicks.md](decisions/0150-allow-input-opens-a-device-to-clicks.md)).
+([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Without that
 helper every input kind is unavailable; Octant does not script Simulator.app
 to inject a tap, swipe, typed text, or key
-([decisions/0149-the-agent-opens-the-in-app-simulator-pane.md](decisions/0149-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
+([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
 fourth input kind on the same channel, for the pane and for `octant_apple`
 alike, and the live screen is driven directly: a press and release is a tap, a
 drag is one swipe sent when it ends, keys typed on the focused screen go to

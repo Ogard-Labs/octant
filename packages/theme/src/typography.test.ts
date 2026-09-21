@@ -4,13 +4,16 @@ import {
   DEFAULT_EDITOR_TYPOGRAPHY,
   DEFAULT_TERMINAL_TYPOGRAPHY,
   DEFAULT_UI_TYPOGRAPHY,
+  SYSTEM_UI_FAMILY,
   resolveTypographyProjection,
+  savedUiFamily,
 } from "./typography";
 
 describe("typography projections", () => {
-  it("ships the compact system typography as the default", () => {
+  it("ships Inter at the compact size as the default interface face", () => {
     expect(DEFAULT_UI_TYPOGRAPHY).toEqual({
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      fontFamily:
+        "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
       fontSize: 13,
       fontWeight: 400,
     });
@@ -136,7 +139,22 @@ describe("interface face migration", () => {
     const projection = resolveTypographyProjection(legacy, []);
 
     expect(projection.ui.fontFamily).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
-    expect(projection.ui.fontFamily).toContain("-apple-system");
+    expect(projection.ui.fontFamily).toContain("Inter Variable");
+  });
+
+  it("keeps the system face for someone who picks System interface", () => {
+    // The saved system stack above means "the default", so the picker's
+    // System interface choice has to be a different string, or choosing it
+    // would quietly give the person Inter.
+    const chosen: ThemeTypography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: SYSTEM_UI_FAMILY },
+    };
+
+    expect(resolveTypographyProjection(chosen, []).ui.fontFamily).toBe(SYSTEM_UI_FAMILY);
+    expect(
+      savedUiFamily("-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"),
+    ).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
   });
 
   it("keeps a deliberately chosen system stack", () => {

@@ -23,7 +23,7 @@ export interface AppleExecutionScope {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvalValid: boolean;
   /**
-   * The host holds this thread's Simulator open to input (0142, 0150). Input is
+   * The host holds this thread's Simulator open to input (0142, 0152). Input is
    * then allowed without a one-shot approval on the request; Allow input is
    * what opened the grant. The pane sends none for clicks, because it only
    * ever learns of the grant, and cannot make one.
