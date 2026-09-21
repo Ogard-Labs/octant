@@ -507,7 +507,7 @@ function ComputerUseActivityPreview(props: {
     return (
       <div className="thread-activity-pip__permission">
         <div className="thread-activity-pip__permission-title">
-          <MonitorUp aria-hidden="true" size={18} strokeWidth={1.7} />
+          <MonitorUp aria-hidden="true" size={16} strokeWidth={1.7} />
           <h3>Allow computer access?</h3>
         </div>
         <p>{props.session.pendingApproval.summary}</p>
