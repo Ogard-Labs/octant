@@ -16,7 +16,7 @@ const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.
 const appStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 describe("ThemeTypographyProvider", () => {
-  it("projects the compact system typography by default", () => {
+  it("projects Inter at the compact size by default", () => {
     const rendered = render(
       <ThemeTypographyProvider>
         <div />
@@ -24,7 +24,7 @@ describe("ThemeTypographyProvider", () => {
     );
 
     expect(document.documentElement.style.getPropertyValue("--octant-ui-font-family")).toBe(
-      "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
     );
     expect(document.documentElement.style.getPropertyValue("--octant-ui-font-size")).toBe("13px");
     expect(document.documentElement.style.getPropertyValue("--octant-editor-font-size")).toBe(

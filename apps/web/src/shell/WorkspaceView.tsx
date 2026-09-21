@@ -10,7 +10,7 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
-import type { ThreadBoardPullRequestIdentity } from "@octant/contracts";
+import type { CodeOperationId, ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type {
   ProjectAvailability,
@@ -727,6 +727,24 @@ function WorkThreadDisplayBoundary(props: {
   return <>{props.children({ displayReady, onDisplayReadyChange })}</>;
 }
 
+/**
+ * The operation of the last reply to have completed, been interrupted, or
+ * failed. A turn sent from this window and one the thread reattached to both
+ * end with their reply in one of those states, and a turn still waiting on an
+ * approval has not finished editing.
+ */
+function latestSettledTurn(
+  conversation: CodeController["conversation"],
+): CodeOperationId | undefined {
+  return conversation.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "completed" ||
+        message.status === "interrupted" ||
+        message.status === "failed"),
+  )?.operationId;
+}
+
 function renderCodeTab(
   tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
   props: WorkspaceViewProps,
@@ -743,6 +761,15 @@ function renderCodeTab(
       : codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(tab.threadId),
         );
+  const checkoutAvailability =
+    activeThread === undefined
+      ? undefined
+      : codeController.activeView !== undefined &&
+          String(codeController.activeView.thread.id) === String(tab.threadId)
+        ? codeController.activeView.checkout.availability
+        : codeController.bootstrap?.checkouts.find(
+            (checkout) => String(checkout.id) === String(activeThread.checkoutId),
+          )?.availability;
   const providerInstanceId = activeThread?.providerInstanceId;
   const harnessAutoReviewSupported =
     providerInstanceId === undefined
@@ -871,6 +898,7 @@ function renderCodeTab(
           <CodeThreadEnvironment
             active={paneIsActive(props, paneId)}
             observe={codeController.conversationHistory === "loaded"}
+            checkoutAvailability={checkoutAvailability}
             {...(props.environmentDockOpen === undefined
               ? {}
               : { environmentOpen: props.environmentDockOpen })}
@@ -931,6 +959,11 @@ function renderCodeTab(
                   onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
                 })}
             tab={tab}
+            latestSettledTurn={
+              codeController.conversationHistory === "loaded"
+                ? latestSettledTurn(codeController.conversation)
+                : undefined
+            }
             sources={
               codeController.conversationHistory !== "loaded"
                 ? []

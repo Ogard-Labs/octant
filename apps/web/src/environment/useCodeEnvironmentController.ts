@@ -1,5 +1,10 @@
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
-import type { CodeEnvironmentObservation, CodeThreadId, ProjectSummary } from "@octant/contracts";
+import type {
+  CodeEnvironmentObservation,
+  CodeOperationId,
+  CodeThreadId,
+  ProjectSummary,
+} from "@octant/contracts";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export type CodeEnvironmentControllerStatus = "idle" | "loading" | "ready" | "error";
@@ -16,6 +21,12 @@ export interface CodeEnvironmentControllerOptions {
   readonly client?: ProjectClient;
   readonly project?: ProjectSummary | undefined;
   readonly threadId?: CodeThreadId | undefined;
+  /**
+   * The thread's most recent turn to have completed, been interrupted, or
+   * failed. A new value means a turn may have edited the checkout since it was
+   * last read.
+   */
+  readonly latestSettledTurn?: CodeOperationId | undefined;
   readonly enabled: boolean;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -40,9 +51,10 @@ export function useCodeEnvironmentController(
   const mounted = useRef(true);
   const generation = useRef(0);
   const activeRequest = useRef<AbortController | undefined>(undefined);
+  const readCoversTurn = useRef<CodeOperationId | undefined>(undefined);
 
   const load = useCallback(
-    async (fresh = false): Promise<void> => {
+    async (fresh = false, keepObservation = false): Promise<void> => {
       const project = options.project;
       if (!options.enabled || project?.type !== "code") {
         activeRequest.current?.abort();
@@ -58,9 +70,11 @@ export function useCodeEnvironmentController(
       const controller = new AbortController();
       activeRequest.current = controller;
       const request = ++generation.current;
-      setStatus("loading");
-      setObservation(undefined);
-      setErrorMessage(undefined);
+      if (!keepObservation) {
+        setStatus("loading");
+        setObservation(undefined);
+        setErrorMessage(undefined);
+      }
       try {
         const nextObservation =
           options.threadId === undefined
@@ -86,6 +100,7 @@ export function useCodeEnvironmentController(
       } catch (error) {
         if (!mounted.current || request !== generation.current) return;
         setStatus("error");
+        setObservation(undefined);
         setErrorMessage(failureMessage(error));
       } finally {
         if (activeRequest.current === controller) activeRequest.current = undefined;
@@ -104,6 +119,7 @@ export function useCodeEnvironmentController(
       setErrorMessage(undefined);
       return;
     }
+    readCoversTurn.current = options.latestSettledTurn;
     void load();
   }, [
     load,
@@ -112,6 +128,19 @@ export function useCodeEnvironmentController(
     options.project?.type,
     options.project?.updatedAt,
   ]);
+
+  // Nothing else re-reads the checkout while a thread stays open: without this,
+  // the counts under the composer stayed at what they were when the thread
+  // opened, however much the agent went on to edit. The read skips the host's short-lived Git cache,
+  // which could otherwise answer with the reading from before the edits, and
+  // keeps the last facts on screen until it lands: dropping them would pull the
+  // bar out from under the composer and put it back after every turn.
+  useEffect(() => {
+    if (!options.enabled || options.project?.type !== "code") return;
+    if (readCoversTurn.current === options.latestSettledTurn) return;
+    readCoversTurn.current = options.latestSettledTurn;
+    void load(true, true);
+  }, [load, options.enabled, options.project?.type, options.latestSettledTurn]);
 
   useEffect(() => {
     mounted.current = true;
