@@ -2,6 +2,7 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import {
   decodeGithubCatalogueReadResponse,
+  decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProjectId,
   decodeWorkspaceTab,
@@ -16,6 +17,7 @@ import {
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { CodeCheckoutBar } from "../code/CodeCheckoutBar";
 import { CodeThreadEnvironment } from "./CodeThreadEnvironment";
 
 const codeProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
@@ -48,7 +50,7 @@ function codeProject(id: ProjectId = codeProjectId): ProjectSummary {
   } as ProjectSummary;
 }
 
-function readyObservation(): CodeEnvironmentObservation {
+function readyObservation(): Extract<CodeEnvironmentObservation, { readonly status: "ready" }> {
   return {
     status: "ready",
     projectId: codeProjectId,
@@ -127,6 +129,50 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
+  });
+
+  it("re-reads the checkout when a turn settles, so the bar under the composer counts what the turn changed", async () => {
+    const client = projectClient({ ...readyObservation(), insertions: 3, deletions: 1 });
+    let settleReRead: (observation: CodeEnvironmentObservation) => void = () => undefined;
+    const view = (latestSettledTurn: string) => (
+      <CodeThreadEnvironment
+        latestSettledTurn={decodeCodeOperationId(latestSettledTurn)}
+        observe
+        project={codeProject()}
+        projectClient={client}
+        tab={codeTab()}
+      >
+        <CodeCheckoutBar />
+      </CodeThreadEnvironment>
+    );
+    const { rerender } = render(view("00000000-0000-4000-8000-000000000a01"));
+    expect(await screen.findByLabelText("Checkout")).toHaveTextContent("+3−1");
+
+    vi.mocked(client.environmentForThread).mockImplementationOnce(
+      () => new Promise((resolve) => (settleReRead = resolve)),
+    );
+    rerender(view("00000000-0000-4000-8000-000000000a02"));
+
+    // The host keeps a Git reading for a few seconds, so a read that did not
+    // skip it could hand back the counts from before the turn's edits.
+    await waitFor(() =>
+      expect(client.environmentForThread).toHaveBeenLastCalledWith(
+        codeProjectId,
+        codeThreadId,
+        expect.any(AbortSignal),
+        true,
+      ),
+    );
+    // Dropping the facts while they are re-read would pull the bar out from
+    // under the composer and put it back a moment later, after every turn.
+    expect(screen.getByLabelText("Checkout")).toHaveTextContent("+3−1");
+    await act(async () => {
+      settleReRead({ ...readyObservation(), insertions: 12, deletions: 4 });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText("Checkout")).toHaveTextContent("+12−4");
+    expect(client.environmentForThread).toHaveBeenCalledTimes(2);
   });
 
   it("names the thread's identity and facts in the Environment header", async () => {

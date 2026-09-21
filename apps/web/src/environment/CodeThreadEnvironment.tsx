@@ -11,6 +11,7 @@ import type {
   CodeCommand,
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
+  CodeOperationId,
   LocalServerOpenTarget,
   ProjectSummary,
   WorkspaceTab,
@@ -50,6 +51,12 @@ export interface CodeThreadEnvironmentProps {
   readonly observe?: boolean;
   readonly project?: ProjectSummary | undefined;
   readonly projectClient?: ProjectClient | undefined;
+  /**
+   * The thread's most recent turn to have settled. The checkout is read again
+   * each time this changes, so what the header and the bar under the composer
+   * report includes that turn's edits.
+   */
+  readonly latestSettledTurn?: CodeOperationId | undefined;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly children: ReactNode;
@@ -107,6 +114,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     enabled: props.project !== undefined && props.observe !== false,
     project: props.project,
     threadId: props.tab.threadId,
+    latestSettledTurn: props.latestSettledTurn,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
