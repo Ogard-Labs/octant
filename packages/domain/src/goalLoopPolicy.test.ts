@@ -202,10 +202,19 @@ describe("saying why a loop stopped", () => {
       "authority-widened",
       "approval-required",
       "checkpoint-unavailable",
+      "spend-unreported",
       "paused-by-user",
       "stopped-by-user",
     ] as const) {
       expect(goalLoopPauseText(reason).length).toBeGreaterThan(0);
     }
+  });
+
+  it("pauses a token-budgeted loop when the runner could not see the round's spend", () => {
+    const decision = decideGoalLoopRound(
+      facts({ budget: { tokenBudget: 10_000 }, roundSpendObserved: false }),
+    );
+
+    expect(decision).toEqual({ decision: "pause", reason: "spend-unreported" });
   });
 });

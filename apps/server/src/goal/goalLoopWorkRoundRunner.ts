@@ -70,12 +70,14 @@ export function createGoalLoopWorkRoundRunner(
         tokensSpent: 0,
         elapsedMs: 0,
         detail: "No local window is available to run the round.",
+        usageReported: false,
       };
     }
     const controller = new AbortController();
     const startedAt = now();
     let settled: Extract<WorkTurnLookupResult, { kind: "accepted" }> | undefined;
     let requestId: ReturnType<typeof decodeWorkTurnRequestId> | undefined;
+    let charged: { readonly tokens: number } | undefined;
     try {
       const command = options.command(input);
       requestId = decodeWorkTurnRequestId(command.requestId);
@@ -98,59 +100,88 @@ export function createGoalLoopWorkRoundRunner(
             accepted.kind === "not-created" || accepted.kind === "ambiguous"
               ? accepted.message
               : "Work turn was not accepted.",
+          usageReported: false,
         };
       }
       if (TERMINAL_TURN_STATUSES.has(accepted.turn.status)) {
+        charged = takeUsage(requestId, options.usage);
         settled = accepted;
       } else {
         for await (const frame of frames) {
           if (frame.kind !== "turn-settled") continue;
           if (String(frame.turn.requestId) !== String(requestId)) continue;
+          charged = takeUsage(requestId, options.usage);
           settled = { kind: "accepted", turn: frame.turn };
           break;
         }
       }
     } catch (error) {
+      // The turn may have charged before it threw; consume whatever the
+      // provider reported so the failed round still pays for the work done.
+      charged = takeUsage(requestId, options.usage);
       return {
         outcome: "failed",
-        tokensSpent: 0,
+        tokensSpent: charged?.tokens ?? 0,
         elapsedMs: now() - startedAt,
         detail: error instanceof Error ? error.message : "The goal-loop round failed.",
+        usageReported: charged !== undefined,
       };
     } finally {
       controller.abort();
     }
     if (settled === undefined) {
+      // The stream ended without a settlement the runner could read. The
+      // turn's spend is still real if the provider reported it.
+      charged = takeUsage(requestId, options.usage);
       return {
         outcome: "failed",
-        tokensSpent: 0,
+        tokensSpent: charged?.tokens ?? 0,
         elapsedMs: now() - startedAt,
         detail: "Work turn ended without a settled state the loop could read.",
+        usageReported: charged !== undefined,
       };
     }
     const turn = settled.turn;
     const elapsedMs = now() - startedAt;
+    // A provider that reported no usage is honest about a limitation, not a
+    // free round; the caller pauses a token-budgeted loop on this fact.
+    const tokensSpent = charged?.tokens ?? 0;
+    const usageReported = charged !== undefined;
     if (turn.status === "completed") {
-      const usage = requestId === undefined ? undefined : options.usage.take(requestId);
       return {
         outcome: "ran",
-        tokensSpent: usage === undefined ? 0 : usage.inputTokens + usage.outputTokens,
+        tokensSpent,
         elapsedMs,
+        usageReported,
       };
     }
     if (turn.status === "waiting") {
       return {
         outcome: "failed",
-        tokensSpent: 0,
+        tokensSpent,
         elapsedMs,
         detail: "Work turn is waiting for a person to continue it.",
+        usageReported,
       };
     }
     return {
       outcome: "failed",
-      tokensSpent: 0,
+      tokensSpent,
       elapsedMs,
       detail: turn.failure === undefined ? `Work turn ${turn.status}.` : turn.failure.message,
+      usageReported,
     };
   };
+}
+
+/** Consume the round's reported usage once, so no second reader double-charges. */
+function takeUsage(
+  requestId: ReturnType<typeof decodeWorkTurnRequestId> | undefined,
+  usage: WorkTurnUsageStore,
+): { readonly tokens: number } | undefined {
+  if (requestId === undefined) return undefined;
+  const observed = usage.take(requestId);
+  return observed === undefined
+    ? undefined
+    : { tokens: observed.inputTokens + observed.outputTokens };
 }

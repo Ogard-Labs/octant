@@ -47,6 +47,7 @@ function harness(
     readonly modePosture?: AgentRunAuthority;
     readonly round?: Partial<Awaited<ReturnType<GoalLoopDependencies["runRound"]>>>;
     readonly scheduleNextRound?: GoalLoopDependencies["scheduleNextRound"];
+    readonly scheduleFirstRound?: GoalLoopDependencies["scheduleFirstRound"];
   } = {},
 ) {
   let current = options.goal === undefined ? goal() : options.goal;
@@ -95,6 +96,9 @@ function harness(
     ...(options.scheduleNextRound === undefined
       ? {}
       : { scheduleNextRound: options.scheduleNextRound }),
+    ...(options.scheduleFirstRound === undefined
+      ? {}
+      : { scheduleFirstRound: options.scheduleFirstRound }),
     uuid: () => `55555555-0000-4000-8000-00000000000${String((tick += 1) % 10)}`,
     clock: () => "2026-08-19T09:00:00.000Z" as never,
   };
@@ -130,6 +134,16 @@ function journaled(journal: { append: ReturnType<typeof vi.fn> }): ReadonlyArray
 }
 
 describe("starting a goal loop", () => {
+  it("queues the first round when the loop starts, so a new loop is not running at zero rounds forever", async () => {
+    const scheduleFirstRound = vi.fn();
+    const h = harness({ scheduleFirstRound });
+
+    await started(h);
+
+    expect(scheduleFirstRound).toHaveBeenCalledOnce();
+    expect(scheduleFirstRound).toHaveBeenCalledWith(threadId);
+  });
+
   it("refuses a goal with no budget rather than starting one nothing would stop", async () => {
     const h = harness({ goal: goal({ budget: {} }) });
 
@@ -400,6 +414,38 @@ describe("completing a goal from a loop", () => {
 });
 
 describe("steering a running loop", () => {
+  it("queues the next round when the person resumes a paused loop", async () => {
+    const scheduleFirstRound = vi.fn();
+    const h = harness({ scheduleFirstRound });
+    const start = await started(h);
+    const version = start.kind === "goal-loop" ? start.loop.version : 0;
+    await h.service.execute({ kind: "pause-goal-loop", threadId, expectedVersion: version });
+    scheduleFirstRound.mockClear();
+
+    await h.service.execute({
+      kind: "resume-goal-loop",
+      threadId,
+      expectedVersion: version + 1,
+    });
+
+    expect(scheduleFirstRound).toHaveBeenCalledOnce();
+    expect(scheduleFirstRound).toHaveBeenCalledWith(threadId);
+  });
+
+  it("pauses a token-budgeted loop before a second round whose spend nobody saw", async () => {
+    const h = harness({
+      goal: goal({ budget: { tokenBudget: 10_000 } }),
+      round: { usageReported: false },
+    });
+    await started(h);
+
+    await h.service.advance(threadId);
+    const second = await h.service.advance(threadId);
+
+    expect(second).toEqual({ paused: "spend-unreported" });
+    expect(h.service.read(threadId).loop?.pauseReason).toBe("spend-unreported");
+  });
+
   it("accepts a narrowed ceiling and refuses a widened one", async () => {
     const h = harness();
     const start = await started(h);

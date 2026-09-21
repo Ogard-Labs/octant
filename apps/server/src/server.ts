@@ -5597,6 +5597,7 @@ export function startOctantServer(
         uuid: randomUUID,
       }),
       scheduleNextRound: (threadId) => goalLoopScheduler.schedule(threadId),
+      scheduleFirstRound: (threadId) => goalLoopScheduler.schedule(threadId),
       journal: goalLoopEvents,
       uuid: randomUUID,
       clock: () => new Date().toISOString() as never,

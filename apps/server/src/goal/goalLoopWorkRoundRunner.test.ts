@@ -90,7 +90,12 @@ describe("createGoalLoopWorkRoundRunner", () => {
 
     const outcome = await h.run({ threadId, objective: "Get the migration passing" });
 
-    expect(outcome).toEqual({ outcome: "ran", tokensSpent: 0, elapsedMs: 100 });
+    expect(outcome).toEqual({
+      outcome: "ran",
+      tokensSpent: 0,
+      elapsedMs: 100,
+      usageReported: false,
+    });
   });
 
   it("reports the provider's tokens for the turn when the provider reported usage", async () => {
@@ -109,7 +114,73 @@ describe("createGoalLoopWorkRoundRunner", () => {
 
     const outcome = await h.run({ threadId, objective: "Get the migration passing" });
 
-    expect(outcome).toEqual({ outcome: "ran", tokensSpent: 150, elapsedMs: 100 });
+    expect(outcome).toEqual({
+      outcome: "ran",
+      tokensSpent: 150,
+      elapsedMs: 100,
+      usageReported: true,
+    });
+  });
+
+  it("says the spend was observed when the provider reported usage", async () => {
+    const usage = new WorkTurnUsageStore();
+    const h = harness({
+      usage,
+      frames: (async function* () {
+        const accepted = acceptedTurn("77777777-0000-4000-8000-000000000001", "running");
+        yield settledFrame({ ...accepted.turn, status: "completed" });
+      })(),
+    });
+    usage.record(decodeWorkTurnRequestId("77777777-0000-4000-8000-000000000001"), {
+      inputTokens: 120,
+      outputTokens: 30,
+    });
+
+    const outcome = await h.run({ threadId, objective: "Get the migration passing" });
+
+    expect(outcome.usageReported).toBe(true);
+  });
+
+  it("says the spend was not observed when the provider reported no usage", async () => {
+    const h = harness({
+      frames: (async function* () {
+        const accepted = acceptedTurn("77777777-0000-4000-8000-000000000001", "running");
+        yield settledFrame({ ...accepted.turn, status: "completed" });
+      })(),
+    });
+
+    const outcome = await h.run({ threadId, objective: "Get the migration passing" });
+
+    expect(outcome.usageReported).toBe(false);
+    expect(outcome.tokensSpent).toBe(0);
+  });
+
+  it("charges the tokens a failed turn already reported, so partial paid work is spent", async () => {
+    const usage = new WorkTurnUsageStore();
+    const h = harness({
+      usage,
+      frames: (async function* () {
+        const accepted = acceptedTurn("77777777-0000-4000-8000-000000000001", "running");
+        yield settledFrame({
+          ...accepted.turn,
+          status: "failed",
+          failure: { category: "failed", message: "Provider exploded." },
+        });
+      })(),
+    });
+    usage.record(decodeWorkTurnRequestId("77777777-0000-4000-8000-000000000001"), {
+      inputTokens: 80,
+      outputTokens: 20,
+    });
+
+    const outcome = await h.run({ threadId, objective: "Get the migration passing" });
+
+    expect(outcome).toMatchObject({
+      outcome: "failed",
+      tokensSpent: 100,
+      usageReported: true,
+      detail: "Provider exploded.",
+    });
   });
 
   it("reports a failed round when the turn it started failed", async () => {

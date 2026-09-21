@@ -42,6 +42,12 @@ export interface GoalLoopRoundOutcome {
   readonly evidence?: ReadonlyArray<ThreadGoalEvidenceRef>;
   /** Whether the provider believes the objective is met. Never sufficient alone. */
   readonly providerReportsComplete?: boolean;
+  /**
+   * Whether the runner could read what the provider charged for the round.
+   * A token budget is a stopping condition, so a round whose spend nobody
+   * saw must stop the loop rather than read as free.
+   */
+  readonly usageReported?: boolean;
 }
 
 export interface GoalLoopDependencies {
@@ -93,6 +99,12 @@ export interface GoalLoopDependencies {
    * something asks.
    */
   readonly scheduleNextRound?: (threadId: string) => void;
+  /**
+   * Ask the host to take the first round of a loop that just began running.
+   * Same reason as scheduleNextRound: entering the running state is when a
+   * continuous loop starts, and the service does not drive itself.
+   */
+  readonly scheduleFirstRound?: (threadId: string) => void;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
 }
@@ -102,6 +114,8 @@ interface LoopRecord {
   readonly rounds: ReadonlyArray<GoalLoopRound>;
   /** What the last round actually ran under, for the widening check. */
   readonly lastAuthority?: AgentRunAuthority;
+  /** Whether the last round's spend was visible, for the token-budget rule. */
+  readonly lastSpendObserved?: boolean;
 }
 
 export class GoalLoopService {
@@ -152,6 +166,7 @@ export class GoalLoopService {
           eventName: GOAL_LOOP_EVENT_NAMES.resumed,
           payload: { loopId: String(record.loop.id) },
         });
+        this.#dependencies.scheduleFirstRound?.(command.threadId);
         return this.#result(next);
       }
       case "stop-goal-loop":
@@ -212,6 +227,7 @@ export class GoalLoopService {
         : { previousEffectiveCeiling: record.lastAuthority }),
       ...(pendingApproval === undefined ? {} : { pendingApprovalClass: pendingApproval }),
       checkpointAvailable: checkpointId !== undefined,
+      roundSpendObserved: record.lastSpendObserved !== false,
     });
 
     if (decision.decision !== "run") {
@@ -278,6 +294,7 @@ export class GoalLoopService {
         }),
         rounds: [...record.rounds, round],
         lastAuthority: decision.authority,
+        lastSpendObserved: outcome.usageReported !== false,
       });
       this.#dependencies.journal.append({
         aggregateId: String(record.loop.id),
@@ -364,6 +381,7 @@ export class GoalLoopService {
       eventName: GOAL_LOOP_EVENT_NAMES.started,
       payload: { loop },
     });
+    this.#dependencies.scheduleFirstRound?.(command.threadId);
     return this.#result(record);
   }
 
@@ -430,9 +448,11 @@ export class GoalLoopService {
       ...changes,
       status,
       // The contract refuses a running loop that still carries a reason it
-      // stopped, so resuming clears it rather than leaving a stale explanation.
-      ...(status === "running" ? {} : { pauseReason: pauseReason ?? "paused-by-user" }),
-      ...(status === "running" && loop.pauseReason !== undefined ? {} : {}),
+      // stopped, so entering running clears it rather than keeping a stale
+      // explanation beside a status that no longer explains it.
+      ...(status === "running"
+        ? { pauseReason: undefined }
+        : { pauseReason: pauseReason ?? "paused-by-user" }),
       updatedAt: this.#dependencies.clock(),
       version: loop.version + 1,
     });
