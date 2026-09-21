@@ -3126,8 +3126,11 @@ export function startOctantServer(
       options.providerRuntimeRegistry ??
       new ProviderRuntimeRegistry({
         receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
-        observeAcquireMs: (durationMs) =>
-          latencyStats.record("provider-runtime-acquire", durationMs),
+        observeAcquireMs: (durationMs, kind) =>
+          latencyStats.record(
+            kind === "started" ? "provider-runtime-acquire" : "provider-runtime-reuse",
+            durationMs,
+          ),
       });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();

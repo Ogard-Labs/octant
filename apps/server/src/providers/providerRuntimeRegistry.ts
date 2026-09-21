@@ -38,7 +38,7 @@ export interface ProviderRuntimeRegistryOptions {
   readonly processGroupExists?: (pid: number) => Promise<boolean> | boolean;
   readonly killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
   readonly shutdownTimeoutMs?: number;
-  readonly observeAcquireMs?: (durationMs: number) => void;
+  readonly observeAcquireMs?: (durationMs: number, kind: "started" | "reused") => void;
 }
 
 export interface ProviderRuntimeAcquireOptions<T> {
@@ -88,7 +88,9 @@ export class ProviderRuntimeRegistry {
   readonly #processGroupExists: (pid: number) => Promise<boolean> | boolean;
   readonly #killProcessGroup: ((pid: number, signal: NodeJS.Signals) => void) | undefined;
   readonly #shutdownTimeoutMs: number;
-  readonly #observeAcquireMs: ((durationMs: number) => void) | undefined;
+  readonly #observeAcquireMs:
+    | ((durationMs: number, kind: "started" | "reused") => void)
+    | undefined;
   readonly #observedByInstance = new Map<ProviderInstanceId, ProviderObservedState>();
   readonly #activeSessionsByInstance = new Map<ProviderInstanceId, number>();
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
@@ -250,12 +252,13 @@ export class ProviderRuntimeRegistry {
         entry.refs += 1;
         acquired = entry;
         const value = (await entry.resource).value;
-        if (createdRuntimeEntry) {
-          try {
-            this.#observeAcquireMs?.(performance.now() - startedAt);
-          } catch {
-            // Operational observations must not change a successful acquire.
-          }
+        try {
+          this.#observeAcquireMs?.(
+            performance.now() - startedAt,
+            createdRuntimeEntry ? "started" : "reused",
+          );
+        } catch {
+          // Operational observations must not change a successful acquire.
         }
         return value;
       },

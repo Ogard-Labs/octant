@@ -81,8 +81,12 @@ describe("ProviderRuntimeRegistry", () => {
 
   it("shares an in-flight runtime for one instance and isolates different instances", async () => {
     const observedAcquireMs: number[] = [];
+    const acquireKinds: string[] = [];
     const registry = new ProviderRuntimeRegistry({
-      observeAcquireMs: (durationMs) => observedAcquireMs.push(durationMs),
+      observeAcquireMs: (durationMs, kind) => {
+        observedAcquireMs.push(durationMs);
+        acquireKinds.push(kind);
+      },
     });
     let starts = 0;
     const start = async () => ({
@@ -108,7 +112,8 @@ describe("ProviderRuntimeRegistry", () => {
         }),
       ),
     );
-    expect(observedAcquireMs).toHaveLength(2);
+    expect(observedAcquireMs).toHaveLength(4);
+    expect(acquireKinds).toEqual(["started", "reused", "started", "reused"]);
     await registry.closeAll();
   });
 

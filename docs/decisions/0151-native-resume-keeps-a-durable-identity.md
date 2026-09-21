@@ -85,6 +85,12 @@ A resumed turn can also have a different allowed tool catalogue.
 - A reconnect may change available tools while retaining the native session.
   Exact-prefix cache reuse still depends on the provider and current authority.
 
+Local latency diagnostics distinguish registry runtime starts from acquisitions
+that reuse an existing registry entry. Reuse includes waiting for an in-flight
+startup; it is not a claim of a warm process or a model prompt-cache hit. These
+bounded measurements retain counts and latency samples, not conversation data.
+Drivers that do not use the shared runtime registry are outside these counts.
+
 ## Verification
 
 The opt-in Pi native smoke uses a temporary managed session, restarts the host

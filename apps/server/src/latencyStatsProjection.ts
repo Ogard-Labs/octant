@@ -26,6 +26,7 @@ type MeasurementKey =
   | "rpc-environment"
   | "rpc-toolchain"
   | "provider-runtime-acquire"
+  | "provider-runtime-reuse"
   | "projection-catch-up";
 
 interface Measurement {
@@ -42,6 +43,7 @@ const MEASUREMENTS: ReadonlyArray<Measurement> = [
   { key: "rpc-environment", label: "Environment observation", slowThresholdMs: 2_500 },
   { key: "rpc-toolchain", label: "Toolchain request handling", slowThresholdMs: 120_000 },
   { key: "provider-runtime-acquire", label: "Provider runtime start", slowThresholdMs: undefined },
+  { key: "provider-runtime-reuse", label: "Provider runtime reuse", slowThresholdMs: undefined },
   { key: "projection-catch-up", label: "Projection catch-up", slowThresholdMs: undefined },
 ];
 
