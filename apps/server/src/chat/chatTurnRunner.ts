@@ -622,10 +622,11 @@ export class ChatTurnRunner {
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
 
+      const resumeCursor = startHandle.resumeCursor ?? input.resumeCursor;
       if (
         input.driver.conversationOwnership === "provider" &&
         (String(startHandle.sessionId) !== String(input.attempt.providerSessionId) ||
-          startHandle.resumeCursor === undefined)
+          resumeCursor === undefined)
       ) {
         return yield* persistProviderFailure({
           category: "stale-resume",
@@ -633,8 +634,8 @@ export class ChatTurnRunner {
         });
       }
 
-      if (startHandle.resumeCursor !== undefined) {
-        currentAttempt = { ...currentAttempt, resumeCursor: startHandle.resumeCursor };
+      if (resumeCursor !== undefined) {
+        currentAttempt = { ...currentAttempt, resumeCursor };
         yield* input.persistAttempt(currentAttempt);
       }
 

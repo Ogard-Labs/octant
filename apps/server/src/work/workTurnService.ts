@@ -978,7 +978,8 @@ export class WorkTurnService {
         ? {}
         : {
             onSessionReady: (handle: ProviderSessionHandle) => {
-              if (handle.sessionId !== input.providerSessionId || handle.resumeCursor === undefined)
+              const resumeCursor = handle.resumeCursor ?? input.resumeCursor;
+              if (handle.sessionId !== input.providerSessionId || resumeCursor === undefined)
                 throw new Error("Provider did not return an exact resumable Work session.");
               const latest = this.#projection.lookup(input.command.requestId);
               if (latest === undefined) throw new Error("Work turn is unavailable.");
@@ -988,7 +989,7 @@ export class WorkTurnService {
                 threadId: latest.threadId,
                 turnId: latest.turnId,
                 status: "running",
-                resumeCursor: handle.resumeCursor,
+                resumeCursor,
                 updatedAt: decodeTimestamp(this.#clock()),
               });
             },

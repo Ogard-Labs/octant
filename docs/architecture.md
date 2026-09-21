@@ -582,6 +582,12 @@ those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
 the request-detail table labels them unavailable.
 
+Native Chat, Work, and Code resume acknowledgements may omit an unchanged resume
+cursor. The host retains the already-admitted cursor in that case and persists a
+replacement when one is returned. A changed session identity or an initial native
+session without a recoverable cursor still fails closed; no transcript replay or
+replacement conversation repairs the missing identity.
+
 Optional Project and
 thread token spend ceilings (0060) are host owner policy: the server refuses a
 provider-consuming turn at admission when remaining reserved capacity cannot

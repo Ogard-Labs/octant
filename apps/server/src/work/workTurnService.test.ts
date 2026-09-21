@@ -1218,33 +1218,53 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
-  it("keeps native Work follow-ups in the same session without replaying the transcript", async () => {
-    const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
-      input.onSessionReady?.({
-        sessionId: input.providerSessionId,
+  it.each([true, false])(
+    "keeps native Work follow-ups without replay when the provider repeats its cursor: %s",
+    async (repeatsCursor) => {
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          ...(input.resumeCursor === undefined || repeatsCursor
+            ? { resumeCursor: { driverKind: "pi" as const, value: "native-work" } }
+            : {}),
+        });
+        return { kind: "completed" as const, response: "Private earlier response" };
+      });
+      const fixture = serviceFixture({ nativeConversation: true, turnRuntime: { run } });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      const first = run.mock.calls[0]?.[0];
+      await fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        prompt: "Continue",
+      });
+      await fixture.waitForIdle();
+      const transcript = await fixture.service.transcript(ids.window, ids.thread);
+      expect(transcript.turns.at(-1)?.status).toBe("completed");
+      expect(run.mock.calls[1]?.[0]).toMatchObject({
+        providerSessionId: first?.providerSessionId,
         resumeCursor: { driverKind: "pi", value: "native-work" },
       });
-      return { kind: "completed" as const, response: "Private earlier response" };
-    });
-    const fixture = serviceFixture({ nativeConversation: true, turnRuntime: { run } });
-    await fixture.service.startFirstTurn(ids.window, startCommand());
-    await fixture.waitForIdle();
-    const first = run.mock.calls[0]?.[0];
-    await fixture.service.startFirstTurn(ids.window, {
-      ...startCommand(),
-      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
-      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
-      prompt: "Continue",
-    });
-    expect(run.mock.calls[1]?.[0]).toMatchObject({
-      providerSessionId: first?.providerSessionId,
-      resumeCursor: { driverKind: "pi", value: "native-work" },
-    });
-    expect(JSON.stringify(run.mock.calls[1]?.[0].context)).not.toContain(
-      "Private earlier response",
-    );
-    expect(JSON.stringify(run.mock.calls[1]?.[0].context)).not.toContain("Summarize the brief");
-  });
+      expect(JSON.stringify(run.mock.calls[1]?.[0].context)).not.toContain(
+        "Private earlier response",
+      );
+      expect(JSON.stringify(run.mock.calls[1]?.[0].context)).not.toContain("Summarize the brief");
+      const third = await fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+        turnId: decodeWorkTurnId("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+        prompt: "Continue again",
+      });
+      expect(third.kind).toBe("accepted");
+      await fixture.waitForIdle();
+      expect(run.mock.calls[2]?.[0]).toMatchObject({
+        providerSessionId: first?.providerSessionId,
+        resumeCursor: { driverKind: "pi", value: "native-work" },
+      });
+    },
+  );
 
   it("hands a follow-up turn the prior transcript as provider context", async () => {
     const run = vi.fn();

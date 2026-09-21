@@ -2213,101 +2213,109 @@ describe("ChatTurnRunner", () => {
     });
   });
 
-  it("calls resume and becomes Waiting without calling send, matching real driver contract where resume only reattaches", async () => {
-    const resumeCursor = {
-      driverKind: "openai-compatible" as const,
-      value: "opaque-session-ref",
-    };
-    let resumeCalled = false;
-    let sendCalled = false;
-    const queue = Effect.runSync(Queue.unbounded<never>());
-    const connection = {
-      subscribe: Effect.succeed(Stream.fromQueue(queue)),
-      start: () => Effect.succeed({ sessionId, resumeCursor }),
-      resume: (input: {
-        readonly sessionId: string;
-        readonly resumeCursor: { readonly driverKind: string; readonly value: string };
-      }) =>
-        Effect.sync(() => {
-          resumeCalled = true;
-          expect(input.sessionId).toBe(sessionId);
-          expect(input.resumeCursor).toEqual(resumeCursor);
-          // Real drivers (Codex/Claude) only reattach provider history and
-          // return a handle; they emit no terminal events from resume alone.
-          return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
+  it.each([true, false])(
+    "reattaches native Chat without resending when the provider repeats its cursor: %s",
+    async (repeatsCursor) => {
+      const resumeCursor = {
+        driverKind: "openai-compatible" as const,
+        value: "opaque-session-ref",
+      };
+      let resumeCalled = false;
+      let sendCalled = false;
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId, resumeCursor }),
+        resume: (input: {
+          readonly sessionId: string;
+          readonly resumeCursor: { readonly driverKind: string; readonly value: string };
+        }) =>
+          Effect.sync(() => {
+            resumeCalled = true;
+            expect(input.sessionId).toBe(sessionId);
+            expect(input.resumeCursor).toEqual(resumeCursor);
+            // Real drivers (Codex/Claude) only reattach provider history and
+            // return a handle; they emit no terminal events from resume alone.
+            return {
+              sessionId: input.sessionId,
+              ...(repeatsCursor ? { resumeCursor: input.resumeCursor } : {}),
+            };
+          }),
+        send: () =>
+          Effect.sync(() => {
+            sendCalled = true;
+          }),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const driver = {
+        conversationOwnership: "provider",
+        acquire: () => Effect.succeed(connection),
+      } as unknown as ProviderDriver;
+      const updates: ChatAttempt[] = [];
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          providerNativeExecute: async () => ({
+            query: "x",
+            backend: "provider-native",
+            results: [],
+          }),
         }),
-      send: () =>
-        Effect.sync(() => {
-          sendCalled = true;
-        }),
-      interrupt: () => Effect.void,
-      stop: () => Effect.void,
-      answerApproval: () => Effect.void,
-      answerUserInput: () => Effect.void,
-      answerTool: () => Effect.void,
-    };
-    const driver = {
-      acquire: () => Effect.succeed(connection),
-    } as unknown as ProviderDriver;
-    const updates: ChatAttempt[] = [];
-    const { scheduler, reservation } = makeScheduler();
-    const runner = new ChatTurnRunner({
-      capacityScheduler: scheduler,
-      contextHarness: makeHarness(),
-      researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
-        providerNativeExecute: async () => ({
-          query: "x",
-          backend: "provider-native",
-          results: [],
-        }),
-      }),
-    });
+      });
 
-    const exit = await Effect.runPromiseExit(
-      Effect.scoped(
-        runner.run({
-          thread: thread(),
-          attempt: attempt("queued"),
-          prompt: "continue",
-          context: [{ kind: "instructions", text: "Be concise." }],
-          scratchRoot: "/tmp/octant-scratch/thread",
-          driver,
-          providerInstanceId,
-          serviceLimits: serviceLimits(),
-          contextSubject: subject,
-          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
-          requestShape: "chat-turn",
-          varianceReserve: 20,
-          reservationId: reservation,
-          estimatedTokens: 100,
-          researchEnabled: false,
-          researchRoute: researchRoute({ kind: "disabled" }),
-          attachments: [],
-          mode: "resume",
-          resumeCursor,
-          persistAttempt: (next) => {
-            updates.push(next);
-            return Effect.void;
-          },
-          persistResponse: () =>
-            Effect.succeed({
-              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
-              digest: "a".repeat(64),
-              byteLength: 5,
-            }),
-        }),
-      ),
-    );
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt("queued"),
+            prompt: "continue",
+            context: [{ kind: "instructions", text: "Be concise." }],
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            mode: "resume",
+            resumeCursor,
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "a".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      );
 
-    expect(resumeCalled).toBe(true);
-    // Session reattachment must NOT call send — that would create a new
-    // provider turn and duplicate the original prompt, context, attachments,
-    // and tools.
-    expect(sendCalled).toBe(false);
-    expect(exit._tag).toBe("Failure");
-    expect(updates.at(-1)?.outcome).toBe("waiting");
-  });
+      expect(resumeCalled).toBe(true);
+      // Session reattachment must NOT call send — that would create a new
+      // provider turn and duplicate the original prompt, context, attachments,
+      // and tools.
+      expect(sendCalled).toBe(false);
+      expect(exit._tag).toBe("Failure");
+      expect(updates.at(-1)?.outcome).toBe("waiting");
+      expect(updates.at(-1)?.resumeCursor).toEqual(resumeCursor);
+    },
+  );
 
   it("maps stale-resume provider failure to waiting, never failed", async () => {
     const resumeCursor = {
