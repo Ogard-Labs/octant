@@ -20,6 +20,10 @@ command definition. Cancellation during discovery prevents process launch; runti
 shutdown also cancels pending discovery and waits for it to settle. Thread and
 checkout authority checks still precede both run and cancellation.
 
+The Code composer's attached checkout strip keeps its height and border when
+checkout metadata is unavailable. Missing project, branch and diff values stay
+blank; unavailable checkout actions are not shown.
+
 ## Overview and principles
 
 Octant is one Electron application that hosts a Bun HTTP server, a React
