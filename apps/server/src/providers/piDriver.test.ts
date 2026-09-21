@@ -179,6 +179,58 @@ async function terminal(events: Stream.Stream<ProviderRuntimeEvent, ProviderFail
 }
 
 describe("Pi provider driver", () => {
+  it("refuses concurrent owners of one native history and releases ownership after stop", async () => {
+    const f = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const first = yield* f.driver.acquire({ instanceId, projectRoot: root, mode: "code" });
+          const second = yield* f.driver.acquire({ instanceId, projectRoot: root, mode: "code" });
+          const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
+          const attempts = yield* Effect.all([first.start(input), second.start(input)], {
+            concurrency: "unbounded",
+            mode: "either",
+          });
+          expect(attempts.filter((result) => result._tag === "Right")).toHaveLength(1);
+          expect(f.starts).toHaveLength(1);
+          expect(f.active()).toBe(1);
+          const owner = attempts[0]?._tag === "Right" ? first : second;
+          const waiting = owner === first ? second : first;
+          const duplicate = yield* Effect.either(owner.start(input));
+          expect(duplicate._tag).toBe("Left");
+          expect(f.starts).toHaveLength(1);
+          yield* owner.stop(sessionId);
+          yield* waiting.start(input);
+          expect(f.starts).toHaveLength(2);
+          expect(f.active()).toBe(1);
+        }),
+      ),
+    );
+    expect(f.active()).toBe(0);
+  });
+
+  it("releases native history ownership when startup fails", async () => {
+    const f = fixture();
+    f.client.request.mockRejectedValueOnce(new Error("startup failed"));
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
+          expect((yield* Effect.either(connection.start(input)))._tag).toBe("Left");
+          expect(f.active()).toBe(0);
+          yield* connection.start(input);
+          expect(f.active()).toBe(1);
+        }),
+      ),
+    );
+    expect(f.active()).toBe(0);
+  });
+
   it("probes model readiness without sending a prompt", async () => {
     const { driver, client, registry, starts, active, released } = fixture("0.85.1");
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -495,6 +547,9 @@ describe("Pi provider driver", () => {
       }),
     );
     expect(lifecycle.indexOf("process-release")).toBeLessThan(lifecycle.indexOf("bridge-close"));
+    expect(lifecycle.indexOf("process-release")).toBeLessThan(
+      lifecycle.lastIndexOf("process-start"),
+    );
     expect(starts.at(-1)?.tools).toEqual([tool]);
     const resumedBridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
     expect(resumedBridge).toBeDefined();

@@ -49,6 +49,10 @@ A resumed turn can also have a different allowed tool catalogue.
   single turn's tool handle. Subsequent turns reuse a still-active context only
   with the same model and effective authority; expiry, stop, or changed authority
   requires fresh approval.
+- Pi permits only one live or starting process owner per native session within
+  a configured driver. Competing scoped connections refuse before spawning; an
+  idle or terminal process closes before its replacement starts. Failed startup and
+  completed cleanup release ownership without changing the native history.
 - Pi resumes an existing native file whose header matches both session and
   root. The create-if-missing session-ID flag is only used for session creation.
   Missing, ambiguous, malformed, or cross-Project histories refuse before input.

@@ -232,6 +232,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const makeRequestId = options.requestId ?? (() => crypto.randomUUID());
   const resumeIdentities = new Map<string, ResumeIdentity>();
+  const ownedSessions = new Set<ProviderSessionId>();
   let appManagedToolsVerified = false;
 
   return {
@@ -317,7 +318,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, projectRoot, mode, resumeIdentities, {
+      return makeConnection(options, projectRoot, mode, resumeIdentities, ownedSessions, {
         clientFactory,
         managedToolsFactory,
         clock,
@@ -339,6 +340,7 @@ function makeConnection(
   projectRoot: string,
   mode: PiSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
+  ownedSessions: Set<ProviderSessionId>,
   factories: {
     readonly clientFactory: (connection: PiRpcConnection) => PiClientPort;
     readonly managedToolsFactory: typeof createPiManagedToolsBridge;
@@ -406,6 +408,7 @@ function makeConnection(
         await Effect.runPromise(Scope.close(state.scope, Exit.void));
       } finally {
         await state.managedTools?.close().catch(() => undefined);
+        ownedSessions.delete(state.sessionId);
       }
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
@@ -614,6 +617,20 @@ function makeConnection(
         const selection = modelSelection(input.modelId);
         if (selection === undefined)
           throw failure("invalid-configuration", "Pi model ID must include provider/model.");
+        const previous = sessions.get(input.sessionId);
+        if (previous !== undefined && !previous.closed) {
+          if (input.resume !== true || (previous.promptActive && !previous.terminal)) {
+            throw failure("protocol", "Pi session already has an active owner.");
+          }
+          await closeState(previous);
+          sessions.delete(input.sessionId);
+        }
+        // Reserve before the first startup await: another scoped connection must
+        // never launch a second writer against the same native history file.
+        if (ownedSessions.has(input.sessionId)) {
+          throw failure("protocol", "Pi session already has an active owner.");
+        }
+        ownedSessions.add(input.sessionId);
         // Plan mode refuses browser effects and keeps provider egress closed,
         // so do not register an app-tool bridge that could never reach the
         // host without widening the sandbox network policy.
@@ -682,8 +699,6 @@ function makeConnection(
             }
             factories.appManagedTools.set(true);
           }
-          const previous = sessions.get(input.sessionId);
-          if (previous !== undefined) await closeState(previous);
           let state!: SessionState;
           const removeEvent = rpc.onEvent((event) => handleEvent(state, event));
           const priorToolCalls = rememberedToolCalls.get(input.sessionId) ?? new Map();
@@ -741,6 +756,7 @@ function makeConnection(
             await Effect.runPromise(Scope.close(scope, Exit.void));
           } finally {
             await managedTools?.close().catch(() => undefined);
+            ownedSessions.delete(input.sessionId);
           }
           throw error;
         }
