@@ -1802,6 +1802,33 @@ it("resumes the same native session after recreating the driver", async () => {
   expect(result.resumeCursor).toEqual(cursor);
 });
 
+it("keeps a retained native session identity reserved while it is idle", async () => {
+  const { driver, registry } = fixture(vibe, { runtimeVersion: "2.25.0" });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+        yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+        yield* Fiber.join(terminal);
+        yield* connection.stop(sessionId);
+
+        const claim = registry.claimNativeSession(
+          instanceId,
+          JSON.stringify(["acp-native", vibe.kind, "agent-session-1"]),
+        );
+        expect(claim.status).toBe("refused");
+      }),
+    ),
+  );
+});
+
 it("adding Computer use on a resumed task can send the next message", async () => {
   const { driver, client } = fixture(vibe, {
     mcpHttp: true,

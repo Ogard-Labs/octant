@@ -147,6 +147,7 @@ interface SessionState {
   readonly runtime: AcpRetainedRuntime;
   completed: boolean;
   readonly releaseOwnership: () => void;
+  readonly releaseTaskOwnership: () => void;
   readonly sessionId: ProviderSessionId;
   readonly sourceSessionId: string;
   readonly modelId: string;
@@ -875,6 +876,7 @@ function makeConnection(
       managedTools: AcpManagedToolsLease | undefined,
       appManagedTools: ProviderCapabilitySupport,
       releaseOwnership: () => void,
+      releaseTaskOwnership: () => void,
       runtime: AcpRetainedRuntime,
     ): Promise<SessionState> => {
       const previous = sessions.get(input.sessionId);
@@ -901,6 +903,7 @@ function makeConnection(
         runtime,
         completed: false,
         releaseOwnership,
+        releaseTaskOwnership,
         sessionId: input.sessionId,
         sourceSessionId: source.sessionId,
         modelId: input.modelId,
@@ -1079,6 +1082,7 @@ function makeConnection(
                   runtime.client,
                   runtime.managedTools,
                   runtime.appManagedTools,
+                  ownership.release,
                   ownership.release,
                   runtime,
                 );
@@ -1284,6 +1288,7 @@ function makeConnection(
               client,
               managedTools,
               appManagedTools,
+              releaseOwnership,
               ownership.release,
               runtime,
             );
@@ -1510,7 +1515,7 @@ function makeConnection(
                   options.instanceId,
                   Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
                 );
-                state.releaseOwnership();
+                state.releaseTaskOwnership();
                 await options.runtimeRegistry.retainNativeSessionRuntime(
                   options.instanceId,
                   JSON.stringify(["acp-native", profile.kind, state.sourceSessionId]),
