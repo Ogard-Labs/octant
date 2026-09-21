@@ -51,6 +51,10 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
   narrow reviewed exception is recorded; provider-native delegation is
   reported as unsupported and Octant-managed subagents are attributed
   separately.
+- Permission requests may carry only a tool-call ID. Optional title and kind
+  fields may be omitted or null; the mapper retains the latest description from
+  that session's tool updates for the approval UI. This does not grant permission:
+  the normal server authority check and explicit approval response still apply.
 - Unknown required methods, malformed frames, duplicate response ids,
   uncorrelated approvals, impossible ordering, or contradictory terminal
   outcomes fail as `protocol`. Unknown optional notifications stay bounded and

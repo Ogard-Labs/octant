@@ -4623,6 +4623,13 @@ function LaunchedShell(
           setDraftError("The Code thread could not be created.");
           return;
         }
+        codeThreadControllers.announceFirstPrompt(created.thread.id, prompt);
+        await controller.openCodeThread(
+          created.thread.id,
+          created.thread.title,
+          undefined,
+          created.thread.projectId,
+        );
         const firstTurnStarted = await codeController.startThreadTurn({
           threadId: created.thread.id,
           checkoutId: created.thread.checkoutId,
@@ -4630,6 +4637,8 @@ function LaunchedShell(
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
         });
         if (!firstTurnStarted) {
+          codeThreadControllers.announceFirstPrompt(created.thread.id, undefined);
+          codeThreadControllers.get(created.thread.id)?.setPendingDraft(prompt);
           const refusal = codeController.lastStartRefusal.current;
           setDraftError(
             refusal ?? "The thread was created, but its first provider turn could not be started.",
@@ -4638,12 +4647,7 @@ function LaunchedShell(
             codeThreadControllers.get(created.thread.id)?.showTurnRefusal(refusal);
           }
         }
-        await controller.openCodeThread(
-          created.thread.id,
-          created.thread.title,
-          undefined,
-          created.thread.projectId,
-        );
+        if (firstTurnStarted) codeThreadControllers.refreshConversation(created.thread.id);
       } else if (mode === "work") {
         const destinationHostId = refuseUnlessCreatableDestination({
           action: "create-work-thread",

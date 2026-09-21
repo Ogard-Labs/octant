@@ -148,7 +148,7 @@ function permissionRequest(id: string, toolCallId: string) {
     method: "session/request_permission" as const,
     params: {
       sessionId: "agent-session-1",
-      toolCall: { toolCallId, title: "Write", kind: "edit" },
+      toolCall: { toolCallId },
       options: [
         { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
         { optionId: "reject_once", name: "Reject", kind: "reject_once" },

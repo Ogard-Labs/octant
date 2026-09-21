@@ -195,6 +195,55 @@ describe("ACP event normalization", () => {
     ]);
   });
 
+  it("keeps the latest tool description when approval only identifies the tool", () => {
+    const state = context();
+    mapAcpNotification(state, {
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "acp-session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "bash-1",
+          title: "bash",
+          kind: "execute",
+        },
+      },
+    });
+    mapAcpNotification(state, {
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "acp-session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "bash-1",
+          title: "Count source files",
+        },
+      },
+    });
+    expect(
+      mapAcpPermissionRequest(state, {
+        kind: "request",
+        id: "permission-1",
+        method: "session/request_permission",
+        params: {
+          sessionId: "acp-session-1",
+          toolCall: { toolCallId: "bash-1" },
+          options: [
+            { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+            { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      kind: "approval",
+      allowOptionId: "allow_once",
+      rejectOptionId: "reject_once",
+      event: { kind: "approval-request", description: "Count source files", action: "execute" },
+    });
+  });
+
   it("maps side effects to approvals and q0 options to a single-select question", () => {
     const approval = mapAcpPermissionRequest(context(), {
       kind: "request",

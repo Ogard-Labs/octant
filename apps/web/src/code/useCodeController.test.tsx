@@ -184,6 +184,28 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap).toEqual(before);
   });
 
+  it("returns a created thread without waiting for another navigation snapshot", async () => {
+    const snapshot = vi
+      .fn()
+      .mockResolvedValueOnce(bootstrap())
+      .mockImplementation(() => new Promise<CodeBootstrap>(() => {}));
+    const created: CodeCommandResult = { kind: "thread-created", thread: thread(2) };
+    const client = fakeClient({ bootstrap: snapshot, execute: vi.fn(async () => created) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let returned: CodeCommandResult | undefined;
+    await act(async () => {
+      void result.current
+        .execute({ kind: "create-code-thread", thread: thread(2) })
+        .then((value) => {
+          returned = value;
+        });
+    });
+    expect(returned).toEqual(created);
+    expect(result.current.status).toBe("ready");
+    expect(result.current.bootstrap?.threads).toContainEqual(created.thread);
+  });
+
   it("projects a managed-thread-created result into both threads and checkouts", async () => {
     const managedCheckoutId = "40000000-0000-4000-8000-000000000009";
     const managedCheckout = {

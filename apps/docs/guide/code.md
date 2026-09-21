@@ -217,3 +217,8 @@ in **Settings › Host** deletes anything.
 - [Promotions](/guide/promotions) for creating Code threads from Work work
 - [Projects](/guide/projects) for managing Code Projects
 - [Chat](/guide/chat) for conversations without filesystem authority
+
+After a Code task is created, Octant opens it while the provider starts the first
+turn. The initial prompt stays visible in the task; a slow provider startup does
+not keep you on the welcome screen. Any startup refusal appears in the task so
+you can correct the prompt or provider selection and retry.

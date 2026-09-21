@@ -1568,8 +1568,6 @@ export function useCodeController(options: CodeControllerOptions) {
         const currentThreadId = activeThreadId.current;
         if (currentThreadId !== undefined && commandTargets(command, currentThreadId)) {
           void activateThread(currentThreadId);
-        } else if (result.kind === "thread-created") {
-          await loadBootstrap();
         }
         return result;
       } catch (error) {

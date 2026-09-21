@@ -117,8 +117,8 @@ const PermissionRequestParams = Schema.Struct({
   sessionId: Schema.NonEmptyTrimmedString,
   toolCall: Schema.Struct({
     toolCallId: Schema.NonEmptyTrimmedString,
-    title: Schema.NonEmptyTrimmedString,
-    kind: Schema.optional(Schema.NonEmptyTrimmedString),
+    title: Schema.optional(Schema.NullOr(Schema.String)),
+    kind: Schema.optional(Schema.NullOr(Schema.NonEmptyTrimmedString)),
   }),
   options: Schema.Array(
     Schema.Struct({

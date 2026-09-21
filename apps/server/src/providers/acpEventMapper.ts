@@ -23,7 +23,10 @@ export interface AcpEventContext {
   readonly displayName: string;
   sequence: number;
   terminal: boolean;
-  readonly tools: Map<string, { readonly toolCallId: string; terminal: boolean }>;
+  readonly tools: Map<
+    string,
+    { readonly toolCallId: string; terminal: boolean; title?: string; kind?: string }
+  >;
   readonly requestIds: Map<string | number, string>;
   readonly makeRequestId: () => string;
 }
@@ -139,7 +142,13 @@ function mapTool(
     if (state !== undefined)
       return [protocolFailure(`${context.displayName} repeated a tool start.`)];
     const title = normalized(update.title, LABEL_MAX_CHARACTERS) ?? "Tool";
-    const created = { toolCallId: `tool-${context.tools.size + 1}`, terminal: false };
+    const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
+    const created = {
+      toolCallId: `tool-${context.tools.size + 1}`,
+      terminal: false,
+      title,
+      ...(toolKind === undefined ? {} : { kind: toolKind }),
+    };
     context.tools.set(providerId, created);
     return [
       event(context, { kind: "tool-start", toolCallId: created.toolCallId, toolName: title }),
@@ -149,6 +158,10 @@ function mapTool(
     return [protocolFailure(`${context.displayName} updated a tool that was not started.`)];
   if (state.terminal)
     return [protocolFailure(`${context.displayName} repeated a terminal tool update.`)];
+  const title = normalized(update.title, SUMMARY_MAX_CHARACTERS);
+  const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
+  if (title !== undefined) state.title = title;
+  if (toolKind !== undefined) state.kind = toolKind;
   const status = string(update.status);
   if (status === "completed") {
     state.terminal = true;
@@ -262,6 +275,12 @@ export function mapAcpPermissionRequest(
       },
     };
   }
+  const tool = context.tools.get(request.params.toolCall.toolCallId);
+  const title =
+    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) ??
+    tool?.title ??
+    "Tool requires permission";
+  const toolKind = request.params.toolCall.kind ?? tool?.kind ?? "tool";
   const requestId = context.makeRequestId();
   context.requestIds.set(request.id, requestId);
   const questionOptions = request.params.options.filter((option) =>
@@ -282,7 +301,7 @@ export function mapAcpPermissionRequest(
       event: mappedEvent(context, {
         kind: "user-input-request",
         requestId,
-        prompt: request.params.toolCall.title,
+        prompt: title,
         options,
       }),
     };
@@ -307,8 +326,8 @@ export function mapAcpPermissionRequest(
     event: mappedEvent(context, {
       kind: "approval-request",
       requestId,
-      action: request.params.toolCall.kind ?? "tool",
-      description: request.params.toolCall.title,
+      action: toolKind,
+      description: title,
     }),
   };
 }
