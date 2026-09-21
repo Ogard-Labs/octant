@@ -61,9 +61,10 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text uses the platform stack by default: `-apple-system,
-BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`. The bundled variable
-face remains available as an explicit Appearance choice. Code, paths, branches,
+Interface text uses the bundled Inter variable face by default, with the
+platform stack behind it: `'Inter Variable', -apple-system, BlinkMacSystemFont,
+'Segoe UI', system-ui, sans-serif` (0149). The platform face remains an explicit
+Appearance choice, System interface. Code, paths, branches,
 identifiers, and terminal text use the monospace stack. Antialiased,
 `text-rendering: optimizeLegibility`, no synthetic bold.
 
@@ -351,7 +352,7 @@ Typography has distinct jobs:
 
 | Job        | Default                                                                                                                   | Usage                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                                    | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                  | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                                                        | Wordmark, section headings, selected navigation labels                             |
 | Transcript | inherits Interface                                                                                                        | Long-running conversation and composer; readable at 13–16px, 13px by default       |
 | Editor     | `'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |

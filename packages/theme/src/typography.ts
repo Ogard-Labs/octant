@@ -44,6 +44,24 @@ export interface ResolvedTypographyProjection {
 
 const LEGACY_DEFAULT_UI_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+
+/**
+ * The platform face, as Appearance's System interface choice saves it. It is
+ * deliberately not the legacy stack above: that string means "the default",
+ * so a person who picked System would otherwise be given Inter.
+ */
+export const SYSTEM_UI_FAMILY =
+  "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+/**
+ * The interface family a saved setting means. Settings saved while the system
+ * face was the default hold its stack verbatim; that string meant "the
+ * default", so it keeps meaning the default instead of pinning those people to
+ * whichever face was the default when they saved.
+ */
+export function savedUiFamily(family: string): string {
+  return family === LEGACY_DEFAULT_UI_FAMILY ? DEFAULT_UI_TYPOGRAPHY.fontFamily : family;
+}
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
 const MIN_LINE_HEIGHT = 1;
@@ -76,13 +94,8 @@ export function resolveTypographyProjection(
   const sourceTerminal = asRecord(source.terminal);
   const defaults = DEFAULT_THEME_SETTINGS.typography;
 
-  // Settings saved before the renderer shipped its own interface face hold
-  // the old system stack verbatim. That string meant "the default", so it
-  // keeps meaning the default instead of pinning those users to a bundled face.
   const uiFamily = resolveFamily(
-    sourceUi.family === LEGACY_DEFAULT_UI_FAMILY
-      ? DEFAULT_UI_TYPOGRAPHY.fontFamily
-      : sourceUi.family,
+    typeof sourceUi.family === "string" ? savedUiFamily(sourceUi.family) : sourceUi.family,
     availableFonts,
     DEFAULT_UI_TYPOGRAPHY.fontFamily,
   );
