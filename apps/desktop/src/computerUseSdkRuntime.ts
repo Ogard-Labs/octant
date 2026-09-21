@@ -75,6 +75,31 @@ export async function startComputerDriverRuntime(options: {
       throw new Error("Computer-use driver contract is incompatible.");
     const connected = sdk.CuaDriver.connect(connection.socketPath);
     client = connected;
+    const health = await connected.callTool(
+      "health_report",
+      JSON.stringify({ include: ["bundle_identity"] }),
+      {
+        signal: AbortSignal.any([
+          stopping.signal,
+          AbortSignal.timeout(15_000),
+          ...(options.signal === undefined ? [] : [options.signal]),
+        ]),
+      },
+    );
+    const report: unknown = JSON.parse(health.structuredJson ?? "null");
+    if (
+      health.isError ||
+      !isRecord(report) ||
+      report.schema_version !== "1" ||
+      !Array.isArray(report.checks) ||
+      !report.checks.some(
+        (check: unknown) =>
+          isRecord(check) && check.name === "bundle_identity" && check.status === "pass",
+      )
+    )
+      throw new Error(
+        "Computer-use host application identity could not be verified. Run the packaged Octant application.",
+      );
     void host.waitForExit(connection.generation).then(
       () => {
         if (!closed) options.onExit(connection.generation);
@@ -120,4 +145,8 @@ export async function openComputerUsePermissionSettings(): Promise<void> {
   if (process.platform !== "darwin") return;
   const sdk = await import("@trycua/cua-driver/electron");
   await sdk.openMacOSScreenRecordingSettings();
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

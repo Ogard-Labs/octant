@@ -35,6 +35,10 @@ A resumed turn can also have a different allowed tool catalogue.
   Interrupted work cancels pending approval and native input; a changed owner or
   authority revokes the session. This extends lifecycle handling without changing
   0113's consent, expiry, disable, and native confinement requirements.
+- Computer driver startup verifies the driver-reported host bundle identity as
+  well as protocol and binary versions. A missing or failed identity check closes
+  the child and refuses admission. Source-run Electron is not the packaged Octant
+  identity and must not substitute its grants for Octant's.
 - A computer-use window whose native accessibility surface cannot be resolved
   returns an explicit window-unavailable refusal. A screenshot alone does not
   authorize input; revalidation must still resolve that exact window before acting.
