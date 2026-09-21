@@ -13,6 +13,11 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+Code task creation accepts a plain-folder checkout when the server admits it under
+Code settings. The renderer preserves its proposed branch as delivery intent without
+claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
+actions continue to report unavailable for plain folders.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
