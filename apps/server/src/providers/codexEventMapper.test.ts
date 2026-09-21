@@ -1052,6 +1052,47 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
+  it("ignores delayed usage from an earlier turn without poisoning the active turn totals", () => {
+    const session = context({ turnId: "turn-2" });
+    const report = (turnId: string, inputTokens: number, threadId = "thread-1") =>
+      map(
+        session,
+        notification("thread/tokenUsage/updated", {
+          threadId,
+          turnId,
+          tokenUsage: {
+            total: {
+              totalTokens: inputTokens,
+              inputTokens,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+            },
+            last: {
+              totalTokens: 10,
+              inputTokens: 10,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+            },
+            modelContextWindow: null,
+          },
+        }),
+      );
+    expect(report("turn-1", 100)).toEqual([{ kind: "ignored" }]);
+    expect(session.usage).toBeUndefined();
+    expect(report("turn-2", 100, "other-thread")).toMatchObject([
+      { kind: "protocol-failure", failure: { category: "protocol" } },
+    ]);
+    expect(report("turn-2", 110)).toMatchObject([
+      { kind: "event", event: { kind: "usage", inputTokens: 10 } },
+    ]);
+    expect(report("turn-1", 100)).toEqual([{ kind: "ignored" }]);
+    expect(report("turn-2", 120)).toMatchObject([
+      { kind: "event", event: { kind: "usage", inputTokens: 20 } },
+    ]);
+  });
+
   it("counts each new request once after resume, duplicate reports, and a counter reset", () => {
     const session = context();
     const report = (

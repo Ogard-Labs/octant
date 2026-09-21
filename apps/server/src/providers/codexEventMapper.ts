@@ -686,9 +686,10 @@ function mapNotification(
       return results.length === 0 ? [{ kind: "ignored" }] : results;
     }
     case "thread/tokenUsage/updated": {
-      if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
-        return correlationFailure();
-      }
+      if (message.params.threadId !== context.threadId) return correlationFailure();
+      // Usage can arrive after a resumed thread has advanced to its next turn.
+      // Stale telemetry neither belongs in the new totals nor fails that turn.
+      if (message.params.turnId !== context.turnId) return [{ kind: "ignored" }];
       const { total, last } = message.params.tokenUsage;
       const previous = context.usage?.previous;
       // A resumed thread already contains usage from older turns. The first
