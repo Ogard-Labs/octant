@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -24,6 +25,7 @@ export interface AcpManagedToolsBridge {
   readonly port: number;
   /** Resolves only after the agent initialized this endpoint and listed its exact tools. */
   readonly attested: Promise<void>;
+  readonly bind: (execute: ExecuteManagedTool | undefined) => void;
   readonly close: () => Promise<void>;
 }
 
@@ -110,7 +112,25 @@ export async function createAcpManagedToolsBridge(
   definitions: ReadonlyArray<ProviderToolDefinition>,
   execute: ExecuteManagedTool,
 ): Promise<AcpManagedToolsBridge> {
-  const managed = createManagedMcpTools(definitions, execute);
+  let binding: {
+    readonly execute: ExecuteManagedTool | undefined;
+    readonly controller: AbortController;
+  } = { execute, controller: new AbortController() };
+  const admittedRequest = new AsyncLocalStorage<typeof binding>();
+  const bind = (next: ExecuteManagedTool | undefined) => {
+    binding.controller.abort();
+    binding = { execute: next, controller: new AbortController() };
+  };
+  const managed = createManagedMcpTools(definitions, async (name, inputJson, signal, context) => {
+    const admitted = admittedRequest.getStore();
+    if (admitted === undefined || admitted.execute === undefined)
+      return { resultJson: '{"error":"tool-unavailable"}', isError: true };
+    const boundSignal = AbortSignal.any([signal, admitted.controller.signal]);
+    if (boundSignal.aborted) return { resultJson: '{"error":"tool-interrupted"}', isError: true };
+    return context === undefined
+      ? admitted.execute(name, inputJson, boundSignal)
+      : admitted.execute(name, inputJson, boundSignal, context);
+  });
   if (managed.kind !== "ready") throw new Error("ACP tool catalogue is invalid.");
 
   const token = randomBytes(32).toString("base64url");
@@ -155,13 +175,15 @@ export async function createAcpManagedToolsBridge(
       response.end();
       return;
     }
+    // Admission precedes body upload so a delayed request keeps its original turn.
+    const admitted = binding;
     void (async () => {
       const body = request.method === "POST" ? await readRequestBody(request) : undefined;
       let method: unknown;
       if (typeof body === "object" && body !== null && !Array.isArray(body) && "method" in body) {
         method = body.method;
       }
-      await transport.handleRequest(request, response, body);
+      await admittedRequest.run(admitted, () => transport.handleRequest(request, response, body));
       if (method === "initialize") observedInitialize = true;
       if (method === "tools/list") observedToolsList = true;
       markAttested();
@@ -210,9 +232,11 @@ export async function createAcpManagedToolsBridge(
       headers: [{ name: "Authorization", value: `Bearer ${token}` }],
     },
     port: address.port,
+    bind,
     close: async () => {
       if (closed) return;
       closed = true;
+      bind(undefined);
       if (attestationTimer !== undefined) clearTimeout(attestationTimer);
       rejectAttested(new AcpFailure("closed", "ACP MCP bridge closed before runtime attestation."));
       await transport.close().catch(() => undefined);

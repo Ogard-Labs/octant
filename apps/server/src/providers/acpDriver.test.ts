@@ -552,6 +552,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           },
           port: 43123,
           attested: Promise.resolve(),
+          bind: () => {},
           close: bridgeClose,
         };
       },
@@ -601,6 +602,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       },
       port: 43123,
       attested: Promise.resolve(),
+      bind: () => {},
       close: bridgeClose,
     }));
     const { driver, client } = fixture(profiles[0]!, { managedToolsBridgeFactory: bridgeFactory });
@@ -654,6 +656,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           },
           port: 43123,
           attested: Promise.resolve(),
+          bind: () => {},
           close: bridgeClose,
         };
       },
@@ -1658,6 +1661,7 @@ it("adding Computer use on a resumed task can send the next message", async () =
       },
       port: 43123,
       attested: Promise.resolve(),
+      bind: () => {},
       close: async () => undefined,
     }),
   });
