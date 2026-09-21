@@ -8165,6 +8165,11 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            await codeOperationRuntime?.close();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
+          try {
             await warmingProviders;
             await providerRuntimeRegistry.closeAll();
           } catch (error) {
@@ -8172,11 +8177,6 @@ export function startOctantServer(
           }
           try {
             zenService.close();
-          } catch (error) {
-            shutdownFailure ??= error;
-          }
-          try {
-            await codeOperationRuntime?.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

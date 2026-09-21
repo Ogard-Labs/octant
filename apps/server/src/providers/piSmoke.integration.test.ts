@@ -23,16 +23,23 @@ async function fixture() {
   const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-pi-smoke-")));
   const piHome = join(temporaryRoot, "managed");
   const registry = new ProviderRuntimeRegistry();
+  let processStarts = 0;
+  const processPort = makePiProcessLive();
   const createDriver = (runtimeRegistry: ProviderRuntimeRegistry) =>
     makePiDriver({
       instanceId,
       binaryPath,
       piHome,
-      process: makePiProcessLive(),
+      process: {
+        start: (input) => {
+          processStarts += 1;
+          return processPort.start(input);
+        },
+      },
       runtimeRegistry,
     });
   const driver = createDriver(registry);
-  return { temporaryRoot, registry, driver, createDriver };
+  return { temporaryRoot, registry, driver, createDriver, processStarts: () => processStarts };
 }
 
 describe("installed Pi runtime", () => {
@@ -57,7 +64,7 @@ describe("installed Pi runtime", () => {
   it.skipIf(!smokeEnabled)(
     "remembers prior input and invokes newly available tools after a host restart",
     async () => {
-      const { temporaryRoot, registry, driver, createDriver } = await fixture();
+      const { temporaryRoot, registry, driver, createDriver, processStarts } = await fixture();
       const restartedRegistry = new ProviderRuntimeRegistry();
       const marker = `octant-${crypto.randomUUID()}`;
       const toolMarker = `tool-${crypto.randomUUID()}`;
@@ -104,6 +111,41 @@ describe("installed Pi runtime", () => {
             }),
           ),
         );
+        const startsBeforeWarmTurn = processStarts();
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({
+                instanceId,
+                projectRoot: temporaryRoot,
+                mode: "code",
+              });
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: cursor,
+                executionPolicy: "full-access",
+                tools: [],
+              });
+              const completion = yield* Effect.fork(collectTerminal(yield* connection.subscribe));
+              yield* connection.send({
+                sessionId,
+                prompt:
+                  "Reply only with the exact marker I asked you to remember. Do not use tools.",
+                attachments: [],
+                tools: [],
+              });
+              const events = Array.from(yield* Fiber.join(completion));
+              expect(events.at(-1)?.kind).toBe("completed");
+              expect(
+                events
+                  .flatMap((event) => (event.kind === "text-delta" ? [event.text] : []))
+                  .join(""),
+              ).toContain(marker);
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        expect(processStarts()).toBe(startsBeforeWarmTurn);
         await registry.closeAll();
         const restarted = createDriver(restartedRegistry);
         await Effect.runPromise(
@@ -156,6 +198,56 @@ describe("installed Pi runtime", () => {
             }),
           ),
         );
+        const startsBeforeWarmToolTurn = processStarts();
+        const warmToolMarker = `warm-tool-${crypto.randomUUID()}`;
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* restarted.acquire({
+                instanceId,
+                projectRoot: temporaryRoot,
+                mode: "code",
+              });
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: cursor,
+                executionPolicy: "full-access",
+                tools: [tool],
+              });
+              let calls = 0;
+              const stream = (yield* connection.subscribe).pipe(
+                Stream.tap((event) => {
+                  if (event.kind !== "tool-request") return Effect.void;
+                  calls += 1;
+                  return connection.answerTool({
+                    sessionId,
+                    requestId: event.requestId,
+                    resultJson: JSON.stringify({ marker: warmToolMarker }),
+                    isError: false,
+                  });
+                }),
+              );
+              const completion = yield* Effect.fork(collectTerminal(stream));
+              yield* connection.send({
+                sessionId,
+                prompt:
+                  "Call octant_smoke_observe again and reply only with its new marker. Do not reuse the earlier tool result.",
+                attachments: [],
+                tools: [tool],
+              });
+              const events = Array.from(yield* Fiber.join(completion));
+              expect(events.at(-1)?.kind).toBe("completed");
+              expect(calls).toBe(1);
+              expect(
+                events
+                  .flatMap((event) => (event.kind === "text-delta" ? [event.text] : []))
+                  .join(""),
+              ).toContain(warmToolMarker);
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        expect(processStarts()).toBe(startsBeforeWarmToolTurn);
         expect(registry.activeSessionCount(instanceId)).toBe(0);
         expect(restartedRegistry.activeSessionCount(instanceId)).toBe(0);
       } finally {

@@ -1,3 +1,4 @@
+import { NativeSessionRuntimePool, type RetainedNativeRuntime } from "./nativeSessionRuntimePool";
 import {
   decodeProviderObservedState,
   decodeProviderFailure,
@@ -95,6 +96,9 @@ export class ProviderRuntimeRegistry {
   readonly #activeSessionsByInstance = new Map<ProviderInstanceId, number>();
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
   readonly #runtimes = new Map<ProviderInstanceId, RuntimeEntry>();
+  readonly #idleNativeSessions = new NativeSessionRuntimePool();
+  #closed = false;
+  readonly #nativeSessionShutdown = new Map<symbol, () => Promise<void>>();
   readonly #nativeSessions = new Map<ProviderInstanceId, Map<string, symbol>>();
   readonly #invalidationListeners = new Map<ProviderInstanceId, Set<() => void>>();
   readonly #updatingByExecutable = new Map<string, ReadonlySet<string>>();
@@ -170,13 +174,40 @@ export class ProviderRuntimeRegistry {
     else this.#activeSessionsByInstance.set(instanceId, count);
   }
 
+  takeNativeSessionRuntime<T>(
+    instanceId: ProviderInstanceId,
+    identity: string,
+    compatibility: string,
+  ): Promise<RetainedNativeRuntime<T> | undefined> {
+    if (this.executableUpdateInProgress(instanceId)) return Promise.resolve(undefined);
+    return this.#idleNativeSessions.take(instanceId, identity, compatibility);
+  }
+
+  retainNativeSessionRuntime<T>(
+    instanceId: ProviderInstanceId,
+    identity: string,
+    resource: RetainedNativeRuntime<T>,
+  ): Promise<void> {
+    return this.#idleNativeSessions.retain(instanceId, identity, resource);
+  }
+
+  #hasLeasedNativeSession(instanceId: ProviderInstanceId): boolean {
+    return [...(this.#nativeSessions.get(instanceId)?.keys() ?? [])].some(
+      (identity) => !this.#idleNativeSessions.has(instanceId, identity),
+    );
+  }
+
   claimNativeSession(
     instanceId: ProviderInstanceId,
     nativeIdentity: string,
   ):
-    | { readonly status: "claimed"; readonly release: () => void }
+    | {
+        readonly status: "claimed";
+        readonly release: () => void;
+        readonly onShutdown: (cleanup: () => Promise<void>) => void;
+      }
     | { readonly status: "refused"; readonly failure: ProviderFailure } {
-    if (this.executableUpdateInProgress(instanceId)) {
+    if (this.#closed || this.executableUpdateInProgress(instanceId)) {
       return {
         status: "refused",
         failure: {
@@ -200,9 +231,13 @@ export class ProviderRuntimeRegistry {
     this.#nativeSessions.set(instanceId, sessions);
     return {
       status: "claimed",
+      onShutdown: (cleanup) => {
+        if (sessions.get(nativeIdentity) === owner) this.#nativeSessionShutdown.set(owner, cleanup);
+      },
       release: () => {
         if (sessions.get(nativeIdentity) !== owner) return;
         sessions.delete(nativeIdentity);
+        this.#nativeSessionShutdown.delete(owner);
         if (sessions.size === 0 && this.#nativeSessions.get(instanceId) === sessions) {
           this.#nativeSessions.delete(instanceId);
         }
@@ -220,10 +255,7 @@ export class ProviderRuntimeRegistry {
       );
     }
     for (const instanceId of instanceIds) {
-      if (
-        this.activeSessionCount(instanceId) !== 0 ||
-        (this.#nativeSessions.get(instanceId)?.size ?? 0) > 0
-      ) {
+      if (this.activeSessionCount(instanceId) !== 0 || this.#hasLeasedNativeSession(instanceId)) {
         throw new ProviderRuntimeInvalidationRejected(
           "Stop active sessions before updating this provider CLI.",
         );
@@ -349,10 +381,7 @@ export class ProviderRuntimeRegistry {
   }
 
   async invalidateRuntime(instanceId: ProviderInstanceId): Promise<void> {
-    if (
-      this.activeSessionCount(instanceId) !== 0 ||
-      (this.#nativeSessions.get(instanceId)?.size ?? 0) > 0
-    ) {
+    if (this.activeSessionCount(instanceId) !== 0 || this.#hasLeasedNativeSession(instanceId)) {
       throw new ProviderRuntimeInvalidationRejected(
         "Stop active sessions before changing this provider runtime.",
       );
@@ -360,6 +389,7 @@ export class ProviderRuntimeRegistry {
     const entry = this.#runtimes.get(instanceId);
     try {
       if (entry !== undefined) await this.#closeEntry(instanceId, entry);
+      await this.#idleNativeSessions.invalidate(instanceId);
     } finally {
       this.clearObservedState(instanceId);
       this.clearCompatibleProtocol(instanceId);
@@ -368,11 +398,18 @@ export class ProviderRuntimeRegistry {
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all(
-      [...this.#runtimes.entries()].map(([instanceId, entry]) =>
+    this.#closed = true;
+    const results = await Promise.allSettled([
+      this.#idleNativeSessions.close(),
+      ...[...this.#nativeSessionShutdown.values()].map((cleanup) =>
+        Promise.resolve().then(cleanup),
+      ),
+      ...[...this.#runtimes.entries()].map(([instanceId, entry]) =>
         this.#closeEntry(instanceId, entry),
       ),
-    );
+    ]);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
   }
 
   async reconcile(): Promise<void> {

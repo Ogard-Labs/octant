@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http";
 import type { ProviderToolDefinition } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPiManagedToolsBridge, type PiManagedToolCall } from "./piManagedTools";
@@ -19,6 +20,60 @@ afterEach(async () => {
 });
 
 describe("Pi app-managed tool bridge", () => {
+  it("does not route an old partially uploaded request through a newly bound turn", async () => {
+    const oldExecute = vi.fn(async () => ({ resultJson: "{}", isError: false }));
+    const nextExecute = vi.fn(async () => ({ resultJson: '{"new":true}', isError: false }));
+    const bridge = await createPiManagedToolsBridge([definition], oldExecute);
+    bridges.push(bridge);
+    const body = JSON.stringify({ toolCallId: "old", name: definition.name, input: {} });
+    const response = await new Promise<string>((resolve, reject) => {
+      const request = httpRequest(
+        bridge.config.url,
+        {
+          method: "POST",
+          headers: {
+            expect: "100-continue",
+            "content-length": Buffer.byteLength(body),
+            "x-octant-pi-token": bridge.config.token,
+          },
+        },
+        (response) => {
+          let output = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => {
+            output += chunk;
+          });
+          response.on("end", () => resolve(output));
+          response.on("error", reject);
+        },
+      );
+      request.on("error", reject);
+      request.on("continue", () => {
+        bridge.bind(nextExecute);
+        request.end(body);
+      });
+      request.flushHeaders();
+    });
+    expect(JSON.parse(response)).toMatchObject({ isError: true });
+    expect(oldExecute).not.toHaveBeenCalled();
+    expect(nextExecute).not.toHaveBeenCalled();
+    const next = await fetch(bridge.config.url, {
+      method: "POST",
+      headers: { "x-octant-pi-token": bridge.config.token },
+      body: JSON.stringify({ toolCallId: "next", name: definition.name, input: {} }),
+    });
+    expect(await next.json()).toMatchObject({ isError: false, resultJson: '{"new":true}' });
+    expect(nextExecute).toHaveBeenCalledTimes(1);
+    bridge.bind(undefined);
+    const idle = await fetch(bridge.config.url, {
+      method: "POST",
+      headers: { "x-octant-pi-token": bridge.config.token },
+      body,
+    });
+    expect(await idle.json()).toMatchObject({ isError: true });
+    expect(nextExecute).toHaveBeenCalledTimes(1);
+  });
+
   it("routes a custom tool call through the per-session loopback endpoint", async () => {
     const calls: PiManagedToolCall[] = [];
     const bridge = await createPiManagedToolsBridge([definition], async (call) => {

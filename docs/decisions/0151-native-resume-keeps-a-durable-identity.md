@@ -55,6 +55,21 @@ A resumed turn can also have a different allowed tool catalogue.
   completed cleanup release ownership without changing the native history.
   Starting reservations exclude CLI updates before the process becomes active;
   a stale release cannot revoke a newer reservation.
+- Pi 0.85.1 can retain a successfully settled process for 30 seconds, with at
+  most four idle native runtimes across the host. Warm reuse requires identical
+  executable, managed home, root, mode, model, execution policy, and full tool
+  catalogue. A mismatch closes the old process before cold-resuming the same
+  native history. Other Pi versions retain the cold-resume path until verified.
+- Retained processes have no active turn or tool executor. Each resumed turn
+  receives fresh event, approval, cancellation, and tool-answer state. A bridge
+  request captures its binding before reading its body, so a delayed old request
+  cannot execute through the next turn. Unexpected idle activity destroys the
+  runtime. Interrupted, failed, or unresolved turns are never retained.
+- The runtime registry owns idle expiry, least-recently-released eviction, CLI
+  update cleanup, and shutdown. Native ownership remains reserved through
+  cleanup; uncertain cleanup refuses replacement. Shutdown rejects new native
+  claims, waits for starting runtimes, and destroys late returns rather than
+  repopulating the idle pool. Code producers stop before the final registry drain.
 - Pi resumes an existing native file whose header matches both session and
   root. The create-if-missing session-ID flag is only used for session creation.
   Missing, ambiguous, malformed, or cross-Project histories refuse before input.

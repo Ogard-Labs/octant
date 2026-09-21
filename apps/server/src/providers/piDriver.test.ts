@@ -208,6 +208,205 @@ describe("Pi provider driver", () => {
     expect(f.active()).toBe(0);
   });
 
+  it("reuses a settled native process across scoped turns and destroys it on shutdown", async () => {
+    const f = fixture("0.85.1");
+    let cursor: import("@octant/contracts").ProviderResumeCursor | undefined;
+    try {
+      for (let turn = 0; turn < 2; turn += 1) {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              const handle = yield* cursor === undefined
+                ? connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                : connection.resume({
+                    sessionId,
+                    resumeCursor: cursor,
+                    executionPolicy: "approval-gated",
+                    tools: [],
+                  });
+              cursor = handle.resumeCursor;
+              const collected = terminal(yield* connection.subscribe);
+              yield* connection.send({
+                sessionId,
+                prompt: `turn ${turn}`,
+                attachments: [],
+                tools: [],
+              });
+              f.client.emit({ type: "agent_settled" });
+              expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        expect(f.active()).toBe(1);
+        expect(f.starts).toHaveLength(1);
+        expect(f.registry.activeSessionCount(instanceId)).toBe(0);
+      }
+    } finally {
+      await f.registry.closeAll();
+    }
+    expect(f.active()).toBe(0);
+  });
+
+  it.each(["authority", "catalogue"] as const)(
+    "closes an incompatible warm process before resuming the same history after a %s change",
+    async (change) => {
+      const f = fixture("0.85.1");
+      const tool: ProviderToolDefinition = {
+        name: "octant_observe",
+        description: "Observe",
+        inputSchema: { type: "object" },
+      };
+      try {
+        const cursor = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              const handle = yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              });
+              const collected = terminal(yield* connection.subscribe);
+              yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+              f.client.emit({ type: "agent_settled" });
+              yield* Effect.promise(() => collected);
+              yield* connection.stop(sessionId);
+              return handle.resumeCursor;
+            }),
+          ),
+        );
+        if (cursor === undefined) throw new Error("Missing cursor");
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: cursor,
+                executionPolicy: change === "authority" ? "plan" : "approval-gated",
+                tools: change === "catalogue" ? [tool] : [],
+              });
+              expect(f.starts).toHaveLength(2);
+              expect(f.starts[1]).toMatchObject({ sessionId, resume: true });
+              expect(f.lifecycle.indexOf("process-release")).toBeLessThan(
+                f.lifecycle.lastIndexOf("process-start"),
+              );
+            }),
+          ),
+        );
+      } finally {
+        await f.registry.closeAll();
+      }
+      expect(f.active()).toBe(0);
+    },
+  );
+
+  it("waits for a starting native runtime to close during registry shutdown", async () => {
+    const f = fixture("0.85.1");
+    const original = f.client.request.getMockImplementation();
+    if (original === undefined) throw new Error("Missing client implementation");
+    let finish = () => {};
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    f.client.request.mockImplementationOnce(async (type, fields) => {
+      await gate;
+      return original(type, fields);
+    });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      f.driver
+        .acquire({ instanceId, projectRoot: root, mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const starting = Effect.runPromise(
+      Effect.either(connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })),
+    );
+    try {
+      await vi.waitFor(() =>
+        expect(f.client.request).toHaveBeenCalledWith("set_model", expect.anything()),
+      );
+      let closed = false;
+      const closing = f.registry.closeAll().then(() => {
+        closed = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(closed).toBe(false);
+      finish();
+      await closing;
+      expect((await starting)._tag).toBe("Left");
+      expect(f.active()).toBe(0);
+    } finally {
+      finish();
+      await starting;
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    }
+  });
+
+  it("does not retain a process that settles with an unfinished tool", async () => {
+    const f = fixture("0.85.1");
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({
+              instanceId,
+              projectRoot: root,
+              mode: "code",
+            });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* connection.send({ sessionId, prompt: "work", attachments: [], tools: [] });
+            f.client.emit({
+              type: "tool_execution_start",
+              toolCallId: "unfinished",
+              toolName: "read",
+            });
+            f.client.emit({ type: "agent_settled" });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      expect(f.active()).toBe(0);
+    } finally {
+      await f.registry.closeAll();
+    }
+  });
+
+  it("destroys interrupted processes instead of retaining them", async () => {
+    const f = fixture("0.85.1");
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.send({ sessionId, prompt: "work", attachments: [], tools: [] });
+          yield* connection.interrupt(sessionId);
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    expect(f.active()).toBe(0);
+    await f.registry.closeAll();
+  });
+
   it("keeps native history exclusive when the configured driver is recreated", async () => {
     const first = fixture();
     const recreated = fixture("0.80.10", first.registry);
