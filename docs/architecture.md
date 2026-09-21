@@ -569,7 +569,11 @@ planning; it replaces emergency estimates while conflicting model facts retain
 the more conservative bound.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. One operation contributes one request; a later report replaces its
-previous totals. A separate replay checkpoint imports existing Code reports on
+previous totals. Code conversation usage also preserves optional cache-read and cache-write
+counters. Codex native-thread totals are normalized to turn usage before recording;
+missing cache reports remain unknown. ACP and Pi resume cursors carry a durable
+task binding, and resume supplies the currently allowed tool catalogue without
+reconstructing native history ([0151](decisions/0151-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
 upgrade without replaying unrelated purged usage. The provider and model are
 those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and

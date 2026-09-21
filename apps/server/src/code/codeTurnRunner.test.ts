@@ -557,7 +557,13 @@ describe("CodeTurnRunner", () => {
             prompt: "Choose a target",
             options: ["A", "B"],
           }),
-          event({ kind: "usage", inputTokens: 10, outputTokens: 20 }),
+          event({
+            kind: "usage",
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadInputTokens: 7,
+            cacheWriteInputTokens: 2,
+          }),
           event({
             kind: "child-agent-activity",
             childAgentId: "child-1",
@@ -598,6 +604,10 @@ describe("CodeTurnRunner", () => {
       "tool",
       "completion",
     ]);
+    expect(observed.find((entry) => entry.category === "usage")).toMatchObject({
+      cacheReadInputTokens: 7,
+      cacheWriteInputTokens: 2,
+    });
     expect(observed[1]).toMatchObject({
       executionPolicy: "plan",
       permissionPersistence: "current-session",

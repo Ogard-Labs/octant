@@ -1203,6 +1203,10 @@ const UsageEvent = Schema.Struct({
   kind: Schema.Literal("usage"),
   inputTokens: Schema.Int.pipe(Schema.nonNegative()),
   outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  /** Absent means the provider did not report cache usage. */
+  cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+
   /**
    * What the provider says this turn cost, in US dollars. Absent whenever the
    * provider reports no cost: the host never derives one from a price list of
@@ -1328,6 +1332,10 @@ export type CodeConversationStep = typeof CodeConversationStep.Type;
 export const CodeConversationTurnUsage = Schema.Struct({
   inputTokens: Schema.Int.pipe(Schema.nonNegative()),
   outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  /** Absent means the provider did not report cache usage. */
+  cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+
   /** The provider's own price for the turn. Never one the host derived. */
   costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
   /** The window and its fill after this turn, when the provider reported them. */

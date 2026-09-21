@@ -262,6 +262,9 @@ const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
  */
 export interface CodeThreadUsage {
   readonly inputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+
   readonly outputTokens?: number;
   readonly costUsd?: number;
   /** The model's window and its fill after the latest turn that named them. */
@@ -274,6 +277,9 @@ const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
 
 interface CodeTurnUsage {
   readonly inputTokens: number;
+  readonly cacheReadInputTokens?: number | undefined;
+  readonly cacheWriteInputTokens?: number | undefined;
+
   readonly outputTokens: number;
   readonly costUsd?: number | undefined;
   readonly contextWindow?: number | undefined;
@@ -291,6 +297,9 @@ interface CodeTurnUsage {
  */
 function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   readonly inputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+
   readonly outputTokens?: number;
   readonly costUsd?: number;
   readonly contextWindow?: number;
@@ -299,6 +308,9 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   if (byOperation.size === 0) return {};
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheReadInputTokens: number | undefined;
+  let cacheWriteInputTokens: number | undefined;
+
   let costUsd: number | undefined;
   // Tokens and cost add up across turns; the window figures are a state, so
   // the latest turn that reported each speaks for the thread. The occupancy
@@ -309,6 +321,11 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   for (const usage of byOperation.values()) {
     inputTokens += usage.inputTokens;
     outputTokens += usage.outputTokens;
+    if (usage.cacheReadInputTokens !== undefined)
+      cacheReadInputTokens = (cacheReadInputTokens ?? 0) + usage.cacheReadInputTokens;
+    if (usage.cacheWriteInputTokens !== undefined)
+      cacheWriteInputTokens = (cacheWriteInputTokens ?? 0) + usage.cacheWriteInputTokens;
+
     if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
     if (usage.contextWindow !== undefined) contextWindow = usage.contextWindow;
     if (usage.contextTokens !== undefined) contextTokens = usage.contextTokens;
@@ -317,6 +334,9 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
     inputTokens,
     outputTokens,
     ...(costUsd === undefined ? {} : { costUsd }),
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(contextTokens === undefined ? {} : { contextTokens }),
   };
@@ -494,11 +514,22 @@ export function useCodeController(options: CodeControllerOptions) {
   const usageByOperation = useRef(new Map<string, CodeTurnUsage>());
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     if (event.kind === "usage") {
-      const { inputTokens, outputTokens, costUsd, contextWindow, contextTokens } = event;
+      const {
+        inputTokens,
+        outputTokens,
+        costUsd,
+        contextWindow,
+        contextTokens,
+        cacheReadInputTokens,
+        cacheWriteInputTokens,
+      } = event;
       usageByOperation.current.set(String(operationId), {
         inputTokens,
         outputTokens,
         ...(costUsd === undefined ? {} : { costUsd }),
+        ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+        ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+
         ...(contextWindow === undefined ? {} : { contextWindow }),
         ...(contextTokens === undefined ? {} : { contextTokens }),
       });

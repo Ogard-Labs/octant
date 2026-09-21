@@ -97,6 +97,9 @@ export interface CodeTurnEvent {
   readonly path?: string;
   readonly change?: string;
   readonly inputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+
   readonly outputTokens?: number;
   readonly costUsd?: number;
   readonly contextWindow?: number;
@@ -247,7 +250,11 @@ export class CodeTurnRunner {
               modelId: input.thread.modelId,
               tools: input.appManagedTools?.definitions ?? [],
             })
-          : connection.resume({ ...sessionOptions, resumeCursor: input.resumeCursor })
+          : connection.resume({
+              ...sessionOptions,
+              resumeCursor: input.resumeCursor,
+              tools: input.appManagedTools?.definitions ?? [],
+            })
       ).pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
       if (input.onSessionReady !== undefined) yield* input.onSessionReady(handle);
 
@@ -643,6 +650,13 @@ function normalizeProviderEvent(
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
         ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+        ...(event.cacheReadInputTokens === undefined
+          ? {}
+          : { cacheReadInputTokens: event.cacheReadInputTokens }),
+        ...(event.cacheWriteInputTokens === undefined
+          ? {}
+          : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+
         ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
         ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
       });

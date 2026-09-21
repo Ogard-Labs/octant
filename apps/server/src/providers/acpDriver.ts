@@ -1029,6 +1029,8 @@ function makeConnection(
                     ? await client.loadSession(sourceSessionId, runtimeRoot)
                     : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers)
                   : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers, sessionMeta);
+          if (sourceSessionId !== undefined && source.sessionId !== sourceSessionId)
+            throw failure("stale-resume", "The provider returned a different native session.");
           if (managedTools !== undefined) await managedTools.bridge.attested;
           // A profile that supplies its own request shape is describing an agent
           // whose reply the standard result schema does not fit, so that reply is
@@ -1101,14 +1103,44 @@ function makeConnection(
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map((state) => ({
             sessionId: input.sessionId,
-            resumeCursor: { driverKind: profile.kind, value: state.sourceSessionId },
+            resumeCursor: {
+              driverKind: profile.kind,
+              value: state.sourceSessionId,
+              binding: {
+                instanceId: options.instanceId,
+                sessionId: state.sessionId,
+                projectRoot,
+                mode,
+                modelId: input.modelId,
+              },
+            },
           })),
         ),
       resume: (input) => {
         if (input.resumeCursor.driverKind !== profile.kind) {
           return Effect.fail(failure("stale-resume", `${name} resume identity is incompatible.`));
         }
-        const identity = resumeIdentities.get(input.resumeCursor.value);
+        const binding = input.resumeCursor.binding;
+        if (
+          binding !== undefined &&
+          (binding.instanceId !== options.instanceId ||
+            binding.sessionId !== input.sessionId ||
+            binding.projectRoot !== projectRoot ||
+            binding.mode !== mode)
+        ) {
+          return Effect.fail(
+            failure("stale-resume", "The saved session belongs to another task or Project."),
+          );
+        }
+        const identity =
+          binding === undefined
+            ? resumeIdentities.get(input.resumeCursor.value)
+            : {
+                root: binding.projectRoot,
+                mode: binding.mode,
+                modelId: binding.modelId,
+                tools: input.tools ?? resumeIdentities.get(input.resumeCursor.value)?.tools ?? [],
+              };
         if (identity === undefined || identity.root !== projectRoot || identity.mode !== mode) {
           return Effect.fail(
             failure("stale-resume", `${name} resume identity does not match this Project.`),
@@ -1119,7 +1151,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
-          tools: identity.tools,
+          tools: input.tools ?? identity.tools,
           ...(input.modelOptionValues === undefined
             ? {}
             : { modelOptionValues: input.modelOptionValues }),
@@ -1188,7 +1220,17 @@ function makeConnection(
                       offer(
                         eventFor(state, factories.clock, {
                           kind: "completed",
-                          resumeCursor: { driverKind: profile.kind, value: state.sourceSessionId },
+                          resumeCursor: {
+                            driverKind: profile.kind,
+                            value: state.sourceSessionId,
+                            binding: {
+                              instanceId: options.instanceId,
+                              sessionId: state.sessionId,
+                              projectRoot,
+                              mode,
+                              modelId: decodeProviderModelId(state.modelId),
+                            },
+                          },
                         }),
                       );
                     } else {

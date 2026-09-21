@@ -69,6 +69,8 @@ export interface ProviderSessionHandle {
 }
 
 export interface ProviderSessionResume {
+  /** Current allowed catalogue, reattached without changing native history. */
+  readonly tools?: ReadonlyArray<ProviderToolDefinition>;
   readonly sessionId: ProviderSessionId;
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;

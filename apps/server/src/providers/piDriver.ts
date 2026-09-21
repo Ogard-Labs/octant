@@ -582,7 +582,17 @@ function makeConnection(
         state.terminal = true;
         emit(state, {
           kind: "completed",
-          resumeCursor: { driverKind: "pi", value: state.sessionId },
+          resumeCursor: {
+            driverKind: "pi",
+            value: state.sessionId,
+            binding: {
+              instanceId: options.instanceId,
+              sessionId: state.sessionId,
+              projectRoot,
+              mode,
+              modelId: decodeProviderModelId(state.modelId),
+            },
+          },
         });
         return;
       }
@@ -593,6 +603,7 @@ function makeConnection(
     };
 
     const createState = (input: {
+      readonly resume?: boolean;
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
@@ -630,6 +641,7 @@ function makeConnection(
                 piHome: options.piHome,
                 sessionDirectory: join(options.piHome, "sessions"),
                 sessionId: input.sessionId,
+                ...(input.resume === true ? { resume: true } : {}),
                 mode,
                 executionPolicy: input.executionPolicy,
                 modelProvider: selection.provider,
@@ -655,7 +667,7 @@ function makeConnection(
           await rpc.request("set_model", selection);
           const stateResponse = await rpc.request("get_state");
           const sourceSessionId = bounded(record(stateResponse.data)?.sessionId, 256);
-          if (sourceSessionId === undefined)
+          if (sourceSessionId === undefined || sourceSessionId !== String(input.sessionId))
             throw new PiRpcFailure("protocol", "Pi session identity missing.");
           if (tools.length > 0) {
             const attestation = await rpc.request("get_commands", {
@@ -742,14 +754,44 @@ function makeConnection(
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map(() => ({
             sessionId: input.sessionId,
-            resumeCursor: { driverKind: "pi" as const, value: input.sessionId },
+            resumeCursor: {
+              driverKind: "pi" as const,
+              value: input.sessionId,
+              binding: {
+                instanceId: options.instanceId,
+                sessionId: input.sessionId,
+                projectRoot,
+                mode,
+                modelId: input.modelId,
+              },
+            },
           })),
         ),
       resume: (input) => {
         if (input.resumeCursor.driverKind !== "pi") {
           return Effect.fail(failure("stale-resume", "Pi resume identity is incompatible."));
         }
-        const identity = resumeIdentities.get(input.resumeCursor.value);
+        const binding = input.resumeCursor.binding;
+        if (
+          binding !== undefined &&
+          (binding.instanceId !== options.instanceId ||
+            binding.sessionId !== input.sessionId ||
+            binding.projectRoot !== projectRoot ||
+            binding.mode !== mode)
+        ) {
+          return Effect.fail(
+            failure("stale-resume", "The saved session belongs to another task or Project."),
+          );
+        }
+        const identity =
+          binding === undefined
+            ? resumeIdentities.get(input.resumeCursor.value)
+            : {
+                root: binding.projectRoot,
+                mode: binding.mode,
+                modelId: binding.modelId,
+                tools: input.tools ?? resumeIdentities.get(input.resumeCursor.value)?.tools ?? [],
+              };
         if (
           identity === undefined ||
           identity.root !== projectRoot ||
@@ -761,10 +803,11 @@ function makeConnection(
           );
         }
         return createState({
+          resume: true,
           sessionId: input.sessionId,
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
-          tools: identity.tools,
+          tools: input.tools ?? identity.tools,
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
           Effect.mapError(() => failure("stale-resume", "Pi session could not be resumed.")),

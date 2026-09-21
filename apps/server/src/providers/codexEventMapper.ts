@@ -34,6 +34,10 @@ export interface CodexEventContext {
   readonly turnId: string;
   sequence: number;
   terminal: boolean;
+  usage?: {
+    readonly previous: CodexUsage;
+    readonly turn: CodexUsage;
+  };
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -41,6 +45,13 @@ export interface CodexEventContext {
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
   readonly makeToolCallId: () => string;
+}
+
+interface CodexUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
 }
 
 export interface CodexToolState {
@@ -674,17 +685,38 @@ function mapNotification(
       });
       return results.length === 0 ? [{ kind: "ignored" }] : results;
     }
-    case "thread/tokenUsage/updated":
+    case "thread/tokenUsage/updated": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
         return correlationFailure();
       }
+      const { total, last } = message.params.tokenUsage;
+      const previous = context.usage?.previous;
+      // A resumed thread already contains usage from older turns. The first
+      // observation contributes only its last request; later observations
+      // contribute their increments. A provider reset starts a new baseline.
+      const reset =
+        previous === undefined ||
+        total.inputTokens < previous.inputTokens ||
+        total.outputTokens < previous.outputTokens ||
+        total.cachedInputTokens < previous.cachedInputTokens ||
+        total.reasoningOutputTokens < previous.reasoningOutputTokens;
+      const accumulated = context.usage?.turn;
+      const increment = (field: keyof CodexUsage) =>
+        (accumulated?.[field] ?? 0) + (reset ? last[field] : total[field] - previous[field]);
+      const turn: CodexUsage = {
+        inputTokens: increment("inputTokens"),
+        outputTokens: increment("outputTokens"),
+        cachedInputTokens: increment("cachedInputTokens"),
+        reasoningOutputTokens: increment("reasoningOutputTokens"),
+      };
+      context.usage = { previous: total, turn };
       return [
         event(context, {
           kind: "usage",
-          inputTokens: message.params.tokenUsage.total.inputTokens,
-          outputTokens: message.params.tokenUsage.total.outputTokens,
-          reasoningTokens: message.params.tokenUsage.total.reasoningOutputTokens,
-          cacheReadInputTokens: message.params.tokenUsage.total.cachedInputTokens,
+          inputTokens: turn.inputTokens,
+          outputTokens: turn.outputTokens,
+          reasoningTokens: turn.reasoningOutputTokens,
+          cacheReadInputTokens: turn.cachedInputTokens,
           // What sits in the window is the last request less its reasoning
           // output, which the model does not keep between turns. The figure
           // stands even when the app-server cannot name the window — a model
@@ -701,6 +733,7 @@ function mapNotification(
             : { contextWindow: message.params.tokenUsage.modelContextWindow }),
         }),
       ];
+    }
     case "account/rateLimits/updated":
       return rateLimitWindowEvents(context, message.params.rateLimits);
   }

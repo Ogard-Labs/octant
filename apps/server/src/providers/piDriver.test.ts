@@ -48,7 +48,7 @@ class FakeClient implements PiClientPort {
         type: "response" as const,
         command: type,
         success: true,
-        data: { sessionId: "pi-source-1", sessionFile: "/managed/sessions/pi-source-1.jsonl" },
+        data: { sessionId, sessionFile: "/managed/sessions/pi-source-1.jsonl" },
       };
     }
     if (type === "get_commands") {
@@ -314,7 +314,11 @@ describe("Pi provider driver", () => {
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     expect(starts[0]).toMatchObject({ onProcessStarted: expect.any(Function) });
-    expect(handle.resumeCursor).toEqual({ driverKind: "pi", value: sessionId });
+    expect(handle.resumeCursor).toEqual({
+      driverKind: "pi",
+      value: sessionId,
+      binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
+    });
     expect(starts.at(-1)).toMatchObject({
       root,
       sessionId,
@@ -632,4 +636,46 @@ describe("Pi provider driver", () => {
     });
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
+});
+
+it("recovers the same Pi session after replacing the driver", async () => {
+  const first = fixture();
+  const cursor = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* first.driver.acquire({
+          instanceId,
+          projectRoot: root,
+          mode: "code",
+        });
+        const handle = yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        });
+        return handle.resumeCursor;
+      }),
+    ),
+  );
+  if (cursor === undefined) throw new Error("missing cursor");
+  const restarted = fixture();
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* restarted.driver.acquire({
+          instanceId,
+          projectRoot: root,
+          mode: "code",
+        });
+        const resumed = yield* connection.resume({
+          sessionId,
+          resumeCursor: cursor,
+          executionPolicy: "approval-gated",
+          tools: [],
+        });
+        expect(resumed.resumeCursor).toEqual(cursor);
+      }),
+    ),
+  );
+  expect(restarted.starts.at(-1)?.sessionId).toBe(sessionId);
 });

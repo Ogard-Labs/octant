@@ -1010,7 +1010,7 @@ describe("mapCodexMessage", () => {
     expect(reordered.map(({ taskId }) => taskId)).toEqual(["task-1", "task-3", "task-2"]);
   });
 
-  it("maps total usage and the window the last request sat in", () => {
+  it("excludes earlier native turns from a resumed turn usage report", () => {
     expect(
       map(
         context(),
@@ -1041,14 +1041,57 @@ describe("mapCodexMessage", () => {
         kind: "event",
         event: {
           kind: "usage",
-          inputTokens: 12,
-          outputTokens: 8,
+          inputTokens: 4,
+          outputTokens: 3,
+          cacheReadInputTokens: 1,
           contextWindow: 200_000,
           // The last request's total less its reasoning output.
           contextTokens: 6,
         },
       },
     ]);
+  });
+
+  it("counts each new request once after resume, duplicate reports, and a counter reset", () => {
+    const session = context();
+    const report = (
+      inputTokens: number,
+      cachedInputTokens: number,
+      lastInput: number,
+      lastCached: number,
+    ) => {
+      const mapped = map(
+        session,
+        notification("thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              totalTokens: inputTokens,
+              inputTokens,
+              cachedInputTokens,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+            },
+            last: {
+              totalTokens: lastInput,
+              inputTokens: lastInput,
+              cachedInputTokens: lastCached,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+            },
+            modelContextWindow: null,
+          },
+        }),
+      );
+      const first = mapped[0];
+      if (first?.kind !== "event") throw new Error("expected usage");
+      return first.event;
+    };
+    expect(report(100, 40, 10, 5)).toMatchObject({ inputTokens: 10, cacheReadInputTokens: 5 });
+    expect(report(120, 50, 20, 10)).toMatchObject({ inputTokens: 30, cacheReadInputTokens: 15 });
+    expect(report(120, 50, 20, 10)).toMatchObject({ inputTokens: 30, cacheReadInputTokens: 15 });
+    expect(report(8, 2, 8, 2)).toMatchObject({ inputTokens: 38, cacheReadInputTokens: 17 });
   });
 
   it("reports the last request's occupancy when the app-server cannot name the window", () => {
@@ -1081,8 +1124,9 @@ describe("mapCodexMessage", () => {
         kind: "event",
         event: {
           kind: "usage",
-          inputTokens: 12,
-          outputTokens: 8,
+          inputTokens: 4,
+          outputTokens: 3,
+          cacheReadInputTokens: 1,
           contextTokens: 6,
         },
       },

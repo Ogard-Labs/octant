@@ -1446,20 +1446,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart();
     const resolvedDriver = await this.#options.resolveProviderDriver(input.thread);
     if (resolvedDriver === undefined) return failStart();
-    const history = this.#events.historyForThread(input.thread.id);
-    if (history.status !== "ok")
+    const recovered = this.#events.providerSessionForThread(input.thread.id, command.operationId);
+    if (recovered.status !== "ok")
       return failStart(
         "The task's provider session could not be recovered. Retry after reloading the task.",
       );
-    const sessions = history.frames.filter(
-      (frame) => frame.event.kind === "provider-session-ready",
-    );
-    const previous = sessions.at(-1)?.event;
-    const priorTurn = history.frames.some(
-      (frame) =>
-        frame.event.kind === "conversation-turn-started" &&
-        String(frame.operationId) !== String(command.operationId),
-    );
+    const previous = recovered.session;
+    const priorTurn = recovered.priorTurn;
     if (
       previous?.kind === "provider-session-ready" &&
       (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
@@ -2279,6 +2272,13 @@ function normalizedOperationEvent(
       inputTokens: event.inputTokens ?? 0,
       outputTokens: event.outputTokens ?? 0,
       ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+      ...(event.cacheReadInputTokens === undefined
+        ? {}
+        : { cacheReadInputTokens: event.cacheReadInputTokens }),
+      ...(event.cacheWriteInputTokens === undefined
+        ? {}
+        : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
     };

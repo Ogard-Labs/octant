@@ -117,6 +117,7 @@ export class Journal {
   readonly #replayAggregateTypeRows: SqliteStatement;
   readonly #replayAggregateTypeThreadRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
+  readonly #latestThreadKindRows: SqliteStatement;
 
   constructor(options: JournalOptions) {
     this.#connection = options.connection;
@@ -188,6 +189,15 @@ export class Journal {
     // is the same payload ownership rule thread purge already relies on, and
     // every returned row still goes through the registered schema in
     // #decodeRow before a caller sees it.
+    this.#latestThreadKindRows = options.connection.prepare(`
+      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+      ORDER BY global_sequence DESC LIMIT ?
+    `);
     this.#replayAggregateTypeThreadRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
@@ -509,6 +519,31 @@ export class Journal {
         cursor.threadId,
         cursor.afterSequence,
         cursor.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  latestThreadEvents(input: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly kind: string;
+    readonly limit: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.threadId.trim().length === 0 ||
+      input.kind.trim().length === 0 ||
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 1_000
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#latestThreadKindRows.all(
+        input.aggregateType,
+        input.threadId,
+        input.kind,
+        input.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
   }

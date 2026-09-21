@@ -1189,14 +1189,28 @@ describe("useCodeController", () => {
         operationId,
         cursor: 1,
         occurredAt: now,
-        event: { kind: "usage", inputTokens: 10, outputTokens: 4, costUsd: 0.01 },
+        event: {
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 4,
+          costUsd: 0.01,
+          cacheReadInputTokens: 3,
+          cacheWriteInputTokens: 1,
+        },
       };
       yield {
         threadId: ids.thread,
         operationId,
         cursor: 2,
         occurredAt: now,
-        event: { kind: "usage", inputTokens: 20, outputTokens: 9, costUsd: 0.02 },
+        event: {
+          kind: "usage",
+          inputTokens: 20,
+          outputTokens: 9,
+          costUsd: 0.02,
+          cacheReadInputTokens: 7,
+          cacheWriteInputTokens: 2,
+        },
       };
       yield {
         threadId: ids.thread,
@@ -1231,6 +1245,8 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.threadUsage.outputTokens).toBe(9));
     expect(result.current.threadUsage.inputTokens).toBe(20);
     expect(result.current.threadUsage.costUsd).toBeCloseTo(0.02);
+    expect(result.current.threadUsage.cacheReadInputTokens).toBe(7);
+    expect(result.current.threadUsage.cacheWriteInputTokens).toBe(2);
   });
 
   it("keeps usage unknown until the thread has a provider report", async () => {
@@ -1238,6 +1254,8 @@ describe("useCodeController", () => {
     const { result } = renderHook(() => useCodeController({ activeThreadId: ids.thread, client }));
     await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
     expect(result.current.threadUsage.inputTokens).toBeUndefined();
+    expect(result.current.threadUsage.cacheReadInputTokens).toBeUndefined();
+    expect(result.current.threadUsage.cacheWriteInputTokens).toBeUndefined();
     expect(result.current.threadUsage.outputTokens).toBeUndefined();
   });
 

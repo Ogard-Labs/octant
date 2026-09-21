@@ -169,6 +169,8 @@ distilled successor of the earlier long-form design specifications.
 | [0155](0155-conversations-share-a-quiet-reading-surface.md) | Conversations share a quiet reading surface | Accepted |
 | [0156](0156-content-opens-beside-the-conversation.md) | Content opens beside the conversation | Accepted |
 
+| [0151](0151-native-resume-keeps-a-durable-identity.md) | Native resume keeps a durable identity | Accepted |
+
 ## Adding an ADR
 
 - Take the next number (`00NN-short-slug.md`); never renumber existing records.
