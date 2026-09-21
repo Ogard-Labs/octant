@@ -699,50 +699,74 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
-  it("resumes the native session with the next message without replaying conversation text", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    try {
-      await fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(80),
-        threadId,
-        checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-      });
-      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
-      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
-      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
-      const nextPrompt = storedEvidence(82, "main");
-      fixture.evidenceValues.set(nextPrompt.contentId, "main");
-      await fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(81),
-        threadId,
-        checkoutId,
-        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000081"),
-        prompt: nextPrompt,
-      });
-      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
-      expect(connection.start).toHaveBeenCalledOnce();
-      expect(connection.resume).toHaveBeenCalledWith(
-        expect.objectContaining({
+  it.each([true, false])(
+    "resumes without replay when a replacement cursor is returned: %s",
+    async (replacementCursor) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      if (!replacementCursor)
+        vi.mocked(connection.resume).mockImplementation((input) =>
+          Effect.succeed({ sessionId: input.sessionId }),
+        );
+      const fixture = runtimeFixture({ provider: providerDriver(connection) });
+      try {
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(80),
+          threadId,
+          checkoutId,
           sessionId,
-          resumeCursor: { driverKind: "codex", value: "native-code-session" },
-        }),
-      );
-      expect(vi.mocked(connection.send).mock.calls[1]?.[0]).toMatchObject({
-        sessionId,
-        prompt: "main",
-      });
-      expect(vi.mocked(connection.send).mock.calls[1]?.[0].context).toBeUndefined();
-    } finally {
-      await fixture.runtime.close();
-      fixture.close();
-    }
-  });
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+        const nextPrompt = storedEvidence(82, "main");
+        fixture.evidenceValues.set(nextPrompt.contentId, "main");
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(81),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000081"),
+          prompt: nextPrompt,
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+        expect(connection.start).toHaveBeenCalledOnce();
+        expect(connection.resume).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId,
+            resumeCursor: { driverKind: "codex", value: "native-code-session" },
+          }),
+        );
+        expect(vi.mocked(connection.send).mock.calls[1]?.[0]).toMatchObject({
+          sessionId,
+          prompt: "main",
+        });
+        expect(vi.mocked(connection.send).mock.calls[1]?.[0].context).toBeUndefined();
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledTimes(2));
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(83),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: nextPrompt,
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(3));
+        expect(connection.start).toHaveBeenCalledOnce();
+        expect(connection.resume).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            resumeCursor: { driverKind: "codex", value: "native-code-session" },
+          }),
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
 
   it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());

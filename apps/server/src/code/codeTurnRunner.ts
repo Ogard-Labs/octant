@@ -256,7 +256,11 @@ export class CodeTurnRunner {
               tools: input.appManagedTools?.definitions ?? [],
             })
       ).pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
-      if (input.onSessionReady !== undefined) yield* input.onSessionReady(handle);
+      if (input.onSessionReady !== undefined) {
+        yield* input
+          .onSessionReady(handle)
+          .pipe(Effect.catchAll((failure) => failForProvider(failure, fail)));
+      }
 
       if (input.signal?.aborted) {
         yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));

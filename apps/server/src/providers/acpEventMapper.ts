@@ -276,6 +276,18 @@ export function mapAcpPermissionRequest(
     };
   }
   const tool = context.tools.get(request.params.toolCall.toolCallId);
+  if (
+    tool === undefined &&
+    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined
+  ) {
+    return {
+      kind: "protocol-failure",
+      failure: {
+        category: "protocol",
+        message: `${context.displayName} permission request did not identify a known tool.`,
+      },
+    };
+  }
   const title =
     normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) ??
     tool?.title ??

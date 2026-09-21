@@ -1793,6 +1793,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           onSessionReady: (handle) =>
             Effect.try({
               try: () => {
+                const resumeCursor = handle.resumeCursor ?? active.resumeCursor;
                 const frame = this.#events.append({
                   threadId: active.thread.id,
                   operationId: active.operationId,
@@ -1803,9 +1804,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     providerInstanceId: active.thread.providerInstanceId,
                     modelId: active.thread.modelId,
                     checkoutId: active.thread.checkoutId,
-                    ...(handle.resumeCursor === undefined
-                      ? {}
-                      : { resumeCursor: handle.resumeCursor }),
+                    ...(resumeCursor === undefined ? {} : { resumeCursor }),
                   },
                 });
                 active.cursor = frame.cursor;

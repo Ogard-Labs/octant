@@ -195,6 +195,25 @@ describe("ACP event normalization", () => {
     ]);
   });
 
+  it("refuses an ID-only approval for an unknown tool without reserving the request", () => {
+    const state = context();
+    const mapped = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "unknown-permission",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "unknown-tool" },
+        options: [
+          { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+          { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    });
+    expect(mapped).toMatchObject({ kind: "protocol-failure", failure: { category: "protocol" } });
+    expect(state.requestIds.size).toBe(0);
+  });
+
   it("keeps the latest tool description when approval only identifies the tool", () => {
     const state = context();
     mapAcpNotification(state, {

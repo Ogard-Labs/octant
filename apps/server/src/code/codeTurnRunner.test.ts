@@ -79,6 +79,29 @@ describe("CodeTurnRunner", () => {
     expect(connection.send).not.toHaveBeenCalled();
   });
 
+  it("persists a session-save failure before refusing to send the prompt", async () => {
+    const connection = fakeConnection({ subscribe: Effect.succeed(Stream.empty) });
+    const outcomes: Array<readonly [CodeTurnOutcome, string | undefined]> = [];
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            onSessionReady: () =>
+              Effect.fail({ category: "failed", message: "Session could not be saved." }),
+            persistOutcome: (outcome, failure) =>
+              Effect.sync(() => {
+                outcomes.push([outcome, failure?.message]);
+              }),
+          }),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([["failed", "Session could not be saved."]]);
+  });
+
   it("starts the provider with the reasoning choice saved on the Code thread", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
