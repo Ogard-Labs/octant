@@ -767,6 +767,15 @@ describe("AppleToolchainService lifecycle", () => {
     service.requestPaneOpen(other, simulatorId);
     expect(service.snapshot(context).paneOpenRequest).toEqual(opened.paneOpenRequest);
     expect(service.snapshot(other).paneOpenRequest).toBeDefined();
+    for (let index = 0; index < 256; index += 1) {
+      service.requestPaneOpen(
+        { ...context, threadId: `40000000-0000-4000-8000-${String(index).padStart(12, "0")}` },
+        simulatorId,
+      );
+      if (index === 128) service.requestPaneOpen(context, simulatorId);
+    }
+    expect(service.snapshot(other).paneOpenRequest).toBeUndefined();
+    expect(service.snapshot(context).paneOpenRequest).toBeDefined();
   });
 
   it("keeps a shutdown that finished while a slower discovery was still reading", async () => {

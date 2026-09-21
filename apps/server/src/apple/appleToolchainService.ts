@@ -487,7 +487,15 @@ export class AppleToolchainService {
     simulatorId: AppleSimulatorRecord["simulatorId"],
   ): AppleRuntimeSnapshot {
     const projectPath = this.#findDiscovery(context)?.workspace.projectPath;
-    this.#paneOpenRequests.set(String(context.threadId), {
+    // Pane-open intents are transient UI hints, not task history. Keep recent
+    // requests without retaining every task visited during the host lifetime.
+    const threadKey = String(context.threadId);
+    this.#paneOpenRequests.delete(threadKey);
+    if (this.#paneOpenRequests.size >= 256) {
+      const oldest = this.#paneOpenRequests.keys().next().value;
+      if (oldest !== undefined) this.#paneOpenRequests.delete(oldest);
+    }
+    this.#paneOpenRequests.set(threadKey, {
       threadId: context.threadId,
       checkoutId: context.checkoutId,
       requestId: this.#options.newId(),

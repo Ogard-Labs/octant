@@ -467,6 +467,15 @@ describe("AndroidToolchainService", () => {
     service.requestPaneOpen(other, "Pixel_8_API_34" as never);
     expect(service.snapshot(context).paneOpenRequest).toEqual(snapshot.paneOpenRequest);
     expect(service.snapshot(other).paneOpenRequest).toBeDefined();
+    for (let index = 0; index < 256; index += 1) {
+      service.requestPaneOpen(
+        { ...context, threadId: `40000000-0000-4000-8000-${String(index).padStart(12, "0")}` },
+        "Pixel_8_API_34",
+      );
+      if (index === 128) service.requestPaneOpen(context, "Pixel_8_API_34");
+    }
+    expect(service.snapshot(other).paneOpenRequest).toBeUndefined();
+    expect(service.snapshot(context).paneOpenRequest).toBeDefined();
   });
 
   it("returns replayed evidence for a repeated input without sending it again", async () => {

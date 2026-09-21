@@ -336,7 +336,15 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
     emulatorId: AndroidEmulatorRecord["emulatorId"],
   ): AndroidRuntimeSnapshot {
-    this.#paneOpenRequests.set(String(context.threadId), {
+    // Pane-open intents are transient UI hints, not task history. Keep recent
+    // requests without retaining every task visited during the host lifetime.
+    const threadKey = String(context.threadId);
+    this.#paneOpenRequests.delete(threadKey);
+    if (this.#paneOpenRequests.size >= 256) {
+      const oldest = this.#paneOpenRequests.keys().next().value;
+      if (oldest !== undefined) this.#paneOpenRequests.delete(oldest);
+    }
+    this.#paneOpenRequests.set(threadKey, {
       requestId: this.#options.newId(),
       emulatorId,
       requestedAt: this.#options.now(),

@@ -90,3 +90,8 @@ and activating or quitting Simulator.app.
 - 0142 One approval opens a Simulator to input
 - 0152 Allow input opens a device to clicks (first-input confirmation superseded)
 - 0153 Android emulator is a separate in-app device destination (Android non-goal superseded)
+
+Pane-open intents are transient host memory, separate from task history and
+evidence. Each device service retains the 256 most recently requested tasks;
+reopening a task refreshes its position. Eviction removes only the old automatic
+pane-opening hint, never its transcript, artifacts, or device state.
