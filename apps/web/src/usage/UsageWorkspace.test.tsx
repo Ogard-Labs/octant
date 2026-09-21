@@ -558,7 +558,31 @@ describe("UsageWorkspace", () => {
       within(section).getByRole("meter", { name: "Project pull requests miss rate" }),
     ).toHaveValue(1 - 0.8);
     expect(within(section).getByText("20%")).toBeVisible();
-    expect(within(section).getByRole("meter", { name: "Token cache hit ratio" })).toHaveValue(0.75);
+    expect(within(section).getByRole("meter", { name: "Cache traffic read share" })).toHaveValue(
+      0.75,
+    );
+  });
+
+  it("shows an unreported cache counter as unknown rather than zero", async () => {
+    const reading = dashboard();
+    const { client } = clientReturning({
+      ...reading,
+      cacheStats: {
+        caches: [],
+        providerTokenCaches: reading.cacheStats.providerTokenCaches.map((provider) => ({
+          providerInstanceId: provider.providerInstanceId,
+          requestCount: provider.requestCount,
+          ...(provider.cacheReadInputTokens === undefined
+            ? {}
+            : { cacheReadInputTokens: provider.cacheReadInputTokens }),
+        })),
+      },
+    });
+    render(<UsageWorkspace client={client} />);
+    const table = await screen.findByRole("table", { name: "Provider prompt cache reuse" });
+    expect(within(table).getByText("Unknown")).toBeVisible();
+    expect(within(table).queryByRole("meter")).not.toBeInTheDocument();
+    expect(screen.getByText(/this is not a prompt-cache hit rate/)).toBeVisible();
   });
 
   it("does not promise an automatic retry for a cache that never holds unattended refreshes", async () => {

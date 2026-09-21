@@ -200,16 +200,15 @@ export const UsageCacheStat = Schema.Struct({
 export type UsageCacheStat = typeof UsageCacheStat.Type;
 
 /**
- * Prompt-cache efficiency reported by one provider instance. Cache reads are
- * tokens the provider served from its prompt cache and cache writes are tokens
- * it had to store, so the ratio of reads to reads-plus-writes says how much of
- * the cached prompt work was reused rather than paid for again.
+ * Reported cache traffic for one provider instance. The legacy hitRatio field
+ * is reads / (reads + writes), not a prompt-cache hit rate. Missing counters
+ * remain unknown, and incomplete traffic has no ratio.
  */
 export const UsageProviderTokenCacheStat = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   requestCount: NonNegativeInt,
-  cacheReadInputTokens: NonNegativeInt,
-  cacheWriteInputTokens: NonNegativeInt,
+  cacheReadInputTokens: Schema.optional(NonNegativeInt),
+  cacheWriteInputTokens: Schema.optional(NonNegativeInt),
   hitRatio: Schema.optional(Ratio),
 }).annotations(strict);
 export type UsageProviderTokenCacheStat = typeof UsageProviderTokenCacheStat.Type;
@@ -217,7 +216,7 @@ export type UsageProviderTokenCacheStat = typeof UsageProviderTokenCacheStat.Typ
 export const UsageCacheStats = Schema.Struct({
   caches: Schema.Array(UsageCacheStat),
   providerTokenCaches: Schema.Array(UsageProviderTokenCacheStat),
-  /** Prompt-cache reuse across every provider instance in range. */
+  /** Read share of reported cache traffic; absent for incomplete counters. */
   tokenCacheHitRatio: Schema.optional(Ratio),
 }).annotations(strict);
 export type UsageCacheStats = typeof UsageCacheStats.Type;

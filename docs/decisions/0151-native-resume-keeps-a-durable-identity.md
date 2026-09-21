@@ -71,6 +71,12 @@ A resumed turn can also have a different allowed tool catalogue.
   counter. Coverage records measured turns and tokens separately for reads and
   writes; an explicit zero is measured, while an omitted counter is unknown.
   This coverage describes reported turns, not turns with no usage event.
+- The usage dashboard labels its existing reads/(reads+writes) statistic as
+  cache traffic read share, not a prompt-cache hit rate. Uncached input is not
+  part of that denominator. Missing counters remain unknown and prevent a
+  complete traffic ratio; they are never substituted with zero. Historical
+  ledger records remain unchanged. A true prompt-cache hit rate requires a
+  verified total-input basis and is not inferred from these legacy counters.
 
 - Browser screenshots use the existing provider image-result channel in Chat,
   Work, and Code. Encoded image bytes are not duplicated in JSON text. Missing,

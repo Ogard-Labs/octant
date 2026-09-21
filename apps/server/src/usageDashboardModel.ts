@@ -129,7 +129,13 @@ export function buildUsageDashboard(
   >();
   const providerTokenCaches = new Map<
     string,
-    { requestCount: number; readTokens: number; writeTokens: number }
+    {
+      requestCount: number;
+      readTokens: number;
+      writeTokens: number;
+      readsComplete: boolean;
+      writesComplete: boolean;
+    }
   >();
   const detail: Array<UsageDetailRow> = [];
   const accepted: Array<UsageDashboardSourceRow> = [];
@@ -195,8 +201,12 @@ export function buildUsageDashboard(
         requestCount: 0,
         readTokens: 0,
         writeTokens: 0,
+        readsComplete: true,
+        writesComplete: true,
       }));
       tokenCache.requestCount += 1;
+      tokenCache.readsComplete &&= row.cacheReadInputTokens !== undefined;
+      tokenCache.writesComplete &&= row.cacheWriteInputTokens !== undefined;
       tokenCache.readTokens += row.cacheReadInputTokens ?? 0;
       tokenCache.writeTokens += row.cacheWriteInputTokens ?? 0;
     }
@@ -581,38 +591,49 @@ function buildHostCoverage(
 
 /**
  * Join the host's own cache readings with prompt-cache efficiency read from the
- * ledger. Prompt-cache reuse is expressed as cache-read tokens over read plus
- * written tokens: writes are prompt work the provider had to store again, so a
- * high ratio means the same context was mostly reused rather than re-sent.
+ * ledger. The legacy ratio fields describe reads among reported cache traffic,
+ * not a prompt-cache hit rate: uncached input is absent from that denominator.
+ * Omitted counters cannot be treated as zero or as complete totals.
  */
 function buildCacheStats(
   providerTokenCaches: ReadonlyMap<
     string,
-    { requestCount: number; readTokens: number; writeTokens: number }
+    {
+      requestCount: number;
+      readTokens: number;
+      writeTokens: number;
+      readsComplete: boolean;
+      writesComplete: boolean;
+    }
   >,
   caches: ReadonlyArray<UsageCacheStat>,
 ): UsageCacheStats {
   let readTokens = 0;
   let writeTokens = 0;
+  let complete = true;
   const providers = [...providerTokenCaches.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([providerInstanceId, facts]): UsageProviderTokenCacheStat => {
       readTokens += facts.readTokens;
       writeTokens += facts.writeTokens;
       const observed = facts.readTokens + facts.writeTokens;
+      const providerComplete = facts.readsComplete && facts.writesComplete;
+      complete &&= providerComplete;
       return {
         providerInstanceId: providerInstanceId as UsageProviderTokenCacheStat["providerInstanceId"],
         requestCount: facts.requestCount,
-        cacheReadInputTokens: facts.readTokens,
-        cacheWriteInputTokens: facts.writeTokens,
-        ...(observed === 0 ? {} : { hitRatio: facts.readTokens / observed }),
+        ...(facts.readsComplete ? { cacheReadInputTokens: facts.readTokens } : {}),
+        ...(facts.writesComplete ? { cacheWriteInputTokens: facts.writeTokens } : {}),
+        ...(!providerComplete || observed === 0 ? {} : { hitRatio: facts.readTokens / observed }),
       };
     });
   const observedTokens = readTokens + writeTokens;
   return {
     caches,
     providerTokenCaches: providers,
-    ...(observedTokens === 0 ? {} : { tokenCacheHitRatio: readTokens / observedTokens }),
+    ...(!complete || observedTokens === 0
+      ? {}
+      : { tokenCacheHitRatio: readTokens / observedTokens }),
   };
 }
 
