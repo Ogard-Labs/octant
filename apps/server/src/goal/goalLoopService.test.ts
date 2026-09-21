@@ -46,6 +46,7 @@ function harness(
     readonly checkpoint?: string | undefined;
     readonly modePosture?: AgentRunAuthority;
     readonly round?: Partial<Awaited<ReturnType<GoalLoopDependencies["runRound"]>>>;
+    readonly scheduleNextRound?: GoalLoopDependencies["scheduleNextRound"];
   } = {},
 ) {
   let current = options.goal === undefined ? goal() : options.goal;
@@ -91,6 +92,9 @@ function harness(
     markCheckpoint,
     runRound,
     journal,
+    ...(options.scheduleNextRound === undefined
+      ? {}
+      : { scheduleNextRound: options.scheduleNextRound }),
     uuid: () => `55555555-0000-4000-8000-00000000000${String((tick += 1) % 10)}`,
     clock: () => "2026-08-19T09:00:00.000Z" as never,
   };
@@ -104,6 +108,7 @@ function harness(
     setThreadAuthority: (next: ReturnType<GoalLoopDependencies["threadAuthority"]>) => {
       liveAuthority = next;
     },
+    ...options,
   };
 }
 
@@ -297,6 +302,66 @@ describe("a round whose spend could not be recorded", () => {
 
     expect(round).toMatchObject({ outcome: "failed" });
     expect(journaled(h.journal)).toContain("goal-loop-round-recorded@1");
+  });
+});
+
+describe("scheduling the next round", () => {
+  it("asks the host to schedule the next round while a continuous loop is still running", async () => {
+    const scheduleNextRound = vi.fn();
+    const h = harness({ scheduleNextRound });
+    await started(h);
+
+    await h.service.advance(threadId);
+
+    expect(scheduleNextRound).toHaveBeenCalledOnce();
+    expect(scheduleNextRound).toHaveBeenCalledWith(threadId);
+  });
+
+  it("does not schedule another round once the loop completed its goal", async () => {
+    const scheduleNextRound = vi.fn();
+    const h = harness({
+      scheduleNextRound,
+      round: {
+        providerReportsComplete: true,
+        evidence: [
+          {
+            kind: "test",
+            referenceId: "run-1",
+            summary: "Migration suite passed",
+            observedAt: "2026-08-19T09:10:00.000Z" as never,
+          },
+        ],
+      },
+    });
+    await started(h);
+
+    await h.service.advance(threadId);
+
+    expect(scheduleNextRound).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule another round when the round could not record its spend", async () => {
+    const scheduleNextRound = vi.fn();
+    const h = harness({ scheduleNextRound });
+    await started(h);
+    h.recordUsage.mockRejectedValueOnce(new Error("goal version conflict"));
+
+    await h.service.advance(threadId);
+
+    expect(scheduleNextRound).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule another round for a loop the person paused mid-flight", async () => {
+    const scheduleNextRound = vi.fn();
+    const h = harness({ scheduleNextRound });
+    const start = await started(h);
+    const version = start.kind === "goal-loop" ? start.loop.version : 0;
+    await h.service.execute({ kind: "pause-goal-loop", threadId, expectedVersion: version });
+
+    await h.service.advance(threadId);
+
+    expect(scheduleNextRound).not.toHaveBeenCalled();
+    expect(h.runRound).not.toHaveBeenCalled();
   });
 });
 
