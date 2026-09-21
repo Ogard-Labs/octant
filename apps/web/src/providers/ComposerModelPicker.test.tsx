@@ -376,6 +376,56 @@ describe("ComposerModelPicker", () => {
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
   });
 
+  it("names both ends of the level range under the slider, wherever the knob sits", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[
+          {
+            id: "effort",
+            displayName: "Effort",
+            values: ["low", "medium", "high"],
+            value: "medium",
+          },
+        ]}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const slider = await screen.findByRole("slider", { name: "Effort level" });
+    // Stops alone gave no sense of the range: at Default the knob sat on the
+    // left with nothing saying what lay to its right.
+    const ends = slider.nextElementSibling;
+    expect(ends).toHaveTextContent(/^DefaultHigh$/);
+  });
+
+  it("spells out a provider's extra-high level instead of capitalising its id", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[
+          { id: "effort", displayName: "Effort", values: ["high", "xhigh"], value: "xhigh" },
+        ]}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(await screen.findByRole("slider", { name: "Effort level" })).toHaveAttribute(
+      "aria-valuetext",
+      "Extra high",
+    );
+  });
+
   it("reads the knob's level from the thread's stored effort", async () => {
     const user = userEvent.setup();
     const renderView = (effortValue: string) =>
