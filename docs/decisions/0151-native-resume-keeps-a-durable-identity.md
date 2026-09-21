@@ -28,6 +28,11 @@ A resumed turn can also have a different allowed tool catalogue.
 - Pi resumes an existing native file whose header matches both session and
   root. The create-if-missing session-ID flag is only used for session creation.
   Missing, ambiguous, malformed, or cross-Project histories refuse before input.
+- The SDK identifies provider-owned conversations explicitly. Work follow-ups
+  reuse the persisted native session and omit prior transcript contributions;
+  host-owned API conversations retain their planned history. Work journals the
+  resume cursor before input and refuses incompatible provider, model, or folder
+  bindings without editing earlier turns.
 - Code startup reads the newest session binding and at most two turn markers
   through a SQLite expression index derived from the journal. It never scans
   message/tool history to decide whether to resume. The index is rebuildable;

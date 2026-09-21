@@ -382,6 +382,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
   return {
     kind: "opencode",
+    conversationOwnership: "provider",
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))

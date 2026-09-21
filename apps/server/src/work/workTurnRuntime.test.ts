@@ -229,6 +229,86 @@ describe("WorkTurnRuntime", () => {
     ]);
   });
 
+  it.each([false, true])(
+    "persists the resumed identity before sending and refuses input when persistence fails (%s)",
+    async (persistenceFails) => {
+      const order: string[] = [];
+      const cursor = { driverKind: "pi" as const, value: "existing-native-session" };
+      const start = vi.fn(() => Effect.die("must resume"));
+      const resume = vi.fn((input: Parameters<ProviderConnection["resume"]>[0]) =>
+        Effect.sync(() => {
+          order.push("resume");
+          return { sessionId: input.sessionId, resumeCursor: cursor };
+        }),
+      );
+      const send = vi.fn(() =>
+        Effect.sync(() => {
+          order.push("send");
+        }),
+      );
+      const connection: ProviderConnection = {
+        start,
+        resume,
+        send,
+        subscribe: Effect.succeed(
+          Stream.make({
+            instanceId: ids.provider,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(ids.project)),
+            occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+            kind: "completed" as const,
+            sessionId: ids.session as never,
+          }),
+        ),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const outcome = await new WorkTurnRuntime().run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Continue",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        resumeCursor: cursor,
+        projectRoot: "/tmp/work-project",
+        signal: new AbortController().signal,
+        driver: {
+          kind: "pi",
+          probe: () => Effect.die("unused"),
+          acquire: () => Effect.succeed(connection),
+        },
+        onSessionReady: (handle) => {
+          expect(handle.resumeCursor).toEqual(cursor);
+          order.push("persist");
+          if (persistenceFails) throw new Error("disk unavailable");
+        },
+      });
+      expect(start).not.toHaveBeenCalled();
+      expect(resume).toHaveBeenCalledWith(
+        expect.objectContaining({ resumeCursor: cursor, tools: [] }),
+      );
+      expect(order).toEqual(
+        persistenceFails ? ["resume", "persist"] : ["resume", "persist", "send"],
+      );
+      expect(outcome.kind).toBe(persistenceFails ? "failed" : "completed");
+    },
+  );
+
   it("keeps the idle window open while an app-managed action is executing", async () => {
     const answerTool = vi.fn(() => Effect.void);
     const execute = vi.fn(async () => {

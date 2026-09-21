@@ -565,6 +565,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
 
   return {
     kind: profile.kind,
+    conversationOwnership: "provider",
     ...(profile.authentication.kind === "delegated-browser"
       ? {
           beginAuthentication: ({ instanceId }) => {

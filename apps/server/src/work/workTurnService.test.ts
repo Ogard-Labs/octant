@@ -1218,6 +1218,34 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("keeps native Work follow-ups in the same session without replaying the transcript", async () => {
+    const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+      input.onSessionReady?.({
+        sessionId: input.providerSessionId,
+        resumeCursor: { driverKind: "pi", value: "native-work" },
+      });
+      return { kind: "completed" as const, response: "Private earlier response" };
+    });
+    const fixture = serviceFixture({ nativeConversation: true, turnRuntime: { run } });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const first = run.mock.calls[0]?.[0];
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      prompt: "Continue",
+    });
+    expect(run.mock.calls[1]?.[0]).toMatchObject({
+      providerSessionId: first?.providerSessionId,
+      resumeCursor: { driverKind: "pi", value: "native-work" },
+    });
+    expect(JSON.stringify(run.mock.calls[1]?.[0].context)).not.toContain(
+      "Private earlier response",
+    );
+    expect(JSON.stringify(run.mock.calls[1]?.[0].context)).not.toContain("Summarize the brief");
+  });
+
   it("hands a follow-up turn the prior transcript as provider context", async () => {
     const run = vi.fn();
     run.mockImplementationOnce(async () => ({
@@ -1276,6 +1304,7 @@ async function attachmentStore(): Promise<WorkAttachmentStore> {
 function serviceFixture(
   options: {
     readonly project?: Project;
+    readonly nativeConversation?: boolean;
     readonly turnRuntime?: WorkTurnRuntimePort;
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
@@ -1296,6 +1325,7 @@ function serviceFixture(
   const acquireInputs: unknown[] = [];
   const defaultDriver: ProviderDriver = {
     kind: "openai-compatible",
+    ...(options.nativeConversation ? { conversationOwnership: "provider" as const } : {}),
     ...(options.contextFacts === undefined ? {} : { contextFacts: options.contextFacts }),
     probe: () => Effect.die("unused"),
     acquire: (input) => {

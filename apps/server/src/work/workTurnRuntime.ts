@@ -8,6 +8,7 @@ import {
   type ProviderFailure,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderResumeCursor,
   type StartWorkThreadTurnCommand,
   type WorkTurnFailure,
   type WorkTurnRequestId,
@@ -15,7 +16,7 @@ import {
   upsertThreadTaskProgress,
   type ThreadTaskProgressList,
 } from "@octant/contracts";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -42,6 +43,8 @@ export interface WorkTurnRuntimePort {
   run(input: {
     readonly command: StartWorkThreadTurnCommand;
     readonly providerSessionId: ProviderSessionId;
+    readonly resumeCursor?: ProviderResumeCursor;
+    readonly onSessionReady?: (handle: ProviderSessionHandle) => void;
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
@@ -76,6 +79,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   async run(input: {
     readonly command: StartWorkThreadTurnCommand;
     readonly providerSessionId: ProviderSessionId;
+    readonly resumeCursor?: ProviderResumeCursor;
+    readonly onSessionReady?: (handle: ProviderSessionHandle) => void;
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
@@ -124,6 +129,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     input: {
       readonly command: StartWorkThreadTurnCommand;
       readonly providerSessionId: ProviderSessionId;
+      readonly resumeCursor?: ProviderResumeCursor;
+      readonly onSessionReady?: (handle: ProviderSessionHandle) => void;
       readonly projectRoot: string;
       readonly driver: ProviderDriver;
       readonly signal: AbortSignal;
@@ -164,15 +171,26 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           yield* boundedCleanup(connection.stop(input.providerSessionId), cleanupTimeoutMs);
         }),
       );
-      yield* connection.start({
+      const options = {
         sessionId: input.providerSessionId,
-        modelId: input.command.authority.modelId,
         ...(input.modelOptionValues === undefined
           ? {}
           : { modelOptionValues: input.modelOptionValues }),
-        executionPolicy: "approval-gated",
+        executionPolicy: "approval-gated" as const,
         tools: input.appManagedTools?.definitions ?? [],
-      });
+      };
+      const handle = yield* input.resumeCursor === undefined
+        ? connection.start({ ...options, modelId: input.command.authority.modelId })
+        : connection.resume({ ...options, resumeCursor: input.resumeCursor });
+      if (input.onSessionReady !== undefined) {
+        yield* Effect.try({
+          try: () => input.onSessionReady?.(handle),
+          catch: () => ({
+            category: "provider-failed" as const,
+            message: "Work session identity could not be saved.",
+          }),
+        });
+      }
 
       if (input.signal.aborted) {
         yield* connection

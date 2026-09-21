@@ -118,6 +118,7 @@ export function makeOhMyPiDriver(options: OhMyPiDriverOptions): ProviderDriver {
 
   return {
     kind: "oh-my-pi",
+    conversationOwnership: "provider",
     probe: ({ instanceId }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(

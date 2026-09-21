@@ -91,6 +91,8 @@ export interface ProviderUserInputAnswer {
 }
 
 export interface ProviderDriver {
+  /** Provider-owned conversations must resume; host-owned APIs receive planned history. */
+  readonly conversationOwnership?: "provider" | "host";
   readonly kind: ProviderDriverKind;
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */

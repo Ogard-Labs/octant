@@ -236,6 +236,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
 
   return {
     kind: "pi",
+    conversationOwnership: "provider",
     probe: ({ instanceId }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(

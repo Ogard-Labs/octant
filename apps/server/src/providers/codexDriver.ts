@@ -519,6 +519,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 
   return {
     kind: "codex",
+    conversationOwnership: "provider",
     contextFacts,
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
