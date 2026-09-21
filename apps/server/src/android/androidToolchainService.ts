@@ -943,7 +943,9 @@ function inputArgv(
 }
 
 function adbText(value: string): string {
-  return value.replaceAll(" ", "%s").replaceAll("'", "\\'");
+  // adb joins argv into a command that the device shell parses again.
+  // Quote the whole token so typed punctuation cannot become shell syntax.
+  return `'${value.replaceAll(" ", "%s").replaceAll("'", "'\\''")}'`;
 }
 
 function androidKey(key: string): string | undefined {

@@ -75,3 +75,8 @@ already separate "is there a screen" from "how do I click".
   process access. Closing the runtime cancels capture and action commands and
   waits for their cleanup before returning; a closed runtime accepts no new
   discovery, actions, or frame watches.
+
+- Typed text is quoted as one device-shell argument after Android space encoding.
+  Shell metacharacters, substitutions, newlines, and quotes remain input data,
+  never additional commands. Host argv boundaries alone do not provide this
+  protection because `adb shell` reparses the command on the device.

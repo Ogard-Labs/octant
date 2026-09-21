@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type {
   AndroidDiscoveryRequest,
   AndroidEmulatorRequest,
@@ -132,6 +133,47 @@ function action(kind: AndroidEmulatorRequest["kind"], extra: Record<string, unkn
 }
 
 describe("AndroidToolchainService", () => {
+  it.each([
+    "hello world",
+    "it's quoted",
+    "a; printf INJECTED",
+    "$(printf INJECTED)",
+    "`printf INJECTED`",
+    "a\nb",
+    '"quoted" & | < > \\',
+  ])("keeps typed text literal when the device shell reparses it: %s", async (text) => {
+    const execute = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+    });
+    try {
+      await service.discover(discoveryRequest, context);
+      const result = await service.execute(action("type-text", { text, requestedBy: actor }), {
+        ...context,
+        inputGranted: true,
+      });
+      expect(result.outcome).toBe("succeeded");
+      const argv = execute.mock.calls.find(([call]) => call.argv.includes("text"))?.[0].argv;
+      expect(argv).toBeDefined();
+      // Match adb's device-shell parsing; the fake input command only prints arguments.
+      const command = argv?.slice(4).join(" ") ?? "";
+      const received = execFileSync(
+        "/bin/sh",
+        ["-c", `input() { printf '%s\\0' "$@"; }; ${command}`],
+        { encoding: "utf8" },
+      );
+      expect(received.split("\0")).toEqual(["text", text.replaceAll(" ", "%s"), ""]);
+    } finally {
+      await service.close();
+    }
+  });
+
   it("refuses discovery outside the requesting task authority before probing the SDK", async () => {
     const execute = discoveryExecutor();
     const access = vi.fn(async () => undefined);
