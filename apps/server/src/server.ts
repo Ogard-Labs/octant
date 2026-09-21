@@ -4478,8 +4478,9 @@ export function startOctantServer(
           })),
         ),
       realpath,
-      writeArtifact: (reference, bytes) => androidRuntimeStore.writeArtifact(reference, bytes),
-      readArtifact: (reference) => androidRuntimeStore.readArtifact(reference),
+      writeArtifact: (reference, bytes, scope) =>
+        androidRuntimeStore.writeArtifact(reference, bytes, scope),
+      readArtifact: (reference, scope) => androidRuntimeStore.readArtifact(reference, scope),
       now: () => new Date().toISOString(),
       newId: randomUUID,
     });

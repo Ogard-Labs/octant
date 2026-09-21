@@ -1,3 +1,4 @@
+import type { AndroidArtifactScope } from "./androidRuntimeStore";
 import { createHash } from "node:crypto";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -79,8 +80,15 @@ export interface AndroidToolchainServiceOptions {
   >;
   readonly realpath: (path: string) => Promise<string>;
   readonly observeEmulators?: (emulators: ReadonlyArray<AndroidEmulatorRecord>) => void;
-  readonly writeArtifact: (reference: string, bytes: Uint8Array) => Promise<void>;
-  readonly readArtifact: (reference: string) => Promise<Uint8Array | undefined>;
+  readonly writeArtifact: (
+    reference: string,
+    bytes: Uint8Array,
+    scope: AndroidArtifactScope,
+  ) => Promise<void>;
+  readonly readArtifact: (
+    reference: string,
+    scope: AndroidArtifactScope,
+  ) => Promise<Uint8Array | undefined>;
   readonly now: () => string;
   readonly newId: () => string;
   readonly environment?: () => Readonly<Record<string, string | undefined>>;
@@ -121,10 +129,6 @@ export class AndroidToolchainService {
       readonly threadId: AndroidExecutionContext["threadId"];
       readonly checkoutId: AndroidExecutionContext["checkoutId"];
     }
-  >();
-  readonly #artifacts = new Map<
-    string,
-    { readonly bytes: Uint8Array; readonly threadId: string }
   >();
 
   constructor(options: AndroidToolchainServiceOptions) {
@@ -283,14 +287,7 @@ export class AndroidToolchainService {
     | { readonly kind: "unavailable"; readonly message: string }
     | { readonly kind: "unauthorized"; readonly message: string }
   > {
-    const stored = this.#artifacts.get(reference);
-    if (stored !== undefined) {
-      if (stored.threadId !== String(context.threadId)) {
-        return { kind: "unauthorized", message: "That screenshot does not belong to this thread." };
-      }
-      return { kind: "found", bytes: stored.bytes };
-    }
-    const bytes = await this.#options.readArtifact(reference);
+    const bytes = await this.#options.readArtifact(reference, context);
     if (bytes === undefined) {
       return { kind: "unavailable", message: "That screenshot is not available." };
     }
@@ -707,8 +704,7 @@ export class AndroidToolchainService {
     bytes: Uint8Array,
     context: AndroidExecutionContext,
   ): Promise<void> {
-    this.#artifacts.set(reference, { bytes, threadId: String(context.threadId) });
-    await this.#options.writeArtifact(reference, bytes);
+    await this.#options.writeArtifact(reference, bytes, context);
   }
 
   async #logged(
@@ -722,6 +718,7 @@ export class AndroidToolchainService {
     await this.#options.writeArtifact(
       reference,
       new TextEncoder().encode(diagnostics.map((item) => item.message).join("\n") + "\n"),
+      request,
     );
     return evidence(
       request,

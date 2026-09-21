@@ -65,3 +65,9 @@ already separate "is there a screen" from "how do I click".
   frames are rejected whole rather than truncated into invalid image bytes.
 - Emulator console discovery accepts the AVD name followed by its normal `OK`
   trailer. Actions never guess a serial when the destination cannot be resolved.
+
+- Artifact storage retains task and checkout ownership in its on-disk namespace.
+  Restart does not broaden read access. Legacy files without recorded ownership
+  remain untouched and unavailable through scoped reads. Reads reject links and
+  oversized files before allocating their contents; no unbounded binary cache
+  retains screenshots in the service.
