@@ -444,6 +444,8 @@ describe("ThreadActivityPictureInPicture", () => {
 
     expect(await screen.findByText("Computer Use")).toBeVisible();
     expect(screen.getByText("click in Preview")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Allow computer access?" })).toBeVisible();
+    expect(screen.queryByText("Approval needed")).not.toBeInTheDocument();
     expect(screen.queryByText(otherThreadId)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Approve once" }));

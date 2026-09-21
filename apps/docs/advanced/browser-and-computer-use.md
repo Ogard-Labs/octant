@@ -86,6 +86,10 @@ check. Oh My Pi remains unavailable where its driver is probe-only.
 
 ## Computer use
 
+Computer access requests show a compact, left-aligned approval card with the
+server-provided application, task scope, and duration. **Deny** and **Approve once**
+remain visible together; the activity footer does not repeat the approval status.
+
 Computer use is a bundled plugin for the Apple Silicon macOS desktop app.
 Choose **Computer** from the `@` picker in a Chat, Work, or Code composer, then
 describe what to do. The selected Computer chip gives a supported provider

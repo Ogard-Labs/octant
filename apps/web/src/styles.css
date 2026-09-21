@@ -307,6 +307,44 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.thread-activity-pip[data-approval="pending"] {
+  width: min(360px, calc(100% - 32px));
+}
+
+.thread-activity-pip__permission {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  text-align: left;
+}
+
+.thread-activity-pip__permission-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--octant-text-primary);
+}
+
+.thread-activity-pip__permission-title h3 {
+  margin: 0;
+  font-size: var(--oct-text-detail);
+  font-weight: 500;
+}
+
+.thread-activity-pip__permission p {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.thread-activity-pip__permission-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* One floating picture per tool, and nothing around it. */
 .thread-activity-pip__card {
   position: relative;
