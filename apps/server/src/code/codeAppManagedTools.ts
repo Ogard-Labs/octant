@@ -118,7 +118,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot observes it. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -160,7 +160,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot observes it. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -204,7 +204,19 @@ const androidDefinition = {
  * decides. The tool takes no shortcut a person operating the workbench could
  * not take, and mints no destination of its own.
  */
-export interface CodeAppleToolPort {
+interface CodeDeviceScreenshotPort {
+  readonly readScreenshot: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    reference: string,
+  ) => Promise<Uint8Array | undefined>;
+}
+
+export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -236,7 +248,7 @@ export interface CodeAppleToolPort {
   ) => Promise<AppleRuntimeSnapshot | undefined>;
 }
 
-export interface CodeAndroidToolPort {
+export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -888,7 +900,18 @@ async function appleTool(
   }
   const evidence = await apple.execute(options.windowId, request);
   if (evidence === undefined) return failure("apple-unavailable");
-  return appleEvidenceResult(evidence, opensPane);
+  const result = appleEvidenceResult(evidence, opensPane);
+  if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
+  if (signal?.aborted) return failure("tool-interrupted");
+  const reference = evidence.artifacts.find(
+    (artifact) => artifact.kind === "screenshot",
+  )?.reference;
+  const bytes =
+    reference === undefined
+      ? undefined
+      : await apple.readScreenshot(options.windowId, scope, reference);
+  if (signal?.aborted) return failure("tool-interrupted");
+  return deviceScreenshotResult(result, bytes);
 }
 
 const ANDROID_BOOT_TIMEOUT_MS = 180_000;
@@ -1007,7 +1030,18 @@ async function androidTool(
   }
   const evidence = await android.execute(options.windowId, request);
   if (evidence === undefined) return failure("android-unavailable");
-  return androidEvidenceResult(evidence, opensPane);
+  const result = androidEvidenceResult(evidence, opensPane);
+  if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
+  if (signal?.aborted) return failure("tool-interrupted");
+  const reference = evidence.artifacts.find(
+    (artifact) => artifact.kind === "screenshot",
+  )?.reference;
+  const bytes =
+    reference === undefined
+      ? undefined
+      : await android.readScreenshot(options.windowId, scope, reference);
+  if (signal?.aborted) return failure("tool-interrupted");
+  return deviceScreenshotResult(result, bytes);
 }
 
 function inAppAndroidPaneResult<T extends Record<string, unknown>>(
@@ -1172,9 +1206,8 @@ function appleEvidenceResult(evidence: AppleBuildEvidence, opensPane: boolean) {
       message: diagnostic.message,
       ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
     })),
-    // References, never bytes. A captured screen is an artifact the host
-    // holds; putting it in a tool result would put the Simulator's screen
-    // into the provider transcript.
+    // Durable evidence keeps references; explicit screenshot calls attach
+    // bytes separately through the provider image channel.
     artifacts: evidence.artifacts.map((artifact) => ({
       kind: artifact.kind,
       reference: artifact.reference,
@@ -2008,4 +2041,33 @@ function postureRefusal(error: string) {
 
 function defaultWait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function deviceScreenshotResult<T extends { readonly result: object; readonly isError: boolean }>(
+  evidence: T,
+  bytes: Uint8Array | undefined,
+) {
+  // The wire allows 2 MiB of base64. Refuse whole images instead of truncating
+  // or resizing them and invalidating the pixel coordinates used for input.
+  const maxBytes = 1_572_864;
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (
+    bytes === undefined ||
+    bytes.byteLength > maxBytes ||
+    !pngSignature.every((byte, index) => bytes[index] === byte)
+  ) {
+    return {
+      result: {
+        ...evidence.result,
+        error: "screenshot-image-unavailable",
+        message:
+          "The screenshot could not be delivered as a provider image. Do not infer screen contents from the artifact reference.",
+      },
+      isError: true,
+    };
+  }
+  return {
+    ...evidence,
+    images: [{ mimeType: "image/png" as const, data: Buffer.from(bytes).toString("base64") }],
+  };
 }

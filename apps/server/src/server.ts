@@ -3957,6 +3957,17 @@ export function startOctantServer(
             await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
+          readScreenshot: async (windowId, scope, reference) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            const artifact = await appleToolchainService.readScreenshotArtifact(reference, context);
+            return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
           snapshot: async (windowId, scope) => {
             const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
@@ -4019,6 +4030,20 @@ export function startOctantServer(
               );
             }
             return evidence;
+          },
+          readScreenshot: async (windowId, scope, reference) => {
+            const context = await resolveAndroidContext(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            const artifact = await androidToolchainService.readScreenshotArtifact(
+              reference,
+              context,
+            );
+            return artifact.kind === "found" ? artifact.bytes : undefined;
           },
           snapshot: async (windowId, scope) => {
             const context = await resolveAndroidContext(windowId, scope, {

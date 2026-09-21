@@ -1133,8 +1133,10 @@ describe("the Apple capability as an agent tool", () => {
     ).not.toContain("octant_apple");
   });
 
-  it("captures the Simulator screen as a reference, never as bytes in the transcript", async () => {
-    const { execute, tools } = appleTools();
+  it("returns an explicitly requested Simulator screenshot through the provider image channel", async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const readScreenshot = vi.fn(async () => bytes);
+    const { execute, tools } = appleTools({ readScreenshot });
 
     const outcome = await tools.execute({
       name: "octant_apple",
@@ -1160,6 +1162,68 @@ describe("the Apple capability as an agent tool", () => {
       artifacts: [{ kind: "screenshot", reference: "apple-screenshot-1" }],
     });
     expect(JSON.stringify(outcome.result)).not.toContain("PNG");
+    expect(outcome.images).toEqual([
+      { mimeType: "image/png", data: Buffer.from(bytes).toString("base64") },
+    ]);
+    expect(readScreenshot).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "apple-screenshot-1",
+    );
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["invalid", Uint8Array.from([1, 2, 3])],
+    ["oversized", new Uint8Array(1_572_865)],
+  ])("reports %s screenshot images as unavailable", async (_name, bytes) => {
+    const { tools } = appleTools({ readScreenshot: async () => bytes });
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+      }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.images).toBeUndefined();
+    expect(outcome.result).toMatchObject({ error: "screenshot-image-unavailable" });
+  });
+
+  it("does not send a screen when a device action returns screenshot evidence", async () => {
+    const readScreenshot = vi.fn(async () => new Uint8Array());
+    const { tools } = appleTools({ readScreenshot });
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "tap",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+        x: 1,
+        y: 2,
+      }),
+    });
+    expect(readScreenshot).not.toHaveBeenCalled();
+    expect(outcome.images).toBeUndefined();
+  });
+
+  it("does not deliver a screenshot after the turn is cancelled during its read", async () => {
+    const controller = new AbortController();
+    const { tools } = appleTools({
+      readScreenshot: async () => {
+        controller.abort();
+        return Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+      },
+    });
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      signal: controller.signal,
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+      }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.images).toBeUndefined();
   });
 
   it("attributes Simulator input to the agent actor on the workbench channel", async () => {
@@ -1488,6 +1552,27 @@ describe("the Android capability as an agent tool", () => {
       }),
     };
   }
+
+  it("delivers an explicitly requested Android screenshot through the image channel", async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const readScreenshot = vi.fn(async () => bytes);
+    const { tools } = androidTools({ readScreenshot });
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        emulatorId: "Pixel_Test",
+      }),
+    });
+    expect(outcome.images).toEqual([
+      { mimeType: "image/png", data: Buffer.from(bytes).toString("base64") },
+    ]);
+    expect(readScreenshot).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "android-screenshot-1",
+    );
+  });
 
   it("offers the Android tool only where the host has an Android capability to lend", () => {
     expect(androidTools().tools.definitions.map((definition) => definition.name)).toContain(
