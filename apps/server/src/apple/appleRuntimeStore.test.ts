@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, mkdir, writeFile, symlink, link, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -52,6 +52,45 @@ describe("AppleRuntimeStore", () => {
       await expect(store.loadReceipts()).resolves.toEqual(receipts);
       expect(await readFile(join(root, "artifacts", "apple-log-safe"), "utf8")).toBe("bounded log");
       expect(await readFile(join(root, "active-actions.json"), "utf8")).not.toContain("/private/");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses linked artifacts instead of reading another file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-apple-store-"));
+    try {
+      const store = new AppleRuntimeStore(root);
+      await mkdir(join(root, "artifacts"));
+      const source = join(root, "outside");
+      await writeFile(source, "private content");
+      await symlink(source, join(root, "artifacts", "apple-linked"));
+      await link(source, join(root, "artifacts", "apple-hardlinked"));
+      await expect(store.readArtifact("apple-linked")).resolves.toBeUndefined();
+      await expect(store.readArtifact("apple-hardlinked")).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses oversized on-disk artifacts and receipts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-apple-store-"));
+    try {
+      const store = new AppleRuntimeStore(root);
+      await mkdir(join(root, "artifacts"));
+      for (const [path, size] of [
+        [join(root, "artifacts", "apple-large"), 16 * 1024 * 1024 + 1],
+        [join(root, "active-actions.json"), 1024 * 1024 + 1],
+      ] as const) {
+        const file = await open(path, "w");
+        try {
+          await file.truncate(size);
+        } finally {
+          await file.close();
+        }
+      }
+      await expect(store.readArtifact("apple-large")).resolves.toBeUndefined();
+      await expect(store.loadReceipts()).resolves.toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

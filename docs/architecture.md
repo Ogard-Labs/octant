@@ -420,6 +420,10 @@ states; closing the tab does not shut down the destination. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app (see
 [decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
+Apple artifact and restart-receipt reads validate regular-file identity and size
+on an open handle before allocation. Reads reject linked files and size changes,
+with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
+rewritten.
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
 ([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
