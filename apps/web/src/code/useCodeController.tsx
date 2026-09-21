@@ -260,7 +260,15 @@ const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
  * heard about. Every figure comes from the provider: a provider that reports
  * no cost leaves `costUsd` absent rather than showing a derived number.
  */
+interface CodeCacheCoverage {
+  /** Coverage is over turns with usage reports, not all conversation turns. */
+  readonly reportedTurns: number;
+  readonly read: { readonly measuredTurns: number; readonly measuredTokens: number };
+  readonly write: { readonly measuredTurns: number; readonly measuredTokens: number };
+}
+
 export interface CodeThreadUsage {
+  readonly cacheCoverage?: CodeCacheCoverage;
   readonly inputTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
@@ -296,6 +304,7 @@ interface CodeTurnUsage {
  * journal projects when the thread is reopened.
  */
 function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
+  readonly cacheCoverage?: CodeCacheCoverage;
   readonly inputTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
@@ -309,6 +318,8 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   let inputTokens = 0;
   let outputTokens = 0;
   let cacheReadInputTokens: number | undefined;
+  let cacheReadTurns = 0;
+  let cacheWriteTurns = 0;
   let cacheWriteInputTokens: number | undefined;
 
   let costUsd: number | undefined;
@@ -321,10 +332,14 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   for (const usage of byOperation.values()) {
     inputTokens += usage.inputTokens;
     outputTokens += usage.outputTokens;
-    if (usage.cacheReadInputTokens !== undefined)
+    if (usage.cacheReadInputTokens !== undefined) {
+      cacheReadTurns += 1;
       cacheReadInputTokens = (cacheReadInputTokens ?? 0) + usage.cacheReadInputTokens;
-    if (usage.cacheWriteInputTokens !== undefined)
+    }
+    if (usage.cacheWriteInputTokens !== undefined) {
+      cacheWriteTurns += 1;
       cacheWriteInputTokens = (cacheWriteInputTokens ?? 0) + usage.cacheWriteInputTokens;
+    }
 
     if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
     if (usage.contextWindow !== undefined) contextWindow = usage.contextWindow;
@@ -334,8 +349,17 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
     inputTokens,
     outputTokens,
     ...(costUsd === undefined ? {} : { costUsd }),
-    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
-    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(cacheReadTurns !== byOperation.size || cacheReadInputTokens === undefined
+      ? {}
+      : { cacheReadInputTokens }),
+    ...(cacheWriteTurns !== byOperation.size || cacheWriteInputTokens === undefined
+      ? {}
+      : { cacheWriteInputTokens }),
+    cacheCoverage: {
+      reportedTurns: byOperation.size,
+      read: { measuredTurns: cacheReadTurns, measuredTokens: cacheReadInputTokens ?? 0 },
+      write: { measuredTurns: cacheWriteTurns, measuredTokens: cacheWriteInputTokens ?? 0 },
+    },
 
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(contextTokens === undefined ? {} : { contextTokens }),

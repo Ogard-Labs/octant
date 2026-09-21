@@ -67,6 +67,10 @@ A resumed turn can also have a different allowed tool catalogue.
   runtime usage includes uncached input, cache reads, and cache writes in total
   input; the provider reports these as disjoint counters. Unsafe aggregate totals
   refuse before event emission. Historical journal usage is not rewritten.
+  Renderer cache totals remain unknown when any usage-reporting turn omits that
+  counter. Coverage records measured turns and tokens separately for reads and
+  writes; an explicit zero is measured, while an omitted counter is unknown.
+  This coverage describes reported turns, not turns with no usage event.
 
 ## Consequences
 
