@@ -97,7 +97,7 @@ export function AndroidEmulatorPane(props: {
   const inputFlight = useRef(Promise.resolve());
   // The epoch only wakes this surface after the host records a grant; the
   // per-Emulator expiry stays in rememberedInputGrants.
-  const [rememberedGrantEpoch, setRememberedGrantEpoch] = useState(0);
+  const [, setRememberedGrantEpoch] = useState(0);
   const [frameAttach, setFrameAttach] = useState(false);
   useEffect(() => {
     let active = true;

@@ -452,7 +452,7 @@ function AppleWorkbenchSurface(props: {
   const inputFlight = useRef(Promise.resolve());
   // The epoch only wakes this surface after the host records a grant; the
   // per-Simulator expiry stays in rememberedInputGrants.
-  const [rememberedGrantEpoch, setRememberedGrantEpoch] = useState(0);
+  const [, setRememberedGrantEpoch] = useState(0);
   const [frameAttach, setFrameAttach] = useState<AppleSimulatorLiveFrameAttach>({
     kind: "not-attachable",
     reason:
