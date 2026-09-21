@@ -734,6 +734,96 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     ).resolves.toBe("invalid-configuration");
   });
 
+  it("waits for starting sessions at shutdown and refuses to admit them afterward", async () => {
+    const { driver, client, registry, active } = fixture(profile);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    client.setConfigOption.mockImplementationOnce(async () => {
+      await gate;
+      return { configOptions: client.configOptions };
+    });
+    // Profile-specific model selection can bypass setConfigOption.
+    vi.mocked(client.call).mockImplementation(async () => {
+      await gate;
+      return {};
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const starting = yield* Effect.fork(
+            Effect.flip(
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            ),
+          );
+          yield* Effect.promise(() => vi.waitFor(() => expect(active()).toBe(1)));
+          let closed = false;
+          const closing = registry.closeAll().then(() => {
+            closed = true;
+          });
+          yield* Effect.promise(async () => {
+            await Promise.resolve();
+            expect(closed).toBe(false);
+            release();
+          });
+          yield* Fiber.join(starting);
+          yield* Effect.promise(() => closing);
+          expect(active()).toBe(0);
+        }),
+      ),
+    );
+  });
+
+  it("refuses another connection before it can open the same native conversation", async () => {
+    const { driver, starts } = fixture(profile);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const first = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const second = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const handle = yield* first.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          if (handle.resumeCursor === undefined) throw new Error("Expected native cursor");
+          const before = starts.length;
+          yield* Effect.flip(
+            second.resume({
+              sessionId,
+              resumeCursor: handle.resumeCursor,
+              executionPolicy: "approval-gated",
+            }),
+          );
+          expect(starts).toHaveLength(before);
+          const alias = decodeProviderSessionId("80000000-0000-4000-8000-000000000399");
+          if (handle.resumeCursor.binding === undefined) throw new Error("Expected binding");
+          yield* Effect.flip(
+            second.resume({
+              sessionId: alias,
+              resumeCursor: {
+                ...handle.resumeCursor,
+                binding: { ...handle.resumeCursor.binding, sessionId: alias },
+              },
+              executionPolicy: "approval-gated",
+            }),
+          );
+          expect(starts).toHaveLength(before);
+          yield* first.stop(sessionId);
+          yield* second.resume({
+            sessionId,
+            resumeCursor: handle.resumeCursor,
+            executionPolicy: "approval-gated",
+          });
+          expect(starts).toHaveLength(before + 1);
+          yield* second.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
   it.each([
     ["code", "approval-gated"],
     ["code", "plan"],

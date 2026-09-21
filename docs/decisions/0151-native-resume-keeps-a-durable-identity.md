@@ -55,6 +55,11 @@ A resumed turn can also have a different allowed tool catalogue.
   completed cleanup release ownership without changing the native history.
   Starting reservations exclude CLI updates before the process becomes active;
   a stale release cannot revoke a newer reservation.
+- ACP also reserves the Octant task and native provider identity before resume.
+  A second scoped connection or task alias cannot open a concurrent writer.
+  Same-connection replacement closes its idle predecessor before process startup.
+  Starting reservations exclude runtime changes; shutdown waits for startup and
+  destroys its resources before completing. Failed cleanup retains ownership.
 - Pi 0.85.1 can retain a successfully settled process for 30 seconds, with at
   most four idle native runtimes across the host. Warm reuse requires identical
   executable, managed home, root, mode, model, execution policy, and full tool
