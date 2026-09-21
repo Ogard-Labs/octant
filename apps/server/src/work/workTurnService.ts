@@ -546,12 +546,18 @@ export class WorkTurnService {
     }
     const acceptedAt = decodeTimestamp(this.#clock());
     const nativeConversation = driver.conversationOwnership === "provider";
-    const previous = nativeConversation
-      ? this.#projection.latestForThread(command.threadId)
-      : undefined;
+    const previous = this.#projection.latestForThread(command.threadId);
+    const previousDriver =
+      previous === undefined
+        ? undefined
+        : this.#resolveDriver(previous.authority.providerInstanceId);
+    const previousNative = previousDriver?.conversationOwnership === "provider";
     if (
+      (nativeConversation || previousNative || previousDriver === undefined) &&
       previous !== undefined &&
-      (previous.providerSessionId === undefined ||
+      (!nativeConversation ||
+        !previousNative ||
+        previous.providerSessionId === undefined ||
         previous.resumeCursor === undefined ||
         previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
         previous.authority.modelId !== command.authority.modelId ||
@@ -563,8 +569,10 @@ export class WorkTurnService {
         "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
       );
     }
-    const resumeCursor = previous?.resumeCursor;
-    const providerSessionId = previous?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
+    const resumeCursor = nativeConversation ? previous?.resumeCursor : undefined;
+    const providerSessionId =
+      (nativeConversation ? previous?.providerSessionId : undefined) ??
+      decodeProviderSessionId(this.#uuid());
     const harnessContext =
       thread === undefined
         ? []

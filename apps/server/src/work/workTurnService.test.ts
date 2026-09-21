@@ -1266,6 +1266,62 @@ describe("WorkTurnService", () => {
     },
   );
 
+  it.each([
+    { nativeFirst: true, retirePrevious: false },
+    { nativeFirst: false, retirePrevious: false },
+    { nativeFirst: true, retirePrevious: true },
+  ])(
+    "refuses a Work conversation replacement when nativeFirst=$nativeFirst and retirePrevious=$retirePrevious",
+    async ({ nativeFirst, retirePrevious }) => {
+      let retired = false;
+      const nextProvider = decodeProviderInstanceId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: { driverKind: "pi", value: "native-work" },
+        });
+        return { kind: "completed" as const, response: "Existing conversation" };
+      });
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        resolveDriver: (id, fallback) =>
+          retired && id === ids.provider
+            ? undefined
+            : {
+                ...fallback,
+                conversationOwnership: (id === ids.provider ? nativeFirst : !nativeFirst)
+                  ? "provider"
+                  : "host",
+              },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      retired = retirePrevious;
+      const previousThread = await fixture.threads.read();
+      fixture.threads.read.mockResolvedValue({
+        ...previousThread,
+        providerInstanceId: nextProvider,
+      });
+      const previousProvider = fixture.persistence.readProviderInstance();
+      fixture.persistence.readProviderInstance.mockReturnValue({
+        ...previousProvider,
+        id: nextProvider,
+      });
+      const journalCalls = fixture.persistence.journal.append.mock.calls.length;
+      await expect(
+        fixture.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+          turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+          authority: { ...startCommand().authority, providerInstanceId: nextProvider },
+          prompt: "Continue",
+        }),
+      ).rejects.toThrow("native session cannot be recovered");
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(fixture.persistence.journal.append.mock.calls).toHaveLength(journalCalls);
+    },
+  );
+
   it("hands a follow-up turn the prior transcript as provider context", async () => {
     const run = vi.fn();
     run.mockImplementationOnce(async () => ({
@@ -1325,6 +1381,10 @@ function serviceFixture(
   options: {
     readonly project?: Project;
     readonly nativeConversation?: boolean;
+    readonly resolveDriver?: (
+      id: Parameters<WorkTurnServiceDependencies["resolveDriver"]>[0],
+      fallback: ProviderDriver,
+    ) => ProviderDriver | undefined;
     readonly turnRuntime?: WorkTurnRuntimePort;
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
@@ -1469,7 +1529,10 @@ function serviceFixture(
     workingDirectories: {
       resolve: vi.fn(async (root: string) => root),
     },
-    resolveDriver: () => defaultDriver,
+    resolveDriver: (id) =>
+      options.resolveDriver === undefined
+        ? defaultDriver
+        : options.resolveDriver(id, defaultDriver),
     ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
     ...(options.supportsAttachments === undefined
       ? {}

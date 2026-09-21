@@ -586,7 +586,11 @@ Native Chat, Work, and Code resume acknowledgements may omit an unchanged resume
 cursor. The host retains the already-admitted cursor in that case and persists a
 replacement when one is returned. A changed session identity or an initial native
 session without a recoverable cursor still fails closed; no transcript replay or
-replacement conversation repairs the missing identity.
+replacement conversation repairs the missing identity. Work and Chat also refuse
+a follow-up that switches between provider-owned and host-owned conversation
+history; switching adapters cannot implicitly replace an existing native task.
+Work also refuses when the previous driver is unavailable and its conversation
+ownership cannot be established.
 
 Optional Project and
 thread token spend ceilings (0060) are host owner policy: the server refuses a
