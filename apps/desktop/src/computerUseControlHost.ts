@@ -177,6 +177,17 @@ export function createComputerUseControlHost(options: {
             max_dimension: 1280,
             max_elements: 512,
           });
+          const backgroundInput = response.data.background_input;
+          const exactWindow = record(backgroundInput) ? backgroundInput.exact_window : undefined;
+          if (record(exactWindow) && exactWindow.status === "ax_unresolved") {
+            return {
+              observation: undefined,
+              result: refused(
+                "window-unavailable",
+                "The window is visible, but its accessibility surface is unavailable. Wait for the application to finish loading and observe this window again.",
+              ),
+            };
+          }
           if (
             typeof response.data.snapshot_id !== "string" ||
             !/^s[0-9a-f]{8}$/.test(response.data.snapshot_id) ||
@@ -297,6 +308,7 @@ export function createComputerUseControlHost(options: {
           return refused("stale-observation", "The application process changed. Observe it again.");
         const before = await observe(old.appId, old.pid, old.windowId);
         if (before === undefined) return refused("window-owned", "Another task owns this window.");
+        if (before.observation === undefined) return before.result;
         let element: Record<string, unknown> | undefined;
         if (command.operation === "click" && "x" in command) {
           if (before.observation.truncated)

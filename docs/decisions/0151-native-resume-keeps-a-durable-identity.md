@@ -35,6 +35,9 @@ A resumed turn can also have a different allowed tool catalogue.
   Interrupted work cancels pending approval and native input; a changed owner or
   authority revokes the session. This extends lifecycle handling without changing
   0113's consent, expiry, disable, and native confinement requirements.
+- A computer-use window whose native accessibility surface cannot be resolved
+  returns an explicit window-unavailable refusal. A screenshot alone does not
+  authorize input; revalidation must still resolve that exact window before acting.
 - Browser context approval belongs to the host-owned task context, not a
   single turn's tool handle. Subsequent turns reuse a still-active context only
   with the same model and effective authority; expiry, stop, or changed authority

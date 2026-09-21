@@ -14,7 +14,7 @@ const owner = decodeComputerUseOwner({
   executionPolicy: "approval-gated",
 });
 
-function fixture(protectedField = false, additionalElements = 0) {
+function fixture(protectedField = false, additionalElements = 0, unresolved = false) {
   let snapshot = 0;
   const call = vi.fn(async (name: string) => {
     const data =
@@ -24,7 +24,12 @@ function fixture(protectedField = false, additionalElements = 0) {
           ? { windows: [{ window_id: 9, title: "Fixture" }] }
           : name === "get_window_state"
             ? {
-                snapshot_id: `s${String(++snapshot).padStart(8, "0")}`,
+                ...(unresolved
+                  ? {
+                      background_input: { exact_window: { status: "ax_unresolved" } },
+                      degraded: true,
+                    }
+                  : { snapshot_id: `s${String(++snapshot).padStart(8, "0")}` }),
                 screenshot_width: 100,
                 screenshot_height: 100,
                 elements: [
@@ -72,7 +77,13 @@ function fixture(protectedField = false, additionalElements = 0) {
       close: async () => {},
     }),
   });
-  return { host, call };
+  return {
+    host,
+    call,
+    setUnresolved: (value: boolean) => {
+      unresolved = value;
+    },
+  };
 }
 
 describe("Thread-owned computer control", () => {
@@ -105,6 +116,51 @@ describe("Thread-owned computer control", () => {
       await host.close();
     }
   });
+  it("explains when a captured window has no safe accessibility input surface", async () => {
+    const { host, call } = fixture(false, 0, true);
+    try {
+      const result = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 9,
+        }),
+      );
+      expect(result).toMatchObject({ kind: "refused", reason: "window-unavailable" });
+      if (result.kind === "refused") expect(result.message).toContain("accessibility");
+      expect(call.mock.calls.map(([name]) => name)).toEqual(["list_apps", "get_window_state"]);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("refuses input if a previously observed window loses its accessibility surface", async () => {
+    const { host, call, setUnresolved } = fixture();
+    try {
+      const observed = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 9,
+        }),
+      );
+      if (observed.kind !== "observation") throw new Error("Expected an observation");
+      setUnresolved(true);
+      const result = await host.execute(owner, {
+        operation: "click",
+        observationId: observed.observationId,
+        elementIndex: 4,
+      });
+      expect(result).toMatchObject({ kind: "refused", reason: "window-unavailable" });
+      expect(call.mock.calls.map(([name]) => name)).not.toContain("click");
+      expect(call.mock.calls.map(([name]) => name)).not.toContain("start_session");
+    } finally {
+      await host.close();
+    }
+  });
+
   it("uses an observed element and returns fresh evidence after the action", async () => {
     const { host, call } = fixture();
     try {
