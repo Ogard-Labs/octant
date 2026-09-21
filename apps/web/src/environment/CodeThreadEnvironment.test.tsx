@@ -117,6 +117,32 @@ describe("CodeThreadEnvironment", () => {
     await waitFor(() => expect(client.environmentForThread).toHaveBeenCalledOnce());
   });
 
+  it("reads the checkout once the host has reconnected it, so the bar under the composer appears", async () => {
+    const client = projectClient(readyObservation());
+    const view = (checkoutAvailability: "waiting" | "available") => (
+      <CodeThreadEnvironment
+        checkoutAvailability={checkoutAvailability}
+        observe
+        project={codeProject()}
+        projectClient={client}
+        tab={codeTab()}
+      >
+        <CodeCheckoutBar />
+      </CodeThreadEnvironment>
+    );
+    const { rerender } = render(view("waiting"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The host refuses a read while it is still reconnecting the checkout, and
+    // nothing asked again, so the bar stayed away for as long as the tab lived.
+    expect(client.environmentForThread).not.toHaveBeenCalled();
+    rerender(view("available"));
+
+    expect(await screen.findByLabelText("Checkout")).toHaveTextContent("feature/issue-204");
+  });
+
   it("renders the code workspace children inside the content area", () => {
     render(
       <CodeThreadEnvironment
