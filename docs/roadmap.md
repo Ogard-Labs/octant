@@ -56,6 +56,9 @@ Hardening in progress for the preview:
   the machine slept, and stays paired through a moment of no network. What is
   still open is proving it on real hardware across a genuine sleep/wake cycle.
 - Dogfood-driven fixes as they surface.
+- Internal TestFlight packaging for the existing mobile remote client: signing,
+  protected CI, Apple processing, and real-device acceptance are separate
+  gates under [0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
 
 ## Next
 
@@ -121,8 +124,9 @@ starts.
   desktop app (0058) sequences Windows after Linux + macOS parity; packaging
   stays outside the first release until the Out of scope preconditions in 0058
   hold; Work/Code stay `incompatible` until a Windows sandbox ADR exists.
-- **Mobile maturity** — device builds, live push notifications, native capture,
-  voice input, and public store distribution for the Expo client. Design:
+- **Mobile maturity after internal TestFlight** — Android device builds, live
+  push notifications, native capture, voice input, and public store
+  distribution for the Expo client. Design:
   [mobile-maturity-phases.md](mobile-maturity-phases.md).
 - **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete
   reachability need; local-first remote access comes first. Research:
@@ -134,8 +138,8 @@ starts.
   handoff remain primary; a full IDE would run as a separately launched
   companion. Start gates:
   [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
-- **Apple devices and distribution** — physical devices, provisioning,
-  TestFlight, and App Store submission on top of the Simulator loop. Design:
+- **Apple devices and public distribution** — deeper physical-device tooling
+  and App Store submission beyond the internal TestFlight remote-client track. Design:
   [apple-devices-distribution.md](apple-devices-distribution.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:

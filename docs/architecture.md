@@ -123,7 +123,12 @@ process-local client context on the loopback listener (internally still named
 carrying authenticated remote identity — and runs all mutations through
 services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
-server through `@octant/cli` (`octant server run`, `octant web`).
+server through `@octant/cli` (`octant server run`, `octant web`). For Code,
+verified remote requests carry their principal through an async request scope:
+the paired device may reach existing active Code Projects without a desktop
+workspace, while services retain thread, checkout, provider, and approval checks.
+This admission ends on cancellation or dispatch completion. Local windows retain
+their selected-Project restriction (ADR 0148).
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
@@ -142,7 +147,11 @@ phone creates Chat, Work, and Code threads, reads their transcripts, and sends
 follow-up turns under each thread's own authority (`start-work-thread-turn`
 with the thread's binding; `start-provider-turn` on the thread's checkout).
 Approvals, folder binding, file edits, and shell remain host-only and the
-composer says so.
+composer says so. Native startup supplies WebCrypto for the shared pairing and
+request-proof clients; keys persist in platform secure storage. Native remote
+fetch sends the proof-bound session cookie explicitly and disables the shared
+cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
+unchanged, and native remote requests refuse redirects.
 
 **Local client context.** Opening the canonical host URL directly creates a
 process-local client context through `/api/shell/local-session`; no launcher

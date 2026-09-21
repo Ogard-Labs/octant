@@ -23,6 +23,10 @@ import {
   type EventEnvelope,
   type CodeWorktreeRemoteFacts,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remote-access";
+import { CodeProjectAccess } from "../codeProjectAccess";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -563,6 +567,53 @@ describe("CodeService reads", () => {
 });
 
 describe("CodeService commands", () => {
+  it("prepares a paired device checkout and lists its thread without granting desktop workspace authority", async () => {
+    const fixture = serviceFixture();
+    const access = new CodeProjectAccess({
+      readWorkspace: () => undefined,
+      hasActiveCodeProject: (id) => String(id) === String(ids.project),
+    });
+    fixture.access.canAccessProject.mockImplementation((scope, project) =>
+      access.canAccessProject(scope, project),
+    );
+    const dispatch = createAuthenticatedProductDispatch({
+      dispatch: (_request, context) =>
+        access.run(context, async () => {
+          const prepared = await fixture.service.execute(context.scopeId, {
+            kind: "prepare-code-project-checkout",
+            projectId: ids.project,
+          });
+          const bootstrap = await fixture.service.bootstrap(context.scopeId);
+          return Response.json({ prepared, threads: bootstrap.threads });
+        }),
+    });
+    const response = await dispatch({
+      request: new Request("https://octant.example/api/code/commands", { method: "POST" }),
+      principal: {
+        kind: "remote-device",
+        deviceId: Schema.decodeUnknownSync(DeviceId)(String(ids.window)),
+        hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+          "00000000-0000-4000-8000-00000000c003",
+        ),
+        origin: "https://octant.example",
+        credentialGeneration: 1,
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+      },
+    });
+    expect(await response?.json()).toMatchObject({
+      prepared: { kind: "checkout-prepared" },
+      threads: [{ id: ids.thread }],
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "prepare-code-project-checkout",
+        projectId: ids.project,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
   it("observes and journals the authenticated Project checkout without exposing its root", async () => {
     // The persisted checkout is still waiting, so this observation is a real
     // change of state and belongs in the journal.

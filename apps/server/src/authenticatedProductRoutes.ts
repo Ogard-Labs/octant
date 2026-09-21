@@ -1,6 +1,10 @@
 import { authorizePrincipalAction } from "@octant/domain";
 import type { ClientPrincipal } from "./clientPrincipal";
-import { bindPrincipalRouteContext, resolvePrincipalRouteContext } from "./principalRouteContext";
+import {
+  bindPrincipalRouteContext,
+  resolvePrincipalRouteContext,
+  type PrincipalRouteContext,
+} from "./principalRouteContext";
 
 export interface AuthenticatedProductDispatchHandoff {
   readonly request: Request;
@@ -11,7 +15,10 @@ export interface AuthenticatedProductDispatchHandoff {
 }
 
 export interface AuthenticatedProductDispatchOptions {
-  readonly dispatch: (request: Request) => Response | undefined | Promise<Response | undefined>;
+  readonly dispatch: (
+    request: Request,
+    context: PrincipalRouteContext,
+  ) => Response | undefined | Promise<Response | undefined>;
 }
 
 /**
@@ -39,7 +46,7 @@ export function createAuthenticatedProductDispatch(
     bindPrincipalRouteContext(handoff.request, context);
     const internalRequest = makeLoopbackDispatchRequest(handoff.request);
     bindPrincipalRouteContext(internalRequest, context);
-    return options.dispatch(internalRequest);
+    return options.dispatch(internalRequest, context);
   };
 }
 

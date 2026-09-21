@@ -1,9 +1,11 @@
+import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -32,7 +34,7 @@ import {
   type MobileHostHealth,
   type MobileHostSessionHub,
 } from "./MobileHostSessionHub";
-import { disconnectLiveMobileSession } from "./mobileSessionLifecycle";
+import { disconnectLiveMobileSession, refreshLiveMobileSession } from "./mobileSessionLifecycle";
 
 export type MobileInboxHostFilter = "all" | string;
 
@@ -96,7 +98,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const hub = useMemo(
     () =>
       createMobileHostSessionHub({
-        fetch: globalThis.fetch.bind(globalThis),
+        fetch: mobileRemoteFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       }),
@@ -106,12 +108,13 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const bridge = useMemo(
     () =>
       createRemoteSessionBridge({
-        fetch: globalThis.fetch.bind(globalThis),
+        fetch: mobileRemoteFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       }),
     [deviceKeyStore],
   );
+  const lifetime = useRef(new AbortController());
   const [bridgeState, setBridgeState] = useState<RemoteSessionBridgeState>(bridge.getState);
   const [hosts, setHosts] = useState<ReadonlyArray<MobileHostRegistration>>([]);
   const [health, setHealth] = useState<ReadonlyArray<MobileHostHealth>>([]);
@@ -122,17 +125,21 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   useEffect(() => bridge.subscribe(setBridgeState), [bridge]);
   useEffect(() => hub.subscribe(() => setHubEpoch((value) => value + 1)), [hub]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const current = new AbortController();
+    lifetime.current = current;
+    return () => {
+      // A pending secure-storage read must not reconnect hosts after vault teardown.
+      current.abort();
       disconnectLiveMobileSession({ bridge, hub });
-    },
-    [bridge, hub],
-  );
+    };
+  }, [bridge, hub]);
 
   const refreshHosts = useCallback(async () => {
-    const listed = await registry.list();
+    const signal = lifetime.current.signal;
+    const listed = await refreshLiveMobileSession({ registry, hub, signal });
+    if (listed === undefined || signal.aborted) return;
     setHosts(listed);
-    hub.syncRegistrations(listed);
     setHealth(hub.health());
     if (placementHostId !== undefined && !listed.some((host) => host.hostId === placementHostId)) {
       setPlacementHostId(listed[0]?.hostId);

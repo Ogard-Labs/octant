@@ -35,23 +35,26 @@
 
 ## Threats and mitigations
 
-| ID  | Threat                                           | Mitigation                                                                                                                  |
-| --- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| T1  | Lost/stolen phone with unlocked vault access     | SecureStore-backed keys; biometric gate for merge/revoke; host revoke-self removes device; other clients stay up            |
-| T2  | Lost phone with lock-screen push previews        | Redacted push payloads only (`buildRedactedPushNotification`); no secrets/paths/prompts                                     |
-| T3  | Jailbroken/rooted device exfiltrates SecureStore | Fail-soft integrity heuristic + soft warn UI; do not brick pairing; host revoke remains available                           |
-| T4  | Screenshots / app switcher leak thread detail    | Screenshot privacy mode preference + port (native FLAG_SECURE / blur residual); scrub UI strings for secretish/path content |
-| T5  | Stale host still accepts phone mutations         | Session health + host mutation gate; stale presentation copy; zero queued mutations when not ready                          |
-| T6  | Concurrent desktop + phone; revoke wrong client  | Device-scoped revoke; concurrent-session tests (Mobile A)                                                                   |
-| T7  | Push token reused across hosts/devices           | Token store keyed by `{ hostId, deviceId }`; clear on revoke path residual                                                  |
-| T8  | Deep link opens wrong host thread                | Deep links carry explicit `hostId` + `threadId`; parse rejects foreign schemes                                              |
-| T9  | Notification content over-sharing after C lands  | Domain redaction tests; Mobile C residual for live provider send                                                            |
-| T10 | Public store listing before internal evidence    | Store decision deferred (`MOBILE-LATER-STORE`); internal EAS profiles only                                                  |
+| ID  | Threat                                           | Mitigation                                                                                                                                |
+| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | Lost/stolen phone with unlocked vault access     | SecureStore-backed keys; biometric gate for merge/revoke; host revoke-self removes device; other clients stay up                          |
+| T2  | Lost phone with lock-screen push previews        | Redacted push payloads only (`buildRedactedPushNotification`); no secrets/paths/prompts                                                   |
+| T3  | Jailbroken/rooted device exfiltrates SecureStore | Fail-soft integrity heuristic + soft warn UI; do not brick pairing; host revoke remains available                                         |
+| T4  | Screenshots / app switcher leak thread detail    | Native capture blocking unavailable in the current client; scrub UI strings for secretish/path content and disclose the limit in Settings |
+| T5  | Stale host still accepts phone mutations         | Session health + host mutation gate; stale presentation copy; zero queued mutations when not ready                                        |
+| T6  | Concurrent desktop + phone; revoke wrong client  | Device-scoped revoke; concurrent-session tests (Mobile A)                                                                                 |
+| T7  | Push token reused across hosts/devices           | Token store keyed by `{ hostId, deviceId }`; clear on revoke path residual                                                                |
+| T8  | Deep link opens wrong host thread                | Deep links carry explicit `hostId` + `threadId`; parse rejects foreign schemes                                                            |
+| T9  | Notification content over-sharing after C lands  | Domain redaction tests; Mobile C residual for live provider send                                                                          |
+| T10 | Public store listing before internal evidence    | Store decision deferred (`MOBILE-LATER-STORE`); internal EAS profiles only                                                                |
 
 ## Residual risk
 
-- Live jailbreak/root SDK signals and real screen-capture blocking require device
-  builds and platform APIs not available in Linux cloud agents.
+- Device-integrity detection, native screenshot/app-switcher protection, and push
+  delivery are unavailable in the current client, including device builds. Settings
+  disclose those limits and omit unavailable capture and push-enablement controls;
+  integrity stays unknown. Vault locking is not evidence of native capture protection.
+  Platform adapters and device acceptance are still required.
 - EAS `projectId`, signing, TestFlight, and Play internal uploads need Henrik-owned
   credentials.
 - Live APNs/FCM delivery remains a Mobile C residual.
