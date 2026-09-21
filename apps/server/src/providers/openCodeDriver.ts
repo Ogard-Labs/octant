@@ -1138,6 +1138,7 @@ function makeConnection(
                     resumeCursor: input.resumeCursor,
                   });
                 }),
+                Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
                 Effect.ensuring(
                   Effect.sync(() => {
                     sessionSetupInFlight = false;

@@ -827,6 +827,7 @@ describe("OpenCode driver", () => {
                 sessionId,
                 resumeCursor: { driverKind: "opencode", value: "provider-session" },
                 executionPolicy: "approval-gated",
+                tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
               }),
             ),
           ),
@@ -836,6 +837,8 @@ describe("OpenCode driver", () => {
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("stale-resume");
     expect(fixture.calls).not.toContain("session.promptAsync");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
+    expect(fixture.calls).not.toContain("session.abort");
   });
 
   it("rejects resume when the source session belongs to another project root", async () => {
