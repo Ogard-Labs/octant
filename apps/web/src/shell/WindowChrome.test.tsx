@@ -369,18 +369,19 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("parts one Project from the next by more than it parts two threads", () => {
+  it("keeps collapsed Projects in a compact folder list", () => {
     // Three levels, ordered: rows inside a Project, then Projects, then the
-    // sections a hairline divides. A Project block used the same 2px step as
-    // the rows inside it, so a sidebar of several Projects read as one
-    // unbroken list and a Project header looked like another thread.
+    // sections a hairline divides. A folder row already has the navigation
+    // row height, so another block margin leaves collapsed folders floating
+    // apart and makes the sidebar feel like a sparse stack of cards.
     const rows = cssRule(".project-threads");
     const projects = cssRule(".project-block + .project-block");
     const sections = cssRule(".project-section + .project-section");
 
-    // Rows sit flush inside a Project; the Project gap is what the eye finds.
+    // Rows and collapsed folder rows sit flush; the section boundary is what
+    // the eye finds when a larger separation is needed.
     expect(rows).toContain("gap: 0;");
-    expect(projects).toContain("margin-top: var(--oct-space-2);");
+    expect(projects).toContain("margin-top: 0;");
     expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
 
     // The nested list is a folder child: a small inset and rail make that

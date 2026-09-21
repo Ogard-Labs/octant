@@ -1190,11 +1190,11 @@ h6 {
 }
 
 /* A Project name is a section header over its thread rows, not a row among
-   them. Keep the gap between folders visible, but small enough that collapsed
-   folders still read as a compact list. The three levels stay ordered: rows,
-   Projects, sections. */
+   them. The folder row already supplies the navigation rhythm, so collapsed
+   folders stay compact instead of floating apart. The three levels stay
+   ordered: rows, Projects, sections. */
 .project-block + .project-block {
-  margin-top: var(--oct-space-2);
+  margin-top: 0;
 }
 
 /* Projects, then Chats: two flat groups parted by one hairline, never cards. */
