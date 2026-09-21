@@ -77,6 +77,7 @@ it.skipIf(process.env.OCTANT_VIBE_SMOKE !== "1")(
         isError: false,
       });
     };
+    const cleanupFailures: unknown[] = [];
     try {
       const driver = createDriver(registry);
       const cursor = await Effect.runPromise(
@@ -210,9 +211,13 @@ it.skipIf(process.env.OCTANT_VIBE_SMOKE !== "1")(
     } finally {
       const cleanup = await Promise.allSettled([registry.closeAll(), restartedRegistry.closeAll()]);
       const failed = cleanup.find((result) => result.status === "rejected");
-      if (failed?.status === "rejected") throw failed.reason;
-      await rm(root, { recursive: true, force: true });
+      if (failed?.status === "rejected") cleanupFailures.push(failed.reason);
+      await rm(root, { recursive: true, force: true }).catch((error: unknown) => {
+        cleanupFailures.push(error);
+      });
     }
+    if (cleanupFailures.length > 0)
+      throw new AggregateError(cleanupFailures, "Smoke cleanup failed.");
   },
   120_000,
 );
