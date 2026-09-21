@@ -457,6 +457,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       page,
       request.kind === "extract-text",
       this.#contexts.get(contextId)?.protectCredentials ?? true,
+      request.kind === "extract-text" ? request.target : undefined,
     );
   }
 
@@ -669,6 +670,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     page: PlaywrightPagePort,
     includeExtractedText: boolean,
     protectCredentials: boolean,
+    selector?: string,
   ): Promise<BrowserRuntimeObservation> {
     if (protectCredentials && (await sensitiveDocument(page))) {
       const title = await page.title();
@@ -681,7 +683,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     }
     const [title, text, screenshotDataUrl] = await Promise.all([
       page.title(),
-      page.textContent("body"),
+      page.textContent(selector ?? "body"),
       boundedScreenshotDataUrl(page),
     ]);
     const boundedText = bounded(text ?? "", 65_536);

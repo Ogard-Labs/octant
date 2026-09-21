@@ -69,12 +69,17 @@ export interface BrowserModelBinding {
 
 type BrowserToolInput =
   | {
+      readonly operation: "read-page";
+      readonly selector?: string;
+      readonly expectedObservationRevision?: number;
+    }
+  | {
       readonly operation: "navigate";
       readonly url: string;
       readonly expectedObservationRevision?: number;
     }
   | {
-      readonly operation: "read-page" | "screenshot" | "stop";
+      readonly operation: "screenshot" | "stop";
       readonly expectedObservationRevision?: number;
     }
   | {
@@ -301,7 +306,11 @@ function browserAction(
     case "navigate":
       return { ...base, kind: "navigate", target: input.url };
     case "read-page":
-      return { ...base, kind: "extract-text" };
+      return {
+        ...base,
+        kind: "extract-text",
+        ...(input.selector === undefined ? {} : { target: input.selector }),
+      };
     case "click":
       return { ...base, kind: "click", target: input.selector };
     case "type":
@@ -352,6 +361,15 @@ function parseInput(value: string): BrowserToolInput | undefined {
     );
   const text = (key: string, max: number) =>
     typeof record[key] === "string" && record[key] !== "" && record[key].length <= max;
+  if (operation === "read-page") {
+    if (!only("selector") || (record.selector !== undefined && !text("selector", 4096)))
+      return undefined;
+    return {
+      ...common,
+      operation,
+      ...(typeof record.selector === "string" ? { selector: record.selector } : {}),
+    };
+  }
   if (operation === "navigate" && only("url") && text("url", 4096))
     return { ...common, operation, url: record.url as string };
   if ((operation === "click" || operation === "wait") && only("selector") && text("selector", 4096))
@@ -387,13 +405,7 @@ function parseInput(value: string): BrowserToolInput | undefined {
       ...(typeof deltaY === "number" ? { deltaY } : {}),
     };
   }
-  if (
-    (operation === "read-page" ||
-      operation === "screenshot" ||
-      operation === "diagnostics" ||
-      operation === "stop") &&
-    only()
-  )
+  if ((operation === "screenshot" || operation === "diagnostics" || operation === "stop") && only())
     return { ...common, operation };
   return undefined;
 }

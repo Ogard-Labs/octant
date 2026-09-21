@@ -1421,7 +1421,11 @@ function browserAction(
         ? undefined
         : { ...base, kind: "navigate" as const, target: input.url };
     case "read-page":
-      return { ...base, kind: "extract-text" as const };
+      return {
+        ...base,
+        kind: "extract-text" as const,
+        ...(input.selector === undefined ? {} : { target: input.selector }),
+      };
     case "click":
       return input.selector === undefined
         ? undefined
@@ -1652,7 +1656,8 @@ type BrowserToolInput = {
   readonly expectedObservationRevision?: number;
 } & (
   | { readonly operation: "navigate"; readonly url: string }
-  | { readonly operation: "read-page" | "screenshot" | "stop" }
+  | { readonly operation: "read-page"; readonly selector?: string }
+  | { readonly operation: "screenshot" | "stop" }
   | { readonly operation: "diagnostics" }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
   | { readonly operation: "click" | "wait"; readonly selector: string }
@@ -1749,6 +1754,13 @@ function parseBrowserInput(value: string): BrowserToolInput | undefined {
       };
     }
     case "read-page":
+      if (!only("selector") || (parsed.selector !== undefined && !text("selector", 4096)))
+        return undefined;
+      return {
+        ...common,
+        operation: "read-page",
+        ...(typeof parsed.selector === "string" ? { selector: parsed.selector } : {}),
+      };
     case "screenshot":
     case "diagnostics":
     case "stop":

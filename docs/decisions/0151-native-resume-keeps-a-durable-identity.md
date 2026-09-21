@@ -78,6 +78,11 @@ A resumed turn can also have a different allowed tool catalogue.
   ledger records remain unchanged. A true prompt-cache hit rate requires a
   verified total-input basis and is not inferred from these legacy counters.
 
+- Browser read-page accepts an optional CSS selector to read a specific element,
+  such as `h1`, without inferring document structure from flattened body text.
+  Omitting it preserves the body read. Desktop and standalone browser runtimes
+  use the same action target; origin and credential protections still apply.
+
 - Browser screenshots use the existing provider image-result channel in Chat,
   Work, and Code. Encoded image bytes are not duplicated in JSON text. Missing,
   malformed, and oversized captures refuse; origin approvals and task authority

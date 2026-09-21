@@ -616,6 +616,40 @@ describe("Code app-managed tools", () => {
     });
   });
 
+  it("passes a requested read selector to the browser without changing its authority", async () => {
+    const current = thread();
+    const act = vi.fn(async () => browserSnapshot(browserAuthority()));
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: current,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => browserSnapshot(browserAuthority()),
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+      },
+    });
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read-page", selector: "h1" }),
+    });
+    expect(result.isError).toBe(false);
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          kind: "extract-text",
+          target: "h1",
+          authority: browserAuthority(),
+        }),
+      }),
+    );
+  });
+
   it("refuses browser actions after the thread switches to Plan", async () => {
     let current = thread();
     const act = vi.fn(async () => browserSnapshot(browserAuthority()));
