@@ -62,7 +62,8 @@ writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ parent: process.pid, 
 setInterval(() => {}, 1000);`,
           ],
           timeoutMs: 1_000,
-          terminationGraceMs: 200,
+          // Use the real cleanup grace: 200 ms can expire while the OS reaps
+          // the killed descendant during the concurrent repository suite.
         }),
       ).rejects.toMatchObject({
         category: "unavailable",
