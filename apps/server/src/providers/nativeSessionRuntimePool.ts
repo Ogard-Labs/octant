@@ -99,7 +99,7 @@ export class NativeSessionRuntimePool {
     this.#closing.add(closing);
     void closing.then(
       () => this.#closing.delete(closing),
-      () => undefined,
+      () => this.#closing.delete(closing),
     );
     return closing;
   }
