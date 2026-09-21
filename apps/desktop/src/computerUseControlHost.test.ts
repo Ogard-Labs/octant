@@ -87,6 +87,26 @@ function fixture(protectedField = false, additionalElements = 0, unresolved = fa
 }
 
 describe("Thread-owned computer control", () => {
+  it("asks for a fresh window list when a window no longer belongs to the application", async () => {
+    const { host, call } = fixture();
+    try {
+      const result = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 99,
+        }),
+      );
+      expect(result).toMatchObject({ kind: "refused", reason: "window-unavailable" });
+      if (result.kind === "refused")
+        expect(result.message).toContain("List the application's windows");
+      expect(call.mock.calls.map(([name]) => name)).not.toContain("get_window_state");
+    } finally {
+      await host.close();
+    }
+  });
+
   it("bounds large accessibility observations to the provider tool-result budget", async () => {
     const { host } = fixture(false, 500);
     try {
@@ -129,7 +149,11 @@ describe("Thread-owned computer control", () => {
       );
       expect(result).toMatchObject({ kind: "refused", reason: "window-unavailable" });
       if (result.kind === "refused") expect(result.message).toContain("accessibility");
-      expect(call.mock.calls.map(([name]) => name)).toEqual(["list_apps", "get_window_state"]);
+      expect(call.mock.calls.map(([name]) => name)).toEqual([
+        "list_apps",
+        "list_windows",
+        "get_window_state",
+      ]);
     } finally {
       await host.close();
     }

@@ -31,6 +31,11 @@ provider session cursors, or earlier events. Already settled turns remain settle
 repeated startup does not append duplicate recovery events. A follow-up resumes
 the retained native identity under the ordinary current-authority checks.
 
+Computer observations verify that the requested window still belongs to the
+current application process before requesting its accessibility state or pixels.
+A vanished window returns a window-unavailable refusal directing the caller to
+list current windows; stale IDs are never silently retargeted.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its

@@ -170,6 +170,21 @@ export function createComputerUseControlHost(options: {
         const observe = async (appId: string, pid: number, windowId: number) => {
           const lease = `${pid}:${windowId}`;
           if (windowOwners.has(lease) && windowOwners.get(lease) !== key(owner)) return undefined;
+          const windows = await call("list_windows", { pid });
+          if (!Array.isArray(windows.data.windows)) throw new Error("Window list is invalid.");
+          if (
+            !windows.data.windows.some(
+              (window: unknown) => record(window) && window.window_id === windowId,
+            )
+          ) {
+            return {
+              observation: undefined,
+              result: refused(
+                "window-unavailable",
+                "This window is no longer available in the application. List the application's windows and observe a current window before retrying.",
+              ),
+            };
+          }
           const response = await call("get_window_state", {
             pid,
             window_id: windowId,
@@ -305,7 +320,10 @@ export function createComputerUseControlHost(options: {
         if (old === undefined || old.generation !== runtime.generation)
           return refused("stale-observation", "Observe this window again before acting.");
         if ((await appProcess(old.appId)) !== old.pid)
-          return refused("stale-observation", "The application process changed. Observe it again.");
+          return refused(
+            "stale-observation",
+            "The application process changed. List its windows and observe a current window before retrying.",
+          );
         const before = await observe(old.appId, old.pid, old.windowId);
         if (before === undefined) return refused("window-owned", "Another task owns this window.");
         if (before.observation === undefined) return before.result;
