@@ -99,6 +99,27 @@ describe("ThemeAppearanceEditor", () => {
     }
   });
 
+  it("names a saved system stack as the default face it now means", () => {
+    // Settings saved while the system face was the default hold its stack
+    // verbatim. That string means "the default", so the picker names the face
+    // those people actually see instead of calling it a custom stack.
+    const saved = {
+      ...DEFAULT_THEME_SETTINGS,
+      typography: {
+        ...DEFAULT_THEME_SETTINGS.typography,
+        ui: {
+          ...DEFAULT_THEME_SETTINGS.typography.ui,
+          family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+        },
+      },
+    };
+    render(
+      <ThemeAppearanceEditor controller={{ ...controller(), settings: saved, draft: saved }} />,
+    );
+
+    expect(screen.getByLabelText("Interface font")).toHaveValue("Octant interface");
+  });
+
   it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {
     const applyPatch = vi.fn(async () => true);
     render(<ThemeAppearanceEditor controller={{ ...controller(), applyPatch }} />);
