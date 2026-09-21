@@ -326,7 +326,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     [],
   );
   useEffect(() => setActiveLocalView(undefined), [surface.id]);
-  const navigation = props.contentTabs?.get(pane.paneId) ?? [surface];
+  const rememberedNavigation = props.contentTabs?.get(pane.paneId);
+  const navigation =
+    rememberedNavigation?.some((entry) => String(entry.id) === String(surface.id)) === true
+      ? rememberedNavigation
+      : [surface];
   const showTabs =
     navigation.length > 1 ||
     localViews.length > 0 ||
