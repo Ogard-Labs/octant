@@ -3849,6 +3849,54 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns[0]).toEqual(first.turns[0]);
   });
 
+  it("preserves native history and explains recovery when the former provider is removed", async () => {
+    let removed = false;
+    const replacement = "84000000-0000-4000-8000-000000000007";
+    const { service, fakeDriver } = openFixture({
+      nativeConversation: true,
+      refuseDriverFor: (id) =>
+        removed && id === String(ids.provider) ? new Error("Provider removed") : undefined,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Removed provider",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Remember this",
+    });
+    const first = service.read(created.thread.id);
+    await service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: first.thread.version,
+      providerInstanceId: replacement,
+      modelId: "model-a",
+    });
+    removed = true;
+    const before = service.read(created.thread.id);
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: before.thread.version,
+        prompt: "Continue",
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unavailable",
+        message: expect.stringContaining("native session cannot be recovered"),
+      },
+    });
+    expect(service.read(created.thread.id).turns).toEqual(before.turns);
+    expect(fakeDriver.startedSessionIds).toHaveLength(1);
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
   it("retries a native Chat turn in its existing conversation", async () => {
     const { service, fakeDriver } = openFixture({ nativeConversation: true });
     const created = await service.execute({

@@ -2775,13 +2775,20 @@ export class ChatService {
     const probe = routed.probe;
     const nativeConversation = driver.conversationOwnership === "provider";
     const previous = this.#persistence.readChatThreadView(thread.id)?.turns.at(-1)?.attempts.at(-1);
-    const previousNative =
-      previous !== undefined &&
-      this.#driver(decodeProviderInstanceId(previous.providerInstanceId)).conversationOwnership ===
-        "provider";
+    let previousNative = false;
+    let previousProviderUnavailable = false;
+    if (previous !== undefined) {
+      try {
+        previousNative =
+          this.#driver(decodeProviderInstanceId(previous.providerInstanceId))
+            .conversationOwnership === "provider";
+      } catch {
+        previousProviderUnavailable = true;
+      }
+    }
     const nativeSession = nativeConversation ? previous : undefined;
     if (
-      (nativeConversation || previousNative) &&
+      (nativeConversation || previousNative || previousProviderUnavailable) &&
       previous !== undefined &&
       (!nativeConversation ||
         !previousNative ||
