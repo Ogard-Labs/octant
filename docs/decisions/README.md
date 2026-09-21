@@ -166,7 +166,7 @@ distilled successor of the earlier long-form design specifications.
 | [0152](0152-allow-input-opens-a-device-to-clicks.md) | Allow input opens a device to clicks | Accepted |
 | [0153](0153-android-emulator-is-a-separate-device-destination.md) | Android emulator is a separate in-app device destination | Accepted |
 
-| [0154](0154-explicit-device-screenshots-reach-the-provider.md) | Explicit device screenshots reach the provider | Proposed |
+| [0154](0154-explicit-device-screenshots-reach-the-provider.md) | Explicit device screenshots reach the provider | Accepted |
 
 ## Adding an ADR
 

@@ -1,6 +1,6 @@
 # 0154. Explicit device screenshots reach the provider
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
