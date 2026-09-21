@@ -509,7 +509,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             </p>
           ) : null}
           {catalogs.length > 1 ? (
-            <div aria-label="Catalogs" className="composer-model-picker__catalogs" role="group">
+            <div
+              aria-label="Catalogs"
+              className="composer-model-picker__catalogs"
+              // A fresh row per provider: a reused one kept the sideways
+              // offset of the provider before it, so this one's All chip
+              // opened out of view.
+              key={String(activeRailId)}
+              role="group"
+            >
               <OctantButton
                 aria-pressed={filteringCatalog === undefined}
                 className={`composer-model-picker__catalog${filteringCatalog === undefined ? " composer-model-picker__catalog--on" : ""}`}
@@ -568,6 +576,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
           <LevelSlider
             displayName={levelOption.displayName}
+            highest={levelLabel(levelOption.values.at(-1) ?? "")}
             label={levelIndex === 0 ? "Default" : levelLabel(levelName)}
             onIndexChange={(index) =>
               props.onModelOptionChange?.(
@@ -584,8 +593,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   );
 }
 
-/** “medium” reads as “Medium” beside the model the control belongs to. */
+/**
+ * “medium” reads as “Medium” beside the model the control belongs to. A
+ * provider's “xhigh” capitalised as “Xhigh”, which reads as a typo, so it is
+ * spelled out.
+ */
 function levelLabel(value: string): string {
+  if (value === "xhigh") return "Extra high";
   return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
 }
 
@@ -598,6 +612,8 @@ function levelLabel(value: string): string {
  */
 function LevelSlider(props: {
   readonly displayName: string;
+  /** The last declared level, named under the slider's far end. */
+  readonly highest: string;
   readonly index: number;
   readonly label: string;
   readonly onIndexChange: (index: number) => void;
@@ -672,6 +688,12 @@ function LevelSlider(props: {
             style={{ insetInlineStart: `${stopCount === 1 ? 0 : (stop / (stopCount - 1)) * 100}%` }}
           />
         ))}
+      </div>
+      {/* The slider already says its level; the ends are for the eye, so a
+          reader can tell what lies either way of the knob. */}
+      <div aria-hidden="true" className="composer-model-picker__level-ends">
+        <span>Default</span>
+        <span>{props.highest}</span>
       </div>
     </div>
   );
