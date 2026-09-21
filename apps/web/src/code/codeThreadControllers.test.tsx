@@ -162,6 +162,19 @@ describe("CodeThreadControllerSlots", () => {
     expect(setPendingDraft).toHaveBeenCalledExactlyOnceWith("Retry this prompt");
   });
 
+  it("keeps the first-turn refusal until the task finishes loading", () => {
+    const registry = createCodeThreadControllers();
+    const setPendingDraft = vi.fn();
+    const showTurnRefusal = vi.fn();
+    registry.restoreDraft(threadA, "Retry this prompt", "Provider unavailable");
+    registry.publish(threadA, { status: "loading", setPendingDraft, showTurnRefusal } as never);
+    expect(showTurnRefusal).not.toHaveBeenCalled();
+    registry.publish(threadA, { status: "ready", setPendingDraft, showTurnRefusal } as never);
+    registry.publish(threadA, { status: "ready", setPendingDraft, showTurnRefusal } as never);
+    expect(setPendingDraft).toHaveBeenCalledExactlyOnceWith("Retry this prompt");
+    expect(showTurnRefusal).toHaveBeenCalledExactlyOnceWith("Provider unavailable");
+  });
+
   it("discards a queued prompt restoration when its task tab is released", () => {
     const registry = createCodeThreadControllers();
     const setPendingDraft = vi.fn();

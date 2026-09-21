@@ -90,7 +90,8 @@ A resumed turn can also have a different allowed tool catalogue.
 
 - If first-turn startup fails after opening the task, withdraw its provisional
   transcript prompt and restore the text to that task’s composer. Restoration
-  waits for controller readiness so initial loading cannot erase the draft.
+  waits for controller readiness so initial loading cannot erase the draft or
+  its refusal reason. Both reach the open task together.
 
 ## Consequences
 
