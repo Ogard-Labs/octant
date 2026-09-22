@@ -354,7 +354,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   // gets a blank sidebar with no explanation. Lifecycle stays out on purpose:
   // an archived view's content is the archived Project rows themselves, so
   // calling it filtered would hide the rows — and their Restore action —
-  // behind the empty message.
+  // behind the empty message. An activity window on that same view must not
+  // take their place either.
   const filteringThreads =
     searching ||
     (currentFilters !== undefined &&
@@ -452,7 +453,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       (unfiled.length > 0 ||
         [...threadsByProject.byProjectId.values()].some((group) => group.length > 0))) ||
     activity.groups.some((group) => group.threads.length > 0);
-  const showFilteredThreadsEmpty = filteringThreads && threadsReady && !hasVisibleThreads;
+  const viewingArchivedProjects = currentFilters?.lifecycle === "archived";
+  const showFilteredThreadsEmpty =
+    filteringThreads && threadsReady && !hasVisibleThreads && !viewingArchivedProjects;
 
   useEffect(() => {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
