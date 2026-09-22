@@ -107,26 +107,34 @@ export async function runProviderCliUpdate(
       (cleanup ??= ensureProcessTreeExited(groupExists, killGroup, graceMs));
     const terminateTree = async (reason: "timeout" | "close") => {
       const released = await releaseTree();
-      if (released !== "released") {
-        settle(() =>
-          reject({
-            ...failure("unavailable", PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE),
-            diagnostic: { stage: "cleanup", kind: "cleanup-unconfirmed" },
-          }),
-        );
-        return;
-      }
       if (reason === "timeout" || timedOut) {
+        // A timeout reports as a timeout even when tree exit is still
+        // unconfirmed: under load the grace window can expire while the OS
+        // reaps a SIGKILLed tree, and telling that person to restart Octant
+        // is a false alarm. The restart advice is reserved for the case that
+        // is genuinely suspicious — the updater exited on its own yet its
+        // process tree could not be confirmed dead. The unconfirmed outcome
+        // still rides in the diagnostic so support can see it.
         settle(() =>
           reject({
             ...failure("unavailable", "Provider CLI update timed out."),
             diagnostic: {
               stage: "update",
               kind: "timed-out",
+              ...(released === "released" ? {} : { cleanup: "unconfirmed" }),
               ...(boundedStderr.context() === undefined
                 ? {}
                 : { stderrContext: boundedStderr.context() }),
             },
+          }),
+        );
+        return;
+      }
+      if (released !== "released") {
+        settle(() =>
+          reject({
+            ...failure("unavailable", PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE),
+            diagnostic: { stage: "cleanup", kind: "cleanup-unconfirmed" },
           }),
         );
         return;
