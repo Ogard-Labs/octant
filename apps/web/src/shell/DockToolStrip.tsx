@@ -181,7 +181,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
         <span className="dock-tool-strip__tab content-tab" key={tool.id}>
           <OctantButton
             aria-selected={tool.id === props.active}
-            className="dock-tool-strip__select content-tab__select window-no-drag"
+            className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit window-no-drag"
             onClick={() => props.onSelect(tool.id)}
             role="tab"
             title={tool.label}
@@ -194,7 +194,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
             <span>{tool.label}</span>
           </OctantButton>
           <IconButton
-            className="dock-tool-strip__close content-tab__close"
+            className="dock-tool-strip__close content-tab__close text-muted-foreground"
             icon={X}
             label={`Hide ${tool.label}`}
             onClick={() => props.onClose(tool.id)}

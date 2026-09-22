@@ -446,14 +446,14 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     {navigation.map((entry) => (
                       <div className="workspace-content-tabs__entry content-tab" key={entry.id}>
                         <OctantTabsTab
-                          className="content-tab__select"
+                          className="content-tab__select border-0 bg-transparent text-inherit"
                           value={entry.id}
                           title={workspaceSurfaceTitle(entry)}
                         >
                           <span>{workspaceSurfaceTitle(entry)}</span>
                         </OctantTabsTab>
                         <OctantIconButton
-                          className="content-tab__close"
+                          className="content-tab__close text-muted-foreground"
                           label={`Close ${workspaceSurfaceTitle(entry)}`}
                           onClick={() => props.onCloseContentTab?.(pane.paneId, entry.id)}
                         >
@@ -463,11 +463,14 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     ))}
                     {localViews.map((view) => (
                       <div className="workspace-content-tabs__entry content-tab" key={view.key}>
-                        <OctantTabsTab className="content-tab__select" value={view.key}>
+                        <OctantTabsTab
+                          className="content-tab__select border-0 bg-transparent text-inherit"
+                          value={view.key}
+                        >
                           <span>{view.title}</span>
                         </OctantTabsTab>
                         <OctantIconButton
-                          className="content-tab__close"
+                          className="content-tab__close text-muted-foreground"
                           label={`Close ${view.title}`}
                           onClick={() => {
                             setLocalViews((views) => views.filter((item) => item.key !== view.key));
