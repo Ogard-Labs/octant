@@ -99,7 +99,11 @@ export function openUtilityTabState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
 ): ThreadUtilityDockState {
-  const existing = state.tabs.find((tab) => tab.surface === surface);
+  // Repeatable surfaces keep every instance, so "open" names the singleton
+  // identity rather than whichever instance happens to be first: an agent
+  // session announced for the thread must land on the shared Browser tab,
+  // not on a dedicated context a link open created.
+  const existing = state.tabs.find((tab) => tab.id === surface);
   if (existing !== undefined) return { ...state, active: existing.id };
   const tab = singletonUtilityTab(surface);
   return { tabs: [...state.tabs, tab], active: tab.id };

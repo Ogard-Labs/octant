@@ -56,6 +56,29 @@ describe("thread-owned right utility dock tabs", () => {
     });
   });
 
+  it("opens the shared Browser tab rather than a dedicated instance", () => {
+    const key = threadUtilityDockKey("code", "thread-a");
+    const dedicatedId = "10000000-0000-4000-8000-000000000001";
+    let states: ThreadUtilityDockStates = new Map();
+
+    states = addThreadUtilityTab(states, key, "browser", dedicatedId);
+    states = openThreadUtilityTab(states, key, "browser");
+
+    // An announced agent session belongs to the thread's shared context, so
+    // the reveal selects the singleton tab instead of whichever dedicated
+    // instance a link open added first.
+    expect(threadUtilityDockState(states, key)).toEqual({
+      tabs: [
+        { id: dedicatedId, surface: "browser" },
+        { id: "browser", surface: "browser" },
+      ],
+      active: "browser",
+    });
+
+    states = openThreadUtilityTab(states, key, "browser");
+    expect(threadUtilityDockState(states, key).active).toBe("browser");
+  });
+
   it("restores each thread's open tabs and selected tab without sharing state", () => {
     const first = threadUtilityDockKey("code", "thread-a");
     const second = threadUtilityDockKey("code", "thread-b");

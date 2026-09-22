@@ -2924,9 +2924,10 @@ function LaunchedShell(
         (tab) => tab.id === tabId,
       );
       setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, tabId));
-      // A dock Browser tab bound to a dedicated context owns it: closing the
-      // tab is the only close path that context has, so it stops here. The
-      // shared thread context has no such binding and stays the thread's.
+      // A dock Browser tab bound to a context owns it: closing the tab is the
+      // only close path a dedicated context has, so the context stops here.
+      // The shared tab binds the thread's context the same way once it exists,
+      // so closing it stops the thread's session too.
       if (
         closedTab?.browserContextId !== undefined &&
         dockThread !== undefined &&
@@ -2979,6 +2980,13 @@ function LaunchedShell(
         dockThreadKey !== undefined &&
         dockThreadKey === threadUtilityDockKey(request.mode, request.threadId)
       ) {
+        // A surface renders in one region at a time: while the bottom panel
+        // holds a Browser tab, every dock Browser tab is filtered out of the
+        // displayed state, so the new tab would open invisible with no close
+        // control. Same region switch as openDockTab/addDockTab.
+        if (bottomPanelPresentation.open) {
+          persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+        }
         setDockVisible(true);
         setDockStatesByThread((current) =>
           addThreadUtilityTab(current, dockThreadKey, "browser", crypto.randomUUID(), contextId),
