@@ -68,7 +68,6 @@ import {
   refreshActiveThreadView,
   replaceById,
   totalTurnUsage,
-  waitForReconnect,
   worthAskingAgain,
 } from "./codeControllerState";
 import type {
@@ -2312,4 +2311,17 @@ export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");
   return value;
+}
+
+async function waitForReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, delayMs);
+    signal.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+  });
 }

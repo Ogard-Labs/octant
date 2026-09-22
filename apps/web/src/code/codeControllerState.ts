@@ -578,19 +578,6 @@ async function readConversationText(
   return readOperationText(client, threadId, operationId, contentId, signal);
 }
 
-export async function waitForReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(done, delayMs);
-    signal.addEventListener("abort", done, { once: true });
-    function done() {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-  });
-}
-
 export {
   providerRequestFromEvent,
   readForkConversation,
