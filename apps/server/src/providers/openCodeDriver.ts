@@ -100,7 +100,17 @@ interface SessionState {
   readonly questionAnswers: Map<string, Map<number, string>>;
   readonly toolNames: Set<string>;
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
+  usageTotals: OpenCodeUsageTotals | undefined;
   managedTools: ManagedToolsLease | undefined;
+}
+
+interface OpenCodeUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadInputTokens: number;
+  cacheWriteInputTokens: number;
+  costUsd: number;
 }
 
 interface PendingToolAnswer {
@@ -1185,6 +1195,7 @@ function makeConnection(
                   Effect.flatMap(() =>
                     Effect.gen(function* () {
                       const managedTools = state.managedTools;
+                      state.usageTotals = undefined;
                       return yield* request(() =>
                         runtimeClient.prompt({
                           sessionId: source,
@@ -1359,6 +1370,7 @@ function newSessionState(
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
     pendingToolAnswers: new Map(),
+    usageTotals: undefined,
     managedTools: undefined,
   };
 }
@@ -1406,6 +1418,29 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
+    // OpenCode settles usage once per model step. Consumers keep the latest
+    // report as the logical turn's figure, so make each report cumulative
+    // across the prompt's tool loop while keeping the same provider session.
+    if (normalized.kind === "usage") {
+      const prior = state.usageTotals ?? {
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        costUsd: 0,
+      };
+      state.usageTotals = {
+        inputTokens: prior.inputTokens + normalized.inputTokens,
+        outputTokens: prior.outputTokens + normalized.outputTokens,
+        reasoningTokens: prior.reasoningTokens + (normalized.reasoningTokens ?? 0),
+        cacheReadInputTokens: prior.cacheReadInputTokens + (normalized.cacheReadInputTokens ?? 0),
+        cacheWriteInputTokens:
+          prior.cacheWriteInputTokens + (normalized.cacheWriteInputTokens ?? 0),
+        costUsd: prior.costUsd + (normalized.costUsd ?? 0),
+      };
+      normalized = { ...normalized, ...state.usageTotals };
+    }
     if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;

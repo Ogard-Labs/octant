@@ -146,7 +146,15 @@ describe("mapOpenCodeEvent", () => {
           snapshot: "private-snapshot-must-not-cross",
         },
       }),
-      expected: { kind: "usage", inputTokens: 12, outputTokens: 7 },
+      expected: {
+        kind: "usage",
+        inputTokens: 12,
+        outputTokens: 7,
+        reasoningTokens: 3,
+        cacheReadInputTokens: 2,
+        cacheWriteInputTokens: 1,
+        costUsd: 0,
+      },
     },
     {
       name: "file edit",

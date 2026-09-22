@@ -32,6 +32,14 @@ function nonEmptyText(value: string): string | undefined {
   return value.length > 0 ? value : undefined;
 }
 
+function nonNegativeInteger(value: number): number | undefined {
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function nonNegativeNumber(value: number): number | undefined {
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 function mappedEvent(
   context: OpenCodeEventContext,
   event: RuntimeEventWithoutEnvelope,
@@ -219,14 +227,40 @@ export function mapOpenCodeEvent(
             }),
           ];
     }
-    case "session.next.step.ended":
+    case "session.next.step.ended": {
+      const inputTokens = nonNegativeInteger(event.properties.tokens.input);
+      const outputTokens = nonNegativeInteger(event.properties.tokens.output);
+      const reasoningTokens = nonNegativeInteger(event.properties.tokens.reasoning);
+      const cacheReadInputTokens = nonNegativeInteger(event.properties.tokens.cache.read);
+      const cacheWriteInputTokens = nonNegativeInteger(event.properties.tokens.cache.write);
+      const costUsd = nonNegativeNumber(event.properties.cost);
+      if (
+        inputTokens === undefined ||
+        outputTokens === undefined ||
+        reasoningTokens === undefined ||
+        cacheReadInputTokens === undefined ||
+        cacheWriteInputTokens === undefined ||
+        costUsd === undefined
+      ) {
+        return [
+          mappedEvent(context, {
+            kind: "failed",
+            failure: { category: "protocol", message: "OpenCode returned invalid usage data." },
+          }),
+        ];
+      }
       return [
         mappedEvent(context, {
           kind: "usage",
-          inputTokens: Math.max(0, Math.trunc(event.properties.tokens.input)),
-          outputTokens: Math.max(0, Math.trunc(event.properties.tokens.output)),
+          inputTokens,
+          outputTokens,
+          reasoningTokens,
+          cacheReadInputTokens,
+          cacheWriteInputTokens,
+          costUsd,
         }),
       ];
+    }
     case "session.next.step.failed":
       return [
         mappedEvent(context, {
