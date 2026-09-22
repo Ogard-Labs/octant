@@ -128,6 +128,22 @@ describe("findDecisionViolations", () => {
   });
 });
 
+describe("current specification references", () => {
+  it.each([
+    ["docs/architecture.md", "[history](decisions/0009-missing.md)"],
+    ["DESIGN.md", "`docs/decisions/0009`"],
+    ["docs/design/workspace.md", "[history](../decisions/0009-missing.md)"],
+  ])("reports missing history from %s", (path, content) => {
+    expect(
+      findDecisionViolations([
+        record("0001", "plugin-architecture", wellFormed("0001", "Plugin architecture")),
+        index(row("0001", "plugin-architecture", "Plugin architecture")),
+        { path, content },
+      ]),
+    ).toEqual([{ path, reason: "routes to decision record 0009, which does not exist" }]);
+  });
+});
+
 describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
   it("sees a record whose filename does not match the convention", () => {
     // The dangerous case: a misnamed record is invisible to every other rule, so

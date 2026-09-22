@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
  * Rule C: a record carries the required sections.
  * Rule D: the index and the records agree on number, title, and status, and
  *         names each number once.
- * Rule E: every record `AGENTS.md` routes to exists, including the numbers a
+ * Rule E: every record current specifications reference exists, including numbers a
  *         written range only implies.
  * Rule F: every Markdown file in the directory is either the index or a record
  *         named the way the conventions require, and the numbers run without
@@ -39,7 +39,8 @@ export interface DecisionViolation {
 
 const DECISIONS_DIRECTORY = "docs/decisions";
 const INDEX_PATH = `${DECISIONS_DIRECTORY}/README.md`;
-const CONTRACT_PATH = "AGENTS.md";
+const SPECIFICATION_PATHS = ["AGENTS.md", "DESIGN.md", "docs/architecture.md"] as const;
+const DESIGN_DIRECTORY = "docs/design";
 const REQUIRED_SECTIONS = ["## Context", "## Decision", "## Consequences"] as const;
 const SIMPLE_STATUSES = new Set(["Proposed", "Accepted", "Deprecated"]);
 
@@ -73,10 +74,9 @@ export function findDecisionViolations(
       records,
       files.find((file) => file.path === INDEX_PATH),
     ),
-    ...findUnroutableReferences(
-      numbers,
-      files.find((file) => file.path === CONTRACT_PATH),
-    ),
+    ...files
+      .filter((file) => !file.path.startsWith(`${DECISIONS_DIRECTORY}/`))
+      .flatMap((file) => findUnroutableReferences(numbers, file)),
   ];
 }
 
@@ -320,7 +320,7 @@ function parseIndexRows(content: string): ReadonlyArray<IndexRow> {
   return rows;
 }
 
-/** Rule E: the contract never routes an agent to a record that is not there. */
+/** Rule E: current specifications retain working historical record references. */
 function findUnroutableReferences(
   numbers: ReadonlySet<string>,
   contract: ScannedFile | undefined,
@@ -328,13 +328,13 @@ function findUnroutableReferences(
   if (contract === undefined) return [];
   const routing = linesOutsideFences(contract.content).join("\n");
   const referenced = new Set(
-    [...routing.matchAll(/docs\/decisions\/(\d{4})/g)].map((match) => match[1] ?? ""),
+    [...routing.matchAll(/decisions\/(\d{4})/g)].map((match) => match[1] ?? ""),
   );
   // A written range routes an agent to every record between its ends, so those
   // are references too. Checking only the two written numbers would let the
   // middle of a range be deleted without the gate noticing.
   for (const range of routing.matchAll(
-    /docs\/decisions\/(\d{4})`?\s*[–—-]\s*`?docs\/decisions\/(\d{4})/g,
+    /decisions\/(\d{4})`?\s*[–—-]\s*`?(?:docs\/)?decisions\/(\d{4})/g,
   )) {
     const from = Number(range[1]);
     const to = Number(range[2]);
@@ -345,7 +345,7 @@ function findUnroutableReferences(
   return [...referenced]
     .filter((number) => !numbers.has(number))
     .map((number) => ({
-      path: CONTRACT_PATH,
+      path: contract.path,
       reason: `routes to decision record ${number}, which does not exist`,
     }));
 }
@@ -363,10 +363,20 @@ async function collectFiles(root: string): Promise<ReadonlyArray<ScannedFile>> {
         };
       }),
   );
-  return [
-    ...records,
-    { path: CONTRACT_PATH, content: await readFile(resolve(root, CONTRACT_PATH), "utf8") },
+  const designNames = await readdir(resolve(root, DESIGN_DIRECTORY), { recursive: true });
+  const specificationPaths = [
+    ...SPECIFICATION_PATHS,
+    ...designNames
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `${DESIGN_DIRECTORY}/${name}`),
   ];
+  const specifications = await Promise.all(
+    specificationPaths.map(async (path) => ({
+      path,
+      content: await readFile(resolve(root, path), "utf8"),
+    })),
+  );
+  return [...records, ...specifications];
 }
 
 async function main(): Promise<void> {
