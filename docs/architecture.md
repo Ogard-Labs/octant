@@ -400,6 +400,13 @@ exactly one source thread: ordinary Chat with that thread's bounded context,
 no inherited Work or Code authority, and no path that approves, steers, or
 appends to the source.
 
+A Chat attempt that fails or is interrupted carries a bounded failure code,
+and the client-safe process diagnostic when the provider supplied one. The
+transcript states Octant's sentence for that code. The provider's own message
+stays off the attempt. App-managed tool and research calls use the turn's own
+deadline; a call that never returns ends the attempt instead of leaving it
+running, and a cancellation is not recorded as that call having failed.
+
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)

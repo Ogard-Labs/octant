@@ -560,6 +560,7 @@ const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
   "cancelled",
   "interrupted",
 ];
+const failureOutcomes: ReadonlyArray<ChatAttemptOutcome> = ["failed", "interrupted"];
 
 const transitions = new Map<ChatAttemptOutcome, ReadonlyArray<ChatAttemptOutcome>>([
   ["queued", ["streaming", "waiting", "interrupted", "failed", "cancelled"]],
@@ -586,18 +587,21 @@ export function transitionChatAttempt(
       `Cannot transition attempt from ${attempt.outcome} to ${input.outcome}`,
     );
   }
-  if (input.failure !== undefined && !terminalOutcomes.includes(input.outcome)) {
+  if (input.failure !== undefined && !failureOutcomes.includes(input.outcome)) {
     reject(
       "invalid-attempt-transition",
-      "A failure reason belongs on a terminal outcome, not " + input.outcome,
+      "A failure reason belongs on a failed or interrupted outcome, not " + input.outcome,
     );
   }
+  const { failure: previousFailure, ...attemptWithoutFailure } = attempt;
+  const failure =
+    input.failure ?? (failureOutcomes.includes(input.outcome) ? previousFailure : undefined);
 
   return decodeChatAttempt({
-    ...attempt,
+    ...attemptWithoutFailure,
     outcome: input.outcome,
     updatedAt: input.updatedAt,
-    ...(input.failure === undefined ? {} : { failure: input.failure }),
+    ...(failure === undefined ? {} : { failure }),
   });
 }
 

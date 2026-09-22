@@ -491,7 +491,8 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent(sentence);
+    expect(screen.getByText(sentence)).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Support correlation")).toHaveTextContent(ids.firstAttempt);
   });
 
@@ -512,7 +513,38 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    expect(
+      screen.getByText("The provider stopped responding and the turn timed out."),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("announces a failure when the open attempt newly fails", async () => {
+    const streaming = viewFixture().turns[0]!.attempts[1]!;
+    const turn = viewFixture().turns[0]!;
+    const viewFor = (outcome: "streaming" | "failed", failure?: { readonly code: string }) =>
+      viewFixture({
+        turns: [
+          {
+            ...turn,
+            attempts: [
+              {
+                ...streaming,
+                outcome,
+                responseRefs: [],
+                citationIds: [],
+                ...(failure === undefined ? {} : { failure }),
+              },
+            ],
+          },
+        ],
+      });
+    const { rerender } = render(<ChatTranscript view={viewFor("streaming")} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    rerender(<ChatTranscript view={viewFor("failed", { code: "timed-out" })} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
       "The provider stopped responding and the turn timed out.",
     );
   });

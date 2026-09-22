@@ -269,14 +269,22 @@ export const ChatAttempt = Schema.Struct({
     Schema.Array(ChatAttemptAnsweredQuestion).pipe(Schema.maxItems(8)),
   ),
   /**
-   * Set on a terminal failure so the transcript can state why the turn ended
-   * instead of offering only a support correlation ID. Absent on successful,
-   * user-cancelled, and still-running attempts.
+   * Set when the attempt failed or was interrupted, so the transcript can
+   * state why. Absent on a completed, cancelled, or still-running attempt.
    */
   failure: Schema.optional(ChatAttemptFailure),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (attempt) =>
+        attempt.failure === undefined ||
+        attempt.outcome === "failed" ||
+        attempt.outcome === "interrupted",
+    ),
+  );
 export type ChatAttempt = typeof ChatAttempt.Type;
 
 export const ChatTurn = Schema.Struct({

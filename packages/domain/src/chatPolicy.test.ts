@@ -545,6 +545,20 @@ describe("chat turn and attempt policy", () => {
         failure: { code: "timed-out" as never },
       }),
     ).toThrow(ChatPolicyRejected);
+    expect(() =>
+      transitionChatAttempt(makeAttempt("streaming"), {
+        outcome: "completed",
+        updatedAt: later,
+        failure: { code: "timed-out" as never },
+      }),
+    ).toThrow(ChatPolicyRejected);
+    expect(() =>
+      transitionChatAttempt(makeAttempt("streaming"), {
+        outcome: "cancelled",
+        updatedAt: later,
+        failure: { code: "timed-out" as never },
+      }),
+    ).toThrow(ChatPolicyRejected);
   });
 
   it("rejects resume for non-resumable outcomes and preserves session identity for resumable ones", () => {

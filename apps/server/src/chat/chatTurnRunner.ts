@@ -139,6 +139,27 @@ function isProviderFailure(error: unknown): error is ProviderFailure {
   );
 }
 
+// Chat failures share categories such as unavailable with provider failures.
+// A structural check would record a journal error as a provider incident, so
+// only a failure that left a provider call is stamped here.
+const providerFailureProvenance: unique symbol = Symbol("octant.chat.providerFailure");
+
+function markProviderFailure(failure: ProviderFailure): ProviderFailure {
+  const marked: ProviderFailure = { ...failure };
+  Object.defineProperty(marked, providerFailureProvenance, { value: true });
+  return marked;
+}
+
+function hasProviderFailureProvenance(error: unknown): error is ProviderFailure {
+  return isProviderFailure(error) && providerFailureProvenance in error;
+}
+
+function callProvider<A, R>(
+  effect: Effect.Effect<A, ProviderFailure, R>,
+): Effect.Effect<A, ProviderFailure, R> {
+  return effect.pipe(Effect.mapError(markProviderFailure));
+}
+
 export interface ChatTurnRunnerOptions {
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly contextHarness: ContextHarnessService;
@@ -739,6 +760,7 @@ export class ChatTurnRunner {
         connection,
         consume: (runtimeEvents) =>
           runtimeEvents.pipe(
+            Stream.mapError(markProviderFailure),
             Stream.filter((event) => event.sessionId === input.attempt.providerSessionId),
             Stream.takeUntil(
               (event) =>
@@ -815,11 +837,13 @@ export class ChatTurnRunner {
                   // Chat has no filesystem, shell, or network authority. Decline
                   // Codex-native approvals so the turn can finish instead of
                   // aborting the pending tool as a user interrupt.
-                  yield* connection.answerApproval({
-                    sessionId: input.attempt.providerSessionId,
-                    requestId: event.requestId,
-                    approved: false,
-                  });
+                  yield* callProvider(
+                    connection.answerApproval({
+                      sessionId: input.attempt.providerSessionId,
+                      requestId: event.requestId,
+                      approved: false,
+                    }),
+                  );
                   return;
                 }
                 if (event.kind === "tool-request") {
@@ -848,12 +872,14 @@ export class ChatTurnRunner {
                         (definition) => definition.name === event.toolName,
                       ) === true;
                     if (!allowed) {
-                      yield* connection.answerTool({
-                        sessionId: input.attempt.providerSessionId,
-                        requestId: event.requestId,
-                        resultJson: JSON.stringify({ error: "tool-unavailable" }),
-                        isError: true,
-                      });
+                      yield* callProvider(
+                        connection.answerTool({
+                          sessionId: input.attempt.providerSessionId,
+                          requestId: event.requestId,
+                          resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                          isError: true,
+                        }),
+                      );
                       return;
                     }
                     if (parkedQuestionRequestId !== undefined) {
@@ -892,12 +918,14 @@ export class ChatTurnRunner {
                       .filter((label) => label.length > 0)
                       .map((label) => ({ label }));
                     if (prompt.length === 0) {
-                      yield* connection.answerTool({
-                        sessionId: input.attempt.providerSessionId,
-                        requestId: event.requestId,
-                        resultJson: JSON.stringify({ error: "question-invalid" }),
-                        isError: true,
-                      });
+                      yield* callProvider(
+                        connection.answerTool({
+                          sessionId: input.attempt.providerSessionId,
+                          requestId: event.requestId,
+                          resultJson: JSON.stringify({ error: "question-invalid" }),
+                          isError: true,
+                        }),
+                      );
                       return;
                     }
                     const answer = yield* parkOnQuestion(
@@ -907,23 +935,27 @@ export class ChatTurnRunner {
                         options,
                       }),
                     );
-                    yield* connection.answerTool({
-                      sessionId: input.attempt.providerSessionId,
-                      requestId: event.requestId,
-                      resultJson: JSON.stringify({ answer }),
-                      isError: false,
-                    });
+                    yield* callProvider(
+                      connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ answer }),
+                        isError: false,
+                      }),
+                    );
                     yield* settleAnsweredAttempt(answer, event.requestId);
                     return;
                   }
                   if (event.toolName === RESEARCH_TOOL_NAME) {
                     if (!input.researchEnabled) {
-                      yield* connection.answerTool({
-                        sessionId: input.attempt.providerSessionId,
-                        requestId: event.requestId,
-                        resultJson: JSON.stringify({ error: "research-disabled" }),
-                        isError: true,
-                      });
+                      yield* callProvider(
+                        connection.answerTool({
+                          sessionId: input.attempt.providerSessionId,
+                          requestId: event.requestId,
+                          resultJson: JSON.stringify({ error: "research-disabled" }),
+                          isError: true,
+                        }),
+                      );
                       return;
                     }
                     let parsedQuery = "";
@@ -935,12 +967,14 @@ export class ChatTurnRunner {
                     }
                     const route = input.researchRoute;
                     if (route.kind !== "ready" || route.backend !== "searxng") {
-                      yield* connection.answerTool({
-                        sessionId: input.attempt.providerSessionId,
-                        requestId: event.requestId,
-                        resultJson: JSON.stringify({ error: "research-unavailable" }),
-                        isError: true,
-                      });
+                      yield* callProvider(
+                        connection.answerTool({
+                          sessionId: input.attempt.providerSessionId,
+                          requestId: event.requestId,
+                          resultJson: JSON.stringify({ error: "research-unavailable" }),
+                          isError: true,
+                        }),
+                      );
                       return;
                     }
                     selectedResearchBackend = route.backend;
@@ -969,10 +1003,22 @@ export class ChatTurnRunner {
                             }),
                         }).pipe(
                           Effect.catchAll((error) =>
-                            failTurn(
-                              { code: decodeDiagnosticFailureCode("research-failed") },
-                              error,
-                            ),
+                            Effect.gen(function* () {
+                              if (executionSignal?.aborted) return;
+                              if (researchAbort.signal.aborted) {
+                                return yield* failTurn(
+                                  { code: decodeDiagnosticFailureCode("research-timed-out") },
+                                  decodeChatFailure({
+                                    category: "failed",
+                                    message: "Research did not return before the turn deadline.",
+                                  }),
+                                );
+                              }
+                              return yield* failTurn(
+                                { code: decodeDiagnosticFailureCode("research-failed") },
+                                error,
+                              );
+                            }),
                           ),
                         ),
                         Effect.andThen(
@@ -990,13 +1036,15 @@ export class ChatTurnRunner {
                         ),
                       ),
                     );
-                    if (executionSignal?.aborted) return;
-                    yield* connection.answerTool({
-                      sessionId: input.attempt.providerSessionId,
-                      requestId: event.requestId,
-                      resultJson: JSON.stringify(results),
-                      isError: false,
-                    });
+                    if (executionSignal?.aborted || results === undefined) return;
+                    yield* callProvider(
+                      connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify(results),
+                        isError: false,
+                      }),
+                    );
                     return;
                   }
 
@@ -1005,12 +1053,14 @@ export class ChatTurnRunner {
                     (definition) => definition.name === event.toolName,
                   );
                   if (toolSet === undefined || allowed !== true) {
-                    yield* connection.answerTool({
-                      sessionId: input.attempt.providerSessionId,
-                      requestId: event.requestId,
-                      resultJson: JSON.stringify({ error: "tool-unavailable" }),
-                      isError: true,
-                    });
+                    yield* callProvider(
+                      connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                        isError: true,
+                      }),
+                    );
                     return;
                   }
                   const toolAbort = new AbortController();
@@ -1038,7 +1088,23 @@ export class ChatTurnRunner {
                           }),
                       }).pipe(
                         Effect.catchAll((error) =>
-                          failTurn({ code: decodeDiagnosticFailureCode("tool-failed") }, error),
+                          Effect.gen(function* () {
+                            if (executionSignal?.aborted) return;
+                            if (toolAbort.signal.aborted) {
+                              return yield* failTurn(
+                                { code: decodeDiagnosticFailureCode("tool-timed-out") },
+                                decodeChatFailure({
+                                  category: "failed",
+                                  message:
+                                    "An app-managed tool call did not return before the turn deadline.",
+                                }),
+                              );
+                            }
+                            return yield* failTurn(
+                              { code: decodeDiagnosticFailureCode("tool-failed") },
+                              error,
+                            );
+                          }),
                         ),
                       ),
                       Effect.andThen(
@@ -1057,14 +1123,16 @@ export class ChatTurnRunner {
                       ),
                     ),
                   );
-                  if (executionSignal?.aborted) return;
-                  yield* connection.answerTool({
-                    sessionId: input.attempt.providerSessionId,
-                    requestId: event.requestId,
-                    resultJson: boundedToolResultJson(execution.result),
-                    ...(execution.images === undefined ? {} : { images: execution.images }),
-                    isError: execution.isError === true,
-                  });
+                  if (executionSignal?.aborted || execution === undefined) return;
+                  yield* callProvider(
+                    connection.answerTool({
+                      sessionId: input.attempt.providerSessionId,
+                      requestId: event.requestId,
+                      resultJson: boundedToolResultJson(execution.result),
+                      ...(execution.images === undefined ? {} : { images: execution.images }),
+                      isError: execution.isError === true,
+                    }),
+                  );
                   return;
                 }
                 if (event.kind === "citation" && input.persistCitation !== undefined) {
@@ -1130,11 +1198,13 @@ export class ChatTurnRunner {
                           }),
                     }),
                   );
-                  yield* connection.answerUserInput({
-                    sessionId: input.attempt.providerSessionId,
-                    requestId: event.requestId,
-                    answer,
-                  });
+                  yield* callProvider(
+                    connection.answerUserInput({
+                      sessionId: input.attempt.providerSessionId,
+                      requestId: event.requestId,
+                      answer,
+                    }),
+                  );
                   yield* settleAnsweredAttempt(answer, event.requestId);
                   return;
                 }
@@ -1255,12 +1325,14 @@ export class ChatTurnRunner {
         yield* Fiber.interrupt(abortWatcher);
       }
       if (exit._tag === "Failure") {
-        // A provider failure that surfaced mid-turn — from a connection call
-        // inside the event loop rather than acquire or send — still names
-        // its cause on the attempt before the original error propagates.
+        // A provider failure that left a connection call inside the event
+        // loop still names its cause. The mark is what keeps a Chat failure
+        // with the same category, such as a journal write, from being
+        // recorded as a provider incident. An outcome the runner already
+        // chose is left alone.
         const providerFailure = Option.getOrUndefined(Cause.failureOption(exit.cause));
-        if (providerFailure !== undefined && isProviderFailure(providerFailure)) {
-          yield* persistProviderFailure(providerFailure).pipe(Effect.catchAll(() => Effect.void));
+        if (terminalOutcome === undefined && hasProviderFailureProvenance(providerFailure)) {
+          return yield* persistProviderFailure(providerFailure);
         }
         if (terminalOutcome === undefined) {
           yield* persistAmbiguousRecovery();

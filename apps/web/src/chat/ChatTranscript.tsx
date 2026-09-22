@@ -18,6 +18,7 @@ import {
   memo,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -150,6 +151,22 @@ function attemptFailureSentence(attempt: ChatAttempt): string {
     attempt.failure?.diagnostic?.stderrContext ??
     attemptFailureSentences[String(attempt.failure?.code ?? "")] ??
     "The turn failed."
+  );
+}
+
+function AttemptFailureNotice(props: { readonly attempt: ChatAttempt }) {
+  const code = props.attempt.failure?.code;
+  const seen = useRef(code);
+  const [announce, setAnnounce] = useState(false);
+  useEffect(() => {
+    if (code !== undefined && seen.current === undefined) setAnnounce(true);
+    seen.current = code;
+  }, [code]);
+  if (props.attempt.failure === undefined) return null;
+  return (
+    <p className="chat-transcript__failure" {...(announce ? { role: "alert" as const } : {})}>
+      {attemptFailureSentence(props.attempt)}
+    </p>
   );
 }
 
@@ -628,11 +645,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             responseBody={responseBody}
           />
         )}
-        {props.attempt.failure === undefined ? null : (
-          <p className="chat-transcript__failure" role="alert">
-            {attemptFailureSentence(props.attempt)}
-          </p>
-        )}
+        <AttemptFailureNotice attempt={props.attempt} />
         {props.attempt.outcome === "failed" || props.attempt.failure !== undefined ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}

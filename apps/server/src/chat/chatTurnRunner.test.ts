@@ -641,6 +641,156 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.failure).toEqual({ code: "tool-failed" });
   });
 
+  it("keeps a cancelled turn cancelled when the app-managed tool rejects the abort", async () => {
+    const controller = new AbortController();
+    const updates: ChatAttempt[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Queue.offer(queue, {
+          kind: "tool-request",
+          sessionId,
+          requestId: "tool-cancel",
+          toolName: "octant_browser",
+          inputJson: "{}",
+        } as never),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+      timeoutMs: 5_000,
+    });
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: { acquire: () => Effect.succeed(connection) } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            signal: controller.signal,
+            appManagedTools: {
+              definitions: [{ name: "octant_browser" } as never],
+              execute: (input: { signal?: AbortSignal }) =>
+                new Promise((_resolve, reject) => {
+                  const abort = () => reject(new Error("aborted"));
+                  if (input.signal?.aborted) {
+                    abort();
+                    return;
+                  }
+                  input.signal?.addEventListener("abort", abort, { once: true });
+                  controller.abort();
+                }),
+              close: async () => undefined,
+            },
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "c".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      ),
+    );
+
+    expect(result._tag).toBe("Left");
+    expect(updates.some((entry) => entry.failure?.code === "tool-failed")).toBe(false);
+    expect(updates.at(-1)?.outcome).toBe("cancelled");
+  });
+
+  it("does not record a journal failure as a provider failure", async () => {
+    const updates: ChatAttempt[] = [];
+    const providerFailures: unknown[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () => Queue.offer(queue, { kind: "text-delta", sessionId, text: "Hello" } as never),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+    });
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: { acquire: () => Effect.succeed(connection) } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistProviderFailure: (_attempt, failure) => {
+              providerFailures.push(failure);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.fail({ category: "unavailable", message: "Journal write failed." }),
+          }),
+        ),
+      ),
+    );
+
+    expect(result._tag).toBe("Left");
+    expect(providerFailures).toEqual([]);
+    expect(updates.at(-1)?.outcome).toBe("interrupted");
+    expect(updates.at(-1)?.failure).toEqual({ code: "incomplete" });
+  });
+
   it("names provider silence past the idle window as a timeout on the attempt", async () => {
     const updates: ChatAttempt[] = [];
     const connection = {

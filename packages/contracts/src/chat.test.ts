@@ -560,6 +560,13 @@ describe("chat contracts", () => {
         },
       }),
     ).toThrow();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        outcome: "completed",
+        failure: { code: "timed-out" },
+      }),
+    ).toThrow();
   });
 
   it("decodes ChatAttempt with a pending provider question and rejects an oversized one", () => {
