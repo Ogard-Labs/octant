@@ -156,8 +156,24 @@
 }
 
 .surface-toolbar__search {
+  position: relative;
+  display: flex;
   flex: 1 1 240px;
   min-width: 200px;
+  align-items: center;
+  color: var(--oct-muted);
+}
+
+.surface-toolbar__search > svg {
+  position: absolute;
+  left: 9px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.surface-toolbar__search input {
+  width: 100%;
+  padding-left: 30px;
 }
 
 /* A field inside that chrome keeps its own text selectable. */
