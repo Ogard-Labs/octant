@@ -38,11 +38,14 @@ export const PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE =
   "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.";
 
 export function isProviderCliUpdateTerminationUnconfirmed(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ("message" in error && error.message === PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE) return true;
+  const diagnostic = "diagnostic" in error ? error.diagnostic : undefined;
   return (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    error.message === PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE
+    typeof diagnostic === "object" &&
+    diagnostic !== null &&
+    "kind" in diagnostic &&
+    diagnostic.kind === "cleanup-unconfirmed"
   );
 }
 
@@ -102,26 +105,25 @@ export async function runProviderCliUpdate(
     // Timeout and child closure may arrive together. A second SIGTERM can
     // kill a parent whose one-shot handler was consumed by the first signal,
     // before it reaps its descendants. Both paths must await the same cleanup.
-    let cleanup: Promise<"released" | "unconfirmed"> | undefined;
+    let cleanup: Promise<"released" | "unconfirmed" | "denied"> | undefined;
     const releaseTree = () =>
       (cleanup ??= ensureProcessTreeExited(groupExists, killGroup, graceMs));
     const terminateTree = async (reason: "timeout" | "close") => {
       const released = await releaseTree();
       if (reason === "timeout" || timedOut) {
-        // A timeout reports as a timeout even when tree exit is still
-        // unconfirmed: under load the grace window can expire while the OS
-        // reaps a SIGKILLed tree, and telling that person to restart Octant
-        // is a false alarm. The restart advice is reserved for the case that
-        // is genuinely suspicious — the updater exited on its own yet its
-        // process tree could not be confirmed dead. The unconfirmed outcome
-        // still rides in the diagnostic so support can see it.
+        // A timeout reports as a timeout. A grace window that expires while
+        // the OS reaps a SIGKILLed tree is a slow reap, and telling that
+        // person to restart Octant is a false alarm. Inspection or signaling
+        // that was denied is different: the tree may still be running, so the
+        // diagnostic keeps cleanup-unconfirmed and the executable claim stays
+        // held even though the sentence the person reads is still a timeout.
+        const signalingDenied = released === "denied";
         settle(() =>
           reject({
             ...failure("unavailable", "Provider CLI update timed out."),
             diagnostic: {
               stage: "update",
-              kind: "timed-out",
-              ...(released === "released" ? {} : { cleanup: "unconfirmed" }),
+              kind: signalingDenied ? "cleanup-unconfirmed" : "timed-out",
               ...(boundedStderr.context() === undefined
                 ? {}
                 : { stderrContext: boundedStderr.context() }),
@@ -199,7 +201,7 @@ async function ensureProcessTreeExited(
   groupExists: () => boolean,
   killGroup: (signal: NodeJS.Signals) => void,
   graceMs: number,
-): Promise<"released" | "unconfirmed"> {
+): Promise<"released" | "unconfirmed" | "denied"> {
   try {
     if (!groupExists()) return "released";
     killGroup("SIGTERM");
@@ -209,8 +211,8 @@ async function ensureProcessTreeExited(
     return "unconfirmed";
   } catch {
     // An OS refusal to inspect or signal the group cannot establish cleanup.
-    // Keep the updater blocked instead of leaking a detached rejection.
-    return "unconfirmed";
+    // This is distinct from a slow reap: the tree may still be running.
+    return "denied";
   }
 }
 
