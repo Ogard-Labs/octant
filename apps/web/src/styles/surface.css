@@ -176,6 +176,11 @@
   padding-left: 30px;
 }
 
+.surface-toolbar__search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 /* A field inside that chrome keeps its own text selectable. */
 .surface-header :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]),
 .surface-toolbar
