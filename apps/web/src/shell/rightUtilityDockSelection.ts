@@ -52,9 +52,10 @@ export function addThreadUtilityTab(
   key: ThreadUtilityDockKey,
   surface: RightUtilityDockSurfaceId,
   instanceId: string,
+  browserContextId?: string,
 ): ThreadUtilityDockStates {
   const current = threadUtilityDockState(states, key);
-  return replace(states, key, addUtilityTabState(current, surface, instanceId));
+  return replace(states, key, addUtilityTabState(current, surface, instanceId, browserContextId));
 }
 
 export function selectThreadUtilityTab(
@@ -98,7 +99,11 @@ export function openUtilityTabState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
 ): ThreadUtilityDockState {
-  const existing = state.tabs.find((tab) => tab.surface === surface);
+  // Repeatable surfaces keep every instance, so "open" names the singleton
+  // identity rather than whichever instance happens to be first: an agent
+  // session announced for the thread must land on the shared Browser tab,
+  // not on a dedicated context a link open created.
+  const existing = state.tabs.find((tab) => tab.id === surface);
   if (existing !== undefined) return { ...state, active: existing.id };
   const tab = singletonUtilityTab(surface);
   return { tabs: [...state.tabs, tab], active: tab.id };
@@ -108,11 +113,16 @@ export function addUtilityTabState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
   instanceId: string,
+  browserContextId?: string,
 ): ThreadUtilityDockState {
   if (surface !== "browser" && surface !== "terminal") {
     return openUtilityTabState(state, surface);
   }
-  const tab = { id: instanceId, surface };
+  const tab: ThreadUtilityDockTab = {
+    id: instanceId,
+    surface,
+    ...(surface === "browser" && browserContextId !== undefined ? { browserContextId } : {}),
+  };
   return {
     tabs: [...state.tabs.filter((candidate) => candidate.id !== instanceId), tab],
     active: tab.id,

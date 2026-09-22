@@ -114,6 +114,13 @@ export interface ShellControllerOptions {
   readonly client?: ShellClient;
   readonly isNarrow?: boolean;
   readonly nativeHost?: NativeShellHost;
+  /**
+   * Offers a thread's live Browser session in the right utility dock instead
+   * of a workspace pane. The dock is thread-scoped, so the callback answers
+   * false when the announcing thread is not the dock's subject — the caller
+   * then falls back to a pane reveal.
+   */
+  readonly openDockBrowser?: (input: { readonly threadId: string }) => boolean;
   readonly serverUrl: string;
   readonly windowCapability?: string;
   readonly windowId: WindowId;
@@ -814,6 +821,12 @@ export function useShellController(options: ShellControllerOptions) {
     if (latest !== undefined && threadHasBrowserSurface(latest.workspace, input.threadId)) {
       return;
     }
+    // The dock is the thread-scoped home for a live tool: when the session
+    // belongs to the subject the dock already describes, it opens there
+    // instead of replacing the pane the person is reading.
+    if (options.openDockBrowser?.({ threadId: input.threadId }) === true) {
+      return;
+    }
     void (input.paneId === undefined
       ? openSurface("browser")
       : openSurface("browser", input.paneId));
@@ -822,6 +835,7 @@ export function useShellController(options: ShellControllerOptions) {
   async function openSurfaceInSplit(
     surface: WorkspaceSurfaceKind,
     targetPaneId: PaneId,
+    browserContextId?: BrowserContextId,
   ): Promise<boolean> {
     const latest = committedShell.current;
     if (latest === undefined) return false;
@@ -833,10 +847,17 @@ export function useShellController(options: ShellControllerOptions) {
       mode,
       boundThreadId(pane.surface),
       sideChatSource(pane.surface),
+      browserContextId,
     );
     if (tab === undefined) return false;
     await splitPane(targetPaneId, "horizontal", "after", tab);
-    return true;
+    // Same adoption contract as openSurface: a rejected split is recovered
+    // rather than thrown, so only the committed workspace proves a context the
+    // caller minted gained a close path.
+    return (
+      browserContextId === undefined ||
+      committedBrowserContextSurface(committedShell.current, browserContextId)
+    );
   }
 
   function dismissCrossContextOffer(): void {

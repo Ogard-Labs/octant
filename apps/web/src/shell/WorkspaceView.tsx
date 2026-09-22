@@ -12,7 +12,6 @@ import type {
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
 import type { CodeOperationId, ThreadBoardPullRequestIdentity } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type {
   ProjectAvailability,
   ProjectId,
@@ -89,7 +88,13 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { BrowserContextId, BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { LocalServerOpenTarget } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
-import { BrowserWorkspace, makeBrowserToolAction } from "../browser/BrowserWorkspace";
+import { BrowserWorkspace } from "../browser/BrowserWorkspace";
+import {
+  openDedicatedBrowserContext,
+  releaseBrowserContext,
+} from "../browser/dedicatedBrowserContext";
+import { MarkdownLinkActionsContext } from "../markdown/Markdown";
+import { openExternalUrl } from "./openExternalUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
@@ -273,6 +278,18 @@ export interface WorkspaceViewProps {
     readonly paneId: PaneId;
     readonly sessionIds: ReadonlyArray<string>;
     readonly threadId: string;
+  }) => void;
+  /**
+   * Opens a link from a pane's conversation in this thread's own isolated
+   * Browser context — the right dock when the pane's thread is the dock's
+   * subject, a split beside the pane otherwise. Absent, links open only
+   * through the external-browser path.
+   */
+  readonly onOpenLink?: (request: {
+    readonly threadId: string;
+    readonly mode: "work" | "code";
+    readonly paneId: PaneId;
+    readonly url: string;
   }) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
@@ -590,11 +607,18 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                   offersThreadComposer(surface)
                 }
               >
-                {onWelcomeGround(
-                  surface,
-                  props.welcomeBackdrop,
-                  renderTab(surface, props, paneId, canvasContext),
-                )}
+                <SurfaceLinkActionsProvider
+                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                  {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
+                  paneId={paneId}
+                  surface={surface}
+                >
+                  {onWelcomeGround(
+                    surface,
+                    props.welcomeBackdrop,
+                    renderTab(surface, props, paneId, canvasContext),
+                  )}
+                </SurfaceLinkActionsProvider>
               </ComposerContextMeterGate>
             </ComposerNoticeProvider>
           )}
@@ -628,6 +652,47 @@ function onWelcomeGround(surface: WorkspaceTab, backdrop: ReactNode, content: Re
       {backdrop}
       {content}
     </div>
+  );
+}
+
+/**
+ * Binds the pane's links to the thread the pane shows. The in-app open exists
+ * only where a Browser surface can be authorized — a Work or Code thread — so
+ * Chat and context-free surfaces offer the external open and copy alone.
+ */
+function SurfaceLinkActionsProvider(props: {
+  readonly children: ReactNode;
+  readonly hostBridge?: OctantHostBridge;
+  readonly onOpenLink?: WorkspaceViewProps["onOpenLink"];
+  readonly paneId: PaneId;
+  readonly surface: WorkspaceTab;
+}) {
+  const threadId =
+    "threadId" in props.surface && props.surface.threadId !== undefined
+      ? String(props.surface.threadId)
+      : undefined;
+  const mode =
+    "mode" in props.surface && (props.surface.mode === "work" || props.surface.mode === "code")
+      ? props.surface.mode
+      : undefined;
+  const value = useMemo(() => {
+    const openExternal = (url: string) => openExternalUrl(props.hostBridge, url);
+    if (props.onOpenLink === undefined || threadId === undefined || mode === undefined) {
+      return { openExternal };
+    }
+    const onOpenLink = props.onOpenLink;
+    const paneId = props.paneId;
+    const thread = threadId;
+    const threadMode = mode;
+    return {
+      openExternal,
+      openInApp: (url: string) => onOpenLink({ threadId: thread, mode: threadMode, paneId, url }),
+    };
+  }, [props.hostBridge, props.onOpenLink, props.paneId, threadId, mode]);
+  return (
+    <MarkdownLinkActionsContext.Provider value={value}>
+      {props.children}
+    </MarkdownLinkActionsContext.Provider>
   );
 }
 
@@ -945,10 +1010,17 @@ function renderCodeTab(
               : {
                   onOpenLocalServer: async (target: LocalServerOpenTarget) => {
                     const browserThreadId = tab.threadId as unknown as BrowserThreadId;
-                    const contextId = await openLocalServerBrowserContext(
+                    const contextId = await openDedicatedBrowserContext(
                       browserAutomationClient,
                       browserThreadId,
-                      target,
+                      "code",
+                      {
+                        allowedOrigin: target.allowedOrigin,
+                        url: String(target.url),
+                        ...(target.acceptsLocalCertificate
+                          ? { acceptsLocalCertificate: true }
+                          : {}),
+                      },
                     );
                     // Named by the context it just created, so this Open gets its
                     // own tab instead of taking over the thread's Browser tab.
@@ -1875,81 +1947,6 @@ function isCodeWorkspaceTab(
     tab.kind === "code-local-review" ||
     tab.kind === "apple-workbench"
   );
-}
-
-/**
- * Realize a prepared Local servers Open target as a host-owned Browser context
- * of its own.
- *
- * Every Open mints a fresh context confined to exactly the one prepared origin
- * and returns its identity, so the caller can open a tab bound to *that*
- * context. Nothing is reconciled against the thread's existing context: a
- * second classified server neither inherits the first server's origin nor stops
- * its session to take the slot.
- */
-async function openLocalServerBrowserContext(
-  client: BrowserAutomationClient,
-  threadId: BrowserThreadId,
-  target: LocalServerOpenTarget,
-): Promise<BrowserContextId> {
-  const scope = await client.resolve({ threadId, mode: "code" });
-  const snapshot = await client.create({
-    threadId,
-    action: makeBrowserToolAction(
-      scope,
-      "Open one classified local server in a host-owned isolated browser context.",
-    ),
-    policy: {
-      profileMode: "isolated",
-      allowedOrigins: [target.allowedOrigin],
-      credentialFieldProtection: true,
-      maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
-      sessionTimeoutMs: 300_000,
-      // The host already decided this, and only for a loopback HTTPS origin: an
-      // HTTPS dev server's self-signed localhost certificate is accepted by this
-      // one context and nowhere else.
-      ...(target.acceptsLocalCertificate ? { acceptsLocalCertificate: true } : {}),
-    },
-    dedicated: true,
-  });
-  const context = snapshot.context;
-  if (context === undefined || context.state !== "active") {
-    throw new Error(snapshot.failure?.message ?? "The host Browser context is unavailable.");
-  }
-  // Only the returned identity is adopted: the caller names a Browser tab after
-  // it, and closing that tab is what stops the context. A context this Open
-  // created but never returned is reachable from no tab, so it would hold a host
-  // Browser session until the session timeout with no user close path. Release
-  // it here and let the honest Open failure reach the user either way.
-  try {
-    await client.act({
-      actionId: context.actionId,
-      contextId: context.contextId,
-      correlationId: context.correlationId,
-      authority: scope.authority,
-      kind: "navigate",
-      target: String(target.url),
-    });
-  } catch (error) {
-    await releaseBrowserContext(client, threadId, context.contextId);
-    throw error;
-  }
-  return context.contextId;
-}
-
-/**
- * Stop a dedicated Browser context that no tab owns, so it cannot hold a host
- * Browser session no user control can reach.
- *
- * Best-effort by design: a failed release must not replace or swallow the
- * honest Open failure the caller is about to report.
- */
-async function releaseBrowserContext(
-  client: BrowserAutomationClient,
-  threadId: BrowserThreadId,
-  contextId: BrowserContextId,
-): Promise<void> {
-  await client.stop({ contextId, threadId }).catch(() => undefined);
 }
 
 function resolveCodeTabProject(

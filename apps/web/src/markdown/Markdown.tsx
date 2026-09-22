@@ -1,7 +1,22 @@
-import { Children, createContext, isValidElement, memo, useContext, type ReactNode } from "react";
+import {
+  Children,
+  createContext,
+  isValidElement,
+  memo,
+  useContext,
+  useState,
+  type ReactNode,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "../transcript/CodeBlock";
+import { AppWindow, ExternalLink, Link2 } from "lucide-react";
+import {
+  OctantContextMenuContent,
+  OctantContextMenuItem,
+  OctantContextMenuRoot,
+  OctantContextMenuTrigger,
+} from "../ui/base/OctantContextMenu";
 
 /**
  * Transforms a run of plain text into nodes. The renderer applies it to text
@@ -27,6 +42,19 @@ export interface MarkdownProps {
  * that pointed at them.
  */
 const TextTransform = createContext<MarkdownTextTransform | undefined>(undefined);
+
+/**
+ * What a link inside rendered Markdown can do beyond opening externally. The
+ * shell provides it: a thread surface offers an in-app Browser open bound to
+ * its own thread, and every surface offers the host's external open. With no
+ * provider the anchor still copies its URL and opens in a browser tab.
+ */
+export interface MarkdownLinkActions {
+  readonly openInApp?: (url: string) => void;
+  readonly openExternal: (url: string) => void;
+}
+
+export const MarkdownLinkActionsContext = createContext<MarkdownLinkActions | undefined>(undefined);
 
 /**
  * The one Markdown renderer. Two hand-written parsers stood here before, each
@@ -105,9 +133,7 @@ const components: Components = {
     href === undefined || href === "" ? (
       <>{children}</>
     ) : (
-      <a href={href} rel="noreferrer" target="_blank">
-        {children}
-      </a>
+      <MarkdownLink href={href}>{children}</MarkdownLink>
     ),
   p: ({ children }) => (
     <p>
@@ -201,4 +227,86 @@ function onlyHttpUrls(url: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * A rendered link. The desktop shell refuses every popup the renderer asks
+ * for, so a bare target=_blank anchor is inert there: activation goes through
+ * the pane's link actions — the in-app Browser when the surface can host one,
+ * the host's external open otherwise. Right-click offers both plus the URL
+ * itself, because a link the agent wrote is also a thing the person copies.
+ */
+function MarkdownLink(props: { readonly href: string; readonly children: ReactNode }) {
+  const actions = useContext(MarkdownLinkActionsContext);
+  const [open, setOpen] = useState(false);
+  const openExternal = () => {
+    if (actions?.openExternal !== undefined) {
+      actions.openExternal(props.href);
+      return;
+    }
+    globalThis.open?.(props.href, "_blank", "noopener,noreferrer");
+  };
+  const copyUrl = () => {
+    const writeText = globalThis.navigator?.clipboard?.writeText;
+    if (writeText === undefined) return;
+    void writeText.call(globalThis.navigator.clipboard, props.href).catch(() => undefined);
+  };
+  const anchor = (
+    <a
+      href={props.href}
+      onClick={(event) => {
+        event.preventDefault();
+        if (actions?.openInApp !== undefined) {
+          actions.openInApp(props.href);
+          return;
+        }
+        openExternal();
+      }}
+      rel="noreferrer"
+      target="_blank"
+    >
+      {props.children}
+    </a>
+  );
+  return (
+    <OctantContextMenuRoot onOpenChange={setOpen}>
+      <OctantContextMenuTrigger
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="window-no-drag"
+        render={anchor}
+      />
+      <OctantContextMenuContent>
+        <OctantContextMenuItem
+          className="gap-2"
+          closeOnClick
+          disabled={actions?.openInApp === undefined}
+          label="Open in Octant"
+          onClick={() => actions?.openInApp?.(props.href)}
+        >
+          <span aria-hidden="true" className="flex size-4 items-center justify-center">
+            <AppWindow size={14} />
+          </span>
+          <span className="flex min-w-0 flex-1">Open in Octant</span>
+        </OctantContextMenuItem>
+        <OctantContextMenuItem
+          className="gap-2"
+          closeOnClick
+          label="Open in external browser"
+          onClick={openExternal}
+        >
+          <span aria-hidden="true" className="flex size-4 items-center justify-center">
+            <ExternalLink size={14} />
+          </span>
+          <span className="flex min-w-0 flex-1">Open in external browser</span>
+        </OctantContextMenuItem>
+        <OctantContextMenuItem className="gap-2" closeOnClick label="Copy URL" onClick={copyUrl}>
+          <span aria-hidden="true" className="flex size-4 items-center justify-center">
+            <Link2 size={14} />
+          </span>
+          <span className="flex min-w-0 flex-1">Copy URL</span>
+        </OctantContextMenuItem>
+      </OctantContextMenuContent>
+    </OctantContextMenuRoot>
+  );
 }

@@ -85,7 +85,7 @@ export interface BrowserSurfaceViewPort {
   setBounds(bounds: BrowserSurfaceBounds): void;
   setVisible(visible: boolean): void;
   readonly webContents: {
-    capturePage(): Promise<{ toJPEG(quality: number): Uint8Array }>;
+    capturePage(): Promise<{ isEmpty(): boolean; toJPEG(quality: number): Uint8Array }>;
     close(): void;
     readonly debugger: {
       attach(protocolVersion?: string): void;
@@ -608,6 +608,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
       const contents = contentsView(owned).webContents;
+      // A context that has not navigated yet has no document to inspect and
+      // no painted frame to capture; both probes below would never resolve.
+      if (contents.getURL() === "") return {};
       const sensitiveDocument = await hasSensitiveDocument(
         contentsView(owned),
         owned.policy.credentialFieldProtection,
@@ -879,6 +882,13 @@ function execute(
   code: string,
   userGesture = false,
 ): Promise<unknown> {
+  // A WebContentsView that has never committed a document queues script
+  // evaluations without ever settling them: the call hangs and, because the
+  // broker serializes a surface's actions, every later action waits behind it.
+  // getURL() is "" exactly while no document exists, so fail the call instead.
+  if (view.webContents.getURL() === "") {
+    return Promise.reject(new Error("Octant Browser has no page loaded."));
+  }
   return view.webContents.executeJavaScriptInIsolatedWorld(
     ISOLATED_WORLD_ID,
     [{ code }],
@@ -1068,6 +1078,9 @@ async function hasSensitiveDocument(
   protectCredentials: boolean,
 ): Promise<boolean> {
   if (!protectCredentials) return false;
+  // No committed document means no credential fields and no frame whose
+  // script evaluation would settle (see execute).
+  if (view.webContents.getURL() === "") return false;
   const probe = `(() => {
     const roots = [document];
     for (let index = 0; index < roots.length; index += 1) {
@@ -1131,6 +1144,9 @@ async function waitForSelector(
 
 async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string | undefined> {
   const image = await view.webContents.capturePage();
+  // A detached surface paints nothing, and Chromium reports that as an empty
+  // image rather than an error; an empty JPEG is not a page snapshot.
+  if (image.isEmpty()) return undefined;
   const bytes = image.toJPEG(70);
   const dataUrl = `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`;
   return dataUrl.length <= 54 * 1_024 ? dataUrl : undefined;

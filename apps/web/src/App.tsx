@@ -63,6 +63,8 @@ import {
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
+  decodeBrowserContextId,
+  decodeBrowserThreadId,
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
   decodeWorkThreadId,
@@ -93,6 +95,7 @@ import type {
 import {
   decodeWindowId,
   decodeWorkspaceTabId,
+  type PaneId,
   type WindowId,
   type WorkspaceTab,
 } from "@octant/contracts/shell";
@@ -148,6 +151,11 @@ import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDesti
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
+import {
+  openDedicatedBrowserContext,
+  releaseBrowserContext,
+} from "./browser/dedicatedBrowserContext";
+import { MarkdownLinkActionsContext } from "./markdown/Markdown";
 import { githubPullRequestUrl } from "./threadBoard/githubPullRequestUrl";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
@@ -676,6 +684,20 @@ function LaunchedShell(
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
+    openDockBrowser: ({ threadId }) => {
+      // The dock is thread-scoped: a Browser session belongs in it only when
+      // the announcing thread is the subject the dock already describes.
+      if (
+        activeMode === "chat" ||
+        dockThreadId === undefined ||
+        String(dockThreadId) !== threadId ||
+        !dockAvailable
+      ) {
+        return false;
+      }
+      openDockTab("browser");
+      return true;
+    },
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
     windowId: props.launch.windowId,
@@ -2917,7 +2939,94 @@ function LaunchedShell(
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => closeUtilityTabState(current, tabId));
     } else {
+      const closedTab = threadUtilityDockState(dockStatesByThread, dockThreadKey).tabs.find(
+        (tab) => tab.id === tabId,
+      );
       setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, tabId));
+      // A dock Browser tab bound to a context owns it: closing the tab is the
+      // only close path a dedicated context has, so the context stops here.
+      // The shared tab binds the thread's context the same way once it exists,
+      // so closing it stops the thread's session too.
+      if (
+        closedTab?.browserContextId !== undefined &&
+        dockThread !== undefined &&
+        browserAutomationClient !== undefined
+      ) {
+        void browserAutomationClient
+          .stop({
+            contextId: decodeBrowserContextId(closedTab.browserContextId),
+            threadId: decodeBrowserThreadId(dockThread.threadId),
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+  /**
+   * A link inside a conversation opens in this thread's own isolated Browser
+   * context — a dock tab when the pane's thread is the dock's subject, a split
+   * beside the pane otherwise. The dedicated context is confined to the link's
+   * origin, so following it cannot reach anywhere else in this thread's name.
+   */
+  async function openLinkInApp(request: {
+    readonly threadId: string;
+    readonly mode: "work" | "code";
+    readonly paneId: PaneId;
+    readonly url: string;
+  }): Promise<void> {
+    const client = browserAutomationClient;
+    let origin: string;
+    try {
+      const parsed = new URL(request.url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("unsupported scheme");
+      }
+      origin = parsed.origin;
+    } catch {
+      openExternalUrl(props.hostBridge, request.url);
+      return;
+    }
+    if (client === undefined) {
+      openExternalUrl(props.hostBridge, request.url);
+      return;
+    }
+    const threadId = decodeBrowserThreadId(request.threadId);
+    try {
+      const contextId = await openDedicatedBrowserContext(client, threadId, request.mode, {
+        allowedOrigin: origin,
+        url: request.url,
+      });
+      if (
+        dockThreadKey !== undefined &&
+        dockThreadKey === threadUtilityDockKey(request.mode, request.threadId)
+      ) {
+        // A surface renders in one region at a time: while the bottom panel
+        // holds a Browser tab, every dock Browser tab is filtered out of the
+        // displayed state, so the new tab would open invisible with no close
+        // control. Same region switch as openDockTab/addDockTab.
+        if (bottomPanelPresentation.open) {
+          persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+        }
+        setDockVisible(true);
+        setDockStatesByThread((current) =>
+          addThreadUtilityTab(current, dockThreadKey, "browser", crypto.randomUUID(), contextId),
+        );
+        return;
+      }
+      // The shell recovers a rejected tab mutation rather than throwing, so
+      // only the adoption answer proves the context gained a close path;
+      // without one it is released here and the Open is reported as failed.
+      const adopted = await controller.openSurfaceInSplit("browser", request.paneId, contextId);
+      if (adopted) return;
+      await releaseBrowserContext(client, threadId, contextId);
+      throw new Error("No Browser tab adopted the context opened for this link.");
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      setThreadExportNotice(
+        "The link could not open in Octant (" +
+          reason +
+          "); it opened in the external browser instead.",
+      );
+      openExternalUrl(props.hostBridge, request.url);
     }
   }
   /**
@@ -3295,6 +3404,11 @@ function LaunchedShell(
     }
     return merge({ ...selected, method, headSha });
   }
+
+  const rootLinkActions = useMemo(
+    () => ({ openExternal: (url: string) => openExternalUrl(props.hostBridge, url) }),
+    [props.hostBridge],
+  );
 
   if (controller.status === "loading") {
     return (
@@ -5967,6 +6081,9 @@ function LaunchedShell(
                       controller.openSurface(surface, paneId, browserContextId)
                     }
                     onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
+                    {...(browserAutomationClient === undefined
+                      ? {}
+                      : { onOpenLink: (request) => void openLinkInApp(request) })}
                     environmentDockOpen={dockOpen && dockSurface === "environment"}
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>
@@ -6474,7 +6591,13 @@ function LaunchedShell(
                   <StreamRepliesContext.Provider
                     value={controller.settings?.streamReplies !== false}
                   >
-                    {shell}
+                    {/* The floor for every rendered link: panes that can host a
+                    Browser layer their in-app open over this, and surfaces that
+                    never can — dock tools, dialogs, Chat — still get the
+                    external open and copy rather than a dead anchor. */}
+                    <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                      {shell}
+                    </MarkdownLinkActionsContext.Provider>
                   </StreamRepliesContext.Provider>
                 </NewTaskDraftsContext.Provider>
               </ProjectThreadsProvider>
