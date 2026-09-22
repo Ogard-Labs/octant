@@ -2103,6 +2103,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .workspace-drag-preview {
   position: fixed;
+  top: var(--workspace-drag-preview-top);
+  left: var(--workspace-drag-preview-left);
   z-index: 100;
   max-width: 220px;
   padding: 5px 9px;
@@ -6605,6 +6607,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   position: absolute;
   inset-block: 0;
   left: 0;
+  width: var(--composer-model-picker-level-fill);
   border-radius: inherit;
   background: var(--octant-palette-blue);
 }
@@ -6757,6 +6760,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .provider-glyph {
   flex: 0 0 auto;
   display: inline-block;
+  color: var(--provider-glyph-color, inherit);
   vertical-align: middle;
 }
 
@@ -6777,6 +6781,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   background: var(--octant-control-hover);
   border: 1px solid var(--octant-border);
   border-radius: 50%;
+  width: var(--provider-glyph-size);
+  height: var(--provider-glyph-size);
+  font-size: var(--provider-glyph-font-size);
   font-weight: var(--oct-weight-display);
   letter-spacing: 0.02em;
   line-height: 1;

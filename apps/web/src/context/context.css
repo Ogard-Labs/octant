@@ -138,6 +138,7 @@
 .context-window-popover__meter > span {
   min-width: 2px;
   height: 100%;
+  width: var(--context-window-meter-size);
   background: var(--context-window-tone);
 }
 
@@ -225,6 +226,7 @@
 .context-window-popover__limit-meter > span {
   display: block;
   height: 100%;
+  width: var(--context-window-meter-size);
   background: var(--oct-accent-fg);
   border-radius: inherit;
   transition: width 480ms cubic-bezier(0.22, 1, 0.36, 1);

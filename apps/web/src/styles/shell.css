@@ -1599,6 +1599,10 @@ html[data-octant-native-host="true"]
   z-index: 0;
 }
 
+[data-octant-sidebar-background][data-background-state="hidden"] {
+  display: none;
+}
+
 [data-octant-sidebar-overlay] {
   z-index: 1;
 }

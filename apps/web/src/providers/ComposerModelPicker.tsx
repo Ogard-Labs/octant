@@ -6,7 +6,7 @@ import type {
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs } from "@octant/domain";
 import { ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   modelFavoriteKey,
   readModelFavorites,
@@ -747,7 +747,11 @@ function LevelSlider(props: {
         <div aria-hidden="true" className="composer-model-picker__level-track">
           <span
             className="composer-model-picker__level-fill"
-            style={{ width: `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%` }}
+            style={
+              {
+                "--composer-model-picker-level-fill": `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%`,
+              } as CSSProperties
+            }
           />
           <span className="composer-model-picker__level-stops">
             {props.labels.map((stop, position) => (

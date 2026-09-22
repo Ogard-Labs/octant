@@ -1,6 +1,6 @@
 import type { ProviderDriverKind } from "@octant/contracts";
 import { providerGlyphColorForKind } from "@octant/theme";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { PROVIDER_LOGOS } from "./providerLogoPaths";
 
 export interface ProviderGlyphProps {
@@ -44,7 +44,12 @@ export function ProviderGlyph(props: ProviderGlyphProps) {
         aria-hidden="true"
         className={`${className} provider-glyph--monogram`}
         data-driver-kind={props.driverKind}
-        style={{ width: size, height: size, fontSize: Math.max(7, Math.round(size * 0.42)) }}
+        style={
+          {
+            "--provider-glyph-size": `${size}px`,
+            "--provider-glyph-font-size": `${Math.max(7, Math.round(size * 0.42))}px`,
+          } as CSSProperties
+        }
       >
         {monogram(props.displayName)}
       </span>
@@ -57,7 +62,7 @@ export function ProviderGlyph(props: ProviderGlyphProps) {
       data-driver-kind={props.driverKind}
       focusable="false"
       height={size}
-      style={{ color: providerGlyphColor(props.driverKind) }}
+      style={{ "--provider-glyph-color": providerGlyphColor(props.driverKind) } as CSSProperties}
       viewBox={spec.viewBox ?? "0 0 16 16"}
       width={size}
     >

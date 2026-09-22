@@ -2,7 +2,7 @@ import type { ServiceLimitBucket } from "@octant/contracts/context";
 import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { matchKeybinding } from "@octant/domain";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { ContextInspector } from "./ContextInspector";
@@ -300,7 +300,11 @@ function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFa
             className="context-window-popover__meter"
             role="progressbar"
           >
-            <span style={{ width: `${String(reported.percent)}%` }} />
+            <span
+              style={
+                { "--context-window-meter-size": `${String(reported.percent)}%` } as CSSProperties
+              }
+            />
           </div>
           <p className="context-window-popover__source">
             {reported.declared
@@ -458,7 +462,9 @@ function ContextMeter(props: {
             data-kind={segment.kind}
             data-tone={segment.tone}
             key={segment.key}
-            style={{ inlineSize: `${String(segment.percent)}%` }}
+            style={
+              { "--context-window-meter-size": `${String(segment.percent)}%` } as CSSProperties
+            }
           />
         ))}
     </span>
@@ -560,7 +566,13 @@ function ProviderLimitRow(props: {
           className="context-window-popover__limit-meter"
           {...(tone === undefined ? {} : { "data-tone": tone })}
         >
-          <span style={{ width: `${String(Math.max(0, Math.min(100, share)))}%` }} />
+          <span
+            style={
+              {
+                "--context-window-meter-size": `${String(Math.max(0, Math.min(100, share)))}%`,
+              } as CSSProperties
+            }
+          />
         </span>
       )}
     </>
