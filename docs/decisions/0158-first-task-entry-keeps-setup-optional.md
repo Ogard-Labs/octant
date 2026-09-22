@@ -31,6 +31,8 @@ General settings despite having no effect on task readiness or authority.
 - Continue retains recent threads and their status, Project, branch, provider,
   pull-request details, and resume action. Rows adapt to the workspace width;
   background refresh keeps the previous list visible until new data arrives.
+  Theme-aware Git cues distinguish additions, deletions, branches, and PR
+  states while retaining signs, icons, and state labels.
 - The compact model picker uses a horizontal source bar and single-line model
   rows where provider and capability information would otherwise repeat.
   Search, Favorites, and Recent retain provider identity per row. Recent keeps

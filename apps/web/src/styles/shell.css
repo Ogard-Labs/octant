@@ -3078,6 +3078,25 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
 }
 
+.code-home__fact--branch,
+.code-home__fact--branch > svg {
+  color: var(--octant-palette-blue);
+}
+
+.code-home__insertions {
+  color: var(--octant-success-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-home__deletions {
+  color: var(--octant-danger-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-home__facts .pull-request-chip {
+  background: color-mix(in srgb, currentcolor 10%, transparent);
+}
+
 /* One pull-request mark wherever a request is named (home list, pane title,
    board): the glyph, the number, the state as tone. */
 .pull-request-chip {
