@@ -300,6 +300,19 @@ function clampSplitRatio(value: number): number {
   return Number(Math.min(0.8, Math.max(0.2, value)).toFixed(6));
 }
 
+function PaneProviderMark(props: { readonly provider: ThreadProviderIdentity | undefined }) {
+  const provider = props.provider;
+  return provider === undefined ? null : (
+    <span aria-hidden="true" className="workspace-pane__provider" title={provider.displayName}>
+      <ProviderGlyph
+        displayName={provider.displayName}
+        driverKind={provider.driverKind}
+        size={14}
+      />
+    </span>
+  );
+}
+
 function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: WorkspacePane }) {
   const pane = props.pane;
   const surface = pane.surface;
@@ -396,19 +409,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 }
               >
                 <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
-                {provider === undefined || showTabs ? null : (
-                  <span
-                    aria-hidden="true"
-                    className="workspace-pane__provider"
-                    title={provider.displayName}
-                  >
-                    <ProviderGlyph
-                      displayName={provider.displayName}
-                      driverKind={provider.driverKind}
-                      size={14}
-                    />
-                  </span>
-                )}
+                <PaneProviderMark provider={showTabs ? undefined : provider} />
                 {pullRequest === undefined ? null : (
                   <PullRequestChip
                     className="workspace-pane__pull-request"
@@ -450,6 +451,13 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                           value={entry.id}
                           title={workspaceSurfaceTitle(entry)}
                         >
+                          {props.showProviderIcons === false ||
+                          !["chat-thread", "work-thread", "code-overview"].includes(entry.kind) ||
+                          !("threadId" in entry) ? null : (
+                            <PaneProviderMark
+                              provider={props.providerByThreadId?.get(String(entry.threadId))}
+                            />
+                          )}
                           <span>{workspaceSurfaceTitle(entry)}</span>
                         </OctantTabsTab>
                         <OctantIconButton

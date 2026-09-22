@@ -125,42 +125,66 @@ describe("SplitWorkspace", () => {
     expect(screen.queryByText("Welcome to Code")).not.toBeInTheDocument();
   });
 
-  it("shows the resolved provider mark in a thread pane tab when enabled", () => {
-    const handlers = splitCallbacks();
-    const layout = decodeWorkspaceLayoutNode({
-      kind: "pane",
-      nodeId: "00000000-0000-4000-8000-000000000611",
-      paneId: String(firstPaneId),
-      surface: {
-        kind: "chat-thread",
-        id: "00000000-0000-4000-8000-000000000613",
-        mode: "chat",
-        threadId: "00000000-0000-4000-8000-000000000614",
-        title: "A thread",
-      },
-    });
-    render(
-      <SplitWorkspace
-        {...handlers}
-        layout={layout}
-        providerByThreadId={
-          new Map([
-            [
-              "00000000-0000-4000-8000-000000000614",
-              { displayName: "Claude", driverKind: "claude" },
-            ],
-          ])
-        }
-        renderSurface={(surface) => surface.title}
-        showProviderIcons
-        contextLabel="repro-work"
-      />,
-    );
+  it.each([false, true])(
+    "keeps the provider mark beside the thread title (multiple tabs: %s)",
+    (multiple) => {
+      const handlers = splitCallbacks();
+      const layout = decodeWorkspaceLayoutNode({
+        kind: "pane",
+        nodeId: "00000000-0000-4000-8000-000000000611",
+        paneId: String(firstPaneId),
+        surface: {
+          kind: "chat-thread",
+          id: "00000000-0000-4000-8000-000000000613",
+          mode: "chat",
+          threadId: "00000000-0000-4000-8000-000000000614",
+          title: "A thread",
+        },
+      });
+      if (layout.kind !== "pane") throw new Error("Expected a pane");
+      const other = decodeWorkspaceLayoutNode({
+        kind: "pane",
+        nodeId: "00000000-0000-4000-8000-000000000621",
+        paneId: String(firstPaneId),
+        surface: {
+          kind: "chat-thread",
+          id: "00000000-0000-4000-8000-000000000623",
+          mode: "chat",
+          threadId: "00000000-0000-4000-8000-000000000624",
+          title: "Another thread",
+        },
+      });
+      if (other.kind !== "pane") throw new Error("Expected a pane");
+      render(
+        <SplitWorkspace
+          {...handlers}
+          layout={layout}
+          {...(multiple
+            ? { contentTabs: new Map([[firstPaneId, [layout.surface, other.surface]]]) }
+            : {})}
+          providerByThreadId={
+            new Map([
+              [
+                "00000000-0000-4000-8000-000000000614",
+                { displayName: "Claude", driverKind: "claude" },
+              ],
+            ])
+          }
+          renderSurface={(surface) => surface.title}
+          showProviderIcons
+          contextLabel="repro-work"
+        />,
+      );
 
-    expect(screen.queryByText("repro-work")).not.toBeInTheDocument();
-    expect(screen.getByTitle("Claude")).toBeVisible();
-    expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
-  });
+      expect(screen.queryByText("repro-work")).not.toBeInTheDocument();
+      expect(screen.getByTitle("Claude")).toBeVisible();
+      if (multiple)
+        expect(screen.getByRole("tab", { name: "A thread" })).toContainElement(
+          screen.getByTitle("Claude"),
+        );
+      expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
+    },
+  );
 
   it("opens the pull request a pane tab names in the dock", async () => {
     const user = userEvent.setup();
