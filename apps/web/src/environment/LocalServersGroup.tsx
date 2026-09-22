@@ -354,8 +354,8 @@ function LocalServerRow(props: {
           title="Confirm stop"
         >
           Stop {listener.processName} on port {listener.port}
-          {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}? Octant
-          cannot verify that it still owns this server.
+          {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
+          Octant cannot verify that it still owns this server.
         </OctantConfirmDialog>
       ) : null}
     </div>
