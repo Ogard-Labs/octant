@@ -2493,3 +2493,142 @@ textarea.settings-view__text-input {
   width: 100%;
   justify-content: space-between;
 }
+
+/* Provider card details moved from styles.css. */
+.provider-card__edit label {
+  display: grid;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+.provider-card__edit textarea {
+  min-height: 58px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.provider-card__guidance,
+.provider-card__authority-note {
+  margin: 0;
+  padding: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+}
+
+.provider-card__authority-note {
+  color: var(--octant-text-muted);
+}
+.provider-card__disclosure-icon {
+  flex: 0 0 auto;
+  transition: transform var(--oct-motion-fast) ease;
+}
+.provider-card__actions [aria-expanded="true"] .provider-card__disclosure-icon {
+  transform: rotate(180deg);
+}
+
+.provider-card__actions,
+.provider-card__facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.provider-card__facts {
+  margin-top: 3px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.provider-details__connection-body > .provider-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2) var(--oct-space-4);
+  margin-top: 0;
+}
+
+.provider-details__connection-body > .provider-card__facts span {
+  min-width: 0;
+}
+
+.provider-details__section--connection > .provider-card__guidance,
+.provider-details__section--connection > .provider-card__authority-note {
+  max-width: 68ch;
+}
+
+.provider-card__credential-status {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.provider-card__credential-status strong {
+  color: var(--octant-text-primary);
+  font-weight: 500;
+}
+
+.provider-card__edit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.provider-card__configuration {
+  display: grid;
+  gap: var(--oct-space-4);
+  padding-top: var(--oct-space-3);
+}
+
+.provider-card__configuration[data-expanded="false"] {
+  display: none;
+}
+
+.provider-card__edit--http,
+.provider-card__edit--claude {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  padding-top: 4px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.provider-card__credential-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.provider-card__discovery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-4);
+}
+.provider-card__discovery h4 {
+  margin: 0 0 var(--oct-space-2);
+}
+
+.provider-card__discovery ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+@container provider-settings (max-width: 640px) {
+  .provider-card__edit,
+  .provider-card__discovery {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .provider-card__edit,
+  .provider-card__discovery {
+    grid-template-columns: 1fr;
+  }
+  .provider-card__credential-actions {
+    grid-column: 1;
+  }
+}
