@@ -1,3 +1,4 @@
+import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import { ProjectClientFailure, type ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -103,15 +104,11 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const inputId = useId();
   const [draft, setDraft] = useState("");
-  const modelKey = `${props.projectId ?? ""}:${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
-  const [modelChoice, setModelChoice] = useState<{
-    readonly key: string;
-    readonly values: ProviderModelOptionValues;
-  }>({ key: modelKey, values: {} });
-  if (modelChoice.key !== modelKey) {
-    setModelChoice({ key: modelKey, values: {} });
-  }
-  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+  const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
+    props.providerGroups ?? [],
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const createAvailable = props.onCreateThread !== undefined;

@@ -1,3 +1,4 @@
+import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import type {
   ProviderInstanceId,
@@ -104,13 +105,11 @@ export function WorkOverview(props: WorkOverviewProps) {
     ),
   );
   const [draft, setDraft] = useState("");
-  const modelKey = `${props.projectId ?? ""}:${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
-  const [modelChoice, setModelChoice] = useState<{
-    readonly key: string;
-    readonly values: ProviderModelOptionValues;
-  }>({ key: modelKey, values: {} });
-  if (modelChoice.key !== modelKey) setModelChoice({ key: modelKey, values: {} });
-  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+  const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
+    props.providerGroups ?? [],
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
   const [submitting, setSubmitting] = useState(false);
   const images = useWorkComposerImages();
   const imageSupport = selectedModelReadsImages(providerGroups, {

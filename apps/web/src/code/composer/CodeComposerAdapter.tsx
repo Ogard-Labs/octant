@@ -1,3 +1,4 @@
+import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
 import { useComposerTip } from "../../composer/useComposerTip";
 import {
@@ -219,13 +220,11 @@ const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
-  const modelKey = `${props.selectedProviderInstanceId}:${props.selectedModelId}`;
-  const [modelChoice, setModelChoice] = useState<{
-    readonly key: string;
-    readonly values: ProviderModelOptionValues;
-  }>({ key: modelKey, values: {} });
-  if (modelChoice.key !== modelKey) setModelChoice({ key: modelKey, values: {} });
-  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+  const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
+    props.providerGroups ?? [],
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
 
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,

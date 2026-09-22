@@ -33,10 +33,17 @@ General settings despite having no effect on task readiness or authority.
   background refresh keeps the previous list visible until new data arrives.
   Theme-aware Git cues distinguish additions, deletions, branches, and PR
   states while retaining signs, icons, and state labels.
-- The compact model picker uses a horizontal source bar and single-line model
+- The compact model picker uses a horizontal icon source bar and single-line model
   rows where provider and capability information would otherwise repeat.
   Search, Favorites, and Recent retain provider identity per row. Recent keeps
   the last five explicit model choices locally; it does not change readiness.
+- Explicit composer model and reasoning choices are remembered locally for new
+  threads across Chat, Work, and Code. Reasoning is keyed by provider and model
+  and restored only while declared and supported. Existing thread values remain
+  authoritative; Settings defaults do not overwrite this last-used preference.
+- Provider sources switch on explicit activation, not pointer hover. The reasoning
+  slider shows its full track, discrete stops, and filled range in a compact
+  footer with a reset to provider default. Short result lists shrink to fit.
 - Favorite actions name their model. Search leads into keyboard model navigation,
   and a native range control supports dragging and keyboard adjustment of only
   the reasoning levels the selected model declares.

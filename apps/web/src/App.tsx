@@ -1,3 +1,4 @@
+import { MODEL_CHOICE_CHANGED, readLastModelChoice } from "./providers/modelChoiceMemory";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
@@ -872,10 +873,27 @@ function LaunchedShell(
   const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
-  const [draftProviderInstanceId, setDraftProviderInstanceId] =
-    useState<import("@octant/contracts/providers").ProviderInstanceId>();
-  const [draftModelId, setDraftModelId] =
-    useState<import("@octant/contracts/providers").ProviderModelId>();
+  const [draftProviderInstanceId, setDraftProviderInstanceId] = useState<
+    import("@octant/contracts/providers").ProviderInstanceId | undefined
+  >(() => readLastModelChoice()?.providerInstanceId);
+  const [draftModelId, setDraftModelId] = useState<
+    import("@octant/contracts/providers").ProviderModelId | undefined
+  >(() => readLastModelChoice()?.modelId);
+  useEffect(() => {
+    const restore = () => {
+      const choice = readLastModelChoice();
+      if (choice !== undefined) {
+        setDraftProviderInstanceId(choice.providerInstanceId);
+        setDraftModelId(choice.modelId);
+      }
+    };
+    window.addEventListener(MODEL_CHOICE_CHANGED, restore);
+    window.addEventListener("storage", restore);
+    return () => {
+      window.removeEventListener(MODEL_CHOICE_CHANGED, restore);
+      window.removeEventListener("storage", restore);
+    };
+  }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.

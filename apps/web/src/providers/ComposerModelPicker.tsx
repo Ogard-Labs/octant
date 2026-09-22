@@ -5,7 +5,7 @@ import type {
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs } from "@octant/domain";
-import { ChevronDown, Clock, Search, Star } from "lucide-react";
+import { ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   modelFavoriteKey,
@@ -18,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSlider } from "../ui/base/OctantSlider";
+import { rememberModelChoice } from "./modelChoiceMemory";
 import { readRecentModels, rememberModel } from "./modelRecents";
 import { ProviderGlyph } from "./ProviderGlyph";
 
@@ -48,6 +49,7 @@ export function isComposerReasoningOption(option: {
 const DEFAULT_LEVEL_ID = "__default__";
 
 export interface ComposerModelPickerProps {
+  readonly rememberChoice?: boolean;
   readonly groups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
   readonly selectedModelId?: ProviderModelId | undefined;
@@ -315,6 +317,8 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           onClick={() => {
             if (unavailable) return;
             rememberModel(group.instance.id, modelId);
+            if (props.rememberChoice !== false)
+              rememberModelChoice({ providerInstanceId: group.instance.id, modelId });
             props.onSelect({ providerInstanceId: group.instance.id, modelId });
             setOpen(false);
           }}
@@ -379,14 +383,6 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           setCatalogFilter(undefined);
           setActiveRailId(group.instance.id);
         }}
-        onMouseEnter={() => {
-          if (searching) return;
-          // Moving across the rail lands on a different catalog set, so
-          // a filter chosen for the provider you left must not silently
-          // hide models on the one you arrived at.
-          if (group.instance.id !== activeRailId) setCatalogFilter(undefined);
-          setActiveRailId(group.instance.id);
-        }}
         role="option"
         title={group.instance.displayName}
         type="button"
@@ -395,7 +391,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         <ProviderGlyph
           displayName={group.instance.displayName}
           driverKind={group.instance.driverKind}
-          size={16}
+          size={20}
         />
         <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
         {status === undefined ? null : (
@@ -424,17 +420,12 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           setCatalogFilter(undefined);
           setActiveRailId(OCTANT_RAIL_ID);
         }}
-        onMouseEnter={() => {
-          if (searching) return;
-          setCatalogFilter(undefined);
-          setActiveRailId(OCTANT_RAIL_ID);
-        }}
         role="option"
         title="Octant — native harness"
         type="button"
         variant="ghost"
       >
-        <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={16} />
+        <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={20} />
         <span className="composer-model-picker__rail-label">Octant</span>
         {worst === undefined ? null : (
           <span
@@ -499,7 +490,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             type="button"
             variant="ghost"
           >
-            <Star aria-hidden="true" fill="currentColor" size={16} strokeWidth={1.75} />
+            <Star aria-hidden="true" fill="currentColor" size={20} strokeWidth={1.75} />
             <span className="composer-model-picker__rail-label">Favorites</span>
           </OctantButton>
           <OctantButton
@@ -512,10 +503,11 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               setActiveRailId(RECENT_RAIL_ID);
             }}
             role="option"
+            title="Recent"
             type="button"
             variant="ghost"
           >
-            <Clock aria-hidden="true" size={16} />
+            <Clock aria-hidden="true" size={20} />
             <span className="composer-model-picker__rail-label">Recent</span>
           </OctantButton>
           {railGroups.flatMap((group, index) => {
@@ -532,11 +524,24 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           {harnessGroups.length > 0 && octantRailIndex >= railGroups.length
             ? renderOctantRailItem()
             : null}
+          {props.onOpenSettings === undefined ? null : (
+            <OctantButton
+              aria-label="Provider settings"
+              title="Provider settings"
+              className="composer-model-picker__rail-item"
+              onClick={props.onOpenSettings}
+              variant="ghost"
+              type="button"
+            >
+              <Plus aria-hidden="true" size={20} />
+            </OctantButton>
+          )}
         </div>
         <div className="composer-model-picker__pane">
           <label className="composer-model-picker__search">
             <Search aria-hidden="true" size={14} />
             <OctantInput
+              autoFocus
               aria-label="Search models"
               onKeyDown={(event) => {
                 if (event.key !== "ArrowDown") return;
@@ -662,18 +667,29 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             )}
           </div>
         </div>
-        <p className="composer-model-picker__keyboard-hint">↓ Browse · Enter select · Esc close</p>
+        <p className="sr-only">↓ Browse · Enter select · Esc close</p>
         {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
           <LevelSlider
             displayName={levelOption.displayName}
             disabled={props.disabled === true}
             labels={["Default", ...levelOption.values.map(levelLabel)]}
-            onIndexChange={(index) =>
-              props.onModelOptionChange?.(
-                levelOption.id,
-                index === 0 ? undefined : levelOption.values[index - 1],
-              )
-            }
+            onIndexChange={(index) => {
+              const value = index === 0 ? undefined : levelOption.values[index - 1];
+              if (
+                props.rememberChoice !== false &&
+                props.selectedProviderInstanceId !== undefined &&
+                props.selectedModelId !== undefined
+              ) {
+                rememberModelChoice(
+                  {
+                    providerInstanceId: props.selectedProviderInstanceId,
+                    modelId: props.selectedModelId,
+                  },
+                  { id: levelOption.id, value },
+                );
+              }
+              props.onModelOptionChange?.(levelOption.id, value);
+            }}
             index={levelIndex}
           />
         )}
@@ -715,44 +731,62 @@ function LevelSlider(props: {
       <div className="composer-model-picker__level-reading">
         <span className="composer-model-picker__level-label">{props.displayName}</span>
         <strong className="composer-model-picker__level-value">{label}</strong>
+        <OctantButton
+          aria-label="Reset reasoning to provider default"
+          title="Reset reasoning to provider default"
+          disabled={props.disabled || index === 0}
+          onClick={() => props.onIndexChange(0)}
+          size="icon"
+          variant="ghost"
+          type="button"
+        >
+          <RotateCcw aria-hidden="true" size={14} />
+        </OctantButton>
       </div>
-      <OctantSlider
-        className="composer-model-picker__reasoning-slider"
-        aria-label={`${props.displayName} level`}
-        aria-valuemax={stopCount - 1}
-        aria-valuemin={0}
-        aria-valuenow={index}
-        aria-valuetext={label}
-        disabled={props.disabled}
-        min={0}
-        max={stopCount - 1}
-        step={1}
-        value={index}
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          setDragIndex(props.index);
-        }}
-        onLostPointerCapture={() => setDragIndex(undefined)}
-        onPointerCancel={() => setDragIndex(undefined)}
-        onPointerUp={(event) => {
-          const next = event.currentTarget.valueAsNumber;
-          setDragIndex(undefined);
-          props.onIndexChange(next);
-        }}
-        onChange={(event) => {
-          const next = event.currentTarget.valueAsNumber;
-          // Existing threads persist through versioned commands. Preview the
-          // drag locally and send its final value once, rather than racing a
-          // command for every intermediate stop against the same version.
-          if (dragIndex !== undefined) setDragIndex(next);
-          else props.onIndexChange(next);
-        }}
-      />
-      {/* The slider already says its level; the ends are for the eye, so a
-          reader can tell what lies either way of the knob. */}
-      <div aria-hidden="true" className="composer-model-picker__level-ends">
-        <span>Default</span>
-        <span>{props.labels.at(-1)}</span>
+      <div className="composer-model-picker__level-control">
+        <div aria-hidden="true" className="composer-model-picker__level-track">
+          <span
+            className="composer-model-picker__level-fill"
+            style={{ width: `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%` }}
+          />
+          <span className="composer-model-picker__level-stops">
+            {props.labels.map((stop, position) => (
+              <span key={`${position}:${stop}`} title={stop} />
+            ))}
+          </span>
+        </div>
+        <OctantSlider
+          className="composer-model-picker__reasoning-slider"
+          aria-label={`${props.displayName} level`}
+          aria-valuemax={stopCount - 1}
+          aria-valuemin={0}
+          aria-valuenow={index}
+          aria-valuetext={label}
+          disabled={props.disabled}
+          min={0}
+          max={stopCount - 1}
+          step={1}
+          value={index}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            setDragIndex(props.index);
+          }}
+          onLostPointerCapture={() => setDragIndex(undefined)}
+          onPointerCancel={() => setDragIndex(undefined)}
+          onPointerUp={(event) => {
+            const next = event.currentTarget.valueAsNumber;
+            setDragIndex(undefined);
+            props.onIndexChange(next);
+          }}
+          onChange={(event) => {
+            const next = event.currentTarget.valueAsNumber;
+            // Existing threads persist through versioned commands. Preview the
+            // drag locally and send its final value once, rather than racing a
+            // command for every intermediate stop against the same version.
+            if (dragIndex !== undefined) setDragIndex(next);
+            else props.onIndexChange(next);
+          }}
+        />
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useComposerTip } from "../composer/useComposerTip";
 import {
@@ -842,15 +843,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
   }
 
-  const modelKey = `${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
-  const [modelChoice, setModelChoice] = useState<{
-    readonly key: string;
-    readonly values: ProviderModelOptionValues;
-  }>({ key: modelKey, values: {} });
-  if (modelChoice.key !== modelKey) {
-    setModelChoice({ key: modelKey, values: {} });
-  }
-  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+  const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
+    props.providerGroups ?? [],
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();

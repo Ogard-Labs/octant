@@ -6530,14 +6530,14 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* Sources, results, keyboard help, and reasoning share one compact column. */
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  width: min(360px, calc(100vw - 24px));
-  /* Keep a stable, compact list as sources change; scroll results internally. */
-  height: min(65vh, 360px);
+  /* Sources, results, and reasoning share one compact column. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(340px, calc(100vw - 24px));
+  /* Short results fit their content; long catalogs scroll inside the same bound. */
+  height: auto;
   /* At enlarged text sizes neither side of the composer fits the full box.
      Use the positioner's available space so reasoning stays inside the window. */
-  max-height: min(var(--available-height, 360px), calc(100dvh - 24px));
+  max-height: min(360px, 65vh, var(--available-height, 360px), calc(100dvh - 24px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -6552,15 +6552,15 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .composer-model-picker__level {
   grid-column: 1 / -1;
   display: grid;
-  gap: 6px;
-  padding: 6px 12px 8px;
+  gap: 0;
+  padding: 4px 12px 6px;
   border-top: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__level-reading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
   gap: var(--oct-space-2);
 }
 
@@ -6571,19 +6571,64 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   font-weight: var(--oct-weight-medium);
 }
 
-/* Ink, not the accent: the level is a setting read back, not an action, and
-   the default theme spends no hue on a menu's state. */
+.composer-model-picker__level-reading > button {
+  justify-self: end;
+  width: 24px;
+  height: 24px;
+}
+
+/* The current level shares the slider's ink so the value and track read together. */
 .composer-model-picker__level-value {
   min-inline-size: 0;
   overflow: hidden;
-  color: var(--octant-text-primary);
+  color: var(--octant-palette-blue);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.composer-model-picker__level-control {
+  position: relative;
+  height: 24px;
+}
+
+.composer-model-picker__level-track {
+  position: absolute;
+  inset-inline: 9px;
+  top: 8px;
+  height: 8px;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in srgb, var(--octant-text-muted) 35%, var(--octant-surface));
+  pointer-events: none;
+}
+
+.composer-model-picker__level-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  border-radius: inherit;
+  background: var(--octant-palette-blue);
+}
+
+.composer-model-picker__level-stops {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.composer-model-picker__level-stops > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--octant-text-muted);
+}
+
 .composer-model-picker__reasoning-slider {
+  position: relative;
+  z-index: 1;
   height: 24px;
   background: transparent;
 }
@@ -6598,27 +6643,26 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__reasoning-slider::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 6px;
   border-radius: var(--oct-radius-pill);
-  background: var(--octant-text-secondary);
+  background: transparent;
 }
 
-.composer-model-picker__reasoning-slider::-webkit-slider-thumb {
-  margin-top: -5px;
+.composer-model-picker__level .composer-model-picker__reasoning-slider::-webkit-slider-thumb {
+  margin-top: -6px;
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+.composer-model-picker__level .composer-model-picker__reasoning-slider::-moz-range-thumb {
+  inline-size: 18px;
+  block-size: 18px;
 }
 
 .composer-model-picker__reasoning-slider::-moz-range-track {
-  height: 4px;
+  height: 6px;
   border-radius: var(--oct-radius-pill);
-  background: var(--octant-text-secondary);
-}
-
-.composer-model-picker__level-ends {
-  display: flex;
-  justify-content: space-between;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
-  line-height: 1.2;
+  background: transparent;
 }
 
 .code-branch-selector__search {
@@ -6659,33 +6703,22 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .composer-model-picker__rail-item {
   position: relative;
   display: flex;
-  min-height: 28px;
-  height: auto;
   flex: 0 0 auto;
-  gap: 5px;
-  padding: 4px 7px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 34px;
+  padding: 6px;
 }
 
 .composer-model-picker__rail-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-}
-
-.composer-model-picker__keyboard-hint {
-  margin: 0;
-  padding: 3px 10px;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-}
-
-.composer-model-picker__rail-item:hover {
-  background: var(--octant-control-hover);
 }
 
 .composer-model-picker__rail-item--active {
@@ -6763,13 +6796,11 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  min-height: 28px;
-  margin: 6px 8px 4px;
+  min-height: 36px;
+  margin: 0;
   padding: 0 12px;
   color: var(--octant-text-muted);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-pill);
+  border-bottom: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__search:focus-within {
@@ -6909,7 +6940,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   font-weight: var(--oct-weight-display);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
 }
 
 .composer-model-picker__model-detail {

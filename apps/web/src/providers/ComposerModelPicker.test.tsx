@@ -7,9 +7,15 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useDraftModelOptions } from "./useDraftModelOptions";
+import {
+  rememberModelChoice,
+  readRememberedModelOptions,
+  readLastModelChoice,
+} from "./modelChoiceMemory";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 
 const providerA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
@@ -23,7 +29,53 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
-  it("keeps the current model label while hovering providers that do not contain it", async () => {
+  it("restores reasoning on a new draft only for the exact model's supported levels", () => {
+    const selection = { providerInstanceId: providerA, modelId: modelOne };
+    const source = groups().map((group) => ({
+      ...group,
+      sections: group.sections.map((section) => ({
+        ...section,
+        models: section.models.map((entry) => ({
+          ...entry,
+          model: {
+            ...entry.model,
+            options: [
+              {
+                kind: "selection" as const,
+                id: "effort",
+                displayName: "Effort",
+                values: ["low", "high"] as const,
+              },
+            ],
+          },
+        })),
+      })),
+    }));
+    rememberModelChoice(selection, { id: "effort", value: "high" });
+    const first = renderHook(() => useDraftModelOptions(source, providerA, modelOne));
+    expect(first.result.current.modelOptionValues).toEqual({ effort: "high" });
+    first.unmount();
+    const next = renderHook(() => useDraftModelOptions(source, providerA, modelOne));
+    expect(next.result.current.modelOptionValues).toEqual({ effort: "high" });
+    expect(
+      readRememberedModelOptions(source, { providerInstanceId: providerB, modelId: modelOne }),
+    ).toEqual({});
+    expect(readRememberedModelOptions(groups(), selection)).toEqual({});
+    rememberModelChoice(selection, { id: "effort", value: "unsupported" });
+    expect(readRememberedModelOptions(source, selection)).toEqual({});
+    rememberModelChoice(selection, { id: "effort", value: undefined });
+    expect(readRememberedModelOptions(source, selection)).toEqual({});
+    next.unmount();
+  });
+
+  it("recovers from malformed preferences without blocking model selection", () => {
+    localStorage.setItem("octant.models.last-choice.v1", "{broken");
+    expect(readLastModelChoice()).toBeUndefined();
+    rememberModelChoice({ providerInstanceId: providerA, modelId: modelOne });
+    expect(readLastModelChoice()).toEqual({ providerInstanceId: providerA, modelId: modelOne });
+  });
+
+  it("changes provider catalogs only on an explicit click", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
@@ -40,6 +92,8 @@ describe("ComposerModelPicker", () => {
     expect(trigger).toHaveTextContent("current-model");
     await user.click(trigger);
     await user.hover(screen.getByRole("option", { name: "Remote Claude" }));
+    expect(screen.queryByRole("option", { name: "Model Three" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Remote Claude" }));
     expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
     expect(trigger).toHaveTextContent("current-model");
     expect(onSelect).not.toHaveBeenCalled();
@@ -389,7 +443,10 @@ describe("ComposerModelPicker", () => {
     // app smoke covers those gestures, while this proves the resulting value.
     fireEvent.change(level, { target: { value: "3" } });
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", "high");
+    expect(readLastModelChoice()).toEqual({ providerInstanceId: providerA, modelId: modelOne });
     fireEvent.change(level, { target: { value: "0" } });
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
+    await user.click(screen.getByRole("button", { name: "Reset reasoning to provider default" }));
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
     onModelOptionChange.mockClear();
     fireEvent.pointerDown(level);
@@ -401,7 +458,7 @@ describe("ComposerModelPicker", () => {
     expect(onModelOptionChange).toHaveBeenCalledExactlyOnceWith("effort", "high");
   });
 
-  it("names both ends of the level range under the slider, wherever the knob sits", async () => {
+  it("exposes the reasoning range and current level without extra endpoint labels", async () => {
     const user = userEvent.setup();
     render(
       <ComposerModelPicker
@@ -423,10 +480,9 @@ describe("ComposerModelPicker", () => {
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const slider = await screen.findByRole("slider", { name: "Effort level" });
-    // Stops alone gave no sense of the range: at Default the knob sat on the
-    // left with nothing saying what lay to its right.
-    const ends = slider.nextElementSibling;
-    expect(ends).toHaveTextContent(/^DefaultHigh$/);
+    expect(slider).toHaveAttribute("aria-valuemin", "0");
+    expect(slider).toHaveAttribute("aria-valuemax", "3");
+    expect(slider).toHaveAttribute("aria-valuetext", "Medium");
   });
 
   it("spells out a provider's extra-high level instead of capitalising its id", async () => {

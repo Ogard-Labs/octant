@@ -183,6 +183,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           settingId="chat-default-model"
         >
           <ComposerModelPicker
+            rememberChoice={false}
             menuSide="bottom"
             unselectedLabel="Choose model"
             ariaLabel="Default Chat provider and model"
