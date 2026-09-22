@@ -48,7 +48,7 @@ export function useAppleProjects(
     ...(options.serverUrl === undefined ? {} : { serverUrl: options.serverUrl }),
     ...(options.windowCapability === undefined
       ? {}
-        : { windowCapability: options.windowCapability }),
+      : { windowCapability: options.windowCapability }),
   });
   // A listing that ran while the host was still resolving the checkout fails
   // once; when the view's availability next changes, try again. The retry is
@@ -60,6 +60,9 @@ export function useAppleProjects(
   const refresh = controller.refresh;
   useEffect(() => {
     if (seenAvailability.current === availability) return;
+    // The listing may still be in flight. Leave the transition unseen so a
+    // later failure can retry; consuming it now would drop the only retry.
+    if (status === "loading") return;
     seenAvailability.current = availability;
     if (status === "error") void refresh();
   }, [availability, status, refresh]);

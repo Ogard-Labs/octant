@@ -8,21 +8,23 @@ const threadId = "c5b0e039-ee21-40cb-a8b7-7c8d6da68354" as CodeThreadId;
 const checkoutId = "c86ab8b6-7cd4-4ecf-8ea8-bbcd78bfabce" as CodeCheckoutId;
 
 function listingClient() {
-  const list = vi.fn(async (): Promise<unknown> => ({
-    status: "listed" as const,
-    listing: {
-      kind: "code-file-listing" as const,
-      threadId,
-      checkoutId,
-      entries: [
-        { kind: "directory" as const, path: "SimulatorFixture" },
-        { kind: "directory" as const, path: "SimulatorFixture.xcodeproj" },
-        { kind: "directory" as const, path: "SimulatorFixture.xcodeproj/project.xcworkspace" },
-        { kind: "directory" as const, path: "SimulatorFixtureTests" },
-      ],
-      truncated: false,
-    },
-  }));
+  const list = vi.fn(
+    async (): Promise<unknown> => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId,
+        entries: [
+          { kind: "directory" as const, path: "SimulatorFixture" },
+          { kind: "directory" as const, path: "SimulatorFixture.xcodeproj" },
+          { kind: "directory" as const, path: "SimulatorFixture.xcodeproj/project.xcworkspace" },
+          { kind: "directory" as const, path: "SimulatorFixtureTests" },
+        ],
+        truncated: false,
+      },
+    }),
+  );
   const client = {
     list,
     watch: vi.fn(),
@@ -88,5 +90,42 @@ describe("useAppleProjects", () => {
       ]),
     );
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a listing that fails after availability changes while the request is in flight", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    const { client, list } = listingClient();
+    list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      (props: { readonly availability: "waiting" | "available" }) =>
+        useAppleProjects({
+          client,
+          threadId,
+          checkoutId,
+          checkoutAvailability: props.availability,
+        }),
+      { initialProps: { availability: "waiting" } },
+    );
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    rerender({ availability: "available" });
+    expect(list).toHaveBeenCalledTimes(1);
+
+    resolveFirst?.({
+      status: "failed",
+      failure: { category: "unavailable", message: "Code checkout is unavailable." },
+    });
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(result.current).toEqual([
+        { projectPath: "SimulatorFixture.xcodeproj", name: "SimulatorFixture.xcodeproj" },
+      ]),
+    );
   });
 });
