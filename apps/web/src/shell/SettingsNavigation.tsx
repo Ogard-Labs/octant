@@ -47,6 +47,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   >
 > = {
   general: { group: "Personal", icon: Settings2 },
+  profile: { group: "Personal", icon: UserRound },
   appearance: { group: "Personal", icon: Palette },
   keybindings: { group: "Personal", icon: Keyboard },
   chat: { group: "Modes", icon: MessageCircle },

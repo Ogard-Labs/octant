@@ -270,7 +270,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     // only informative sections get a suffix. The catalog is left out when a
     // heading directly above the row already names it.
     const detail = [
-      group.instance.displayName,
+      searching || favoritesActive ? group.instance.displayName : undefined,
       showCatalog ? picker.catalog : undefined,
       sectionId === "all-models" || sectionLabel === group.instance.displayName
         ? undefined
@@ -300,14 +300,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         >
           <span className="composer-model-picker__model-copy">
             <span className="composer-model-picker__model-name">{picker.model.displayName}</span>
-            <span className="composer-model-picker__model-detail">
-              <ProviderGlyph
-                displayName={group.instance.displayName}
-                driverKind={group.instance.driverKind}
-                size={12}
-              />
-              {detail}
-            </span>
+            {detail === "" ? null : (
+              <span className="composer-model-picker__model-detail">
+                <ProviderGlyph
+                  displayName={group.instance.displayName}
+                  driverKind={group.instance.driverKind}
+                  size={12}
+                />
+                {detail}
+              </span>
+            )}
           </span>
           {unavailable ? (
             <OctantBadge className="composer-model-picker__model-badge" variant="secondary">
@@ -316,14 +318,14 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           ) : null}
         </OctantButton>
         <OctantButton
-          aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+          aria-label={`${favorited ? "Remove" : "Add"} ${picker.model.displayName} ${favorited ? "from" : "to"} favorites`}
           aria-pressed={favorited}
           className={`composer-model-picker__star${favorited ? " composer-model-picker__star--on" : ""}`}
           onClick={(event) => {
             event.stopPropagation();
             toggleFavorite(favoriteKey);
           }}
-          title={favorited ? "Remove from favorites" : "Add to favorites"}
+          title={`${favorited ? "Remove" : "Add"} ${picker.model.displayName} ${favorited ? "from" : "to"} favorites`}
           type="button"
           variant="ghost"
         >
@@ -370,6 +372,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           driverKind={group.instance.driverKind}
           size={16}
         />
+        <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
         {status === undefined ? null : (
           <span
             className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
@@ -407,6 +410,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         variant="ghost"
       >
         <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={16} />
+        <span className="composer-model-picker__rail-label">Octant</span>
         {worst === undefined ? null : (
           <span
             className="composer-model-picker__rail-status composer-model-picker__rail-status--degraded"
@@ -465,6 +469,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             variant="ghost"
           >
             <Star aria-hidden="true" fill="currentColor" size={16} strokeWidth={1.75} />
+            <span className="composer-model-picker__rail-label">Favorites</span>
           </OctantButton>
           <OctantSeparator aria-hidden="true" className="my-0.5 w-5 shrink-0" />
           {railGroups.flatMap((group, index) => {

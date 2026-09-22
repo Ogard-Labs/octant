@@ -109,6 +109,33 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
+  it("keeps examples compact and fills the prompt only when an example is chosen", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        onCreateThread={onCreateThread}
+        suggestions={[
+          {
+            id: "explain",
+            label: "Explain this codebase",
+            prompt: "Explain the entry points and data flow.",
+          },
+        ]}
+      />,
+    );
+    expect(screen.queryByText("Explain the entry points and data flow.")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show example details" }));
+    expect(screen.getByText("Explain the entry points and data flow.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Explain this codebase" }));
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Explain the entry points and data flow.",
+    );
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveFocus();
+    expect(onCreateThread).not.toHaveBeenCalled();
+  });
+
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("What should we build");

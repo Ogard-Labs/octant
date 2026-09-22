@@ -155,6 +155,7 @@ export interface DraftThreadWorkspaceProps {
   readonly defaultExecutionPolicy?: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence?: PermissionPersistence;
   readonly onAttachFolder?: () => void;
+  readonly onOpenCodeSettings?: () => void;
   /**
    * Reports the Project the composer now targets. The draft is unmounted
    * while Settings covers the workspace, so the shell keeps this choice and
@@ -488,18 +489,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         }
       : undefined;
 
+  function addFolder() {
+    if (props.onCreateProject !== undefined) setAddFolderOpen(true);
+    else props.onAttachFolder?.();
+  }
+
   const folderControl =
     props.mode === "code" || props.mode === "work" ? (
       <ComposerProjectSelector
         {...(props.creating === undefined ? {} : { disabled: props.creating })}
         entries={projectEntries}
-        onAddFolder={() => {
-          if (props.onCreateProject !== undefined) {
-            setAddFolderOpen(true);
-          } else {
-            props.onAttachFolder?.();
-          }
-        }}
+        onAddFolder={addFolder}
         onSelect={(entry) => {
           if (entry.kind === "saved-project") {
             selectProject(entry.projectId);
@@ -643,6 +643,37 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
           defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
           defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
+          projectSetup={
+            selectedProjectId === undefined && compatibleProjects.length === 0 ? (
+              <div aria-label="Set up a Code project" className="code-home__project-setup">
+                <p>Add a folder to choose where this task will work.</p>
+                {props.onCreateProject === undefined &&
+                props.onAttachFolder === undefined ? null : (
+                  <OctantButton
+                    onClick={addFolder}
+                    disabled={props.creating}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    <FolderOpen aria-hidden="true" size={16} />
+                    Add a folder
+                  </OctantButton>
+                )}
+                {defaultFolderEntry?.disabled === true ? (
+                  <>
+                    <p>
+                      Threads without a Project is turned off. You can change this in Code settings.
+                    </p>
+                    {props.onOpenCodeSettings === undefined ? null : (
+                      <OctantButton onClick={props.onOpenCodeSettings} size="sm" variant="link">
+                        Open Code settings
+                      </OctantButton>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            ) : undefined
+          }
           folderControl={folderControl}
           {...(createFromControl === null ? {} : { createFromControl })}
           {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}

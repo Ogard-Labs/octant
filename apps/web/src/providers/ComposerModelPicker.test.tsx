@@ -160,7 +160,7 @@ describe("ComposerModelPicker", () => {
     expect(within(menu).queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
   });
 
-  it("renders the provider rail as icon-only buttons with accessible names", async () => {
+  it("labels providers visibly and removes repeated provider text from their model rows", async () => {
     const user = userEvent.setup();
     render(<ComposerModelPicker groups={groups()} onSelect={vi.fn()} />);
 
@@ -172,7 +172,10 @@ describe("ComposerModelPicker", () => {
       "Local OpenCode",
       "Remote Claude",
     ]);
-    for (const item of items) expect(item).toHaveTextContent("");
+    for (const item of items) expect(item).toHaveTextContent(item.getAttribute("aria-label") ?? "");
+    expect(screen.getByRole("option", { name: "Model One" })).not.toHaveTextContent(
+      "Local OpenCode",
+    );
     expect(items[0]?.querySelector("svg")).not.toBeNull();
     expect(within(rail).getByRole("option", { name: "Local OpenCode" })).toHaveAttribute(
       "aria-selected",
@@ -198,18 +201,20 @@ describe("ComposerModelPicker", () => {
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
     const modelTwoRow = within(menu).getByRole("option", { name: "Model Two" }).parentElement!;
-    const star = within(modelTwoRow).getByRole("button", { name: "Add to favorites" });
+    const star = within(modelTwoRow).getByRole("button", { name: "Add Model Two to favorites" });
     expect(star).toHaveAttribute("aria-pressed", "false");
     await user.click(star);
     expect(onSelect).not.toHaveBeenCalled();
     expect(menu).toBeInTheDocument();
     expect(
-      within(modelTwoRow).getByRole("button", { name: "Remove from favorites" }),
+      within(modelTwoRow).getByRole("button", { name: "Remove Model Two from favorites" }),
     ).toHaveAttribute("aria-pressed", "true");
 
     await user.click(within(menu).getByRole("option", { name: "Remote Claude" }));
     const modelThreeRow = within(menu).getByRole("option", { name: "Model Three" }).parentElement!;
-    await user.click(within(modelThreeRow).getByRole("button", { name: "Add to favorites" }));
+    await user.click(
+      within(modelThreeRow).getByRole("button", { name: "Add Model Three to favorites" }),
+    );
 
     await user.click(within(menu).getByRole("option", { name: "Favorites" }));
     const favoriteNames = within(within(menu).getByRole("listbox", { name: "Models" }))
@@ -228,7 +233,9 @@ describe("ComposerModelPicker", () => {
     await user.click(await screen.findByRole("option", { name: "Favorites" }));
     expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
     const modelTwoAgain = screen.getByRole("option", { name: "Model Two" }).parentElement!;
-    await user.click(within(modelTwoAgain).getByRole("button", { name: "Remove from favorites" }));
+    await user.click(
+      within(modelTwoAgain).getByRole("button", { name: "Remove Model Two from favorites" }),
+    );
     expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
   });

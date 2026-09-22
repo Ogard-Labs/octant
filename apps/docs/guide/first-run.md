@@ -6,9 +6,11 @@ description: "Complete the first-run flow: configure a provider, create a Projec
 
 After launching Octant for the first time, the welcome surface walks through
 who you are, how the workspace looks, which providers this Mac can reach, a
-default Chat model, and whether Navigator is on. None of those setup steps
-except your name is a gate. Skip, dismiss, or quit keeps every answer that
-already landed; first run stays pending until an answer is accepted.
+default Chat model, and whether Navigator is on. Every step is optional,
+including your name. **Skip setup** is available from the first step and keeps
+answers that have already been saved. Quitting without completing or skipping
+leaves first run pending. You can edit your name, avatar, and other identity
+details later in **Settings → Profile**.
 
 The last screen is a readiness view. It reports three facts separately:
 whether a provider can answer, whether a Project exists for the mode you
@@ -64,6 +66,10 @@ same create surface the sidebar uses:
 - **Work Projects** bind one OS-confined folder for local knowledge work.
 - **Code Projects** bind one folder for engineering work; Git tools activate
   when it is a repository.
+
+On an empty Code screen, **Add a folder** opens Project setup. If threads
+without a Project are disabled, the screen explains this and links directly
+to **Code settings**. Choosing a folder does not change access permissions.
 
 The selected root is validated to exist. The renderer receives an opaque,
 single-use receipt rather than the raw path.

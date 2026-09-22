@@ -127,6 +127,7 @@ export interface CodeComposerAdapterProps {
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
   readonly folderControl?: ReactNode;
+  readonly projectSetup?: ReactNode;
   /**
    * Optional GitHub repository selection slot rendered on the context tray.
    * Host, Octant Project, and GitHub repository stay distinct visible selections.
@@ -303,6 +304,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setPrompt(promptRequest.text);
     textareaRef.current?.focus();
   }, [promptRequest]);
+  const [showExampleDetails, setShowExampleDetails] = useState(false);
   const applySuggestion = (suggestion: CodeComposerSuggestion) => {
     setPrompt(suggestion.prompt);
     textareaRef.current?.focus();
@@ -866,6 +868,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         </div>
 
+        {props.projectSetup}
+
         {/* Start from origin only decides where a new worktree branches from.
               Binding the current checkout resolves no source, so the control
               would be a lie rather than a choice. */}
@@ -892,9 +896,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         {props.suggestions === undefined ||
         props.suggestions.length === 0 ||
         trimmed !== "" ? null : (
-          <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
+          <div
+            aria-label="Suggested prompts"
+            className="code-home__suggestions"
+            data-expanded={showExampleDetails}
+            role="group"
+          >
             {props.suggestions.map((suggestion) => (
               <OctantButton
+                aria-label={suggestion.label}
                 disabled={props.creating}
                 key={suggestion.id}
                 onClick={() => applySuggestion(suggestion)}
@@ -903,9 +913,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 variant="ghost"
               >
                 <span className="code-home__suggestion-label">{suggestion.label}</span>
-                <span className="code-home__suggestion-text">{suggestion.prompt}</span>
+                {showExampleDetails ? (
+                  <span className="code-home__suggestion-text">{suggestion.prompt}</span>
+                ) : null}
               </OctantButton>
             ))}
+            <OctantButton
+              aria-expanded={showExampleDetails}
+              className="code-home__examples-toggle"
+              onClick={() => setShowExampleDetails((shown) => !shown)}
+              size="sm"
+              type="button"
+              variant="link"
+            >
+              {showExampleDetails ? "Hide example details" : "Show example details"}
+            </OctantButton>
           </div>
         )}
         {props.beneath}

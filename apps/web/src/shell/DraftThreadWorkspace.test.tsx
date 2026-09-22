@@ -662,6 +662,33 @@ describe("DraftThreadWorkspace", () => {
     },
   );
 
+  it("offers folder setup and Code settings before an empty workspace can start work", async () => {
+    const user = userEvent.setup();
+    const onAttachFolder = vi.fn();
+    const onOpenCodeSettings = vi.fn();
+    const onEnsureDefaultProject = vi.fn(async () => undefined);
+    const onCreateThread = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projects={[]}
+        defaultFolder="/Users/ada/Documents/Octant"
+        onAttachFolder={onAttachFolder}
+        onOpenCodeSettings={onOpenCodeSettings}
+        onEnsureDefaultProject={onEnsureDefaultProject}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add a folder" }));
+    expect(onAttachFolder).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Open Code settings" }));
+    expect(onOpenCodeSettings).toHaveBeenCalledOnce();
+    expect(screen.getByText(/Threads without a Project is turned off/)).toBeVisible();
+    expect(onEnsureDefaultProject).not.toHaveBeenCalled();
+    expect(onCreateThread).not.toHaveBeenCalled();
+  });
+
   it("shows the default-folder child path without a doubled trailing separator", async () => {
     const user = userEvent.setup();
     render(

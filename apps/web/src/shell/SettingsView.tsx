@@ -168,7 +168,8 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 );
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
-  general: "Choose app-wide defaults, identity, updates, and network behavior.",
+  general: "Choose app-wide defaults, updates, and network behavior.",
+  profile: "Choose how you appear inside Octant. Everything is optional and kept on this Mac.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
@@ -193,6 +194,13 @@ const APPEARANCE_SECTION = (): SettingsSectionEntry =>
 const ADVANCED_SECTION = (): SettingsSectionEntry =>
   findSection(octantSettingsRegistry, "advanced")!;
 
+// The profile setting moved out of General; existing deep links still reach it.
+function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
+  return link.section === "general" && link.setting === "user-profile"
+    ? { ...link, section: "profile" }
+    : link;
+}
+
 export function SettingsView(props: SettingsViewProps) {
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
@@ -216,7 +224,9 @@ export function SettingsView(props: SettingsViewProps) {
     availableSections,
     capabilities,
     registry: octantSettingsRegistry,
-    ...(props.initialDeepLink === undefined ? {} : { initialDeepLink: props.initialDeepLink }),
+    ...(props.initialDeepLink === undefined
+      ? {}
+      : { initialDeepLink: currentSettingsLink(props.initialDeepLink) }),
   });
   const narrow = props.isNarrow === true;
   const contentRef = useRef<HTMLDivElement>(null);
@@ -247,7 +257,7 @@ export function SettingsView(props: SettingsViewProps) {
     }
     if (appliedPendingRef.current) return;
     appliedPendingRef.current = true;
-    route.applyDeepLink(pendingDeepLink);
+    route.applyDeepLink(currentSettingsLink(pendingDeepLink));
     onDeepLinkApplied?.();
   }, [pendingDeepLink, route, onDeepLinkApplied]);
 
@@ -494,6 +504,8 @@ function ActiveSectionContent({
   switch (activeSection) {
     case "general":
       return <GeneralSection focusedSetting={focusedSetting} props={props} />;
+    case "profile":
+      return <ProfileSection focusedSetting={focusedSetting} props={props} />;
     case "appearance":
       return (
         <AppearanceSection
@@ -860,6 +872,29 @@ function CompletedThreadArchiveSelect(props: {
   );
 }
 
+function ProfileSection({ focusedSetting, props }: SectionProps) {
+  return (
+    <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
+      <SettingsSection title="Your identity">
+        <div className="setgroup">
+          <SettingRow
+            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
+            focused={focusedSetting === settingId("user-profile")}
+            label="Your profile"
+            scope="app"
+            settingId="user-profile"
+          >
+            <UserProfileSettingsView
+              onSettingsChange={props.onSettingsChange}
+              profile={props.settings.userProfile}
+            />
+          </SettingRow>
+        </div>
+      </SettingsSection>
+    </section>
+  );
+}
+
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
@@ -889,25 +924,6 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               checked={props.settings.workEnabled}
               label="Enable Work"
               onCheckedChange={(checked) => props.onSettingsChange({ workEnabled: checked })}
-            />
-          </SettingRow>
-        </div>
-      </SettingsSection>
-      {/* Your name, picture and avatar colour: identity, not an advanced
-          option, so it is not worth a click to reach. The collapsed summary
-          used to preview the display name; the row it opens onto says it. */}
-      <SettingsSection title="Profile">
-        <div className="setgroup">
-          <SettingRow
-            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
-            focused={focusedSetting === settingId("user-profile")}
-            label="Your profile"
-            scope="app"
-            settingId="user-profile"
-          >
-            <UserProfileSettingsView
-              onSettingsChange={props.onSettingsChange}
-              profile={props.settings.userProfile}
             />
           </SettingRow>
         </div>

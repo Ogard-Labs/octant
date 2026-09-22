@@ -38,8 +38,8 @@ On the host, Octant holds:
 - **Unsent composer drafts** — ordinary client storage on the machine where
   you typed them. They never enter the journal, diagnostics, or a provider
   request until you send.
-- **A local profile** — the name first run requires, plus an optional
-  address, accent, and inlined avatar. The profile authenticates nothing
+- **A local profile** — an optional display name, address, accent,
+  and inlined avatar. The profile authenticates nothing
   and authorizes nothing.
 - **Credential references** — opaque Keychain pointers, never the secret
   values.

@@ -6072,6 +6072,12 @@ function LaunchedShell(
                       ? {}
                       : { onDraftPendingMessage: draftPendingMessage })}
                     onAttachFolder={() => openProjectCreate()}
+                    onOpenCodeSettings={() =>
+                      void controller.openSettings({
+                        section: "code",
+                        setting: "code-default-folder-threads",
+                      })
+                    }
                     onOpenProviderSettings={() =>
                       void controller.openSettings({ section: "providers" })
                     }
