@@ -7468,10 +7468,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   opacity: 0.45;
 }
 .prov-state[data-tone="ok"] {
-  padding: 2px 8px;
-  border-radius: var(--oct-radius-pill);
   color: var(--octant-success-text);
-  background: var(--octant-success-surface);
 }
 .prov-state[data-tone="ok"]::before {
   background: var(--octant-success-text);

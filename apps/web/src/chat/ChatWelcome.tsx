@@ -22,6 +22,7 @@ import {
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
@@ -80,6 +81,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const ready = props.status === undefined || props.status === "ready";
   const presentation = draftThreadModePresentation("chat");
   const [prompt, setPrompt] = useState("");
+  const [attachmentNotice, setAttachmentNotice] = useState<string>();
   const slash = useComposerSlashCommands({
     draft: prompt,
     onDraftChange: setPrompt,
@@ -106,6 +108,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         : props.status === "disconnected"
           ? "Chat is disconnected."
           : undefined);
+  const visibleStatusMessage = statusMessage ?? attachmentNotice;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
@@ -162,6 +165,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 disabled={!ready || props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
+                  setAttachmentNotice(undefined);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
@@ -178,6 +182,11 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             row={{
               leading: (
                 <>
+                  <ComposerAttachButton
+                    refusedReason="Attachments can be added once the chat starts."
+                    onRefused={setAttachmentNotice}
+                    onFileSelected={() => undefined}
+                  />
                   <ComposerVoiceButton
                     disabled={!ready || props.creating === true}
                     onTranscript={(transcript) =>
@@ -220,12 +229,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             }}
           />
         </div>
-        {statusMessage === undefined ? null : (
+        {visibleStatusMessage === undefined ? null : (
           <p
             className="draft-thread__error"
             role={props.errorMessage === undefined ? "status" : "alert"}
           >
-            {statusMessage}
+            {visibleStatusMessage}
           </p>
         )}
         {!ready && props.status === "disconnected" && props.onRetry !== undefined ? (
