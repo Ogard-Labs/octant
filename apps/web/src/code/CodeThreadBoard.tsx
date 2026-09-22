@@ -11,7 +11,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { cardViewExtras, ThreadBoardBody } from "../board/ThreadBoardView";
+import { cardViewExtras, ThreadBoardBody } from "../threadBoard/ThreadBoardView";
 import {
   activityLabel,
   defaultBoardStorage,
@@ -25,7 +25,7 @@ import {
   type ThreadBoardState,
   writeStoredBoolean,
   writeStoredValue,
-} from "../board/threadBoardState";
+} from "../threadBoard/threadBoardState";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
