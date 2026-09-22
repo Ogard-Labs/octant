@@ -39,12 +39,17 @@ gate.
 | `bun run test`      | Vitest across all workspaces                                      |
 | `bun run verify`    | The full chain CI runs: wiring, fmt, lint, typecheck, test, build |
 
-Run `bun run verify` and `git diff --check` before opening a PR. Per-workspace
-scripts exist too (for example `bun run --cwd apps/server test`) for a faster
-loop while iterating.
+Use the [verification policy](AGENTS.md#testing-and-verification) to select
+checks. Bounded changes use focused local checks and required hosted CI; broad
+integration or uncertain dependency impact needs full local `bun run verify`.
+Always run `git diff --check`. Existing tests may supply the required coverage;
+adding tests is justified by an uncovered behavior or concrete risk.
 
-Provider smokes that need real credentials (`bun run smoke:*`) are opt-in and
-are not required for a PR.
+Run real-provider smokes when the issue's outcome or affected provider boundary
+requires them and credentials are available. If a required smoke is unavailable,
+record the exact blocker; synthetic checks do not replace that acceptance.
+Once applicable checks pass, proceed to delivery under the
+[issue closeout policy](AGENTS.md#issue-closeout).
 
 ## Branches and pull requests
 
@@ -123,20 +128,18 @@ implementation. See [AGENTS.md](AGENTS.md) for authority and delivery rules.
 - New identifiers, env vars, and storage use `@octant/*`, `OCTANT_*`, and
   Octant naming.
 
-## Testing principles
+## Testing and closeout
 
-- Tests exist to catch meaningful regressions, not to raise a coverage number.
-- For a bug, add or extend the closest existing test so it fails before the
-  fix and passes after.
-- For a feature, test observable behavior or a public contract; prefer one
-  focused test over several that probe internal steps.
-- Add failure and edge cases where they represent real risk: authority,
-  security, privacy, persistence, recovery, data integrity, accessibility.
-- Use the lowest test level that proves the behavior reliably; extend an
-  existing suite rather than adding a parallel one.
-- Do not test trivial getters, pass-through wiring, or framework behavior.
-  When no useful automated test is practical, say so in the PR and describe
-  the manual verification you did.
+[AGENTS.md](AGENTS.md#testing-and-verification) owns the verification rules and
+[issue closeout conditions](AGENTS.md#issue-closeout). The PR should map the
+changed acceptance criteria to evidence and name remaining blockers. Existing
+coverage is sufficient when it proves the behavior; do not add duplicate tests
+or repeat unaffected checks simply for another handoff.
+
+Keep the Linear description's current summary consistent with its status. An
+implementation issue normally closes after merge and its applicable acceptance
+checks; an explicit different delivery target is honored. Preserve required
+native/provider/human checks, and keep unrelated discoveries in separate issues.
 
 ## Releases
 

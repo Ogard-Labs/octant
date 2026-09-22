@@ -214,8 +214,10 @@ not test count or coverage percentage, determines what to add.
 - For behavior changes with a meaningful automated assertion, use
   red-green-refactor: prove the missing or broken behavior, implement the smallest
   correct fix, and refactor only if the changed code needs it.
-- For a bug fix, add or extend the closest stable test that reproduces the defect
-  before the fix when a useful automated assertion is practical.
+- For a bug fix, first use the closest existing test that reproduces the defect.
+  Add or extend it only if useful behavior or a realistic failure is uncovered.
+  Refactors may rely on existing behavior coverage without manufacturing a
+  failing assertion.
 - For a feature, test observable behavior or a public contract. Prefer one focused
   test that proves the acceptance criterion over several tests of internal steps.
 - Add failure and edge cases when they represent a realistic risk to authority,
@@ -233,22 +235,42 @@ not test count or coverage percentage, determines what to add.
 - Use repository scripts rather than substitutes (`bun run test`, not raw
   `bun test`). Always run `git diff --check`.
 
-Start with the focused check for the changed surface, then broaden:
+Before editing, identify acceptance criteria, the delivery requirement, and the
+smallest applicable checks in the issue or PR. The table scopes verification to
+affected behavior; it is not a requirement to add a new test at every layer.
+Existing coverage counts. Broaden only for a named gap or affected risk:
 
-| Changed surface                                            | Minimum additional verification                                                                                |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Documentation or configuration only                        | Formatter, link/path and consistency checks                                                                    |
-| Contracts                                                  | Focused contract tests and typecheck every consuming package                                                   |
-| Domain policy                                              | Focused red/green policy tests and affected consumers                                                          |
-| Server, API, or persistence                                | Route registration, auth/permission negatives, response/event shape, migrations/replay, and client integration |
-| Provider                                                   | Provider-sdk conformance plus real-provider smoke when credentials or runtime exist                            |
-| Web UI                                                     | Closest component/integration test for changed behavior plus rendered QA at relevant viewport/state boundaries |
-| Desktop/native lifecycle, sandbox, Keychain, terminal, IPC | Desktop tests plus native-process or packaged-app smoke                                                        |
-| Broad or cross-package change                              | `bun run verify` (wiring, format, lint, typecheck, test, build) unless a precise blocker is recorded           |
+| Changed surface                                                          | Minimum additional verification                                                                                |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Documentation only                                                       | Formatter, link/path and consistency checks                                                                    |
+| Configuration                                                            | Relevant configuration validation and affected runtime/build checks                                            |
+| Contracts                                                                | Focused contract tests and typecheck every consuming package                                                   |
+| Domain policy                                                            | Focused red/green policy tests and affected consumers                                                          |
+| Server, API, or persistence                                              | Route registration, auth/permission negatives, response/event shape, migrations/replay, and client integration |
+| Provider                                                                 | Provider-sdk conformance plus real-provider smoke when credentials or runtime exist                            |
+| Web UI                                                                   | Closest component/integration test for changed behavior plus rendered QA at relevant viewport/state boundaries |
+| Desktop/native lifecycle, sandbox, Keychain, terminal, IPC               | Desktop tests plus native-process or packaged-app smoke                                                        |
+| Broad integration, shared infrastructure, or uncertain dependency impact | `bun run verify` locally unless a precise blocker is recorded                                                  |
 
-Agents perform all available automated, browser, and tool-accessible
-verification. The maintainer owns human acceptance and checks requiring personal
-credentials, physical devices, release authority, or subjective judgment.
+For bounded changes, run the applicable local checks and let required hosted CI
+perform the full integration suite. Crossing a package boundary alone does not
+require a full local run: validate the changed contract and affected consumers.
+Local and hosted evidence are complementary; CI does not replace a required
+native, rendered, provider, or packaged scenario that it does not exercise.
+
+Once those checks pass, proceed to delivery or closeout. Add or rerun checks only
+for changed relevant inputs, a failure, an uncovered criterion, or a concrete
+in-scope risk; name that gap first. Reuse evidence with its commit/build,
+environment, scenario, result, and limitations when still applicable. Label
+cached results and distinguish them from fresh execution. Live native/provider
+acceptance needs execution in the relevant environment; a known failure cannot
+be replaced by an older or cached pass. Required CI stays tied to the exact head.
+
+Agents perform the applicable tool-accessible checks. Reserve human acceptance
+for an explicit issue criterion or capability that actually requires personal
+credentials, physical-device access, release authority, or subjective judgment.
+An unavailable required check remains a named blocker; extra unit tests do not
+satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 
 ## Delivery And Completion
 
@@ -300,6 +322,42 @@ credentials, physical devices, release authority, or subjective judgment.
   explicit instruction for that specific PR.
 - State every skipped or unavailable check and residual risk precisely. Never
   infer success from intent or partial output.
+
+## Issue Closeout
+
+These rules govern Linear issues, not the product's Work/Code thread lifecycle.
+Implementing a tracked issue includes keeping its evidence and status current.
+An instruction to validate or finish an issue includes closing it when the
+conditions below are met; it does not authorize merging or releasing.
+
+- Use the issue's stated outcome, acceptance criteria, and delivery requirement.
+  For an implementation issue without a narrower explicit target, Done requires
+  the change landed on `main`, required checks passed, acceptance evidence is
+  sufficient, and no known in-scope defect remains. An explicit investigation,
+  local-only, or PR-delivery target uses that target rather than inventing a merge
+  requirement. A ready implementation PR normally remains In Review.
+- Deployment, packaged/native validation, real-provider checks, device testing,
+  and subjective acceptance are additional gates only when the stated outcome
+  or affected boundary requires them. Preserve explicit gates; do not silently
+  remove an unmet criterion to close an issue.
+- Map each criterion to existing evidence before doing more work. Reuse child
+  evidence in parent acceptance; execute only uncovered scenarios or those whose
+  relevant inputs changed. Integration acceptance remains distinct from child
+  completion. A required merged-build check still needs that build.
+- A new finding blocks this issue only when it violates its criteria, is a
+  regression caused by the change, or prevents relevant verification. Record
+  independent defects as separate follow-ups; do not expand the finish line.
+- When the conditions are met, update the acceptance summary and transition the
+  issue to Done in the same pass. Read back the status. Otherwise record the exact
+  remaining action, its owner, and missing prerequisite or evidence; use In Review
+  for review/merge, and identify validation or access blockers explicitly rather
+  than treating them as more implementation work.
+- Lead the issue description with its current outcome/delivery requirement,
+  criterion-to-evidence summary, remaining blockers, and closure decision. Keep
+  old progress in comments or a clearly labeled historical section; historical
+  statements such as "still In Progress" do not reopen a completed issue.
+- Reopen a closed issue only for a reproduced regression or evidence its closure
+  was incorrect. Preserve the closure evidence and explain the reason.
 
 ## Current Release Boundary
 

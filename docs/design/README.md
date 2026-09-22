@@ -89,3 +89,8 @@ resulting behavior, the implementation and useful verification agree, conflictin
 summaries are reconciled, and the PR records any missing evidence. Documentation
 hygiene checks establish valid references and preserved history; they do not prove
 that code follows the design. No new test is required for prose alone.
+
+Use the [verification and stopping policy](../../AGENTS.md#testing-and-verification)
+to bound checks and the [issue closeout policy](../../AGENTS.md#issue-closeout) to
+finish delivery. Once the applicable evidence is sufficient, the next action is
+delivery or closeout rather than additional tests without a named gap.
