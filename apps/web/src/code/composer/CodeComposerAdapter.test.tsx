@@ -125,6 +125,9 @@ describe("CodeComposerAdapter", () => {
     );
     expect(screen.queryByRole("button", { name: /example details/i })).toBeNull();
     expect(screen.getByText("Explain the entry points and data flow.")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Explain this codebase" }),
+    ).toHaveAccessibleDescription("Explain the entry points and data flow.");
     await user.click(screen.getByRole("button", { name: "Explain this codebase" }));
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Explain the entry points and data flow.",

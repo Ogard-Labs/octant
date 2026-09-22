@@ -236,8 +236,8 @@ describe("CodeHome", () => {
     expect(cards[0]).toHaveTextContent("Open PRs merge order");
     expect(cards[1]).toHaveTextContent("Done");
     expect(cards[1]).toHaveTextContent("+610 −0");
-    expect(within(cards[1]!).getByTitle("610 lines added")).toHaveTextContent("+610");
-    expect(within(cards[1]!).getByTitle("0 lines deleted")).toHaveTextContent("−0");
+    expect(within(cards[1]!).getByTitle("610 lines added")).toHaveTextContent(/^\+610$/);
+    expect(within(cards[1]!).getByTitle("0 lines deleted")).toHaveTextContent(/^−0$/);
     expect(cards[1]).toHaveTextContent("Octant");
     expect(cards[1]).toHaveTextContent("octant/ai-slopworktree");
     expect(cards[1]).toHaveTextContent("#273 Merged");

@@ -48,6 +48,7 @@ import { FolderOpen, GitBranch } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -219,6 +220,7 @@ function selectedProviderFamily(
 const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
+  const suggestionDescriptionId = useId();
   const [prompt, setPrompt] = useNewTaskPrompt();
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
@@ -897,6 +899,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
             {props.suggestions.map((suggestion) => (
               <OctantButton
+                aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
                 aria-label={suggestion.label}
                 disabled={props.creating}
                 key={suggestion.id}
@@ -906,7 +909,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 variant="ghost"
               >
                 <span className="code-home__suggestion-label">{suggestion.label}</span>
-                <span className="code-home__suggestion-text">{suggestion.prompt}</span>
+                <span
+                  className="code-home__suggestion-text"
+                  id={`${suggestionDescriptionId}-${suggestion.id}`}
+                >
+                  {suggestion.prompt}
+                </span>
               </OctantButton>
             ))}
           </div>
