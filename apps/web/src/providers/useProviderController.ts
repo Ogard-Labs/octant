@@ -44,6 +44,7 @@ import {
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
 import {
   getInjectedHostBridge,
   type OctantHostBridge,
@@ -261,7 +262,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     } catch (error) {
       if (mounted.current) {
         setStatus("disconnected");
-        setMessage(failureMessage(error));
+        setMessage(failureMessage(error, "Octant Provider service is unavailable."));
       }
       return false;
     }
@@ -286,7 +287,7 @@ export function useProviderController(options: ProviderControllerOptions) {
       const domainDetail = domainValidationMessage(error);
       const message =
         fixedMessage === undefined
-          ? failureMessage(error)
+          ? failureMessage(error, "Octant Provider service is unavailable.")
           : domainDetail.length > 0
             ? `${fixedMessage} ${domainDetail}`
             : fixedMessage;
@@ -1269,7 +1270,8 @@ export function useProviderController(options: ProviderControllerOptions) {
         }
         return result.attempt;
       } catch (error) {
-        if (mounted.current) setMessage(failureMessage(error));
+        if (mounted.current)
+          setMessage(failureMessage(error, "Octant Provider service is unavailable."));
         return undefined;
       } finally {
         if (mounted.current) setBusy(false);
@@ -1299,7 +1301,8 @@ export function useProviderController(options: ProviderControllerOptions) {
         }
         return true;
       } catch (error) {
-        if (mounted.current) setMessage(failureMessage(error));
+        if (mounted.current)
+          setMessage(failureMessage(error, "Octant Provider service is unavailable."));
         return false;
       } finally {
         if (mounted.current) setBusy(false);
@@ -3269,15 +3272,6 @@ function formatProviderProcessDiagnostic(
             ? "Process cleanup could not be confirmed"
             : "Provider process failed";
   return `${result}.${diagnostic.stderrContext === undefined ? "" : ` ${diagnostic.stderrContext}`}`;
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Provider service is unavailable.";
 }
 
 function domainValidationMessage(error: unknown): string {

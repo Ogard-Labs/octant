@@ -101,8 +101,8 @@ import {
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
-import { Schema } from "effect";
+import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
+import { providerFamilyForThread } from "../providers/providerFamily";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 import {
@@ -363,7 +363,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
   });
-  const providerFamily = providerGroupsForThread(props.providerGroups, thread?.providerInstanceId);
+  const providerFamily: ExtensionProviderFamily | undefined = providerFamilyForThread(
+    props.providerGroups,
+    thread?.providerInstanceId,
+  );
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
@@ -1663,18 +1666,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       />
     </section>
   );
-}
-
-function providerGroupsForThread(
-  groups: ReadonlyArray<PickerGroup> | undefined,
-  providerInstanceId: WorkThread["providerInstanceId"] | undefined,
-): import("@octant/contracts/extensions").ExtensionProviderFamily | undefined {
-  const group = groups?.find(
-    (candidate) => String(candidate.instance.id) === String(providerInstanceId),
-  );
-  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
-    ? group.instance.driverKind
-    : undefined;
 }
 
 function workTurnSettlement(turns: ReadonlyArray<WorkTurnState>): TurnSettlement | "idle" {

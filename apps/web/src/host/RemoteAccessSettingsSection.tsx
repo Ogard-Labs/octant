@@ -1,5 +1,6 @@
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import { useCallback, useEffect, useId, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
 import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
 import type {
   PrivateListenerEnableRequest,
@@ -65,10 +66,6 @@ const LISTENER_FAILURE_COPY: Readonly<Record<string, string>> = {
   "shutdown-failed": "Octant could not stop the listener cleanly.",
   unavailable: "The remote listener service is unavailable.",
 };
-
-function failureMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.length > 0 ? error.message : fallback;
-}
 
 function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string {
   return `${origin}/#ticketId=${encodeURIComponent(ticket.ticketId)}&ticketProof=${encodeURIComponent(ticket.ticketProof)}`;

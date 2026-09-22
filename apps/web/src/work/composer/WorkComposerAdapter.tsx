@@ -9,9 +9,7 @@ import {
   useBrowserUseMention,
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
-import type { ExtensionProviderFamily, ExtensionSelection } from "@octant/contracts/extensions";
-import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
-import { Schema } from "effect";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -37,6 +35,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
+import { selectedProviderFamily } from "../../providers/providerFamily";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -513,16 +512,4 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       </div>
     </section>
   );
-}
-
-function selectedProviderFamily(
-  groups: ReadonlyArray<PickerGroup>,
-  selectedProviderInstanceId: ProviderInstanceId | undefined,
-): ExtensionProviderFamily | undefined {
-  const group = groups.find(
-    (candidate) => String(candidate.instance.id) === String(selectedProviderInstanceId),
-  );
-  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
-    ? group.instance.driverKind
-    : undefined;
 }

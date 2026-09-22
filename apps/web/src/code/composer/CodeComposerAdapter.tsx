@@ -10,9 +10,6 @@ import {
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
-import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
-import { Schema } from "effect";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelections";
 import {
@@ -57,6 +54,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
+import { selectedProviderFamily } from "../../providers/providerFamily";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -198,18 +196,6 @@ export interface CodeComposerSubmitInput {
   readonly linearIssueContext?: LinearIssueContextRequest;
   /** Local draft identity used only to anchor a native approval view. */
   readonly presentation?: { readonly composerId: string };
-}
-
-function selectedProviderFamily(
-  groups: ReadonlyArray<PickerGroup>,
-  selectedProviderInstanceId: ProviderInstanceId | undefined,
-): ExtensionProviderFamily | undefined {
-  const group = groups.find(
-    (candidate) => String(candidate.instance.id) === String(selectedProviderInstanceId),
-  );
-  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
-    ? group.instance.driverKind
-    : undefined;
 }
 
 /**

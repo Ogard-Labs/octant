@@ -27,6 +27,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { applyChatAttemptFrame } from "./chatStreamFrames";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
+import { failureMessage } from "../lib/failureMessage";
+import { waitForReconnect } from "../lib/waitForReconnect";
 import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
@@ -404,7 +406,7 @@ export function useChatController(options: ChatControllerOptions) {
     } catch (error) {
       if (!mounted.current || request !== bootstrapGeneration.current) return false;
       setStatus("disconnected");
-      setErrorMessage(failureMessage(error));
+      setErrorMessage(failureMessage(error, "Octant Chat service is unavailable."));
       return false;
     }
   }, [client, reconcileDrafts]);
@@ -461,7 +463,7 @@ export function useChatController(options: ChatControllerOptions) {
               }
               reconnectFailed = true;
               setStatus("disconnected");
-              setErrorMessage(failureMessage(error));
+              setErrorMessage(failureMessage(error, "Octant Chat service is unavailable."));
               await waitForReconnect(signal, reconnectBackoffMs);
               if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
                 return "stop";
@@ -530,7 +532,7 @@ export function useChatController(options: ChatControllerOptions) {
       } catch (error) {
         if (!mounted.current || request !== threadGeneration.current) return;
         setStatus("disconnected");
-        setErrorMessage(failureMessage(error));
+        setErrorMessage(failureMessage(error, "Octant Chat service is unavailable."));
       }
     },
     [
@@ -706,7 +708,7 @@ export function useChatController(options: ChatControllerOptions) {
       return result;
     } catch (error) {
       if (!mounted.current) return undefined;
-      lastExecuteError.current = failureMessage(error);
+      lastExecuteError.current = failureMessage(error, "Octant Chat service is unavailable.");
       if (
         commandThreadId !== undefined &&
         String(activeThreadIdRef.current ?? "") !== commandThreadId
@@ -731,8 +733,9 @@ export function useChatController(options: ChatControllerOptions) {
         if (currentThreadId !== undefined) void activateThread(currentThreadId);
         return undefined;
       }
-      setErrorMessage(failureMessage(error));
-      if (command.kind === "update-chat-settings") setSettingsMessage(failureMessage(error));
+      setErrorMessage(failureMessage(error, "Octant Chat service is unavailable."));
+      if (command.kind === "update-chat-settings")
+        setSettingsMessage(failureMessage(error, "Octant Chat service is unavailable."));
       return undefined;
     }
   }
@@ -844,7 +847,7 @@ export function useChatController(options: ChatControllerOptions) {
     } catch (error) {
       if (!mounted.current) throw error;
       if (String(activeThreadIdRef.current ?? "") !== String(input.threadId)) throw error;
-      setErrorMessage(failureMessage(error));
+      setErrorMessage(failureMessage(error, "Octant Chat service is unavailable."));
       throw error;
     }
   }
@@ -868,7 +871,7 @@ export function useChatController(options: ChatControllerOptions) {
     } catch (error) {
       if (!mounted.current) throw error;
       if (String(activeThreadIdRef.current ?? "") !== String(input.threadId)) throw error;
-      setErrorMessage(failureMessage(error));
+      setErrorMessage(failureMessage(error, "Octant Chat service is unavailable."));
       throw error;
     }
   }
@@ -1001,12 +1004,6 @@ function failureCategory(error: unknown): string | undefined {
   return error instanceof ChatClientFailure ? error.category : undefined;
 }
 
-function failureMessage(error: unknown): string {
-  if (error instanceof ChatClientFailure) return error.message;
-  if (error instanceof Error && error.message.length > 0) return error.message;
-  return "Octant Chat service is unavailable.";
-}
-
 export type ChatController = ReturnType<typeof useChatController>;
 
 export function acceptChatEventFrame(
@@ -1016,19 +1013,6 @@ export function acceptChatEventFrame(
 ): boolean {
   if (String(frame.threadId) !== String(expectedThreadId)) return false;
   return Number.isFinite(frame.sequence) && frame.sequence > afterSequence;
-}
-
-async function waitForReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, Math.max(0, delayMs));
-    signal.addEventListener("abort", finish, { once: true });
-  });
 }
 
 function openChatEventStream(
