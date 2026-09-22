@@ -2,7 +2,7 @@
 
 This note restates two holds already named by the Current Release Boundary in
 `AGENTS.md`. It does not authorize implementation. Opening either item still
-needs its own decision records, published seams, and an explicit maintainer
+needs a documented approved design, published seams, and an explicit maintainer
 request.
 
 The first release remains the Apple Silicon technical preview with the
@@ -23,7 +23,7 @@ keeps ship integrations on the same plugin seams without opening a marketplace.
 
 **Start gates.** Work may leave Backlog only when all of the following are true:
 
-1. Accepted or Proposed decision records cover OAuth and token revocation,
+1. Current specifications document the approved design for OAuth and token revocation,
    publisher trust, what data may leave the host, and how a connector catalog
    relates to the existing plugin and skill marketplace without collapsing
    install, trust, and enablement ([0011](decisions/0011-extensions-activation-ladder.md)).
@@ -31,8 +31,8 @@ keeps ship integrations on the same plugin seams without opening a marketplace.
    (`@octant/plugin-api`, `@octant/plugin-host`, Integration kind) and the
    credential broker ([0054](decisions/0054-headless-host-credential-store.md)).
    No connector may widen a host shortcut a third-party plugin could not take.
-3. An explicit maintainer request authorizes the scoped work against those
-   records.
+3. An explicit maintainer request authorizes the scoped work against that
+   design.
 
 ## Full LSP / extension host / debugger
 
@@ -42,7 +42,7 @@ primary for Code.
 
 **Start gates.** Work may leave Backlog only when all of the following are true:
 
-1. Accepted or Proposed decision records cover the companion process model
+1. Current specifications document the approved design for the companion process model
    (separately launched, not an in-process Monaco expansion), how LSP and debug
    children sit under Code Project and thread authority
    ([0003](decisions/0003-product-modes-and-authority.md),
@@ -52,5 +52,5 @@ primary for Code.
    [0011](decisions/0011-extensions-activation-ladder.md)).
 2. Language services and debugger actions cannot escalate mode, Project, or thread
    authority, and they take no path around sandbox and approval policy.
-3. An explicit maintainer request authorizes the scoped work against those
-   records.
+3. An explicit maintainer request authorizes the scoped work against that
+   design.

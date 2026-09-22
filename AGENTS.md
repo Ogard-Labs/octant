@@ -13,64 +13,52 @@ Apply sources in this order:
 
 1. Direct maintainer request.
 2. This contract.
-3. Decision records in `docs/decisions/` and `docs/architecture.md`.
-4. The active Linear issue's acceptance criteria, which may narrow but not
-   weaken a decision.
+3. Current specifications: `docs/architecture.md`, `DESIGN.md`, and the topic
+   specifications indexed in `docs/design/README.md`.
+4. The active Linear issue's acceptance criteria.
 5. Tests and current code behavior.
 
-Use the highest-priority source when they disagree. Stop only when sources at the
-same priority conflict or resolution requires an unauthorized scope, product,
-architecture, security, privacy, release, or destructive decision.
+Use the highest-priority source when they disagree. A direct maintainer request
+that clearly changes the design authorizes updating the relevant specification
+with the implementation in the same PR. Proceed without asking again merely
+because the previous design differs. Ask only when a consequential choice is
+unresolved or an action exceeds the authorized scope; continue independent work.
+
+Historical ADRs explain earlier choices. Their status and supersession chains do
+not independently constrain implementation or override a current specification.
+When current documents disagree, use the topic owner identified by the design
+index and reconcile stale summaries in the same change. When a specification
+omits a consequential rule, inspect the relevant implementation, tests, and
+history, preserve existing authority and data-integrity boundaries, and record
+the resolved rule. Routine implementation choices need no new design approval.
 
 ## Start With The Smallest Relevant Context
 
 - Before editing, inspect the repository root, branch, worktree, status, and
   whether the branch already has a pull request.
-- Read `docs/architecture.md` for the system shape and the decision record that
-  owns the area you are changing. Do not load every decision record by default.
-- Planning lives in Linear. Do not put issue numbers, phase names, or tracker
-  state into code, comments, test titles, or documentation.
+- Read the relevant current specification from the table below before editing.
+  Read the architecture overview for cross-package or authority changes; follow
+  historical references only when their rationale or missing detail is needed.
+- Planning and implementation progress live in Linear. Keep tracker identifiers
+  and state out of code, comments, test titles, and design specifications.
 
-Read the record that owns your change before editing, not all of them:
+| Change area                                                      | Current source                                                                                                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Finding or changing a design rule                                | [Design index and maintenance](docs/design/README.md)                                                                                                                                 |
+| Navigation, Projects, panes, content tabs, dock, workspace tools | [Workspace](docs/design/workspace.md)                                                                                                                                                 |
+| Visual language, typography, Settings, controls, accessibility   | [Design system](DESIGN.md)                                                                                                                                                            |
+| Process topology, Apple/device transport, host lifecycle         | [Architecture: process topology](docs/architecture.md#process-topology) and [device transport](docs/architecture.md#device-transport-and-evidence)                                    |
+| Modes, Projects, checkout binding, thread authority              | [Architecture: modes](docs/architecture.md#modes-chat-work-and-code)                                                                                                                  |
+| Journal, projections, replay, retention, export                  | [Architecture: persistence](docs/architecture.md#persistence)                                                                                                                         |
+| Providers, harness, context, capacity                            | [Architecture: providers](docs/architecture.md#providers) and [context accounting](docs/architecture.md#context-and-usage-accounting)                                                 |
+| Plugins, skills, activation, contribution boundaries             | [Architecture: extensions and skills](docs/architecture.md#extensions-and-skills), including [extraction boundaries](docs/architecture.md#plugin-boundaries-and-remaining-extraction) |
+| Sandbox, approvals, remote access, credentials                   | [Architecture: security and authority](docs/architecture.md#security-and-authority)                                                                                                   |
+| Packaging, updates, platform scope                               | [Current Release Boundary](#current-release-boundary) and [architecture](docs/architecture.md#current-release-boundary)                                                               |
 
-| Change area                                                    | Owning record                                                                                                                                                                          |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Journal, projections, replay, migrations                       | `docs/decisions/0002`                                                                                                                                                                  |
-| Thread retention, explicit purge, journal erasure              | `docs/decisions/0035`                                                                                                                                                                  |
-| Thread export of transcript, evidence, provenance              | `docs/decisions/0036`                                                                                                                                                                  |
-| Modes, Projects, thread authority, checkout binding            | `docs/decisions/0003`, `docs/decisions/0017`                                                                                                                                           |
-| Package layering and dependency direction                      | `docs/decisions/0004`                                                                                                                                                                  |
-| Provider drivers, capabilities, registry, harness              | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`, `docs/decisions/0111`, `docs/decisions/0112`                                                                       |
-| Native harness loop, role slots, advisor, follow-ups, overflow | `docs/decisions/0066`, `docs/decisions/0067`, `docs/decisions/0069`, `docs/decisions/0110`                                                                                             |
-| Image generation jobs, adapters, and artifacts                 | `docs/decisions/0055`, `docs/decisions/0056`                                                                                                                                           |
-| Work folder listing and what a turn changed                    | `docs/decisions/0083`                                                                                                                                                                  |
-| What a Code turn changed in its checkout                       | `docs/decisions/0141`                                                                                                                                                                  |
-| Context limits, capacity, scheduling                           | `docs/decisions/0008`                                                                                                                                                                  |
-| Usage spend ceilings (Project / thread)                        | `docs/decisions/0060`                                                                                                                                                                  |
-| Pull-request snapshot persistence and refresh cadence          | `docs/decisions/0064`, `docs/decisions/0076`                                                                                                                                           |
-| Sandbox, approvals, Plan mode, access postures                 | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057`, `docs/decisions/0068`, `docs/decisions/0104`, `docs/decisions/0110`                                               |
-| File preview and canvas artifacts                              | `docs/decisions/0010`                                                                                                                                                                  |
-| Canvas boards, comments, and layout revisions                  | `docs/decisions/0052`                                                                                                                                                                  |
-| Extensions, skills, plugin host                                | `docs/decisions/0011`, `docs/decisions/0001`                                                                                                                                           |
-| Subagents and agent runs                                       | `docs/decisions/0012`                                                                                                                                                                  |
-| Project planner thread, board tool, work proposals             | `docs/decisions/0065`                                                                                                                                                                  |
-| Agent-to-agent messaging authority                             | `docs/decisions/0063`                                                                                                                                                                  |
-| Remote clients and mobile                                      | `docs/decisions/0013`, `docs/decisions/0103`, `docs/decisions/0137`                                                                                                                    |
-| Multi-host federation registry and pairing at scale            | `docs/decisions/0059`                                                                                                                                                                  |
-| Collaboration, shared host, git-mediated sharing               | `docs/decisions/0040`                                                                                                                                                                  |
-| Cross-platform desktop packaging and updates                   | `docs/decisions/0034`, `docs/decisions/0058`                                                                                                                                           |
-| Apple build and validation                                     | `docs/decisions/0014`                                                                                                                                                                  |
-| Simulator frame input transport and live view                  | `docs/decisions/0062`, `docs/decisions/0137`, `docs/decisions/0139`, `docs/decisions/0140`, `docs/decisions/0142`, `docs/decisions/0151`, `docs/decisions/0152`, `docs/decisions/0153` |
-| Signed updates and in-app changelog                            | `docs/decisions/0034`, `docs/decisions/0061`                                                                                                                                           |
-| Computer-use destinations                                      | `docs/decisions/0053`, `docs/decisions/0113`                                                                                                                                           |
-| Shell, navigation, workspace layout                            | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`, `docs/decisions/0077`, `docs/decisions/0134`, `docs/decisions/0136`                                                |
-| Components and theme                                           | `docs/decisions/0016`, `docs/decisions/0046`                                                                                                                                           |
-| Visual language (Settings, first-run, welcome, palette)        | `docs/decisions/0070`, `docs/decisions/0072`, `docs/decisions/0073`, `docs/decisions/0091`                                                                                             |
-
-A change that contradicts an `Accepted` record is not a code change. Supersede
-the record first, in the same pull request, per `docs/decisions/README.md`. A
-`Proposed` record states the agreed direction and constrains the shape of new
-work even before it is implemented.
+Edit the owning specification in place when approved behavior changes. Ordinary
+layout, defaults, and implementation choices do not require an ADR. Use a separate
+rationale record only for a consequential tradeoff that benefits from preserving
+its alternatives; keep the effective rule in the current specification.
 
 ## Implementation Discipline
 
@@ -103,14 +91,13 @@ test count.
   less clear or violate an explicit repository boundary.
 - Editing existing code is a ratchet on reach: the surface you touch may keep the
   reach it has or lose some, never gain more. New calls into host internals from
-  a feature that `docs/decisions/0001` lists as separable are a boundary
+  a feature identified as separable by the current plugin design are a boundary
   violation even when the surrounding code already makes them.
 - When a change shows that a feature belongs behind a seam, judge it against that
-  record's candidate table and record the extraction as a follow-up. Extracting
-  is its own deliverable with its own evidence, sequenced by that record; folding
-  it into an unrelated fix or feature is the migration risk the record warns
-  about, not an early payment against it. Features the table keeps in the host
-  are not candidates.
+  plugin design's candidate table and record the extraction as a follow-up. Extracting
+  is its own deliverable with its own evidence, sequenced by the current plugin design; folding
+  it into an unrelated fix or feature adds migration risk. Features the table
+  keeps in the host are not candidates.
 - Record worthwhile adjacent improvements as follow-ups. Include them now only
   when inseparable from correctness, security, privacy, accessibility, data-loss
   protection, or the stated acceptance criteria.
@@ -161,8 +148,8 @@ test count.
   distinctive implementation structure. Third-party code enters only as an
   approved dependency with a compatible license and explicit architectural fit.
 - Preserve local-first and privacy-preserving defaults. Add telemetry, external
-  calls, credential exposure, or cloud dependencies only when a decision record
-  and the request require them.
+  calls, credential exposure, or cloud dependencies only when the request authorizes them and the current
+  specification documents the boundary.
 - Dependencies point inward: apps may consume packages; contracts and domain do
   not import apps. Provider-specific payloads stop at adapters.
 - Authority checks occur on the server before side effects, never only in React.
@@ -227,8 +214,10 @@ not test count or coverage percentage, determines what to add.
 - For behavior changes with a meaningful automated assertion, use
   red-green-refactor: prove the missing or broken behavior, implement the smallest
   correct fix, and refactor only if the changed code needs it.
-- For a bug fix, add or extend the closest stable test that reproduces the defect
-  before the fix when a useful automated assertion is practical.
+- For a bug fix, first use the closest existing test that reproduces the defect.
+  Add or extend it only if useful behavior or a realistic failure is uncovered.
+  Refactors may rely on existing behavior coverage without manufacturing a
+  failing assertion.
 - For a feature, test observable behavior or a public contract. Prefer one focused
   test that proves the acceptance criterion over several tests of internal steps.
 - Add failure and edge cases when they represent a realistic risk to authority,
@@ -246,22 +235,42 @@ not test count or coverage percentage, determines what to add.
 - Use repository scripts rather than substitutes (`bun run test`, not raw
   `bun test`). Always run `git diff --check`.
 
-Start with the focused check for the changed surface, then broaden:
+Before editing, identify acceptance criteria, the delivery requirement, and the
+smallest applicable checks in the issue or PR. The table scopes verification to
+affected behavior; it is not a requirement to add a new test at every layer.
+Existing coverage counts. Broaden only for a named gap or affected risk:
 
-| Changed surface                                            | Minimum additional verification                                                                                |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Documentation or configuration only                        | Formatter, link/path and consistency checks                                                                    |
-| Contracts                                                  | Focused contract tests and typecheck every consuming package                                                   |
-| Domain policy                                              | Focused red/green policy tests and affected consumers                                                          |
-| Server, API, or persistence                                | Route registration, auth/permission negatives, response/event shape, migrations/replay, and client integration |
-| Provider                                                   | Provider-sdk conformance plus real-provider smoke when credentials or runtime exist                            |
-| Web UI                                                     | Closest component/integration test for changed behavior plus rendered QA at relevant viewport/state boundaries |
-| Desktop/native lifecycle, sandbox, Keychain, terminal, IPC | Desktop tests plus native-process or packaged-app smoke                                                        |
-| Broad or cross-package change                              | `bun run verify` (wiring, format, lint, typecheck, test, build) unless a precise blocker is recorded           |
+| Changed surface                                                          | Minimum additional verification                                                                                |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Documentation only                                                       | Formatter, link/path and consistency checks                                                                    |
+| Configuration                                                            | Relevant configuration validation and affected runtime/build checks                                            |
+| Contracts                                                                | Focused contract tests and typecheck every consuming package                                                   |
+| Domain policy                                                            | Focused red/green policy tests and affected consumers                                                          |
+| Server, API, or persistence                                              | Route registration, auth/permission negatives, response/event shape, migrations/replay, and client integration |
+| Provider                                                                 | Provider-sdk conformance plus real-provider smoke when credentials or runtime exist                            |
+| Web UI                                                                   | Closest component/integration test for changed behavior plus rendered QA at relevant viewport/state boundaries |
+| Desktop/native lifecycle, sandbox, Keychain, terminal, IPC               | Desktop tests plus native-process or packaged-app smoke                                                        |
+| Broad integration, shared infrastructure, or uncertain dependency impact | `bun run verify` locally unless a precise blocker is recorded                                                  |
 
-Agents perform all available automated, browser, and tool-accessible
-verification. The maintainer owns human acceptance and checks requiring personal
-credentials, physical devices, release authority, or subjective judgment.
+For bounded changes, run the applicable local checks and let required hosted CI
+perform the full integration suite. Crossing a package boundary alone does not
+require a full local run: validate the changed contract and affected consumers.
+Local and hosted evidence are complementary; CI does not replace a required
+native, rendered, provider, or packaged scenario that it does not exercise.
+
+Once those checks pass, proceed to delivery or closeout. Add or rerun checks only
+for changed relevant inputs, a failure, an uncovered criterion, or a concrete
+in-scope risk; name that gap first. Reuse evidence with its commit/build,
+environment, scenario, result, and limitations when still applicable. Label
+cached results and distinguish them from fresh execution. Live native/provider
+acceptance needs execution in the relevant environment; a known failure cannot
+be replaced by an older or cached pass. Required CI stays tied to the exact head.
+
+Agents perform the applicable tool-accessible checks. Reserve human acceptance
+for an explicit issue criterion or capability that actually requires personal
+credentials, physical-device access, release authority, or subjective judgment.
+An unavailable required check remains a named blocker; extra unit tests do not
+satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 
 ## Delivery And Completion
 
@@ -299,14 +308,11 @@ credentials, physical devices, release authority, or subjective judgment.
   child when the stack relationship already expresses the dependency. This
   explicit stack operation is the exception to the ordinary no-rewrite rule;
   never rebase unrelated or shared work.
-- Canonical repository documentation (`README.md`, `docs/architecture.md`,
-  `docs/decisions/`, `apps/docs`) still updates in the same pull request as the
-  change they describe — not a new pull request, and not a repository pull
-  request just because a store report exists.
-- Update canonical documentation (`README.md`, `docs/architecture.md`,
-  `docs/decisions/`, `apps/docs`) in the same PR when design, architecture,
-  setup, workflow, security, deployment, or user-visible truth changes. Add a
-  new decision record when a change would contradict or extend an existing one.
+- Update the owning current specification and affected user documentation in the
+  same PR as a change to design, architecture, setup, workflow, security,
+  deployment, or user-visible behavior. Reconcile conflicting summaries; link to
+  the owner rather than duplicating its rules. Preserve historical ADRs as
+  rationale without creating a superseding record for routine changes.
 - Ready for review requires: acceptance criteria mapped to evidence, relevant
   checks run, current documentation, a pushed named branch, a non-draft standalone
   or bottom PR to `main` (or a child PR with its parent stack link), and no
@@ -317,16 +323,53 @@ credentials, physical devices, release authority, or subjective judgment.
 - State every skipped or unavailable check and residual risk precisely. Never
   infer success from intent or partial output.
 
+## Issue Closeout
+
+These rules govern Linear issues, not the product's Work/Code thread lifecycle.
+Implementing a tracked issue includes keeping its evidence and status current.
+An instruction to validate or finish an issue includes closing it when the
+conditions below are met; it does not authorize merging or releasing.
+
+- Use the issue's stated outcome, acceptance criteria, and delivery requirement.
+  For an implementation issue without a narrower explicit target, Done requires
+  the change landed on `main`, required checks passed, acceptance evidence is
+  sufficient, and no known in-scope defect remains. An explicit investigation,
+  local-only, or PR-delivery target uses that target rather than inventing a merge
+  requirement. A ready implementation PR normally remains In Review.
+- Deployment, packaged/native validation, real-provider checks, device testing,
+  and subjective acceptance are additional gates only when the stated outcome
+  or affected boundary requires them. Preserve explicit gates; do not silently
+  remove an unmet criterion to close an issue.
+- Map each criterion to existing evidence before doing more work. Reuse child
+  evidence in parent acceptance; execute only uncovered scenarios or those whose
+  relevant inputs changed. Integration acceptance remains distinct from child
+  completion. A required merged-build check still needs that build.
+- A new finding blocks this issue only when it violates its criteria, is a
+  regression caused by the change, or prevents relevant verification. Record
+  independent defects as separate follow-ups; do not expand the finish line.
+- When the conditions are met, update the acceptance summary and transition the
+  issue to Done in the same pass. Read back the status. Otherwise record the exact
+  remaining action, its owner, and missing prerequisite or evidence; use In Review
+  for review/merge, and identify validation or access blockers explicitly rather
+  than treating them as more implementation work.
+- Lead the issue description with its current outcome/delivery requirement,
+  criterion-to-evidence summary, remaining blockers, and closure decision. Keep
+  old progress in comments or a clearly labeled historical section; historical
+  statements such as "still In Progress" do not reopen a completed issue.
+- Reopen a closed issue only for a reproduced regression or evidence its closure
+  was incorrect. Preserve the closure evidence and explain the reason.
+
 ## Current Release Boundary
 
 The first release is the Apple Silicon technical preview with the
-provider-neutral plugin/skill marketplace. Per `docs/decisions/0034`, it is
+provider-neutral plugin/skill marketplace. It is
 signed with a Developer ID, notarized, and updates itself — those three are one
 deliverable, because an updater on an unsigned app is an unauthenticated
 code-delivery channel and macOS refuses the replacement anyway. Cross-platform
-desktop (macOS, Linux, Windows) is authorized by `docs/decisions/0058` and
-sequenced there: Linux desktop shell next, Windows Work/Code only after a
-Windows confinement ADR. Do not add native mobile store distribution, hosted
+desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
+explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
 relay, schedules, connector/OAuth marketplace, full LSP/extension host, or
-product features that mutate pull requests unless a decision record and an
-explicit request authorize that scope.
+product features that mutate pull requests unless an explicit request authorizes that scope and the current
+specification documents its authority and release boundaries. Existing scoped
+exceptions remain documented in the architecture; this workflow change opens no
+new release scope.
