@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DockProjectPullRequestReviewTool } from "./DockProjectPullRequestReviewTool";
 
@@ -108,6 +109,7 @@ describe("DockProjectPullRequestReviewTool", () => {
   });
 
   it("requires confirmation before merging a fresh mergeable pull request", async () => {
+    const user = userEvent.setup();
     const onMerge = vi.fn(async (method: "merge" | "squash" | "rebase") => ({
       status: "merged" as const,
       number: 12,
@@ -124,15 +126,52 @@ describe("DockProjectPullRequestReviewTool", () => {
     );
 
     await screen.findByText("Ready to merge.", { selector: "p" });
-    screen.getByRole("button", { name: "Merge" }).click();
-    expect(
-      await screen.findByRole("alertdialog", { name: "Confirm pull-request merge" }),
-    ).toBeVisible();
-    screen.getByRole("button", { name: "Confirm merge" }).click();
+    const opener = screen.getByRole("button", { name: "Merge" });
+    await user.click(opener);
+    const warning = await screen.findByRole("region", { name: "Confirm pull-request merge" });
+    expect(warning).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
+    expect(opener).not.toHaveAttribute("aria-hidden");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Confirm merge" })).toHaveFocus();
+    await user.tab();
+    expect(warning.contains(document.activeElement)).toBe(false);
+    await user.tab({ shift: true });
+    await user.keyboard("{Escape}");
+    expect(onMerge).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Confirm pull-request merge" })).toBeNull();
+    expect(opener).toHaveFocus();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onMerge).not.toHaveBeenCalled();
+    expect(opener).toHaveFocus();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Confirm merge" }));
 
     expect(onMerge).toHaveBeenCalledWith("squash", "9".repeat(40));
     expect(
       await screen.findByText("Merged pull request #12. Refreshing its review state."),
     ).toBeVisible();
+  });
+  it("restores Merge after cancelling a failed inline attempt", async () => {
+    const user = userEvent.setup();
+    const onMerge = vi.fn(async () => {
+      throw new Error("Connection unavailable");
+    });
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView("Ready to merge.", "mergeable")}
+        onMerge={onMerge}
+        query={query}
+        refresh={async () => detailView("Ready to merge.", "mergeable")}
+      />,
+    );
+    const opener = await screen.findByRole("button", { name: "Merge" });
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Confirm merge" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(opener).toHaveFocus();
+    expect(onMerge).toHaveBeenCalledOnce();
   });
 });

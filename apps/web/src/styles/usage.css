@@ -163,8 +163,7 @@
 }
 
 .usage-dashboard__unavailable-note,
-.usage-dashboard__error,
-.usage-dashboard__confirm {
+.usage-dashboard__error {
   padding: 10px 12px;
   background: var(--oct-warn-soft);
   border: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
@@ -285,23 +284,6 @@
   padding-inline: 3px;
 }
 
-.usage-dashboard__confirm {
-  display: grid;
-  gap: var(--oct-space-3);
-}
-
-.usage-dashboard__confirm p {
-  margin: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-detail);
-}
-
-.usage-dashboard__confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--oct-space-2);
-}
-
 @media (max-width: 680px) {
   .usage-dashboard__filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -322,8 +304,7 @@
 @media (prefers-contrast: more) {
   .usage-dashboard__quality-badge,
   .usage-dashboard__unavailable-note,
-  .usage-dashboard__error,
-  .usage-dashboard__confirm {
+  .usage-dashboard__error {
     border-color: var(--oct-fg);
   }
 }
