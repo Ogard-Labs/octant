@@ -41,6 +41,12 @@ export interface GoalLoopRoundFacts {
   readonly pendingApprovalClass?: ToolApprovalClass;
   /** Whether this round can be checkpointed before it starts. */
   readonly checkpointAvailable: boolean;
+  /**
+   * Whether the runner could see what the provider charged for the round it
+   * just ran. A provider that reports no usage is honest about a limitation,
+   * not a free round: a loop held to a token budget cannot spend against it.
+   */
+  readonly roundSpendObserved: boolean;
 }
 
 export type GoalLoopRoundDecision =
@@ -94,6 +100,13 @@ export function decideGoalLoopRound(facts: GoalLoopRoundFacts): GoalLoopRoundDec
 
   if (!facts.checkpointAvailable) {
     return { decision: "pause", reason: "checkpoint-unavailable" };
+  }
+
+  // Spend is the fact a token budget turns on, so it is checked before the
+  // authority intersection: a loop whose ceiling cannot be trusted to have
+  // spent anything must not take another round on a token budget's word.
+  if (facts.budget.tokenBudget !== undefined && !facts.roundSpendObserved) {
+    return { decision: "pause", reason: "spend-unreported" };
   }
 
   const authority = intersectAuthority(facts.declaredCeiling, facts.liveThreadAuthority);
@@ -212,6 +225,8 @@ export function goalLoopPauseText(reason: GoalLoopPauseReason): string {
       return "The next step needs an approval. The loop stopped and recorded the request.";
     case "checkpoint-unavailable":
       return "The next round could not be checkpointed, so it was not started.";
+    case "spend-unreported":
+      return "This provider did not report what the last round spent, so a token budget cannot be trusted to stop the loop.";
     case "paused-by-user":
       return "Paused.";
     case "stopped-by-user":

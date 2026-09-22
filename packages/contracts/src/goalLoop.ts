@@ -54,6 +54,7 @@ export const GoalLoopPauseReason = Schema.Literal(
   "authority-widened",
   "approval-required",
   "checkpoint-unavailable",
+  "spend-unreported",
   "paused-by-user",
   "stopped-by-user",
 );

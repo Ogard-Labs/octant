@@ -94,6 +94,7 @@ import {
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
 import { WorkTurnLiveStore } from "./workTurnLiveStore";
+import { WorkTurnUsageStore } from "./workTurnUsageStore";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -283,6 +284,12 @@ export interface WorkTurnServiceDependencies {
   readonly contextHarness?: ContextHarnessService;
   readonly safeInputBudgetTokens?: number;
   readonly liveUpdates?: WorkTurnLiveStore;
+  /**
+   * Process-local per-request token figures, recorded on every usage event a
+   * provider reports. The durable turn contract carries no tokens; a caller
+   * waiting on the turn (the goal loop) reads its figures from here.
+   */
+  readonly usageStore?: WorkTurnUsageStore;
 }
 
 export class WorkTurnService {
@@ -318,6 +325,7 @@ export class WorkTurnService {
   readonly #contextHarness: ContextHarnessService | undefined;
   readonly #safeInputBudgetTokens: number;
   readonly #liveUpdates: WorkTurnLiveStore;
+  readonly #usageStore: WorkTurnUsageStore | undefined;
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
@@ -359,6 +367,7 @@ export class WorkTurnService {
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
     this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
+    this.#usageStore = dependencies.usageStore;
   }
 
   async startFirstTurn(
@@ -786,6 +795,11 @@ export class WorkTurnService {
     this.#liveUpdates.close();
   }
 
+  /** The live feed cursor for a thread; subscribe from here to read from now. */
+  liveCursor(threadId: WorkThreadId): number {
+    return this.#liveUpdates.head(threadId);
+  }
+
   #withLive(turn: WorkTurnState): WorkTurnState {
     const live = this.#liveResponses.get(String(turn.requestId));
     if (live === undefined || turn.status === "completed" || turn.status === "cancelled") {
@@ -959,10 +973,18 @@ export class WorkTurnService {
         this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
       },
       onUsage: (usage) => {
-        if (input.signal.aborted || published === undefined || this.#contextHarness === undefined)
-          return;
         const projected = this.#projection.lookup(input.command.requestId);
-        if (projected?.status !== "accepted" && projected?.status !== "running") return;
+        if (
+          input.signal.aborted ||
+          (projected?.status !== "accepted" && projected?.status !== "running")
+        ) {
+          return;
+        }
+        this.#usageStore?.record(input.command.requestId, {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+        });
+        if (published === undefined || this.#contextHarness === undefined) return;
         const snapshot = published.snapshot;
         try {
           usageReported = true;

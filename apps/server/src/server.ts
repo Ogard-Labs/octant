@@ -165,6 +165,9 @@ import { createGoalRouteHandler } from "./goal/goalRoutes";
 import { createGoalLoopRouteHandler } from "./goal/goalLoopRoutes";
 import { GoalLoopEventStore } from "./goal/goalLoopEventStore";
 import { GoalLoopService } from "./goal/goalLoopService";
+import { GoalLoopScheduler } from "./goal/goalLoopScheduler";
+import { createGoalLoopWorkRoundRunner } from "./goal/goalLoopWorkRoundRunner";
+import { WorkTurnUsageStore } from "./work/workTurnUsageStore";
 import { createShipRouteHandler } from "./ship/shipRoutes";
 import { ShipEventStore } from "./ship/shipEventStore";
 import { ShipService } from "./ship/shipService";
@@ -5396,6 +5399,7 @@ export function startOctantServer(
       "Work artifact",
     );
     const workTurnProjection = new WorkTurnProjection();
+    const workTurnUsageStore = new WorkTurnUsageStore();
     requireJournalHydration(
       hydrateWorkTurnProjectionFromJournal({
         replay: (cursor) =>
@@ -5454,6 +5458,7 @@ export function startOctantServer(
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
+      usageStore: workTurnUsageStore,
       contextHarness,
       resolveSelectedSkillContext,
       spendCeiling,
@@ -5756,6 +5761,9 @@ export function startOctantServer(
       clock: () => new Date().toISOString() as never,
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    const goalLoopScheduler = new GoalLoopScheduler({
+      advance: (threadId) => goalLoopService.advance(threadId),
+    });
     const goalLoopService = new GoalLoopService({
       readGoal: (threadId) => goalService.read(threadId).goal,
       recordUsage: async ({ threadId, goal, tokensSpent, elapsedMs, evidence, complete }) => {
@@ -5811,20 +5819,16 @@ export function startOctantServer(
           ? undefined
           : String(marked.checkpoint.id);
       },
-      runRound: async ({ threadId, objective }) => {
-        const windowId = firstRegisteredWindowId();
-        const thread = workThreadProjection.read(threadId as never);
-        if (windowId === undefined || thread === undefined) {
+      runRound: createGoalLoopWorkRoundRunner({
+        turns: workTurnService,
+        usage: workTurnUsageStore,
+        windowId: firstRegisteredWindowId,
+        command: ({ threadId, objective }) => {
+          const thread = workThreadProjection.read(threadId as never);
+          if (thread === undefined) {
+            throw new Error("The Work thread this goal loop runs in is unavailable.");
+          }
           return {
-            outcome: "failed",
-            tokensSpent: 0,
-            elapsedMs: 0,
-            detail: "No local window is available to run the round.",
-          };
-        }
-        const startedAt = Date.now();
-        try {
-          await workTurnService.startFirstTurn(windowId, {
             kind: "start-work-thread-turn",
             requestId: randomUUID(),
             threadId,
@@ -5839,17 +5843,12 @@ export function startOctantServer(
               providerInstanceId: thread.providerInstanceId,
               modelId: thread.modelId,
             },
-          });
-          return { outcome: "ran", tokensSpent: 0, elapsedMs: Date.now() - startedAt };
-        } catch (error) {
-          return {
-            outcome: "failed",
-            tokensSpent: 0,
-            elapsedMs: Date.now() - startedAt,
-            detail: error instanceof Error ? error.message : "The round could not be run.",
           };
-        }
-      },
+        },
+        uuid: randomUUID,
+      }),
+      scheduleNextRound: (threadId) => goalLoopScheduler.schedule(threadId),
+      scheduleFirstRound: (threadId) => goalLoopScheduler.schedule(threadId),
       journal: goalLoopEvents,
       uuid: randomUUID,
       clock: () => new Date().toISOString() as never,
