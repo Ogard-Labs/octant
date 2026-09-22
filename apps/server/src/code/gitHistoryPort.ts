@@ -242,12 +242,7 @@ export class GitHistoryPort {
       temporaryDirectory: this.#sandbox.temporaryDirectory,
       networkEgress: "none",
       allowFileReadStar: true,
-      readRoots: [
-        root,
-        ...metadata,
-        binaryDirectory,
-        dirname(binaryDirectory),
-      ],
+      readRoots: [root, ...metadata, binaryDirectory, dirname(binaryDirectory)],
       ...(extraRules.length === 0 ? {} : { extraRules }),
     });
     return new Promise((resolve) => {

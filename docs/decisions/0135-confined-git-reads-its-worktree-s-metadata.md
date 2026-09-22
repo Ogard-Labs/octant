@@ -97,8 +97,8 @@ the bound root, and Plan and Chat process denial.
   and is its own change, sequenced by 0058.
 - The person's own Git settings do not apply inside the sandbox, and their
   identity reaches a commit through Octant's profile instead. That is the cost
-  of not opening their home. The unused read allowance on those paths stays
-  until it is removed in its own change, with its own evidence.
+  of not opening their home. The profile does not grant a read of
+  `~/.gitconfig` or `~/.config/git`.
 - The bound root itself remains writable on observation launches, which is wider
   than these paths and is not narrowed here.
 - Verified by generating the profile and reading its rules in order, and by
