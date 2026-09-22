@@ -1296,6 +1296,8 @@ function LaunchedShell(
   // Export is offered only where a client resolves — the same test the chat
   // thread-actions menu applies — so a window without a server capability
   // shows no Export item rather than one that could not carry it out.
+  // The row menu closes before this operation finishes. Keep its progress or
+  // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
   const threadExportClient = useMemo(
     () =>
@@ -1313,13 +1315,6 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
-  // A row command has no local surface after its context menu closes. Keep its
-  // feedback transient so a stale receipt does not linger over the workspace.
-  useEffect(() => {
-    if (threadExportNotice === undefined) return;
-    const timer = setTimeout(() => setThreadExportNotice(undefined), 8000);
-    return () => clearTimeout(timer);
-  }, [threadExportNotice]);
   const workNavigation = useWorkThreadNavigation(workThreadClient, {
     navigationRefreshMs: 0,
     changeRevision: machineChanges.workNavigation,
@@ -6554,9 +6549,18 @@ function LaunchedShell(
       </ShellFrame>
       {threadExportNotice === undefined ? null : (
         <div className="toast-stack">
-          <p className="toast" role="status">
-            {threadExportNotice}
-          </p>
+          <div className="toast thread-operation-notice">
+            <p role="status">{threadExportNotice}</p>
+            <OctantButton
+              aria-label="Dismiss notification"
+              onClick={() => setThreadExportNotice(undefined)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Dismiss
+            </OctantButton>
+          </div>
         </div>
       )}
       <ComputerUseActivitySurface

@@ -534,6 +534,27 @@
   pointer-events: auto;
 }
 
+/* The persisted app preference must stop entrance motion just like the OS
+   preference, including feature-owned animations on the shared popup. */
+html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialog__backdrop) {
+  animation: none;
+  transition: none;
+}
+
+.octant-confirmation__title {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  line-height: 1.4;
+}
+
+.octant-confirmation__description {
+  margin: var(--oct-space-3) 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
 .octant-dialog__popup > .right-utility-dock__surface {
   width: 100%;
   height: 100%;

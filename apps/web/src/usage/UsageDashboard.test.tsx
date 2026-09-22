@@ -383,11 +383,34 @@ describe("UsageDashboard", () => {
     render(<UsageDashboard client={client} />);
     await screen.findByText("Total requests");
     await user.click(screen.getByRole("button", { name: /Export CSV/ }));
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent(/Export usage data as CSV/);
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await user.click(screen.getByRole("button", { name: "Export CSV" }));
     expect(client.export).toHaveBeenCalled();
   });
+
+  it.each(["Reset all usage", "Purge older than 30 days"])(
+    "cancels %s safely by keyboard and restores its opener",
+    async (action) => {
+      const user = userEvent.setup();
+      const client = createMockClient(seededResponse());
+      render(<UsageDashboard client={client} />);
+      const opener = await screen.findByRole("button", { name: action });
+      await user.click(opener);
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      await waitFor(() => expect(cancel).toHaveFocus());
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(opener).toHaveFocus());
+      expect(client.reset).not.toHaveBeenCalled();
+      expect(client.retain).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await user.click(opener);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(opener).toHaveFocus());
+      expect(client.reset).not.toHaveBeenCalled();
+      expect(client.retain).not.toHaveBeenCalled();
+    },
+  );
 
   it("requires confirmation before resetting usage", async () => {
     const user = userEvent.setup();
@@ -395,8 +418,8 @@ describe("UsageDashboard", () => {
     render(<UsageDashboard client={client} />);
     await screen.findByText("Total requests");
     await user.click(screen.getByRole("button", { name: /Reset all usage/ }));
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent(/Reset all usage records/);
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(/Reset all usage records/);
+    await user.click(screen.getByRole("button", { name: "Reset all usage" }));
     expect(client.reset).toHaveBeenCalled();
   });
 
@@ -406,8 +429,8 @@ describe("UsageDashboard", () => {
     render(<UsageDashboard client={client} />);
     await screen.findByText("Total requests");
     await user.click(screen.getByRole("button", { name: /Purge older than 30 days/ }));
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent(/Purge usage records older/);
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(/Purge usage records older/);
+    await user.click(screen.getByRole("button", { name: "Purge old records" }));
     expect(client.retain).toHaveBeenCalled();
   });
 
