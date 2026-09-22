@@ -1338,6 +1338,16 @@ h6 {
   min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
 }
 
+/* Compact folders still need a full touch target on coarse pointers and
+   narrow windows. Keep the visual rhythm dense on desktop while preserving
+   the interaction surface required by the design contract. */
+@media (pointer: coarse), (max-width: 560px) {
+  .project-row[data-folder-state="closed"],
+  .project-row[data-folder-state="closed"] .project-row__select {
+    min-height: 44px;
+  }
+}
+
 /* The whole row, name and trailing controls together, takes the soft wash
    under the pointer; the name button inside paints nothing of its own, so
    the row never shows a second, smaller fill. */

@@ -395,6 +395,9 @@ describe("WindowChrome", () => {
     expect(closedProjectSelect).toContain(
       "min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));",
     );
+    const touchFolderRules = atRuleBlock("@media (pointer: coarse), (max-width: 560px)");
+    expect(touchFolderRules).toContain('.project-row[data-folder-state="closed"]');
+    expect(touchFolderRules).toContain("min-height: 44px;");
 
     // The nested list is a folder child: a small inset and rail make that
     // relationship visible without giving every thread its own card.
