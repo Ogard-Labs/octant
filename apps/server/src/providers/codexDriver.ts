@@ -35,10 +35,7 @@ import {
   type CodexPendingApproval,
 } from "./codexEventMapper";
 import type { CodexAppServerConnection, CodexProcessPort } from "./codexProcess";
-import {
-  codexProviderCredential,
-  type CodexProviderCredential,
-} from "./codexProviderCredential";
+import { codexProviderCredential, type CodexProviderCredential } from "./codexProviderCredential";
 import {
   decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
@@ -733,7 +730,9 @@ function normalizeProbe(
           message:
             missingCredential === undefined
               ? "Authenticate Codex and make at least one usable model available."
-              : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
+              : missingCredential === "AWS_BEARER_TOKEN_BEDROCK"
+                ? "The Bedrock provider needs AWS_BEARER_TOKEN_BEDROCK, or an AWS profile or shared credentials file, in the Codex runtime."
+                : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
         }),
     observedAt: observedAt as UtcTimestamp,
   });

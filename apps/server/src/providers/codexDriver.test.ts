@@ -701,9 +701,9 @@ describe("Codex driver probe and runtime lifecycle", () => {
       });
       const missingProbe = await Effect.runPromise(
         Effect.scoped(
-          makeCodexDriver(
-            missing.options({ environment: { CODEX_HOME: codexHome } }),
-          ).probe({ instanceId }),
+          makeCodexDriver(missing.options({ environment: { CODEX_HOME: codexHome } })).probe({
+            instanceId,
+          }),
         ),
       );
       expect(missingProbe.readiness).toBe("unauthenticated");
@@ -731,10 +731,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
 
       // The built-in Bedrock provider's own credential is on the allowlist,
       // so a host that exports it reports ready.
-      writeFileSync(
-        join(codexHome, "config.toml"),
-        'model_provider = "amazon-bedrock"\n',
-      );
+      writeFileSync(join(codexHome, "config.toml"), 'model_provider = "amazon-bedrock"\n');
       const present = fixture({
         account: {
           account: { type: "apiKey" as const },
@@ -754,6 +751,41 @@ describe("Codex driver probe and runtime lifecycle", () => {
         ),
       );
       expect(presentProbe.readiness).toBe("ready");
+
+      const profile = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const profileProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            profile.options({
+              environment: { CODEX_HOME: codexHome, AWS_PROFILE: "work" },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(profileProbe.readiness).toBe("ready");
+
+      const emptyBearer = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const emptyBearerProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            emptyBearer.options({
+              environment: { CODEX_HOME: codexHome, AWS_BEARER_TOKEN_BEDROCK: "" },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(emptyBearerProbe.readiness).toBe("unauthenticated");
+      expect(emptyBearerProbe.message).toContain("AWS profile");
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }

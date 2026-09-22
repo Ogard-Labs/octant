@@ -2,10 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  codexActiveModelProvider,
-  codexProviderCredential,
-} from "./codexProviderCredential";
+import { codexActiveModelProvider, codexProviderCredential } from "./codexProviderCredential";
 
 describe("codexActiveModelProvider", () => {
   it("names the selected provider and its declared env_key", () => {
@@ -27,7 +24,9 @@ describe("codexActiveModelProvider", () => {
   it("answers nothing when no provider is selected or the table declares no env_key", () => {
     expect(codexActiveModelProvider('model = "gpt-5"\n')).toBeUndefined();
     expect(
-      codexActiveModelProvider('model_provider = "vendor"\n\n[model_providers.vendor]\nname = "V"\n'),
+      codexActiveModelProvider(
+        'model_provider = "vendor"\n\n[model_providers.vendor]\nname = "V"\n',
+      ),
     ).toEqual({ id: "vendor" });
   });
 });
@@ -42,9 +41,10 @@ describe("codexProviderCredential", () => {
     try {
       // A custom env_key is not on the runtime allowlist, so the variable is
       // reported missing even when the host exports it.
-      expect(
-        codexProviderCredential({ CODEX_HOME: home, VENDOR_API_KEY: "sk-test" }),
-      ).toEqual({ envKey: "VENDOR_API_KEY", present: false });
+      expect(codexProviderCredential({ CODEX_HOME: home, VENDOR_API_KEY: "sk-test" })).toEqual({
+        envKey: "VENDOR_API_KEY",
+        present: false,
+      });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -61,6 +61,42 @@ describe("codexProviderCredential", () => {
       expect(
         codexProviderCredential({ CODEX_HOME: home, AWS_BEARER_TOKEN_BEDROCK: "token" }),
       ).toEqual({ envKey: "AWS_BEARER_TOKEN_BEDROCK", present: true });
+      expect(codexProviderCredential({ CODEX_HOME: home, AWS_BEARER_TOKEN_BEDROCK: "" })).toEqual({
+        envKey: "AWS_BEARER_TOKEN_BEDROCK",
+        present: false,
+      });
+      expect(codexProviderCredential({ CODEX_HOME: home, AWS_PROFILE: "work" })).toEqual({
+        envKey: "AWS_BEARER_TOKEN_BEDROCK",
+        present: true,
+      });
+      expect(codexProviderCredential({ CODEX_HOME: home, AWS_PROFILE: "  " })).toEqual({
+        envKey: "AWS_BEARER_TOKEN_BEDROCK",
+        present: false,
+      });
+      expect(codexProviderCredential({ CODEX_HOME: home, AWS_REGION: "us-east-1" })).toEqual({
+        envKey: "AWS_BEARER_TOKEN_BEDROCK",
+        present: false,
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("treats an empty allowlisted credential as missing", () => {
+    const home = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
+    writeFileSync(
+      join(home, "config.toml"),
+      'model_provider = "openai"\n\n[model_providers.openai]\nenv_key = "OPENAI_API_KEY"\n',
+    );
+    try {
+      expect(codexProviderCredential({ CODEX_HOME: home, OPENAI_API_KEY: "" })).toEqual({
+        envKey: "OPENAI_API_KEY",
+        present: false,
+      });
+      expect(codexProviderCredential({ CODEX_HOME: home, OPENAI_API_KEY: "sk-test" })).toEqual({
+        envKey: "OPENAI_API_KEY",
+        present: true,
+      });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

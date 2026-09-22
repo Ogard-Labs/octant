@@ -46,7 +46,23 @@ export function codexProviderCredential(
   if (provider === undefined) return undefined;
   const envKey = provider.envKey ?? BUILTIN_PROVIDER_ENV_KEYS[provider.id];
   if (envKey === undefined) return undefined;
-  return { envKey, present: sanitizeCodexEnvironment(environment)[envKey] !== undefined };
+  const allowed = sanitizeCodexEnvironment(environment);
+  // An empty exported value is missing: Codex treats it that way, and the
+  // allowlist keeps empty strings. Bedrock also authenticates through the AWS
+  // profile and shared-credential files the runtime already forwards; the
+  // bearer token is not the only source.
+  const present =
+    nonempty(allowed, envKey) ||
+    (provider.id === "amazon-bedrock" &&
+      (nonempty(allowed, "AWS_PROFILE") ||
+        nonempty(allowed, "AWS_CONFIG_FILE") ||
+        nonempty(allowed, "AWS_SHARED_CREDENTIALS_FILE")));
+  return { envKey, present };
+}
+
+function nonempty(environment: NodeJS.ProcessEnv, key: string): boolean {
+  const value = environment[key];
+  return typeof value === "string" && value.trim() !== "";
 }
 
 interface CodexActiveModelProvider {
