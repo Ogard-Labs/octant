@@ -627,7 +627,7 @@ describe("useChatController", () => {
   });
 
   it("completes, snoozes, wakes, and reopens a thread with the version the host holds now", async () => {
-    const execute = vi.fn(async (command: { readonly kind: string }) => {
+    const execute = vi.fn(async (_command: { readonly kind: string }) => {
       const current = bootstrap().threads[0]!;
       return {
         kind: "thread-updated",
@@ -776,10 +776,12 @@ describe("useChatController", () => {
     const subscribe = vi
       .fn()
       .mockImplementationOnce(async function* () {
+        yield* [];
         throw new Error("Event stream dropped.");
       })
       .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
         await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+        yield* [];
       });
     const thread = vi
       .fn()
@@ -2036,6 +2038,7 @@ describe("useChatController streaming", () => {
       })
       .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
         await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+        yield* [];
       });
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),

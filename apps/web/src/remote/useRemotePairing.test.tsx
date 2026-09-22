@@ -6,7 +6,6 @@ import {
   createClientHostRegistry,
   createInMemoryClientHostRegistryStorage,
   createInMemoryDeviceKeyStore,
-  createRemotePairingClient,
   createRemoteSessionBridge,
   type RemotePairingClient,
   type RemoteSessionBridge,
@@ -51,7 +50,7 @@ function createIdleClient(): RemotePairingClient {
 async function seedApprovedDevice(
   server: ReturnType<typeof createFakeRemoteServer>,
   store: ReturnType<typeof createInMemoryDeviceKeyStore>,
-  config: Parameters<typeof createFakeRemoteServer>[0] = {},
+  _config: Parameters<typeof createFakeRemoteServer>[0] = {},
 ): Promise<void> {
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -114,8 +113,8 @@ describe("useRemotePairing resume", () => {
     ["expired", { credentialFailure: "expired" as const }],
   ] as const)(
     "surfaces an explicit %s re-pair state when the server reports the reason",
-    async (reason, config) => {
-      const server = createFakeRemoteServer(config);
+    async (reason, _config) => {
+      const server = createFakeRemoteServer(_config);
       const store = createInMemoryDeviceKeyStore();
       await seedApprovedDevice(server, store);
       const bridge = createRemoteSessionBridge({ fetch: server.fetch, deviceKeyStore: store });

@@ -6783,7 +6783,6 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   border-radius: 50%;
   width: var(--provider-glyph-size);
   height: var(--provider-glyph-size);
-  font-size: var(--provider-glyph-font-size);
   font-weight: var(--oct-weight-display);
   letter-spacing: 0.02em;
   line-height: 1;

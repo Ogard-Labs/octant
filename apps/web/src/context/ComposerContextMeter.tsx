@@ -566,13 +566,7 @@ function ProviderLimitRow(props: {
           className="context-window-popover__limit-meter"
           {...(tone === undefined ? {} : { "data-tone": tone })}
         >
-          <span
-            style={
-              {
-                "--context-window-meter-size": `${String(Math.max(0, Math.min(100, share)))}%`,
-              } as CSSProperties
-            }
-          />
+          <span style={{ width: `${String(Math.max(0, Math.min(100, share)))}%` }} />
         </span>
       )}
     </>

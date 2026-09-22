@@ -226,7 +226,6 @@
 .context-window-popover__limit-meter > span {
   display: block;
   height: 100%;
-  width: var(--context-window-meter-size);
   background: var(--oct-accent-fg);
   border-radius: inherit;
   transition: width 480ms cubic-bezier(0.22, 1, 0.36, 1);

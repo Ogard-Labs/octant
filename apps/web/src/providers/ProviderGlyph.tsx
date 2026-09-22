@@ -47,7 +47,7 @@ export function ProviderGlyph(props: ProviderGlyphProps) {
         style={
           {
             "--provider-glyph-size": `${size}px`,
-            "--provider-glyph-font-size": `${Math.max(7, Math.round(size * 0.42))}px`,
+            fontSize: Math.max(7, Math.round(size * 0.42)),
           } as CSSProperties
         }
       >
