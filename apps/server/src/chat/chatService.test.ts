@@ -3928,6 +3928,55 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns[0]?.attempts[0]).toEqual(attempt);
   });
 
+  it("refuses to retry an older turn in a provider-owned conversation", async () => {
+    const { service, fakeDriver } = openFixture({ nativeConversation: true });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry native tail",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "First request",
+    });
+    const afterFirst = service.read(created.thread.id);
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: afterFirst.thread.version,
+      prompt: "Second request",
+    });
+    const beforeRetry = service.read(created.thread.id);
+    const firstTurn = beforeRetry.turns[0];
+    const firstAttempt = firstTurn?.attempts[0];
+    if (firstTurn === undefined || firstAttempt === undefined) {
+      throw new Error("Expected the first native turn.");
+    }
+    const resumeCount = fakeDriver.resumeInputs.length;
+    const sentCount = fakeDriver.sentTurns.length;
+
+    await expect(
+      service.execute({
+        kind: "retry-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: beforeRetry.thread.version,
+        turnId: firstTurn.id,
+        attemptId: firstAttempt.id,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unsupported",
+        message: expect.stringContaining("active tail"),
+      },
+    });
+    expect(fakeDriver.resumeInputs).toHaveLength(resumeCount);
+    expect(fakeDriver.sentTurns).toHaveLength(sentCount);
+    expect(service.read(created.thread.id).turns).toEqual(beforeRetry.turns);
+  });
+
   it("preserves native history when an earlier message cannot be edited in place", async () => {
     const { service, fakeDriver } = openFixture({ nativeConversation: true });
     const created = await service.execute({
