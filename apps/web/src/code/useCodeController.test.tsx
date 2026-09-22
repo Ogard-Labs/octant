@@ -2563,7 +2563,6 @@ describe("useCodeController", () => {
       await new Promise<void>((resolve) =>
         signal.addEventListener("abort", () => resolve(), { once: true }),
       );
-      yield* [];
     }
     let attempt = 0;
     const subscribeOperation = vi.fn(

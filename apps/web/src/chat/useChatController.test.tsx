@@ -776,12 +776,10 @@ describe("useChatController", () => {
     const subscribe = vi
       .fn()
       .mockImplementationOnce(async function* () {
-        yield* [];
         throw new Error("Event stream dropped.");
       })
       .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
         await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
-        yield* [];
       });
     const thread = vi
       .fn()
@@ -870,7 +868,6 @@ describe("useChatController", () => {
         String(requestedThreadId) === String(threadId) ? threadView(1) : pendingOther.promise,
       ),
       subscribe: vi.fn(async function* (_threadId, _cursor, signal: AbortSignal) {
-        yield* [];
         await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
       }),
     });

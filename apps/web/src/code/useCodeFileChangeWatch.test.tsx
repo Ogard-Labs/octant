@@ -13,7 +13,6 @@ function watchThat(end: "drops" | "is-refused") {
     if (end === "is-refused") {
       throw new CodeFileListingClientFailure("The host refused this Code file watch.", 401);
     }
-    yield* [];
   });
 }
 
