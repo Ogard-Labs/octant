@@ -469,6 +469,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
           />
         )}
         showEmptyGroups={showEmptyGroups}
+        emptyGroupsInNarrowList="hidden"
       />
     </Surface>
   );

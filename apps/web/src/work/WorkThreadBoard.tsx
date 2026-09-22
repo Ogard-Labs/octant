@@ -400,6 +400,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
           />
         )}
         showEmptyGroups={showEmptyGroups}
+        emptyGroupsInNarrowList="kept"
       />
     </Surface>
   );

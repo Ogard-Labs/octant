@@ -188,6 +188,10 @@ export interface ThreadBoardBodyProps<
   readonly activeFilterSummary: string | undefined;
   readonly onClearFilters: () => void;
   readonly showEmptyGroups: boolean;
+  // Lanes are the workflow on the board; stacked into a list, an empty lane
+  // is only a heading with nothing under it, so the list keeps the groups
+  // that hold work.
+  readonly emptyGroupsInNarrowList: "kept" | "hidden";
   readonly isNarrow: boolean;
   readonly layout: "list" | "columns";
   readonly grouping: string;
@@ -259,7 +263,8 @@ export function ThreadBoardBody<
       };
   const columns = props.groupCards(cards);
   const visibleColumns =
-    (props.showEmptyGroups && !props.isNarrow) || cards.length === 0
+    (props.showEmptyGroups && (props.emptyGroupsInNarrowList === "kept" || !props.isNarrow)) ||
+    cards.length === 0
       ? columns
       : columns.filter((column) => column.cards.length > 0);
   return (
