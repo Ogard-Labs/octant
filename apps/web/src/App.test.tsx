@@ -695,12 +695,17 @@ describe("App", () => {
       target: within(projectsNavigation).getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    await user.click(await screen.findByRole("menuitem", { name: "Hand off…" }));
+    const handOffAction = await screen.findByRole("menuitem", { name: "Hand off…" });
+    await user.click(handOffAction);
 
     const progress = await screen.findByText(
       "Writing the hand-off document for Controller foundation…",
     );
-    expect(progress).toHaveClass("toast");
+    expect(progress.closest(".toast")).not.toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 8200));
+    });
+    expect(progress).toBeVisible();
     expect(within(projectsNavigation).queryByText(/Writing the hand-off document/)).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:13773/api/threads/hand-off",
@@ -724,9 +729,10 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-    expect(
-      await screen.findByText("Hand-off: Controller foundation is open in the dock."),
-    ).toHaveClass("toast");
+    const result = await screen.findByText("Hand-off: Controller foundation is open in the dock.");
+    expect(result.closest(".toast")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(result).not.toBeInTheDocument();
   });
 
   it("opens one App-level command palette that runs a host-derived navigation command", async () => {
