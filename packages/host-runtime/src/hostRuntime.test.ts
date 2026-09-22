@@ -4,6 +4,7 @@ import {
   chmod,
   lstat,
   mkdir,
+  readdir,
   readFile,
   realpath,
   rm,
@@ -29,6 +30,7 @@ import {
   clearHostRuntimeProjections,
   HostRuntimePathError,
   acquireHostRuntimeOwner,
+  HostRuntimeOwnershipError,
   decodeOwnerReceipt,
   decodeHostInfoReceipt,
   encodeOwnerReceipt,
@@ -336,6 +338,20 @@ describe("owner receipts and redaction", () => {
 
     expect(output).toBe("Octant host path validation failed (invalid-path).");
     expect(output).not.toContain(privatePath);
+  });
+
+  it("names the artifact path and next step when ownership fails", () => {
+    const output = formatHostRuntimeError(
+      new HostRuntimeOwnershipError(
+        "owner-unhealthy",
+        "Octant found an unreachable owner socket without a valid receipt.",
+        "/tmp/octant-501/abc.sock",
+      ),
+    );
+
+    expect(output).toContain("owner-unhealthy");
+    expect(output).toContain("/tmp/octant-501/abc.sock");
+    expect(output).toContain("Start Octant again");
   });
 
   it("reports a path validation failure as a configuration failure, not a crash", () => {
@@ -1002,6 +1018,50 @@ describe("single owner control socket", () => {
       instanceId: "33333333-3333-4333-8333-333333333333",
     });
     expect((await lstat(paths.controlSecretPath)).isFile()).toBe(true);
+  });
+
+  it("quarantines a socket-less owner secret with no receipt and takes ownership", async () => {
+    const runtimeBase = await realpath(tmpdir());
+    const root = await mkdtemp(join(runtimeBase, "octant-orphan-secret-"));
+    temporaryRoots.push(root);
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: join(root, "data") },
+      platform: filesystemTestPlatform,
+      home: join(root, "home"),
+      temporaryDirectory: runtimeBase,
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    // What a killed shutdown leaves behind: the control secret without the
+    // receipt that could verify it and without the socket a live owner
+    // would hold.
+    await writeFile(paths.controlSecretPath, "orphaned-control-secret", { mode: 0o600 });
+    // The quarantine directory is shared per-user, so compare against what
+    // was already there rather than counting.
+    const quarantineBefore = await readdir(join(paths.runtimeDirectory, "quarantine")).catch(
+      () => [] as string[],
+    );
+
+    const owner = await acquireHostRuntimeOwner({
+      paths,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      instanceId: "33333333-3333-4333-8333-333333333333",
+      serverVersion: "1.2.3",
+      wireVersion: "1",
+      serviceMode: "foreground",
+      processStart: "replacement-start",
+      processAlive: () => false,
+    });
+
+    expect(owner.kind).toBe("owner");
+    if (owner.kind === "owner") owners.push(owner);
+    const quarantined = await readdir(join(paths.runtimeDirectory, "quarantine"));
+    const moved = quarantined.filter(
+      (name) => name.endsWith(".secret") && !quarantineBefore.includes(name),
+    );
+    expect(moved).toHaveLength(1);
+    // The replacement owner wrote its own secret, not the orphaned bytes.
+    expect(await readFile(paths.controlSecretPath, "utf8")).not.toBe("orphaned-control-secret");
   });
 
   it("preserves a receipt-only owner when its process identity is still live", async () => {

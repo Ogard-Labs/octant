@@ -35,7 +35,9 @@ export function formatHostRuntimeError(error: unknown): string {
     return `Octant host path validation failed (${error.code}).`;
   }
   if (error instanceof HostRuntimeOwnershipError) {
-    return `Octant host ownership failed (${error.code}).`;
+    const detail = redactHostRuntimeText(error.message);
+    const where = error.path === undefined ? "" : ` Path: ${error.path}.`;
+    return `Octant host ownership failed (${error.code}). ${detail}${where} Start Octant again; if it keeps failing, report the code and path.`;
   }
   return redactHostRuntimeText(error instanceof Error ? error.message : String(error));
 }

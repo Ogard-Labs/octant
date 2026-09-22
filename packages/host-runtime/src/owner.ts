@@ -704,6 +704,14 @@ async function recoverSocketlessStaleOwner(
     safeLstat(paths.controlSecretPath),
   ]);
   if (receiptNode === undefined && secretNode === undefined) return;
+  if (receiptNode === undefined && secretNode !== undefined) {
+    // A secret with no receipt and no socket names no live owner: only the
+    // receipt can verify authority, and a live owner would hold the socket.
+    // Whoever wrote it died mid-startup or mid-quarantine, so it is moved
+    // aside rather than left to refuse every later start.
+    await quarantineSocketlessSecret(paths, secretNode);
+    return;
+  }
   if (receiptNode !== undefined && secretNode === undefined) {
     const staleReceipt = await readVerifiedReceipt(paths, expected);
     if (staleReceipt === undefined) {
@@ -752,6 +760,31 @@ async function quarantineStaleAuthority(
     stale.secretIdentity,
   );
   return { quarantine, suffix };
+}
+
+async function quarantineSocketlessSecret(
+  paths: HostRuntimePaths,
+  secretNode: Stats,
+): Promise<void> {
+  const quarantine = join(paths.runtimeDirectory, "quarantine");
+  await mkdir(quarantine, { recursive: true, mode: 0o700 });
+  // No receipt survives to name the instance, so the suffix carries a random
+  // tag instead; orphans from several killed starts can coexist.
+  const suffix = `${Date.now()}-orphan-${randomBytes(4).toString("hex")}`;
+  try {
+    await renameIfSame(
+      paths.controlSecretPath,
+      join(quarantine, `owner-${suffix}.secret`),
+      fileIdentity(secretNode),
+    );
+  } catch (error) {
+    if (error instanceof HostRuntimeOwnershipError) throw error;
+    throw new HostRuntimeOwnershipError(
+      "ambiguous-owner-node",
+      `Octant could not quarantine a stale control secret: ${safeMessage(error)}`,
+      paths.controlSecretPath,
+    );
+  }
 }
 
 async function quarantineStaleReceipt(
