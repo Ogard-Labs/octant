@@ -34,6 +34,13 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+Links inside a Work or Code conversation open in the app: following one
+creates a dedicated Browser context confined to that link's origin and opens
+it in the thread's right dock, or in a split beside the pane when the dock
+describes a different thread. Right-clicking a link offers **Open in Octant**,
+**Open in external browser**, and **Copy URL**. Surfaces that cannot host a
+Browser — Chat, dock tools, dialogs — keep the external open and copy.
+
 ### Agent control
 
 Agent control is separate from manual Browser availability. A provider needs a

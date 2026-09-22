@@ -52,9 +52,10 @@ export function addThreadUtilityTab(
   key: ThreadUtilityDockKey,
   surface: RightUtilityDockSurfaceId,
   instanceId: string,
+  browserContextId?: string,
 ): ThreadUtilityDockStates {
   const current = threadUtilityDockState(states, key);
-  return replace(states, key, addUtilityTabState(current, surface, instanceId));
+  return replace(states, key, addUtilityTabState(current, surface, instanceId, browserContextId));
 }
 
 export function selectThreadUtilityTab(
@@ -108,11 +109,16 @@ export function addUtilityTabState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
   instanceId: string,
+  browserContextId?: string,
 ): ThreadUtilityDockState {
   if (surface !== "browser" && surface !== "terminal") {
     return openUtilityTabState(state, surface);
   }
-  const tab = { id: instanceId, surface };
+  const tab: ThreadUtilityDockTab = {
+    id: instanceId,
+    surface,
+    ...(surface === "browser" && browserContextId !== undefined ? { browserContextId } : {}),
+  };
   return {
     tabs: [...state.tabs.filter((candidate) => candidate.id !== instanceId), tab],
     active: tab.id,

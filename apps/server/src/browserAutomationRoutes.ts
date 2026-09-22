@@ -196,7 +196,7 @@ export function createBrowserAutomationRouteHandler(
         const snapshot =
           dependencies.service.peekThread === undefined
             ? dependencies.service.inspectThread(windowId, input.threadId)
-            : await dependencies.service.peekThread(windowId, input.threadId);
+            : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
         return success(decodeBrowserAutomationSnapshot(snapshot), origin);
       }
       if (url.pathname === "/api/browser/contexts/release") {

@@ -11,7 +11,10 @@ function view(): BrowserSurfaceViewPort {
     setBounds: vi.fn(),
     setVisible: vi.fn(),
     webContents: {
-      capturePage: vi.fn(async () => ({ toJPEG: () => Uint8Array.from([1, 2, 3]) })),
+      capturePage: vi.fn(async () => ({
+        isEmpty: () => false,
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+      })),
       close: vi.fn(),
       debugger: {
         attach: vi.fn(() => {
@@ -370,6 +373,33 @@ describe("BrowserSurfaceHost", () => {
     expect(observation.extractedText).toBeUndefined();
     expect(observation.contentHash).toBeUndefined();
     expect(observation.screenshotDataUrl).toBeUndefined();
+  });
+
+  it("answers a peek for a context whose page has not committed a document", async () => {
+    // A fresh surface has no committed document, and Chromium never settles a
+    // script evaluation queued against it: the probe would wait forever while
+    // the renderer's poll repeats, so peek reports the empty page instead.
+    const created = view();
+    vi.mocked(created.webContents.getURL).mockReturnValue("");
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockReturnValue(
+      new Promise(() => undefined),
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+
+    await expect(host.peek(contextId)).resolves.toEqual({});
+    expect(created.webContents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    expect(created.webContents.capturePage).not.toHaveBeenCalled();
   });
 
   it("keeps the native context reusable after an agent closes its current tab", async () => {

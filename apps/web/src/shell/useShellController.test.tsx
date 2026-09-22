@@ -141,7 +141,10 @@ function mintedCodeThreadSurface(threadId: CodeThreadId, title: string): Workspa
   };
 }
 
-async function readyBoundCodeShell(id = windowId) {
+async function readyBoundCodeShell(
+  id = windowId,
+  options?: { readonly openDockBrowser?: (input: { readonly threadId: string }) => boolean },
+) {
   const initial = codeBootstrap();
   const server = statefulClient({
     ...initial,
@@ -162,6 +165,9 @@ async function readyBoundCodeShell(id = windowId) {
   const { result } = renderHook(() =>
     useShellController({
       client: server.client,
+      ...(options?.openDockBrowser === undefined
+        ? {}
+        : { openDockBrowser: options.openDockBrowser }),
       serverUrl: "http://127.0.0.1:13773",
       windowId: id,
     }),
@@ -650,6 +656,50 @@ describe("useShellController", () => {
     expect(browserPanes[0]!.surface).toMatchObject({ kind: "browser", threadId });
   });
 
+  it("offers an announced session to the dock before opening a pane", async () => {
+    const openDockBrowser = vi.fn(() => true);
+    const { result, server, threadId } = await readyBoundCodeShell(windowId, { openDockBrowser });
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    const executeCalls = server.execute.mock.calls.length;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+
+    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId) });
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+    expect(
+      panes(result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("opens a pane when the dock declines the announced session", async () => {
+    const openDockBrowser = vi.fn(() => false);
+    const { result, threadId } = await readyBoundCodeShell(windowId, { openDockBrowser });
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+
+    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId) });
+    const browserPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "browser",
+    );
+    expect(browserPanes).toHaveLength(1);
+    expect(browserPanes[0]!.surface).toMatchObject({ kind: "browser", threadId });
+  });
+
   it("does not reopen the same Browser session after another announcement", async () => {
     const { result, server, threadId } = await readyBoundCodeShell();
     const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
@@ -963,6 +1013,28 @@ describe("useShellController", () => {
         operation: expect.objectContaining({ kind: "split-pane", mode: "code" }),
       }),
     );
+  });
+
+  it("splits a Browser pane bound to the context a link open created", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const sourcePane = firstPane(result.current.workspace!.layouts.code);
+    const contextId = "60000000-0000-4000-8000-000000000001" as never;
+
+    let adopted!: boolean;
+    await act(async () => {
+      adopted = await result.current.openSurfaceInSplit("browser", sourcePane.paneId, contextId);
+    });
+
+    expect(adopted).toBe(true);
+    const browserPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "browser",
+    );
+    expect(browserPanes).toHaveLength(1);
+    expect(browserPanes[0]!.surface).toMatchObject({
+      kind: "browser",
+      threadId,
+      contextId,
+    });
   });
 
   it("offers a real Project window when a thread selection crosses workspace authority", async () => {

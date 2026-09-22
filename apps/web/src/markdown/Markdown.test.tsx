@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { Markdown } from "./Markdown";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { Markdown, MarkdownLinkActionsContext } from "./Markdown";
 
 describe("Markdown", () => {
   it("renders the syntax the two parsers it replaced each only half supported", () => {
@@ -110,5 +110,68 @@ describe("Markdown", () => {
     expect(screen.getByText(/See TICKET-12 in/)).toBeInTheDocument();
     // A code span is not prose, so its text survives verbatim.
     expect(screen.getByText("#34").tagName).toBe("CODE");
+  });
+
+  it("routes a link click through the surface's in-app open when it has one", () => {
+    const openInApp = vi.fn();
+    const openExternal = vi.fn();
+    render(
+      <MarkdownLinkActionsContext.Provider value={{ openExternal, openInApp }}>
+        <Markdown body="See [the docs](https://example.com/docs)." />
+      </MarkdownLinkActionsContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "the docs" }));
+
+    expect(openInApp).toHaveBeenCalledWith("https://example.com/docs");
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the external open for a link whose surface has no Browser", () => {
+    const openExternal = vi.fn();
+    render(
+      <MarkdownLinkActionsContext.Provider value={{ openExternal }}>
+        <Markdown body="See [the docs](https://example.com/docs)." />
+      </MarkdownLinkActionsContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "the docs" }));
+
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("offers in-app, external, and copy actions on a link's context menu", async () => {
+    const openInApp = vi.fn();
+    const openExternal = vi.fn();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <MarkdownLinkActionsContext.Provider value={{ openExternal, openInApp }}>
+        <Markdown body="See [the docs](https://example.com/docs)." />
+      </MarkdownLinkActionsContext.Provider>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "the docs" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Open in Octant" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Open in external browser" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Copy URL" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy URL" }));
+    expect(writeText).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("disables the in-app open where the surface cannot host a Browser", async () => {
+    render(<Markdown body="See [the docs](https://example.com/docs)." />);
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "the docs" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Open in Octant" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 });

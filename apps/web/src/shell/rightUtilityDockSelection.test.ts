@@ -42,6 +42,20 @@ describe("thread-owned right utility dock tabs", () => {
     });
   });
 
+  it("binds a dedicated Browser context to the tab that adopted it", () => {
+    const key = threadUtilityDockKey("code", "thread-a");
+    const tabId = "10000000-0000-4000-8000-000000000001";
+    const contextId = "60000000-0000-4000-8000-000000000001";
+    let states: ThreadUtilityDockStates = new Map();
+
+    states = addThreadUtilityTab(states, key, "browser", tabId, contextId);
+
+    expect(threadUtilityDockState(states, key)).toEqual({
+      tabs: [{ id: tabId, surface: "browser", browserContextId: contextId }],
+      active: tabId,
+    });
+  });
+
   it("restores each thread's open tabs and selected tab without sharing state", () => {
     const first = threadUtilityDockKey("code", "thread-a");
     const second = threadUtilityDockKey("code", "thread-b");
