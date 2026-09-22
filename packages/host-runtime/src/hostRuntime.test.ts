@@ -1064,6 +1064,52 @@ describe("single owner control socket", () => {
     expect(await readFile(paths.controlSecretPath, "utf8")).not.toBe("orphaned-control-secret");
   });
 
+  it("leaves a control secret in place when a socket appears before quarantine", async () => {
+    const runtimeBase = await realpath(tmpdir());
+    const root = await mkdtemp(join(runtimeBase, "octant-orphan-secret-race-"));
+    temporaryRoots.push(root);
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: join(root, "data") },
+      platform: filesystemTestPlatform,
+      home: join(root, "home"),
+      temporaryDirectory: runtimeBase,
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    await writeFile(paths.controlSecretPath, "live-control-secret", { mode: 0o600 });
+    let server: Server | undefined;
+    try {
+      await expect(
+        acquireHostRuntimeOwner({
+          paths,
+          hostId: "11111111-1111-4111-8111-111111111111",
+          instanceId: "33333333-3333-4333-8333-333333333333",
+          serverVersion: "1.2.3",
+          wireVersion: "1",
+          serviceMode: "foreground",
+          processStart: "competitor",
+          processAlive: () => false,
+          beforeSocketlessSecretQuarantine: async () => {
+            server = createServer((socket) => socket.destroy());
+            await new Promise<void>((resolve, reject) => {
+              server?.once("error", reject);
+              server?.listen(paths.socketPath, () => resolve());
+            });
+          },
+        }),
+      ).rejects.toMatchObject({ code: "owner-unhealthy" });
+      expect(await readFile(paths.controlSecretPath, "utf8")).toBe("live-control-secret");
+    } finally {
+      await new Promise<void>((resolve) => {
+        if (server === undefined) {
+          resolve();
+          return;
+        }
+        server.close(() => resolve());
+      });
+    }
+  });
+
   it("preserves a receipt-only owner when its process identity is still live", async () => {
     const runtimeBase = await realpath(tmpdir());
     const root = await mkdtemp(join(runtimeBase, "octant-receipt-only-live-owner-"));
