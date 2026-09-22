@@ -1,7 +1,7 @@
 import type { CodeCheckoutId, CodeCheckoutIdentity, CodeThreadId } from "@octant/contracts";
 import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import type { CodeFileListingClient } from "@octant/client-runtime";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useCodeFileListingController } from "../code/useCodeFileListingController";
 
 export interface AppleProjectEntry {
@@ -17,10 +17,10 @@ export interface UseAppleProjectsOptions {
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
   /**
-   * The checkout's availability as the thread view reports it. The host
-   * answers a listing with `waiting` while it is still resolving the checkout,
-   * and this one-shot read would keep that refusal for the life of the view,
-   * so it waits for `available` instead of asking early.
+   * The checkout's availability as the thread view reports it, used to retry
+   * a failed listing. It does not gate the read: the listing endpoint resolves
+   * the checkout root itself, so a view stuck on `waiting` can still list —
+   * gating on it hid the Simulator tool for the life of the view instead.
    */
   readonly checkoutAvailability?: CodeCheckoutIdentity["availability"] | undefined;
   readonly serverUrl?: string;
@@ -40,10 +40,7 @@ export function useAppleProjects(
   options: UseAppleProjectsOptions,
 ): ReadonlyArray<AppleProjectEntry> {
   const controller = useCodeFileListingController({
-    enabled:
-      options.threadId !== undefined &&
-      options.checkoutId !== undefined &&
-      options.checkoutAvailability === "available",
+    enabled: options.threadId !== undefined && options.checkoutId !== undefined,
     watch: false,
     ...(options.client === undefined ? {} : { client: options.client }),
     ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
@@ -51,8 +48,21 @@ export function useAppleProjects(
     ...(options.serverUrl === undefined ? {} : { serverUrl: options.serverUrl }),
     ...(options.windowCapability === undefined
       ? {}
-      : { windowCapability: options.windowCapability }),
+        : { windowCapability: options.windowCapability }),
   });
+  // A listing that ran while the host was still resolving the checkout fails
+  // once; when the view's availability next changes, try again. The retry is
+  // bounded by the availability transitions (waiting/unavailable/available),
+  // so a genuinely unavailable checkout costs one request, not a poll.
+  const availability = options.checkoutAvailability;
+  const seenAvailability = useRef(availability);
+  const status = controller.status;
+  const refresh = controller.refresh;
+  useEffect(() => {
+    if (seenAvailability.current === availability) return;
+    seenAvailability.current = availability;
+    if (status === "error") void refresh();
+  }, [availability, status, refresh]);
   const entries = controller.entries;
   return useMemo(
     () =>
