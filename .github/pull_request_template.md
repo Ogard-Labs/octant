@@ -4,11 +4,17 @@ One or two sentences: what changes and why a user or contributor cares.
 
 ## How to verify
 
-Commands you ran and what you observed. Mention anything you could not run.
+Map changed acceptance criteria to evidence: check/scenario, commit or build,
+environment, result, and limitations. Existing evidence may be reused when its
+relevant inputs are unchanged; label cached results. Name any exact remaining
+closure action and its owner.
 
 ## Checklist
 
-- [ ] Tests cover the changed behavior, or this PR explains why none were practical
-- [ ] `bun run verify` passes locally (or CI is green)
-- [ ] Docs updated when user-visible behavior, setup, or architecture changed
+- [ ] Existing or new coverage and applicable acceptance checks prove the changed behavior; omissions are explained
+- [ ] Applicable local checks pass under AGENTS.md; required exact-head CI must pass before merge
+- [ ] Current specification and affected user docs describe the resulting behavior; conflicting summaries are reconciled
 - [ ] No unrelated changes
+
+Issue closure follows [AGENTS.md](../AGENTS.md#issue-closeout). A passing check
+or ready PR alone does not imply that the issue's delivery target is met.

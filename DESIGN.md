@@ -1,10 +1,21 @@
 # Octant design system
 
-This is the implementation-authoritative visual contract for every Octant
-surface: desktop and web, mobile, public documentation, and marketing material.
-It describes the system that is in the repository now; it is not a proposal or
-a visual mood board. When this document and a touched surface disagree, update
-the surface or record the intentional platform adaptation in the same change.
+This is the current visual specification for Octant surfaces: desktop and web,
+mobile, public documentation, and marketing material. [Workspace behavior](docs/design/workspace.md)
+owns navigation and pane interactions; [architecture](docs/architecture.md) owns
+system and authority boundaries. Use the [design workflow](docs/design/README.md)
+to update this document in place with an approved design change. Historical ADR
+numbers explain provenance; their older visual rules do not override this text.
+
+Read the relevant section rather than the entire document:
+
+- [Typography](#typography), [colour](#colour-system), and [materials](#spacing-shapes-and-depth)
+  for visual defaults and safe theme behavior.
+- [Transcript](#transcript) and [welcome/composer](#welcome-and-composer) for reading and input surfaces.
+- [Shell and layout](#shell-and-layout) for sidebar, Settings, dock, and responsive presentation.
+- [Component ownership](#component-ownership-and-composition) for shared controls.
+- [Accessibility](#accessibility-and-reliability) and the [implementation checklist](#implementation-checklist)
+  for verification of changed surfaces.
 
 ## Product character
 
@@ -145,6 +156,18 @@ row immediately above the card, so the composer stays a single object.
 The row wraps rather than grows: a control that needs a list ("Create
 from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
+
+First-run setup is optional from its first step. Skipping preserves settled answers,
+waits for pending writes, and grants no authority. Profile editing has its own
+Personal settings destination. Code suggestions keep their full descriptions
+visible; Continue retains compact recent-task rows and their status and Git cues.
+Empty Code entry offers folder setup and a direct route to Code settings.
+
+The compact model picker uses explicit horizontal provider selection, sub-provider
+grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
+discrete stops, and filled range. Explicit model and reasoning choices are remembered
+locally for new threads; reasoning is keyed by provider/model and restored only while
+supported. Existing thread selections remain authoritative.
 
 The screen sits on the application ground (0091, 0129): an ordered-dither cloud
 drawn from the theme's bounded pattern palette at one cell per three pixels, one of the
@@ -362,6 +385,17 @@ Typography has distinct jobs:
 | Editor     | `'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
 | Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                                                         | Terminal output and prompt glyphs                                                  |
 
+The default interface is Inter at 13px and weight 400; transcript text defaults
+to 13px. The editor defaults to 13px, line height 1.5, and enabled ligatures.
+The terminal defaults to 12px, line height 1.4, and disabled ligatures.
+
+The legacy saved interface stack beginning `-apple-system, BlinkMacSystemFont`
+continues to mean the default face. The explicit System interface choice saves
+`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` so it
+remains distinct. Legacy explicit System selections that used the default's
+identical string cannot be distinguished and need reselection. This preference
+semantics is the reason for the two spellings, not a second typography authority.
+
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
 URLs, imports, remote assets, executable payloads, or control characters. Missing
@@ -540,7 +574,8 @@ overview, or Project-level list. An unsplit conversation uses the title band
 for the Project/mode breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
 their own pane headers and lifecycle controls. Capability-gated toggles for
-Open in, Environment, bottom panel, and right dock remain window chrome. Zen
+Open in, bottom panel, and right dock remain window chrome. Environment is
+opened from the dock tab strip or Add tool. Zen
 remains in the bottom-left identity menu.
 
 Zen arranges itself. A space tiles its cards from their number and the room it
@@ -576,15 +611,12 @@ The app has three server-enforced modes—Chat, Work, and Code. Mode switching i
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
-compact thread list. Opening Projects keeps global navigation in the primary
-sidebar and places the complete Project collection in a persistent adjacent pane,
-never in the main workspace. The collection remains sidebar-owned for navigation
-and responsive behavior, but uses the same material as the Project detail with only
-a hairline division, so it does not read as a second navigation sidebar. It provides
-search and All, Chat, Work, and Code filters; selecting a Project updates the adjacent
-main detail pane without leaving the collection. The detail is thread-first,
-with Project memory, provider access, and canvases in compact expandable rows
-below the primary work. The thread list is named Chats for threads filed in no
+compact thread list. The Projects directory and the selected Project overview
+occupy the main workspace in turn, following the
+[workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
+The directory provides search and All, Chat, Work, and Code filters. Project
+detail is thread-first, with memory, provider access, and canvases in compact
+expandable rows below the primary work. The thread list is named Chats for threads filed in no
 Project; Work and Code call it Recents. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
@@ -625,8 +657,8 @@ Settings is a grouped form page. The shared resizable navigation rail and
 search remain fixed while one centred, bounded 920px reading column scrolls.
 A 32–64px workspace gutter protects the content at narrower widths. The page
 title, quiet section captions, and primary field labels have distinct roles;
-sections follow a consistent 28px rhythm. Navigation groups use quiet separators
-rather than competing labels. A section is an open object: its content is one
+sections follow a consistent 28px rhythm. Navigation groups use quiet
+sentence-case labels without hairlines between groups. A section is an open object: its content is one
 hairline-separated row list on the page ground, while the label and its one-line
 description remain outside the list. Discrete editors and protected actions may
 retain a bounded surface when their hierarchy requires it.
@@ -964,9 +996,10 @@ When adding or touching UI:
 - Feature styles position product surfaces; adapters paint shared controls.
   When migrating an old control, remove the replaced paint rules rather than
   keeping a parallel recipe.
-- Glass is the material for a surface with a ground behind it: the phone, Zen
-  on the desktop (0107), and a thread over the application ground, where the
-  reply card, the person's bubble, and the composer wear it (0150). Its tint,
+- Glass is the material for a surface with a ground behind it: the phone, Zen,
+  and a thread's user bubbles and composer over the application ground.
+  Agent replies stay bare prose on the continuous conversation reading surface
+  described in [Transcript](#transcript). Its tint,
   stroke, and highlight are theme roles like every other colour; what those
   surfaces get is a different material, not a second palette. Do not copy mobile atmosphere or phone radii
   into a flat desktop pane, and do not bring a blur onto a pane that has no

@@ -3,15 +3,12 @@
 Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
 providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
 desktop are the same product under [decisions/0058-cross-platform-desktop.md](decisions/0058-cross-platform-desktop.md).
-This document is the single architecture overview for the
-repository. It describes the shape of the system as it exists in code; the
-decision records under `docs/decisions/` explain why individual choices were
-made.
-
-Projects opens its searchable directory in the main workspace. Selecting a Project
-replaces that directory with the Project overview; Projects in primary navigation
-returns to the directory. Neither view adds a second sidebar. Other destinations
-replace the directory while preserving the underlying Project selection.
+This is the current architecture specification. Read the relevant section for
+system boundaries; use the [design index](design/README.md) for topic owners.
+Edit the current rule with an approved change in the same PR. Historical links
+provide rationale and supporting detail, not a competing source of authority.
+Sections explicitly label approved designs that are not yet fully implemented;
+archive status alone is neither approval nor implementation evidence.
 
 Code task creation accepts a plain-folder checkout when the server admits it under
 Code settings. The renderer preserves its proposed branch as delivery intent without
@@ -268,6 +265,47 @@ runtime. Ordinary inherited configuration does not supply that attestation and
 continues to report app tools as unsupported. Process exit, stream failure,
 interruption, and scope cleanup retire pending tool requests.
 
+### Device transport and evidence
+
+The iOS Simulator dock tab
+is a device pane: the Simulator's screen streamed through the
+host as it changes, authorized like a screenshot and never stored (see
+[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
+or the latest host-held screenshot evidence when there is no live view — with
+honest setup, unavailable, booting, live, interrupted, and stale-after-restart
+states; closing the tab does not shut down the destination. An agent's
+`octant_apple` `boot`, `run`, or `open` raises that pane once per request
+instead of launching Simulator.app (see
+[decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
+Apple artifact and restart-receipt reads validate regular-file identity and size
+on an open handle before allocation. Reads reject linked files and size changes,
+with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
+rewritten.
+An Android emulator is a separate dock destination and `octant_android` tool,
+not an iOS helper feature
+([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
+Tap, typed text,
+and hardware-key input ride the same Apple workbench control channel as boot
+and screenshot, with XCTest-less host injection behind that channel only,
+computer-use-style actor attribution, and the same remote/headless fail-closed
+attach gate (see
+[decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+On an approval-gated thread, **Allow input** is the confirmation that opens
+that destination; clicks, typing, Home, and Lock never raise it
+([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
+Under the desktop app that injection is the native device helper of 0137: a
+tap is a point on the captured screen, typed text is letters, digits, spaces
+and new lines, and every refusal names the helper's own reason. Without that
+helper every input kind is unavailable; Octant does not script Simulator.app
+to inject a tap, swipe, typed text, or key
+([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
+fourth input kind on the same channel, for the pane and for `octant_apple`
+alike, and the live screen is driven directly: a press and release is a tap, a
+drag is one swipe sent when it ends, keys typed on the focused screen go to
+the device as one text per pause, Home and Lock are buttons, and what a person
+does while an action runs is kept and sent in order (see
+[decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+
 ## Modes: Chat, Work, and Code
 
 Modes are server-enforced domain policy, not renderer flags. Chat and Work can
@@ -361,7 +399,7 @@ excerpts and beyond that Chat one-hop tool, is designed in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
 and
 [security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
-The record is still Proposed, and implementation is gated on its acceptance and
+Broader messaging still requires explicit maintainer approval of its design and
 threat-model sign-off; the journaled contracts, pure clamps, delivery service,
 Code turn tool registration, and the Agents center's messaging bounds view now
 exist so that review happens against real code, delivered behind the
@@ -385,299 +423,11 @@ stays in the transcript's activity rows.
 
 ## Workspace shell
 
-The window is mode-first: a persistent left sidebar with the Chat, Work, and
-Code selector, mode-aware destinations, Projects and threads, and settings; an
-integrated borderless top chrome; a central workspace; and an optional right
-dock. Mode changes alter content, authority, default composition, and density,
-never the navigation grammar. See [decisions/0015-workspace-shell-model.md](decisions/0015-workspace-shell-model.md).
-
-Chat, Work, and Code keep the active mode's sidebar current with projection-only
-navigation reads (`GET /api/chat/navigation`, `GET /api/work/navigation`,
-`GET /api/code/navigation`). Work bootstrap still validates Project roots, while
-the Work navigation read uses only active Work Project and thread projections plus
-in-process runtime state. Code bootstrap still observes waiting checkouts on the filesystem so a restart can
-recover them; available and unavailable checkouts are not re-probed, and the
-sidebar timer never walks the checkout tree. Inactive modes and hidden windows
-pause those refreshes so background ticks do not contend with the next
-interaction.
-
-A Chat, Work, or Code thread has two resting states beside archive, both fields
-on the thread aggregate rather than lifecycle values: **completed**
-(`completedAt`, manual only, refused by each mode's service while a turn runs
-or the thread waits on the person) and **snoozed** (`snooze.until`, an overlay
-that hides the row until the wake time and wakes it early when the agent needs
-the person or a turn that was running at snooze time ends). The sidebar files
-both in collapsed shelves below the Project groups and derives snooze
-visibility from the clock; no host timer wakes a snooze. The Work and Code
-boards leave out completed threads until they are reopened. A person sending a
-thread a turn reopens or wakes it on the server. One host sweep archives
-completed threads of every mode once their completion is older than the
-`completedThreadArchiveAfterDays` shell setting (default seven days, `null`
-for never), re-deciding against each mode's authoritative record and
-journaling the ordinary thread update as the `system` actor. It archives only;
-see [decisions/0088-completed-and-snoozed-threads.md](decisions/0088-completed-and-snoozed-threads.md).
-
-**Current shipped behavior.** The central workspace is one persistent recursive
-split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome. A pane retains renderer-session
-navigation tabs for conversations, files, previews, and canvases; selecting a
-tab reopens that surface through the authoritative command path. Image creation
-and revision occupy pane-owned tabs whose drafts remain mounted while switching
-back to the conversation. These tabs add no persisted layout or authority; see
-[decision 0156](decisions/0156-content-opens-beside-the-conversation.md).
-Several same-authority threads can be pinned or dropped into
-that tree; pointer activity and keyboard input give exactly one pane a visible
-accessible active state. Completed layout operations go through
-server-authoritative workspace commands. One visible tree belongs to one
-authority context (host, mode, Project, and bound root); a cross-Project,
-cross-mode, or cross-host placement is refused or offered in a new window.
-Thread utilities live in the Right Utility Dock outside the split tree.
-The shell loads each tool through `dockModuleRegistry`; modules under
-`apps/web/src/dockModules` receive only declared inputs and contain render
-failures. Review owns local Working tree and Git History views. History reads
-through `GitHistoryReader` and the authenticated Code checkout-read boundary;
-its Git subprocesses are network-denied and its data is an ephemeral read,
-not a second journal. Pages anchor to immutable Git tips, and commit details
-compare immutable object IDs with an explicit parent for merges.
-The
-top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. An available empty dock shows a compact launcher;
-an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
-Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Document shows the
-Markdown or text file the Code thread's turn most recently wrote, read through
-the host-authorized file open; the renderer offers a written document (or a
-Chat-authored Canvas) in the dock once per document, never after the person
-closed its tab, and never by moving focus. Hand off (`POST
-/api/threads/hand-off`) starts from the thread export cut, asks the thread's
-own provider for a six-section hand-off document in one tool-free request,
-keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
-running turn, an unready provider, or a thread outside a Project is refused as
-an ordinary answer (see
-[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
-pane's thread and Project, restores that subject's open tools, and presents an
-explicit unavailable state when the newly active pane cannot describe the
-selected tool — never the previous pane's content. Hiding a Browser or Terminal
-tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
-is a device pane: the Simulator's screen streamed through the
-host as it changes, authorized like a screenshot and never stored (see
-[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
-or the latest host-held screenshot evidence when there is no live view — with
-honest setup, unavailable, booting, live, interrupted, and stale-after-restart
-states; closing the tab does not shut down the destination. An agent's
-`octant_apple` `boot`, `run`, or `open` raises that pane once per request
-instead of launching Simulator.app (see
-[decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
-Apple artifact and restart-receipt reads validate regular-file identity and size
-on an open handle before allocation. Reads reject linked files and size changes,
-with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
-rewritten.
-An Android emulator is a separate dock destination and `octant_android` tool,
-not an iOS helper feature
-([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
-Tap, typed text,
-and hardware-key input ride the same Apple workbench control channel as boot
-and screenshot, with XCTest-less host injection behind that channel only,
-computer-use-style actor attribution, and the same remote/headless fail-closed
-attach gate (see
-[decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
-On an approval-gated thread, **Allow input** is the confirmation that opens
-that destination; clicks, typing, Home, and Lock never raise it
-([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
-Under the desktop app that injection is the native device helper of 0137: a
-tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason. Without that
-helper every input kind is unavailable; Octant does not script Simulator.app
-to inject a tap, swipe, typed text, or key
-([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
-fourth input kind on the same channel, for the pane and for `octant_apple`
-alike, and the live screen is driven directly: a press and release is a tap, a
-drag is one swipe sent when it ends, keys typed on the focused screen go to
-the device as one text per pause, Home and Lock are buttons, and what a person
-does while an action runs is kept and sent in order (see
-[decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
-At narrow widths the dock becomes an overlay drawer. Environment belongs to a
-thread as a context-aware dock tab opened from the title-bar shortcut or Add
-tool. It may
-summarize the active thread's server-authored child AgentRuns, including their
-lifecycle, resolved model, and retained final result; full AgentRun control
-stays in the Agents dock. The workspace-rail Agents Center is that same
-hierarchy across modes; on a wide window it can draw the current query as a
-forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. Environment may show a compact read-only preview of
-the host's bounded, process-local child conversation read: entries are
-cursor-readable and byte- and count-bounded, with explicit complete, stale, and
-unavailable states. Provider-native live transcripts remain unavailable unless
-their normalized provider capability supplies an equivalent host-authorized
-read; a host-retained final reply stays readable after completion. See
-[decisions/0050-bounded-live-child-conversation.md](decisions/0050-bounded-live-child-conversation.md).
-Work and Code have server-authoritative thread boards
-(Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. Code also has a Project-scoped Pull requests workspace that
-lists active open and draft pull requests from authorized connected Code
-Projects. The same cached read backs the right dock's Pull requests tool,
-scoped to the active Code thread's Project. The list is a cached read of a
-private host-local snapshot: opening it, navigating, and ordinary board
-queries do not call GitHub. GitHub is reached
-only by an explicit Refresh all or per-Project refresh, or — for Projects that
-opted in — by a bounded background refresh cadence, all through the installed
-authenticated `gh` CLI. The cadence is a journaled per-Project setting, off by
-default, floored at 30 seconds with a conservative default interval, backs off
-on failure without advancing its per-Project sync position, skips re-observing
-cached merged/closed identities, and stops with an honest `unavailable` state
-when `gh` is missing or unauthenticated. Independent repository reads run
-concurrently, results reconcile in stable Project order, and every refresh path
-remains within preview bounds. The journal never stores that cache and never
-sees a per-poll event; it stores only the user's opt-in toggle and exact PR
-identities already produced by Code operations. The bounded list cache survives
-host restart and is cleared when GitHub authority is revoked (see
-[decisions/0064-pull-request-observation-cadence.md](decisions/0064-pull-request-observation-cadence.md)
-and
-[decisions/0076-pull-request-snapshot-survives-restart.md](decisions/0076-pull-request-snapshot-survives-restart.md)).
-
-**GitHub issue browser.** The first-party GitHub plugin contributes a second
-`sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
-issue browser. The sidebar row is shown only when the contribution is present,
-its action is wired, and the authentication snapshot reports `issues-read`
-available. Catalogue reads stay on the existing `githubCatalogue` union over
-`/api/github/catalogue/reads`: `kind: "issues"` includes optional
-server-composed search, and `kind: "issue"` returns a bounded detail. The
-browser renders title, body, and comments as plain text; links stay inert full
-URLs.
-
-Create-from-issue is implemented. The composer `Create from…` Issues tab
-attaches only `{ owner, name, number }` to the draft. At creation the server
-reauthorizes `issues-read`, frames redacted issue text through
-`apps/server/src/context/externalContentFraming.ts`, and appends
-`thread.external-content-ingested@1`. Refusal fails creation visibly. The
-resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
-Disabled GitHub, missing capability, and unauthorized or rate-limited states
-fail closed. See
-[security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
-
-**GitHub repository onboarding.** The managed clone flow turns one confirmed GitHub repository
-into one ordinary Code Project: the composer's Project menu offers "New Project from GitHub
-repository" against the host's managed repository inventory, and the Create Project dialog offers
-a Folder | GitHub source switch whose GitHub side clones into a parent folder the person chooses
-through a host-issued binding receipt (native picker or host folder browser, so a headless host is
-served the same way) plus one folder-name segment. Repositories come from the searchable catalogue
-of what the signed-in `gh` account can reach, or from a pasted link or `owner/name` the renderer
-reduces to owner/name for a fresh server-side `gh api repos/<owner>/<name>` resolution — no clone
-URL is ever a client input. The clone stages on the same filesystem as its destination, verifies
-the staged object's GitHub node identity and origin before any working tree is materialized,
-promotes atomically without overwriting, and only then issues the one-time binding receipt the
-Project is created from; everything is journaled, cancels cleanly, quarantines instead of
-deleting, and reconciles after restart without re-running work.
-
-Code also has a host-scoped Linear issues workspace contributed by the
-bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
-only. The sidebar row is shown only when that contribution is effective, its
-action is wired, and the Linear authentication snapshot reports `list-issues`
-available. Browse goes through the Integration port (`list-issues`,
-`get-issue`, `list-issue-filters`) over Linear GraphQL with bounded page size
-and description bytes. Issue bodies are a live projection, not Octant source of
-truth; credentials and raw API payloads never enter prompts or tool output.
-Open in Linear is an external `linear.app` URL. Disabled, untrusted,
-unauthorized, expired, or rate-limited Linear contributes no sidebar item,
-catalogue rows, or thread context. Chat/Work browse and Linear writes are not
-this surface.
-
-Composer `Create from…` also exposes a Linear tab when the Settings-owned
-connection reports `list-issues` available and the Linear plugin is effective.
-Selecting a row attaches only `{ id }`. At creation the server reauthorizes
-through the Integration port, frames redacted issue text
-(`identifier`, status, description, comments, links) via
-`externalContentFraming.ts`, and appends `thread.external-content-ingested@1`.
-Refusal fails creation visibly. No Linear write-back path exists.
-
-Context usage is a circular used-versus-available meter on
-the active thread's composer; opening it shows an authoritative breakdown
-popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
-model and service limit provenance and inspection metadata in the journal-backed
-plan projection. Inspection restores those saved facts after a host restart
-without querying the provider; saved observation timestamps remain unchanged.
-Older plans without inspection metadata remain unavailable until a new turn
-establishes it. Work includes native instructions, Browser guidance, and tool
-definitions in its planned input, checks available provider-reported context bounds
-before dispatch, and reconciles reported usage with the dispatched plan. Maximum
-output is optional: an unknown limit stays unavailable rather than being inferred
-from a response reservation. Emergency admission budgets are explicitly marked as
-conservative fallbacks. A matching runtime window from the same provider, model,
-and request shape is retained across restart and participates in subsequent
-planning; it replaces emergency estimates while conflicting model facts retain
-the more conservative bound.
-Provider-managed Code turns also contribute their journaled token reports to the
-usage ledger. One operation contributes one request; a later report replaces its
-previous totals. Code conversation usage also preserves optional cache-read and cache-write
-counters. Codex native-thread totals are normalized to turn usage before recording;
-missing cache reports remain unknown. ACP and Pi resume cursors carry a durable
-task binding, and resume supplies the currently allowed tool catalogue without
-reconstructing native history. Chat and Work reuse provider-owned sessions across
-follow-ups; Chat retries retain that identity and native scratch files. Native
-Chat editing refuses where rollback is unavailable, so it cannot replace the
-conversation behind the user's back ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
-upgrade without replaying unrelated purged usage. The provider and model are
-those recorded when the turn started, including after a later handoff. These
-turns have no Octant planning estimate or variance: APIs omit those fields and
-the request-detail table labels them unavailable.
-
-Native Chat, Work, and Code resume acknowledgements may omit an unchanged resume
-cursor. The host retains the already-admitted cursor in that case and persists a
-replacement when one is returned. A changed session identity or an initial native
-session without a recoverable cursor still fails closed; no transcript replay or
-replacement conversation repairs the missing identity. Work and Chat also refuse
-a follow-up that switches between provider-owned and host-owned conversation
-history; switching adapters cannot implicitly replace an existing native task.
-Work also refuses when the previous driver is unavailable and its conversation
-ownership cannot be established.
-
-Optional Project and
-thread token spend ceilings (0060) are host owner policy: the server refuses a
-provider-consuming turn at admission when remaining reserved capacity cannot
-cover a declared per-turn bound, and the composer and Environment name a
-recovery. Spend is the existing `UsageRecord` ledger, never imported provider
-history. Project overviews retain loaded content during same-Project refreshes
-on the same client connection. Changing Project or client clears retained
-content; disconnect and authorization failures remain explicit unavailable
-states. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
-as an app-wide popover from the bottom-left profile and Settings control, and
-opening it never changes the active Project or thread. Zen is a separate
-presentation aggregate inside the same window, not a split-tree tab and not a
-fourth authority mode.
-
-**Approved migration, not yet fully the renderer.** Proposed records
-[0041](decisions/0041-panes-hold-one-surface.md) and
-[0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
-interaction model for remaining renderer work.
-[0070](decisions/0070-setup-surfaces-compose-from-public-blocks.md)
-is the accepted visual language: raise grouped forms and setup objects, enlarge
-radii, and match public block composition on Octant-owned surfaces, without
-vendoring a catalog or replacing the shell. Environment is a context-aware
-thread-owned dock tab and may include a truthful child-run summary
-([0045](decisions/0045-environment-summarizes-the-active-thread.md),
-[0077](decisions/0077-environment-is-a-dock-tool.md)).
-[0071](decisions/0071-one-navigation-and-surface-hierarchy.md) refines that
-language: true tabs stay flat, segmented values keep an enclosed track, active
-pane identity stays on the grip, routine Settings rows remain open while
-discrete objects are raised, and narrow Settings uses a drawer.
-The dock already hosts live thread-owned tool instances — Files, Document,
-Browser, Terminal, Canvas, Side chat, artifact-gated Plan, conditional
-Delivery, thread-level Agents, and Review — rather than a generic Thread
-accordion.
-Open tools restore as per-window presentation keyed by thread; hiding a
-Browser or Terminal does not stop its server-owned lifecycle. Pane Add tab
-no longer mints those tools as split-tree surfaces. Local checkout changes
-open in Review beside the thread; the full-window Code diff is gone. Context
-usage already lives on the composer meter. Project memory already lives in
-Project Overview. Navigator is already one host-wide chat popover from the
-bottom-left profile and Settings control. Simulator placement is already
-[0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains
-the Accepted implemented shell until 0041 and 0044 are accepted.
-
-Local-server stop authority recognizes live terminal descendants by a host process
-snapshot and the tracked shell's process identity. An exited shell, a reused PID,
-or missing ownership evidence leaves the listener classified as a leftover and
-requires confirmation. Editor provenance labels alone never grant stop authority.
+[Workspace behavior](design/workspace.md) owns navigation, Projects, panes,
+content tabs, dock tools, and their presentation lifecycle. [DESIGN.md](../DESIGN.md)
+owns their visual treatment. Those current specifications replace the historical
+shell and visual-language migration descriptions; server authority and durable
+state remain owned by the architectural sections here.
 
 ## Persistence
 
@@ -900,6 +650,57 @@ modelId }`, and the model picker is provider-first. Discovery can find
   the consent redirect, then closes it. Connect fails closed when the public
   client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
+### Context and usage accounting
+
+Context usage is a circular used-versus-available meter on
+the active thread's composer; opening it shows an authoritative breakdown
+popover without a further provider call, and Inspect context opens the
+composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
+model and service limit provenance and inspection metadata in the journal-backed
+plan projection. Inspection restores those saved facts after a host restart
+without querying the provider; saved observation timestamps remain unchanged.
+Older plans without inspection metadata remain unavailable until a new turn
+establishes it. Work includes native instructions, Browser guidance, and tool
+definitions in its planned input, checks available provider-reported context bounds
+before dispatch, and reconciles reported usage with the dispatched plan. Maximum
+output is optional: an unknown limit stays unavailable rather than being inferred
+from a response reservation. Emergency admission budgets are explicitly marked as
+conservative fallbacks. A matching runtime window from the same provider, model,
+and request shape is retained across restart and participates in subsequent
+planning; it replaces emergency estimates while conflicting model facts retain
+the more conservative bound.
+Provider-managed Code turns also contribute their journaled token reports to the
+usage ledger. One operation contributes one request; a later report replaces its
+previous totals. Code conversation usage also preserves optional cache-read and cache-write
+counters. Codex native-thread totals are normalized to turn usage before recording;
+missing cache reports remain unknown. ACP and Pi resume cursors carry a durable
+task binding, and resume supplies the currently allowed tool catalogue without
+reconstructing native history. Chat and Work reuse provider-owned sessions across
+follow-ups; Chat retries retain that identity and native scratch files. Native
+Chat editing refuses where rollback is unavailable, so it cannot replace the
+conversation behind the user's back ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
+upgrade without replaying unrelated purged usage. The provider and model are
+those recorded when the turn started, including after a later handoff. These
+turns have no Octant planning estimate or variance: APIs omit those fields and
+the request-detail table labels them unavailable.
+
+Native Chat, Work, and Code resume acknowledgements may omit an unchanged resume
+cursor. The host retains the already-admitted cursor in that case and persists a
+replacement when one is returned. A changed session identity or an initial native
+session without a recoverable cursor still fails closed; no transcript replay or
+replacement conversation repairs the missing identity. Work and Chat also refuse
+a follow-up that switches between provider-owned and host-owned conversation
+history; switching adapters cannot implicitly replace an existing native task.
+Work also refuses when the previous driver is unavailable and its conversation
+ownership cannot be established.
+
+Optional Project and
+thread token spend ceilings (0060) are host owner policy: the server refuses a
+provider-consuming turn at admission when remaining reserved capacity cannot
+cover a declared per-turn bound, and the composer and Environment name a
+recovery. Spend is the existing `UsageRecord` ledger, never imported provider
+history.
+
 ### Native harness
 
 Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
@@ -1020,10 +821,51 @@ only while idle, and retain the previous version if startup fails. The driver
 never uses a standalone CuaDriver installation. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
 
-The path from this extensions model to a general plugin host — first-party
-features as toggleable plugins, renderer contribution points, integration and
-board plugin kinds — is recorded in
-[decisions/0001-plugin-architecture.md](decisions/0001-plugin-architecture.md).
+### Plugin boundaries and remaining extraction
+
+The approved design bounds a feature's reach through public, provider-neutral
+ports. New providers and tools use `@octant/provider-sdk`, `@octant/plugin-api`,
+and `@octant/plugin-host`; they do not gain direct access to host internals.
+Integration and board modules receive typed, capability-scoped ports, without raw
+filesystem, shell, or credential handles. OAuth access and refresh tokens remain
+in the host credential service; plugin state contains only opaque references.
+Plugin projections are namespaced by package id and remain rebuildable.
+
+These are the current extraction boundaries; eligibility is not a claim that the
+feature is already an independently packaged plugin:
+
+| Surface                                                               | Boundary to preserve                                                                                                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Thread boards                                                         | Separable projection and UI; Work/Code status policy stays host-owned and Chat has no board                                    |
+| GitHub and Linear                                                     | Integration ports and contributed views; no direct host-service wiring                                                         |
+| Canvas and preview viewers                                            | Scoped artifact contracts, renderer modules, and registered viewers                                                            |
+| Zen, backgrounds, theme presets                                       | Appearance contributions and their scoped state                                                                                |
+| Usage, diagnostics, Navigator, automations UI                         | Scoped reads/actions and independent presentation; underlying authority stays in the host                                      |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
+| Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
+| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
+
+The schema API, renderer contribution registry, vendor driver admission,
+Integration port, and plugin-module Settings/sidebar seams exist. The API is a
+curated re-export of contracts, preserving the contracts package's dependency
+direction. Some Settings rows remain host-compiled. Linear uses the Integration
+port as a bundled-off plugin; extracting the remaining GitHub and board packages
+and packaging remaining appearance/viewer assets is unfinished work, tracked in
+Linear rather than inferred from archive status.
+
+Preserve the extraction sequence: establish a provider-neutral port and renderer
+seam before moving a feature behind them; keep extraction separate from unrelated
+fixes; move remaining GitHub/board packages before the remaining appearance/viewer
+packaging. Changing host mode policy is a separate explicit design change, not a
+permission supplied by an integration plugin. The Integration kind stays Code-mode
+safe until that policy changes. Plugin disable preserves data and selections,
+drains running executables, and removes effective contributions; deleting
+credentials requires its own explicit confirmation.
+
+The rationale and original migration account remain in
+[0001](decisions/0001-plugin-architecture.md). This section owns the current
+boundary and approved direction; the archived proposal's status is not a delivery
+gate. The connector marketplace hold remains in force.
 
 ## Security and authority
 
@@ -1047,7 +889,7 @@ mechanisms are:
   (`docs/decisions/0104`); categories and confinement stay Octant's.
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
-  (`docs/decisions/0110`); that path is Proposed and does not yet run.
+  (`docs/decisions/0110`); that planned path does not yet run.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
@@ -1154,7 +996,7 @@ provider-neutral plugin and skill marketplace, signed and self-updating per
 [0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
 and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
 
-Two holds stay Later until dedicated decision records, published seams, and an
+Two holds stay Later until documented approved designs, published seams, and an
 explicit maintainer request open them:
 [connector / OAuth marketplace and full LSP / extension host / debugger](release-boundary-holds.md).
 The [roadmap Later](roadmap.md#later) list names the same deferrals among
