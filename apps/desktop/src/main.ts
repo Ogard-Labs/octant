@@ -133,7 +133,12 @@ import {
 } from "./serverProcess";
 import { createHostLifecycleController, type LocalHostDescriptor } from "./hostLifecycle";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
-import { buildMenuBarItems, formatRedactedHostDiagnostics } from "./menuBar";
+import {
+  buildMenuBarItems,
+  formatRedactedHostDiagnostics,
+  decodeMenuBarTasks,
+  type WindowMenuBarTask,
+} from "./menuBar";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
 import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
 import {
@@ -175,6 +180,8 @@ import {
 import { markHostInteraction } from "./interactionTrace";
 
 const IPC_CHANNELS = {
+  menuBarTasks: "octant:menu:tasks",
+  menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
   clearProviderCredential: "octant:provider-credential:clear",
@@ -1900,6 +1907,11 @@ async function createWindow(): Promise<void> {
       });
       preparationCleanup.trackThermalObserver(stopThermalPerformance);
 
+      window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+        if (!isMainFrame || isInPlace) return;
+        menuBarTasks.delete(window.id);
+        updateHostTray();
+      });
       window.webContents.on("did-finish-load", () => {
         window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
         window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
@@ -2121,6 +2133,11 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           rendererNavigationWebContents(window),
           rendererNavigationPolicyOptions(),
         );
+        window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+          if (!isMainFrame || isInPlace) return;
+          menuBarTasks.delete(window.id);
+          updateHostTray();
+        });
         window.webContents.on("did-finish-load", () => {
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
@@ -2181,24 +2198,40 @@ function hostStatusLabel(): string {
   return "Stopped";
 }
 
+const menuBarTasks = new Map<number, ReadonlyArray<WindowMenuBarTask>>();
+
 function updateHostTray(): void {
   if (hostTray === undefined) return;
   const snapshot = hostLifecycle.snapshot();
-  const items = buildMenuBarItems(snapshot);
-  const actions = new Map(items.map((item) => [item.id, item]));
-  const handler = (id: (typeof items)[number]["id"]): (() => void) | undefined => {
-    const item = actions.get(id);
-    if (item === undefined || !item.enabled) return undefined;
-    return () => void runMenuBarAction(id);
-  };
-  const template: MenuItemConstructorOptions[] = items.map((item) => {
-    const click = handler(item.id);
+  const items = buildMenuBarItems(snapshot, [...menuBarTasks.values()].flat());
+  const toTemplate = (item: (typeof items)[number]): MenuItemConstructorOptions => {
+    if (item.id === "separator") return { type: "separator" };
+    const task = item.task;
+    if (task !== undefined)
+      return {
+        label: item.label,
+        enabled: item.enabled,
+        click: () => {
+          const window = BrowserWindow.fromId(task.windowId);
+          if (window === null || window.isDestroyed()) return;
+          if (window.isMinimized()) window.restore();
+          window.show();
+          window.focus();
+          window.webContents.send(IPC_CHANNELS.menuBarTask, {
+            mode: task.mode,
+            threadId: task.threadId,
+          });
+        },
+      };
     return {
       label: item.label,
       enabled: item.enabled,
-      ...(click === undefined ? {} : { click: () => click() }),
+      ...(item.submenu === undefined
+        ? { click: () => void runMenuBarAction(item.id) }
+        : { submenu: item.submenu.map(toTemplate) }),
     };
-  });
+  };
+  const template = items.map(toTemplate);
   hostTray.setContextMenu(Menu.buildFromTemplate(template));
   hostTray.setToolTip(`Octant — ${hostStatusLabel()}`);
   hostTray.setTitle?.(snapshot.attentionRequired ? "!" : "");
@@ -2485,6 +2518,8 @@ function applyAttentionBadge(): void {
 }
 
 function forgetAttentionBadge(windowId: number): void {
+  menuBarTasks.delete(windowId);
+  updateHostTray();
   if (!attentionBadgeCounts.delete(windowId)) return;
   applyAttentionBadge();
 }
@@ -2525,6 +2560,15 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getHostIdentitySigningService(),
+  });
+  ipcMain.handle(IPC_CHANNELS.menuBarTasks, (event, value: unknown) => {
+    const { window } = ownedTopLevelWindowContext(event);
+    const tasks = decodeMenuBarTasks(value);
+    menuBarTasks.set(
+      window.id,
+      tasks.map((task) => ({ ...task, windowId: window.id })),
+    );
+    updateHostTray();
   });
   ipcMain.handle(IPC_CHANNELS.attentionNotify, (event, request: unknown) => {
     const window = ownedWindow(event);

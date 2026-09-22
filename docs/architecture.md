@@ -36,6 +36,22 @@ current application process before requesting its accessibility state or pixels.
 A vanished window returns a window-unavailable refusal directing the caller to
 list current windows; stale IDs are never silently retargeted.
 
+## Desktop menu bar
+
+The menu bar prioritizes Open Octant, New task, and compact Needs attention,
+Running, and Unread sections. Empty activity sections disappear. Local host
+contains status, browser access, applicable lifecycle controls, and redacted
+diagnostics; Quit Octant retains the existing active-work confirmation.
+
+Trusted top-level desktop windows contribute at most six task titles per activity
+from their existing sidebar state. Electron validates and deduplicates these
+bounded contributions, and a selection returns to the contributing window's
+ordinary task navigation. Contributions clear when that window closes or its
+renderer unloads; stopped hosts show no stale tasks. This is a view of open
+windows, not an additional host task registry. Titles never enter the public
+health response or redacted diagnostics. Separately managed hosts retain their
+existing lifecycle restrictions.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its

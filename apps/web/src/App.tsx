@@ -1,3 +1,4 @@
+import { useMenuBarTasks } from "./shell/useMenuBarTasks";
 import { MODEL_CHOICE_CHANGED, readLastModelChoice } from "./providers/modelChoiceMemory";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
@@ -3268,6 +3269,20 @@ function LaunchedShell(
     providerController.instances,
     workNavigation.navigation,
   ]);
+
+  useMenuBarTasks({
+    bridge: props.hostBridge,
+    ready: controller.status === "ready",
+    chat: navigationModel.markedChatNavigation,
+    work: navigationModel.workProjectThreads,
+    code: navigationModel.codeProjectThreads,
+    onSelect: (target) => {
+      if (controller.status !== "ready") return;
+      if (target.mode === "chat") selectChatThread(target.threadId);
+      else if (target.mode === "work") selectWorkThread(target.threadId);
+      else selectCodeThread(target.threadId);
+    },
+  });
 
   function mergeProjectPullRequest(
     method: CodeProjectPullRequestMergeMethod,
