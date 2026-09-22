@@ -148,7 +148,7 @@ function permissionRequest(id: string, toolCallId: string) {
     method: "session/request_permission" as const,
     params: {
       sessionId: "agent-session-1",
-      toolCall: { toolCallId, title: "Write", kind: "edit" },
+      toolCall: { toolCallId, title: "Write fixture file", kind: "edit" as const },
       options: [
         { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
         { optionId: "reject_once", name: "Reject", kind: "reject_once" },
@@ -161,14 +161,17 @@ function fixture(
   profile: AcpProviderProfile,
   overrides: Partial<Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory">> & {
     readonly mcpHttp?: boolean;
+    readonly nativeResume?: boolean;
+    readonly runtimeVersion?: string;
   } = {},
 ) {
   const client = new FakeClient(profile);
   const starts: Array<Record<string, unknown>> = [];
   let active = 0;
+  let peakActive = 0;
   let released = 0;
   const connection = {
-    version: "7.4.11",
+    version: overrides.runtimeVersion ?? "7.4.11",
     pid: 311,
     root: managedHome,
     initialized: {
@@ -176,7 +179,10 @@ function fixture(
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: { image: true, audio: false, embeddedContext: true },
-        sessionCapabilities: { list: {} },
+        sessionCapabilities: {
+          list: {},
+          ...(overrides.nativeResume === true ? { resume: {} } : {}),
+        },
         ...(overrides.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
       },
       authMethods: [{ id: "provider-auth" }],
@@ -192,6 +198,7 @@ function fixture(
       return Effect.acquireRelease(
         Effect.sync(() => {
           active += 1;
+          peakActive = Math.max(peakActive, active);
           return { ...connection, root: input.root };
         }),
         () =>
@@ -232,6 +239,7 @@ function fixture(
     starts,
     credentialResolver,
     active: () => active,
+    peakActive: () => peakActive,
     released: () => released,
   };
 }
@@ -266,6 +274,31 @@ async function collectTerminal(
 }
 
 describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
+  it("delivers immediate prompt output to every established subscriber", async () => {
+    const { driver } = fixture(profile);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          const first = yield* connection.subscribe;
+          const second = yield* connection.subscribe;
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const outputs = yield* Effect.all(
+            [first, second].map((events) =>
+              Stream.runCollect(
+                events.pipe(Stream.takeUntil((event) => event.kind === "completed")),
+              ),
+            ),
+            { concurrency: "unbounded" },
+          ).pipe(Effect.timeout("1 second"));
+          expect(Array.from(outputs[0] ?? [])).toEqual(Array.from(outputs[1] ?? []));
+          expect(Array.from(outputs[0] ?? []).at(-1)?.kind).toBe("completed");
+        }),
+      ),
+    );
+  });
+
   it("probes through the managed home and discovers models without a prompt", async () => {
     const { driver, client, registry, active, released, starts } = fixture(profile);
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -523,6 +556,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           },
           port: 43123,
           attested: Promise.resolve(),
+          bind: () => {},
           close: bridgeClose,
         };
       },
@@ -572,6 +606,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       },
       port: 43123,
       attested: Promise.resolve(),
+      bind: () => {},
       close: bridgeClose,
     }));
     const { driver, client } = fixture(profiles[0]!, { managedToolsBridgeFactory: bridgeFactory });
@@ -625,14 +660,16 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           },
           port: 43123,
           attested: Promise.resolve(),
+          bind: () => {},
           close: bridgeClose,
         };
       },
     );
-    const { driver } = fixture(profiles[0]!, {
+    const { driver, client } = fixture(profiles[0]!, {
       mcpHttp: true,
       managedToolsBridgeFactory: bridgeFactory,
     });
+    client.prompt.mockImplementation(() => new Promise(() => {}));
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
@@ -647,15 +684,21 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
               executionPolicy: "approval-gated",
               tools,
             });
+            yield* connection.send({
+              sessionId,
+              prompt: "use the browser",
+              attachments: [],
+              tools,
+            });
             if (execute === undefined)
               throw new Error("ACP managed tool handler was not registered.");
+            const stream = yield* connection.subscribe;
             const controller = new AbortController();
             const result = execute(
               "octant_browser",
               '{"operation":"read-page"}',
               controller.signal,
             );
-            const stream = yield* connection.subscribe;
             const requestFiber = yield* Effect.fork(
               Stream.runCollect(
                 stream.pipe(
@@ -703,6 +746,238 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         ),
       ).then((failure) => failure.category),
     ).resolves.toBe("invalid-configuration");
+  });
+
+  if (profile.kind === "mistral-vibe") {
+    it.each([
+      ["2.25.0", undefined, "supported"],
+      ["2.25.1", undefined, "unsupported"],
+      ["2.25.0", false, "unsupported"],
+    ] as const)(
+      "honors HTTP capability evidence for %s with advertisement %s",
+      async (runtimeVersion, http, expected) => {
+        const { driver, connection } = fixture(profile, { runtimeVersion });
+        if (http !== undefined)
+          Object.assign(connection.initialized.agentCapabilities, { mcpCapabilities: { http } });
+        await withProcessPlatform("darwin", async () => {
+          const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+          expect(result.capabilities.appManagedTools).toBe(expected);
+        });
+      },
+    );
+
+    it.each(["approval-gated", "full-access"] as const)(
+      "resumes a settled native conversation under %s without concurrent writers",
+      async (nextPolicy) => {
+        const { driver, client, registry, starts, active, peakActive } = fixture(profile, {
+          runtimeVersion: "2.25.0",
+        });
+        try {
+          const cursor = await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+                const handle = yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                });
+                const events = yield* Effect.fork(
+                  Stream.runCollect(
+                    (yield* connection.subscribe).pipe(
+                      Stream.takeUntil((event) => event.kind === "completed"),
+                    ),
+                  ),
+                );
+                yield* connection.send({
+                  sessionId,
+                  prompt: "remember",
+                  tools: [],
+                  attachments: [],
+                });
+                yield* Fiber.join(events);
+                yield* connection.stop(sessionId);
+                return handle.resumeCursor;
+              }),
+            ),
+          );
+          expect(active()).toBe(1);
+          if (cursor === undefined) throw new Error("Missing cursor");
+          const nativeIdentity = JSON.stringify(["acp-native", profile.kind, cursor.value]);
+          expect(registry.claimNativeSession(instanceId, nativeIdentity).status).toBe("refused");
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+                yield* connection.resume({
+                  sessionId,
+                  resumeCursor: cursor,
+                  executionPolicy: nextPolicy,
+                });
+                expect(starts).toHaveLength(nextPolicy === "approval-gated" ? 1 : 2);
+                if (nextPolicy === "approval-gated") {
+                  expect(client.loadSession).not.toHaveBeenCalled();
+                  expect(client.resumeSession).not.toHaveBeenCalled();
+                } else {
+                  expect(client.loadSession).toHaveBeenCalledWith(cursor.value, projectRoot);
+                }
+                expect(registry.claimNativeSession(instanceId, nativeIdentity).status).toBe(
+                  "refused",
+                );
+                expect(peakActive()).toBe(1);
+                yield* connection.stop(sessionId);
+              }),
+            ),
+          );
+          expect(active()).toBe(0);
+        } finally {
+          await registry.closeAll();
+        }
+      },
+    );
+
+    it
+      .skipIf(profile.kind !== "mistral-vibe")
+      .each(["unfinished-tool", "late-event", "idle-event"] as const)(
+      "destroys a settled process with %s activity",
+      async (activity) => {
+        const { driver, client, registry, active } = fixture(profile, { runtimeVersion: "2.25.0" });
+        const emit = () =>
+          client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: { sessionUpdate: "tool_call", toolCallId: "unfinished", title: "shell" },
+            },
+          });
+        if (activity === "unfinished-tool")
+          client.prompt.mockImplementationOnce(async () => {
+            emit();
+            return { stopReason: "end_turn" };
+          });
+        try {
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+                yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+                const events = yield* Effect.fork(
+                  Stream.runCollect(
+                    (yield* connection.subscribe).pipe(
+                      Stream.takeUntil((event) => event.kind === "completed"),
+                    ),
+                  ),
+                );
+                yield* connection.send({
+                  sessionId,
+                  prompt: "complete",
+                  tools: [],
+                  attachments: [],
+                });
+                yield* Fiber.join(events);
+                if (activity === "late-event") emit();
+                yield* connection.stop(sessionId);
+                if (activity === "idle-event") emit();
+                yield* Effect.promise(() => vi.waitFor(() => expect(active()).toBe(0)));
+              }),
+            ),
+          );
+        } finally {
+          await registry.closeAll();
+        }
+      },
+    );
+  }
+
+  it("waits for starting sessions at shutdown and refuses to admit them afterward", async () => {
+    const { driver, client, registry, active } = fixture(profile);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    client.setConfigOption.mockImplementationOnce(async () => {
+      await gate;
+      return { configOptions: client.configOptions };
+    });
+    // Profile-specific model selection can bypass setConfigOption.
+    vi.mocked(client.call).mockImplementation(async () => {
+      await gate;
+      return {};
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const starting = yield* Effect.fork(
+            Effect.flip(
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            ),
+          );
+          yield* Effect.promise(() => vi.waitFor(() => expect(active()).toBe(1)));
+          let closed = false;
+          const closing = registry.closeAll().then(() => {
+            closed = true;
+          });
+          yield* Effect.promise(async () => {
+            await Promise.resolve();
+            expect(closed).toBe(false);
+            release();
+          });
+          yield* Fiber.join(starting);
+          yield* Effect.promise(() => closing);
+          expect(active()).toBe(0);
+        }),
+      ),
+    );
+  });
+
+  it("refuses another connection before it can open the same native conversation", async () => {
+    const { driver, starts } = fixture(profile);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const first = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const second = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const handle = yield* first.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          if (handle.resumeCursor === undefined) throw new Error("Expected native cursor");
+          const before = starts.length;
+          yield* Effect.flip(
+            second.resume({
+              sessionId,
+              resumeCursor: handle.resumeCursor,
+              executionPolicy: "approval-gated",
+            }),
+          );
+          expect(starts).toHaveLength(before);
+          const alias = decodeProviderSessionId("80000000-0000-4000-8000-000000000399");
+          if (handle.resumeCursor.binding === undefined) throw new Error("Expected binding");
+          yield* Effect.flip(
+            second.resume({
+              sessionId: alias,
+              resumeCursor: {
+                ...handle.resumeCursor,
+                binding: { ...handle.resumeCursor.binding, sessionId: alias },
+              },
+              executionPolicy: "approval-gated",
+            }),
+          );
+          expect(starts).toHaveLength(before);
+          yield* first.stop(sessionId);
+          yield* second.resume({
+            sessionId,
+            resumeCursor: handle.resumeCursor,
+            executionPolicy: "approval-gated",
+          });
+          expect(starts).toHaveLength(before + 1);
+          yield* second.stop(sessionId);
+        }),
+      ),
+    );
   });
 
   it.each([
@@ -1060,6 +1335,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           expect(handle.resumeCursor).toEqual({
             driverKind: profile.kind,
             value: "agent-session-1",
+            binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
           });
           const runtimeEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
@@ -1165,6 +1441,33 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             expect(client.loadSession).toHaveBeenCalledWith("agent-session-1", projectRoot);
             expect(client.resumeSession).not.toHaveBeenCalled();
           }
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
+  it("uses negotiated native resume without requesting a transcript replay", async () => {
+    const { driver, client } = fixture(profile, { nativeResume: true });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing resume cursor.");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+          });
+          expect(client.resumeSession).toHaveBeenCalledWith("agent-session-1", projectRoot);
+          expect(client.loadSession).not.toHaveBeenCalled();
+          expect(client.newSession).toHaveBeenCalledTimes(1);
           yield* connection.stop(sessionId);
         }),
       ),
@@ -1459,4 +1762,193 @@ describe("ACP provider driver profile quirks", () => {
       expect(driver.completeAuthentication).toBeUndefined();
     }
   });
+});
+
+it("resumes the same native session after recreating the driver", async () => {
+  const first = fixture(vibe);
+  const handle = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* first.driver.acquire({ instanceId, mode: "code", projectRoot });
+        const started = yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        });
+        yield* connection.stop(sessionId);
+        return started;
+      }),
+    ),
+  );
+  if (handle.resumeCursor === undefined) throw new Error("Missing cursor");
+  const cursor = handle.resumeCursor;
+  const restarted = fixture(vibe);
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* restarted.driver.acquire({
+          instanceId,
+          mode: "code",
+          projectRoot,
+        });
+        return yield* connection.resume({
+          sessionId,
+          resumeCursor: cursor,
+          executionPolicy: "approval-gated",
+        });
+      }),
+    ),
+  );
+  expect(result.resumeCursor).toEqual(cursor);
+});
+
+it("keeps a retained native session identity reserved while it is idle", async () => {
+  const { driver, registry } = fixture(vibe, { runtimeVersion: "2.25.0" });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+        yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+        yield* Fiber.join(terminal);
+        yield* connection.stop(sessionId);
+
+        const claim = registry.claimNativeSession(
+          instanceId,
+          JSON.stringify(["acp-native", vibe.kind, "agent-session-1"]),
+        );
+        expect(claim.status).toBe("refused");
+      }),
+    ),
+  );
+});
+
+it("adding Computer use on a resumed task can send the next message", async () => {
+  const { driver, client } = fixture(vibe, {
+    mcpHttp: true,
+    managedToolsBridgeFactory: async () => ({
+      server: {
+        type: "http",
+        name: "octant-tools",
+        url: "http://127.0.0.1:43123/mcp/test",
+        headers: [],
+      },
+      port: 43123,
+      attested: Promise.resolve(),
+      bind: () => {},
+      close: async () => undefined,
+    }),
+  });
+  await withProcessPlatform("darwin", () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            tools: [],
+          });
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing cursor");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+            tools: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          });
+          yield* connection.send({
+            sessionId,
+            prompt: "Use the selected computer tool",
+            attachments: [],
+            tools: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          });
+          yield* connection.stop(sessionId);
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+            tools: [],
+          });
+          yield* connection.send({
+            sessionId,
+            prompt: "Continue without tools",
+            attachments: [],
+            tools: [],
+          });
+          expect(client.newSession).toHaveBeenCalledOnce();
+          expect(client.loadSession).toHaveBeenLastCalledWith("agent-session-1", projectRoot);
+        }),
+      ),
+    ),
+  );
+});
+
+it("refuses a durable cursor in another Project before starting a process", async () => {
+  const first = fixture(vibe);
+  const cursor = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* first.driver.acquire({ instanceId, projectRoot, mode: "code" });
+        return (yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }))
+          .resumeCursor;
+      }),
+    ),
+  );
+  if (cursor === undefined) throw new Error("missing cursor");
+  const restarted = fixture(vibe);
+  const refused = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* restarted.driver.acquire({
+          instanceId,
+          projectRoot: "/another-project",
+          mode: "code",
+        });
+        return yield* Effect.flip(
+          connection.resume({ sessionId, resumeCursor: cursor, executionPolicy: "approval-gated" }),
+        );
+      }),
+    ),
+  );
+  expect(refused.category).toBe("stale-resume");
+  expect(restarted.starts).toEqual([]);
+});
+
+it("refuses a provider that replaces the native identity during resume", async () => {
+  const { driver, client } = fixture(vibe);
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        const handle = yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        });
+        if (handle.resumeCursor === undefined) throw new Error("missing cursor");
+        yield* connection.stop(sessionId);
+        client.loadSession.mockResolvedValueOnce({
+          sessionId: "replacement",
+          configOptions: client.configOptions,
+        });
+        const refused = yield* Effect.flip(
+          connection.resume({
+            sessionId,
+            resumeCursor: handle.resumeCursor,
+            executionPolicy: "approval-gated",
+          }),
+        );
+        expect(refused.category).toBe("stale-resume");
+        expect(client.prompt).not.toHaveBeenCalled();
+      }),
+    ),
+  );
 });

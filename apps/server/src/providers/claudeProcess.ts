@@ -418,22 +418,24 @@ function planStateDirectories(
   boundRoot: string,
   stateDirectories: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  for (const path of stateDirectories) {
-    let canonicalPath = path;
+  const canonicalDirectories = stateDirectories.map((path) => {
     try {
-      canonicalPath = realpathSync(path);
+      return realpathSync(path);
     } catch {
       // A provider may create its state directory during launch; preserve the
       // configured path when it does not exist yet.
+      return path;
     }
-    if (canonicalPath === boundRoot) {
+  });
+  for (const path of canonicalDirectories) {
+    if (path === boundRoot) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
         "Claude Plan confinement cannot use a project root that is also a runtime state directory.",
       );
     }
   }
-  return stateDirectories;
+  return canonicalDirectories;
 }
 
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {

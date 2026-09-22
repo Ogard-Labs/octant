@@ -202,7 +202,8 @@ function usageEvent(
 ): ClaudeMappedMessage {
   return event(context, {
     kind: "usage",
-    inputTokens: value.inputTokens,
+    // Claude reports uncached input separately from cache reads and writes.
+    inputTokens: value.inputTokens + value.cacheReadInputTokens + value.cacheCreationInputTokens,
     outputTokens: value.outputTokens,
     cacheReadInputTokens: value.cacheReadInputTokens,
     cacheWriteInputTokens: value.cacheCreationInputTokens,
@@ -220,7 +221,10 @@ function usageIsSafe(value: ClaudeUsage): boolean {
     isSafeUsageValue(value.inputTokens) &&
     isSafeUsageValue(value.outputTokens) &&
     isSafeUsageValue(value.cacheCreationInputTokens) &&
-    isSafeUsageValue(value.cacheReadInputTokens)
+    isSafeUsageValue(value.cacheReadInputTokens) &&
+    isSafeUsageValue(
+      value.inputTokens + value.cacheReadInputTokens + value.cacheCreationInputTokens,
+    )
   );
 }
 

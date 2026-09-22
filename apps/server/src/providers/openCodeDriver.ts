@@ -100,7 +100,17 @@ interface SessionState {
   readonly questionAnswers: Map<string, Map<number, string>>;
   readonly toolNames: Set<string>;
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
+  usageTotals: OpenCodeUsageTotals | undefined;
   managedTools: ManagedToolsLease | undefined;
+}
+
+interface OpenCodeUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadInputTokens: number;
+  cacheWriteInputTokens: number;
+  costUsd: number;
 }
 
 interface PendingToolAnswer {
@@ -382,6 +392,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
   return {
     kind: "opencode",
+    conversationOwnership: "provider",
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
@@ -1052,7 +1063,7 @@ function makeConnection(
                 return Effect.fail(fail("protocol", "A provider session is already active."));
               }
               sessionSetupInFlight = true;
-              const tools = resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
+              const tools = input.tools ?? resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
               const priorSource = sourceBySession.get(input.sessionId);
               const priorState =
                 priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
@@ -1105,6 +1116,11 @@ function makeConnection(
                   );
                 }),
                 Effect.flatMap(({ session }) => {
+                  if (session.id !== input.resumeCursor.value) {
+                    return Effect.fail(
+                      fail("stale-resume", "Provider returned a different native session."),
+                    );
+                  }
                   if (
                     !isAbsolute(session.directory) ||
                     resolve(session.directory) !== projectRoot
@@ -1121,6 +1137,7 @@ function makeConnection(
                   state.sourceId = session.id;
                   sessionsBySource.set(session.id, state);
                   sourceBySession.set(input.sessionId, session.id);
+                  resumeToolCatalogs.set(session.id, tools);
                   activate(state);
                   for (const event of pendingBySource.get(session.id) ?? []) {
                     mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
@@ -1131,6 +1148,7 @@ function makeConnection(
                     resumeCursor: input.resumeCursor,
                   });
                 }),
+                Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
                 Effect.ensuring(
                   Effect.sync(() => {
                     sessionSetupInFlight = false;
@@ -1177,6 +1195,7 @@ function makeConnection(
                   Effect.flatMap(() =>
                     Effect.gen(function* () {
                       const managedTools = state.managedTools;
+                      state.usageTotals = undefined;
                       return yield* request(() =>
                         runtimeClient.prompt({
                           sessionId: source,
@@ -1351,6 +1370,7 @@ function newSessionState(
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
     pendingToolAnswers: new Map(),
+    usageTotals: undefined,
     managedTools: undefined,
   };
 }
@@ -1398,6 +1418,29 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
+    // OpenCode settles usage once per model step. Consumers keep the latest
+    // report as the logical turn's figure, so make each report cumulative
+    // across the prompt's tool loop while keeping the same provider session.
+    if (normalized.kind === "usage") {
+      const prior = state.usageTotals ?? {
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        costUsd: 0,
+      };
+      state.usageTotals = {
+        inputTokens: prior.inputTokens + normalized.inputTokens,
+        outputTokens: prior.outputTokens + normalized.outputTokens,
+        reasoningTokens: prior.reasoningTokens + (normalized.reasoningTokens ?? 0),
+        cacheReadInputTokens: prior.cacheReadInputTokens + (normalized.cacheReadInputTokens ?? 0),
+        cacheWriteInputTokens:
+          prior.cacheWriteInputTokens + (normalized.cacheWriteInputTokens ?? 0),
+        costUsd: prior.costUsd + (normalized.costUsd ?? 0),
+      };
+      normalized = { ...normalized, ...state.usageTotals };
+    }
     if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;

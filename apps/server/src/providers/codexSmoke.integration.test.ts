@@ -18,7 +18,6 @@ const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-00000000040
 const planSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000401");
 const interruptSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000402");
 const approvalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000403");
-const resumedSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000404");
 const fallbackApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000405");
 const inRootApprovalSessionId = decodeProviderSessionId("90000000-0000-4000-8000-000000000406");
 const installedSmokeOuterTimeoutMs = 420_000;
@@ -50,6 +49,7 @@ describe("installed Codex runtime", () => {
       const deniedRoot = await mkdtemp(resolve(homedir(), ".octant-codex-denied."));
       const deniedTarget = join(deniedRoot, "must-not-exist");
       const registry = new ProviderRuntimeRegistry();
+      const continuityMarker = `octant-${crypto.randomUUID()}`;
       const activeConnections = new Set<Awaited<ReturnType<typeof acquireConnection>>>();
       const ownedProcessIds = new Set<number>();
       const liveProcess = makeCodexProcessLive({
@@ -130,8 +130,7 @@ describe("installed Codex runtime", () => {
               await Effect.runPromise(
                 plan.connection.send({
                   sessionId: planSessionId,
-                  prompt:
-                    "Inspect only the repository metadata and return a brief plain-text summary.",
+                  prompt: `Inspect only the repository metadata and return a brief plain-text summary. Remember this exact marker for the next message: ${continuityMarker}.`,
 
                   attachments: [],
                   tools: [],
@@ -150,6 +149,44 @@ describe("installed Codex runtime", () => {
               expect(planResult.some((event) => event.kind === "completed")).toBe(true);
               return started.resumeCursor;
             }),
+        );
+
+        await stage("driver restart", installedSmokeStageTimeouts.restart, () =>
+          registry.closeAll(),
+        );
+        expect(registry.hasRuntime(instanceId)).toBe(false);
+
+        await stage("resume with exact Project root", installedSmokeStageTimeouts.resume, () =>
+          usingConnection(driver, projectRoot, activeConnections, async (resumed) => {
+            const resumedHandle = await Effect.runPromise(
+              resumed.connection.resume({
+                sessionId: planSessionId,
+                resumeCursor,
+                executionPolicy: "plan",
+              }),
+            );
+            expect(
+              resumedHandle.resumeCursor?.driverKind === "codex" &&
+                resumedHandle.resumeCursor.value === resumeCursor.value,
+            ).toBe(true);
+            expect(processStarts).toBeGreaterThanOrEqual(2);
+            const eventsPromise = collectEvents(Stream.unwrapScoped(resumed.connection.subscribe));
+            await Effect.runPromise(
+              resumed.connection.send({
+                sessionId: planSessionId,
+                prompt:
+                  "What exact marker did I ask you to remember? Reply only with that marker. Do not use tools.",
+                attachments: [],
+                tools: [],
+              }),
+            );
+            const events = await eventsPromise;
+            expect(events.some((event) => event.kind === "completed")).toBe(true);
+            expect(
+              events.flatMap((event) => (event.kind === "text-delta" ? [event.text] : [])).join(""),
+            ).toContain(continuityMarker);
+            await Effect.runPromise(resumed.connection.stop(planSessionId));
+          }),
         );
 
         await stage("accepted-output interruption", installedSmokeStageTimeouts.interrupt, () =>
@@ -294,33 +331,15 @@ describe("installed Codex runtime", () => {
                   tools: [],
                 }),
               );
-              expect(await approvalEvents).toBe(true);
+              const requested = await approvalEvents;
+              const fileWritten = await pathExists(inRootTarget);
+              console.log(
+                `[codex-smoke] in-root approval: requested=${requested}; action=${answeredAction ?? "none"}; file-written=${fileWritten}`,
+              );
+              expect(requested).toBe(true);
               expect(answeredAction).toBe("command");
-              expect(await pathExists(inRootTarget)).toBe(false);
+              expect(fileWritten).toBe(false);
             }),
-        );
-
-        await stage("driver restart", installedSmokeStageTimeouts.restart, () =>
-          registry.closeAll(),
-        );
-        expect(registry.hasRuntime(instanceId)).toBe(false);
-
-        await stage("resume with exact Project root", installedSmokeStageTimeouts.resume, () =>
-          usingConnection(driver, projectRoot, activeConnections, async (resumed) => {
-            const resumedHandle = await Effect.runPromise(
-              resumed.connection.resume({
-                sessionId: resumedSessionId,
-                resumeCursor,
-                executionPolicy: "plan",
-              }),
-            );
-            expect(
-              resumedHandle.resumeCursor?.driverKind === "codex" &&
-                resumedHandle.resumeCursor.value === resumeCursor.value,
-            ).toBe(true);
-            expect(processStarts).toBeGreaterThanOrEqual(2);
-            await Effect.runPromise(resumed.connection.stop(resumedSessionId));
-          }),
         );
       } finally {
         await cleanup();

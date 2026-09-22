@@ -49,7 +49,10 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
-type JournalPort = Pick<Journal, "append" | "replayAggregate" | "replayAggregateTypeForThread">;
+type JournalPort = Pick<
+  Journal,
+  "append" | "replayAggregate" | "replayAggregateTypeForThread" | "latestThreadEvents"
+>;
 
 export class CodeOperationEventStoreError extends Error {
   override readonly name = "CodeOperationEventStoreError";
@@ -258,6 +261,57 @@ export class CodeOperationEventStore {
       frames,
       nextCursor: frames.at(-1)?.cursor ?? input.afterCursor,
     };
+  }
+
+  /** Indexed journal reads decode at most three frames, regardless of transcript size. */
+  providerSessionForThread(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+  ):
+    | {
+        readonly status: "ok";
+        readonly priorTurn: boolean;
+        readonly session?: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }>;
+      }
+    | { readonly status: "rebuild-required" } {
+    try {
+      const read = (kind: string, limit: number) =>
+        this.#journal
+          .latestThreadEvents({
+            aggregateType: "code-operation",
+            threadId: String(threadId),
+            kind,
+            limit,
+          })
+          .map((envelope) => {
+            if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+              throw new CodeOperationEventStoreError(
+                "journal-mismatch",
+                "Session event schema is unavailable.",
+              );
+            const frame = decodeCodeOperationEventFrame(envelope.payload);
+            if (
+              String(frame.threadId) !== String(threadId) ||
+              String(frame.operationId) !== String(envelope.aggregateId)
+            )
+              throw new CodeOperationEventStoreError(
+                "journal-mismatch",
+                "Session event ownership differs.",
+              );
+            return frame;
+          });
+      const session = read("provider-session-ready", 1)[0]?.event;
+      const priorTurn = read("conversation-turn-started", 2).some(
+        (frame) => String(frame.operationId) !== String(operationId),
+      );
+      return {
+        status: "ok",
+        priorTurn,
+        ...(session?.kind === "provider-session-ready" ? { session } : {}),
+      };
+    } catch {
+      return { status: "rebuild-required" };
+    }
   }
 
   /**
@@ -471,6 +525,13 @@ export class CodeOperationEventStore {
             inputTokens: frame.event.inputTokens,
             outputTokens: frame.event.outputTokens,
             ...(frame.event.costUsd === undefined ? {} : { costUsd: frame.event.costUsd }),
+            ...(frame.event.cacheReadInputTokens === undefined
+              ? {}
+              : { cacheReadInputTokens: frame.event.cacheReadInputTokens }),
+            ...(frame.event.cacheWriteInputTokens === undefined
+              ? {}
+              : { cacheWriteInputTokens: frame.event.cacheWriteInputTokens }),
+
             ...(frame.event.contextWindow === undefined
               ? {}
               : { contextWindow: frame.event.contextWindow }),

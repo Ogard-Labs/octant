@@ -221,6 +221,70 @@ describe("Pi process boundary", () => {
     );
   });
 
+  it("refuses resume when the exact native history is missing", async () => {
+    const f = fixture();
+    const confinement = makePiConfinementLive({
+      platform: "darwin",
+      sandboxPath: f.sandbox,
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      temporaryDirectory: f.base,
+    });
+    const result = await Effect.runPromise(
+      Effect.either(
+        confinement.prepare({
+          binaryPath: f.binary,
+          root: f.root,
+          piHome: f.home,
+          sessionDirectory: join(f.home, "sessions"),
+          sessionId: "session-1",
+          resume: true,
+          mode: "code",
+          executionPolicy: "full-access",
+          environment: {},
+        }),
+      ),
+    );
+    expect(result).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
+  });
+
+  it("opens the exact native file and refuses a mismatched history header", async () => {
+    const f = fixture();
+    const directory = join(f.home, "sessions");
+    mkdirSync(directory, { recursive: true });
+    const path = join(directory, "2026-09-21_session-1.jsonl");
+    const contents = JSON.stringify({ type: "session", id: "session-1", cwd: f.root }) + "\n";
+    writeFileSync(path, contents);
+    const confinement = makePiConfinementLive({
+      platform: "darwin",
+      sandboxPath: f.sandbox,
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      temporaryDirectory: f.base,
+    });
+    const input = {
+      binaryPath: f.binary,
+      root: f.root,
+      piHome: f.home,
+      sessionDirectory: directory,
+      sessionId: "session-1",
+      resume: true,
+      mode: "code" as const,
+      executionPolicy: "full-access" as const,
+      environment: {},
+    };
+    const launch = await Effect.runPromise(confinement.prepare(input));
+    expect(launch.args).toEqual(expect.arrayContaining(["--session", path]));
+    expect(launch.args).not.toContain("--session-id");
+    expect(readFileSync(path, "utf8")).toBe(contents);
+    writeFileSync(
+      path,
+      JSON.stringify({ type: "session", id: "session-1", cwd: "/another-project" }) + "\n",
+    );
+    const refused = await Effect.runPromise(Effect.either(confinement.prepare(input)));
+    expect(refused).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
+  });
+
   it("writes isolated configuration, links provider-owned auth, and loads only the Octant bridge", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({

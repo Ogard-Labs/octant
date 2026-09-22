@@ -48,7 +48,7 @@ class FakeClient implements PiClientPort {
         type: "response" as const,
         command: type,
         success: true,
-        data: { sessionId: "pi-source-1", sessionFile: "/managed/sessions/pi-source-1.jsonl" },
+        data: { sessionId, sessionFile: "/managed/sessions/pi-source-1.jsonl" },
       };
     }
     if (type === "get_commands") {
@@ -88,7 +88,7 @@ class FakeClient implements PiClientPort {
   }
 }
 
-function fixture(version = "0.80.10") {
+function fixture(version = "0.80.10", registry = new ProviderRuntimeRegistry()) {
   const client = new FakeClient();
   const starts: Array<Record<string, unknown>> = [];
   const lifecycle: string[] = [];
@@ -119,7 +119,6 @@ function fixture(version = "0.80.10") {
           }),
       ),
   };
-  const registry = new ProviderRuntimeRegistry();
   const driver = makePiDriver({
     instanceId,
     binaryPath: "/opt/homebrew/bin/pi",
@@ -179,6 +178,352 @@ async function terminal(events: Stream.Stream<ProviderRuntimeEvent, ProviderFail
 }
 
 describe("Pi provider driver", () => {
+  it.each([false, true])(
+    "reports complete multi-call usage and leaves incomplete usage unknown (%s)",
+    async (missing) => {
+      const { driver, client } = fixture();
+      const scope = Effect.runSync(Scope.make());
+      const connection = await Effect.runPromise(
+        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      client.emit({
+        type: "message_update",
+        usage: { input: 9999 },
+        assistantMessageEvent: { type: "text_delta", delta: "hello" },
+      });
+      for (const usage of [
+        { input: 20, output: 5, cacheRead: 10, cacheWrite: 0 },
+        missing ? undefined : { input: 3, output: 2, cacheRead: 30, cacheWrite: 2 },
+      ]) {
+        client.emit({
+          type: "message_end",
+          message: { role: "assistant", ...(usage === undefined ? {} : { usage }) },
+        });
+      }
+      client.emit({ type: "agent_settled" });
+      const usage = (await collected).filter((event) => event.kind === "usage");
+      if (missing) expect(usage).toEqual([]);
+      else
+        expect(usage).toEqual([
+          expect.objectContaining({
+            inputTokens: 65,
+            outputTokens: 7,
+            cacheReadInputTokens: 40,
+            cacheWriteInputTokens: 2,
+            contextTokens: 37,
+          }),
+        ]);
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
+
+  it("refuses concurrent owners of one native history and releases ownership after stop", async () => {
+    const f = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const first = yield* f.driver.acquire({ instanceId, projectRoot: root, mode: "code" });
+          const second = yield* f.driver.acquire({ instanceId, projectRoot: root, mode: "code" });
+          const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
+          const attempts = yield* Effect.all([first.start(input), second.start(input)], {
+            concurrency: "unbounded",
+            mode: "either",
+          });
+          expect(attempts.filter((result) => result._tag === "Right")).toHaveLength(1);
+          expect(f.starts).toHaveLength(1);
+          expect(f.active()).toBe(1);
+          const owner = attempts[0]?._tag === "Right" ? first : second;
+          const waiting = owner === first ? second : first;
+          const duplicate = yield* Effect.either(owner.start(input));
+          expect(duplicate._tag).toBe("Left");
+          expect(f.starts).toHaveLength(1);
+          yield* owner.stop(sessionId);
+          yield* waiting.start(input);
+          expect(f.starts).toHaveLength(2);
+          expect(f.active()).toBe(1);
+        }),
+      ),
+    );
+    expect(f.active()).toBe(0);
+  });
+
+  it("reuses a settled native process across scoped turns and destroys it on shutdown", async () => {
+    const f = fixture("0.85.1");
+    let cursor: import("@octant/contracts").ProviderResumeCursor | undefined;
+    try {
+      for (let turn = 0; turn < 2; turn += 1) {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              const handle = yield* cursor === undefined
+                ? connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                : connection.resume({
+                    sessionId,
+                    resumeCursor: cursor,
+                    executionPolicy: "approval-gated",
+                    tools: [],
+                  });
+              cursor = handle.resumeCursor;
+              const collected = terminal(yield* connection.subscribe);
+              yield* connection.send({
+                sessionId,
+                prompt: `turn ${turn}`,
+                attachments: [],
+                tools: [],
+              });
+              f.client.emit({
+                type: "message_end",
+                message: {
+                  role: "assistant",
+                  usage: {
+                    input: 10 + turn,
+                    output: 2,
+                    cacheRead: 30,
+                    cacheWrite: 0,
+                  },
+                },
+              });
+              f.client.emit({ type: "agent_settled" });
+              const events = yield* Effect.promise(() => collected);
+              expect(events.at(-1)?.kind).toBe("completed");
+              expect(events.filter((event) => event.kind === "usage")).toEqual([
+                expect.objectContaining({
+                  inputTokens: 40 + turn,
+                  outputTokens: 2,
+                  cacheReadInputTokens: 30,
+                }),
+              ]);
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        expect(f.active()).toBe(1);
+        expect(f.starts).toHaveLength(1);
+        expect(f.registry.activeSessionCount(instanceId)).toBe(0);
+      }
+    } finally {
+      await f.registry.closeAll();
+    }
+    expect(f.active()).toBe(0);
+  });
+
+  it.each(["authority", "catalogue"] as const)(
+    "closes an incompatible warm process before resuming the same history after a %s change",
+    async (change) => {
+      const f = fixture("0.85.1");
+      const tool: ProviderToolDefinition = {
+        name: "octant_observe",
+        description: "Observe",
+        inputSchema: { type: "object" },
+      };
+      try {
+        const cursor = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              const handle = yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              });
+              const collected = terminal(yield* connection.subscribe);
+              yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+              f.client.emit({ type: "agent_settled" });
+              yield* Effect.promise(() => collected);
+              yield* connection.stop(sessionId);
+              return handle.resumeCursor;
+            }),
+          ),
+        );
+        if (cursor === undefined) throw new Error("Missing cursor");
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: cursor,
+                executionPolicy: change === "authority" ? "plan" : "approval-gated",
+                tools: change === "catalogue" ? [tool] : [],
+              });
+              expect(f.starts).toHaveLength(2);
+              expect(f.starts[1]).toMatchObject({ sessionId, resume: true });
+              expect(f.lifecycle.indexOf("process-release")).toBeLessThan(
+                f.lifecycle.lastIndexOf("process-start"),
+              );
+            }),
+          ),
+        );
+      } finally {
+        await f.registry.closeAll();
+      }
+      expect(f.active()).toBe(0);
+    },
+  );
+
+  it("waits for a starting native runtime to close during registry shutdown", async () => {
+    const f = fixture("0.85.1");
+    const original = f.client.request.getMockImplementation();
+    if (original === undefined) throw new Error("Missing client implementation");
+    let finish = () => {};
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    f.client.request.mockImplementationOnce(async (type, fields) => {
+      await gate;
+      return original(type, fields);
+    });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      f.driver
+        .acquire({ instanceId, projectRoot: root, mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const starting = Effect.runPromise(
+      Effect.either(connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })),
+    );
+    try {
+      await vi.waitFor(() =>
+        expect(f.client.request).toHaveBeenCalledWith("set_model", expect.anything()),
+      );
+      let closed = false;
+      const closing = f.registry.closeAll().then(() => {
+        closed = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(closed).toBe(false);
+      finish();
+      await closing;
+      expect((await starting)._tag).toBe("Left");
+      expect(f.active()).toBe(0);
+    } finally {
+      finish();
+      await starting;
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    }
+  });
+
+  it("does not retain a process that settles with an unfinished tool", async () => {
+    const f = fixture("0.85.1");
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({
+              instanceId,
+              projectRoot: root,
+              mode: "code",
+            });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* connection.send({ sessionId, prompt: "work", attachments: [], tools: [] });
+            f.client.emit({
+              type: "tool_execution_start",
+              toolCallId: "unfinished",
+              toolName: "read",
+            });
+            f.client.emit({ type: "agent_settled" });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      expect(f.active()).toBe(0);
+    } finally {
+      await f.registry.closeAll();
+    }
+  });
+
+  it("destroys interrupted processes instead of retaining them", async () => {
+    const f = fixture("0.85.1");
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.send({ sessionId, prompt: "work", attachments: [], tools: [] });
+          yield* connection.interrupt(sessionId);
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    expect(f.active()).toBe(0);
+    await f.registry.closeAll();
+  });
+
+  it("keeps native history exclusive when the configured driver is recreated", async () => {
+    const first = fixture();
+    const recreated = fixture("0.80.10", first.registry);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const owner = yield* first.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          const competitor = yield* recreated.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
+          yield* owner.start(input);
+          expect((yield* Effect.either(competitor.start(input)))._tag).toBe("Left");
+          expect(recreated.starts).toHaveLength(0);
+          yield* owner.stop(sessionId);
+          yield* competitor.start(input);
+          expect(recreated.starts).toHaveLength(1);
+        }),
+      ),
+    );
+  });
+
+  it("releases native history ownership when startup fails", async () => {
+    const f = fixture();
+    f.client.request.mockRejectedValueOnce(new Error("startup failed"));
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({
+            instanceId,
+            projectRoot: root,
+            mode: "code",
+          });
+          const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
+          expect((yield* Effect.either(connection.start(input)))._tag).toBe("Left");
+          expect(f.active()).toBe(0);
+          yield* connection.start(input);
+          expect(f.active()).toBe(1);
+        }),
+      ),
+    );
+    expect(f.active()).toBe(0);
+  });
+
   it("probes model readiness without sending a prompt", async () => {
     const { driver, client, registry, starts, active, released } = fixture("0.85.1");
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -219,6 +564,34 @@ describe("Pi provider driver", () => {
     expect(registry.observedState(instanceId)).toEqual(result);
     expect(active()).toBe(0);
     expect(released()).toBe(1);
+  });
+
+  it("delivers the same event to each subscription established before reading", async () => {
+    const { driver, client } = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: root, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          const first = yield* connection.subscribe;
+          const second = yield* connection.subscribe;
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          client.emit({
+            type: "tool_execution_start",
+            toolCallId: "shared-tool",
+            toolName: "read",
+          });
+          const events = yield* Effect.all(
+            [
+              Stream.runCollect(first.pipe(Stream.take(1))),
+              Stream.runCollect(second.pipe(Stream.take(1))),
+            ],
+            { concurrency: "unbounded" },
+          ).pipe(Effect.timeout("1 second"));
+          expect(Array.from(events[0] ?? [])).toEqual(Array.from(events[1] ?? []));
+        }),
+      ),
+    );
   });
 
   it("keeps app-managed tools unsupported when the trusted extension does not attest", async () => {
@@ -314,7 +687,11 @@ describe("Pi provider driver", () => {
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     expect(starts[0]).toMatchObject({ onProcessStarted: expect.any(Function) });
-    expect(handle.resumeCursor).toEqual({ driverKind: "pi", value: sessionId });
+    expect(handle.resumeCursor).toEqual({
+      driverKind: "pi",
+      value: sessionId,
+      binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
+    });
     expect(starts.at(-1)).toMatchObject({
       root,
       sessionId,
@@ -353,13 +730,35 @@ describe("Pi provider driver", () => {
       isError: false,
       result: {},
     });
+    client.emit({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        usage: {
+          input: 93,
+          output: 3,
+          cacheRead: 3712,
+          cacheWrite: 0,
+          cost: { total: 0.00019168 },
+        },
+      },
+    });
     client.emit({ type: "agent_settled" });
-    expect((await collected).map((event) => event.kind)).toEqual([
+    const events = await collected;
+    expect(events.find((event) => event.kind === "usage")).toMatchObject({
+      inputTokens: 3805,
+      outputTokens: 3,
+      cacheReadInputTokens: 3712,
+      cacheWriteInputTokens: 0,
+      costUsd: 0.00019168,
+    });
+    expect(events.map((event) => event.kind)).toEqual([
       "text-delta",
       "reasoning-delta",
       "tool-start",
       "approval-request",
       "tool-success",
+      "usage",
       "completed",
     ]);
     expect(client.responses).toEqual([{ id: "pi-ui-1", response: { confirmed: true } }]);
@@ -463,6 +862,9 @@ describe("Pi provider driver", () => {
       }),
     );
     expect(lifecycle.indexOf("process-release")).toBeLessThan(lifecycle.indexOf("bridge-close"));
+    expect(lifecycle.indexOf("process-release")).toBeLessThan(
+      lifecycle.lastIndexOf("process-start"),
+    );
     expect(starts.at(-1)?.tools).toEqual([tool]);
     const resumedBridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
     expect(resumedBridge).toBeDefined();
@@ -632,4 +1034,46 @@ describe("Pi provider driver", () => {
     });
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
+});
+
+it("recovers the same Pi session after replacing the driver", async () => {
+  const first = fixture();
+  const cursor = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* first.driver.acquire({
+          instanceId,
+          projectRoot: root,
+          mode: "code",
+        });
+        const handle = yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+        });
+        return handle.resumeCursor;
+      }),
+    ),
+  );
+  if (cursor === undefined) throw new Error("missing cursor");
+  const restarted = fixture();
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* restarted.driver.acquire({
+          instanceId,
+          projectRoot: root,
+          mode: "code",
+        });
+        const resumed = yield* connection.resume({
+          sessionId,
+          resumeCursor: cursor,
+          executionPolicy: "approval-gated",
+          tools: [],
+        });
+        expect(resumed.resumeCursor).toEqual(cursor);
+      }),
+    ),
+  );
+  expect(restarted.starts.at(-1)?.sessionId).toBe(sessionId);
 });

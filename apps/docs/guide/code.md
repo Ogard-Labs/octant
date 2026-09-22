@@ -217,3 +217,16 @@ in **Settings › Host** deletes anything.
 - [Promotions](/guide/promotions) for creating Code threads from Work work
 - [Projects](/guide/projects) for managing Code Projects
 - [Chat](/guide/chat) for conversations without filesystem authority
+
+After a Code task is created, Octant opens it while the provider starts the first
+turn. The initial prompt stays visible in the task; a slow provider startup does
+not keep you on the welcome screen. Any startup refusal appears in the task so
+you can correct the prompt or provider selection and retry.
+
+### Conversation continuity
+
+Follow-ups resume the same provider-native CLI session, including its tool history.
+Octant sends only the new message and never silently starts a replacement session.
+If the saved session cannot be resumed, the task reports that failure. Older tasks
+without a saved session reference need a new task; a host restart also requires
+an adapter that supports durable resume identity.

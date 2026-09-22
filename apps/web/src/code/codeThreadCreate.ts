@@ -85,9 +85,12 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
     };
   }
 
-  // The current checkout is only bindable when the server resolved it to a
-  // branch; a detached head has no branch for the thread to deliver onto.
-  if (input.prepared.checkout.head.kind !== "branch") {
+  // A server-admitted plain folder has no Git head. Detached repository heads
+  // still cannot supply the checked-out branch required for Git delivery.
+  if (
+    input.prepared.checkout.kind !== "plain-folder" &&
+    input.prepared.checkout.head.kind !== "branch"
+  ) {
     return {
       kind: "rejected",
       message: "Create or select a branch before starting a Code thread in the current checkout.",
@@ -115,7 +118,13 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         permissionPersistence: input.composer.permissionPersistence,
         // Work in the existing checkout lands on the branch that checkout is
         // already on, never on a branch intent invented for a new worktree.
-        deliveryTarget: { ...deliveryTarget, branchIntent: input.prepared.checkout.head.name },
+        deliveryTarget: {
+          ...deliveryTarget,
+          branchIntent:
+            input.prepared.checkout.head.kind === "branch"
+              ? input.prepared.checkout.head.name
+              : deliveryTarget.branchIntent,
+        },
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
         version: 1,
         createdAt: input.timestamp,

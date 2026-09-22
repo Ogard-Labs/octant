@@ -33,6 +33,7 @@ import {
   type ProjectId,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
+  type ProviderResumeCursor,
   type ProviderInstance,
   type ProviderModel,
   type ThreadTaskProgressList,
@@ -44,7 +45,7 @@ import {
   isBrowserUseSelection,
   validateBrowserUseSelection,
 } from "@octant/plugin-host/browser-use";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type {
   NativeHarnessTurnAdmission,
@@ -544,7 +545,34 @@ export class WorkTurnService {
       skillContext = resolved.context;
     }
     const acceptedAt = decodeTimestamp(this.#clock());
-    const providerSessionId = decodeProviderSessionId(this.#uuid());
+    const nativeConversation = driver.conversationOwnership === "provider";
+    const previous = this.#projection.latestForThread(command.threadId);
+    const previousDriver =
+      previous === undefined
+        ? undefined
+        : this.#resolveDriver(previous.authority.providerInstanceId);
+    const previousNative = previousDriver?.conversationOwnership === "provider";
+    if (
+      (nativeConversation || previousNative || previousDriver === undefined) &&
+      previous !== undefined &&
+      (!nativeConversation ||
+        !previousNative ||
+        previous.providerSessionId === undefined ||
+        previous.resumeCursor === undefined ||
+        previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
+        previous.authority.modelId !== command.authority.modelId ||
+        previous.authority.bindingRevisionId !== command.authority.bindingRevisionId ||
+        previous.authority.workingDirectory !== command.authority.workingDirectory)
+    ) {
+      throw this.#failure(
+        "unavailable",
+        "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
+      );
+    }
+    const resumeCursor = nativeConversation ? previous?.resumeCursor : undefined;
+    const providerSessionId =
+      (nativeConversation ? previous?.providerSessionId : undefined) ??
+      decodeProviderSessionId(this.#uuid());
     const harnessContext =
       thread === undefined
         ? []
@@ -596,7 +624,7 @@ export class WorkTurnService {
           }),
         ),
         ...(await this.#projectBriefContributions(project, command.threadId)),
-        ...this.#priorTranscriptContributions(command.threadId),
+        ...(nativeConversation ? [] : this.#priorTranscriptContributions(command.threadId)),
         ...(await this.#threadMentionContributions(
           command.threadMentionIds,
           authenticatedWindowId,
@@ -645,6 +673,7 @@ export class WorkTurnService {
         projectId: command.authority.projectId,
         authority: command.authority,
         providerSessionId,
+        ...(resumeCursor === undefined ? {} : { resumeCursor }),
         prompt: command.prompt,
         ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
         ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
@@ -683,6 +712,7 @@ export class WorkTurnService {
       ...(thread === undefined ? {} : { thread }),
       windowId: authenticatedWindowId,
       providerSessionId,
+      ...(resumeCursor === undefined ? {} : { resumeCursor }),
       projectRoot,
       projectCanonicalRoot: project.binding.canonicalRoot,
       driver,
@@ -821,6 +851,7 @@ export class WorkTurnService {
     readonly thread?: WorkThread;
     readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
+    readonly resumeCursor?: ProviderResumeCursor;
     readonly projectRoot: string;
     /** The Project's bound root, where `STATUS.md` lives; the turn may run in a subfolder. */
     readonly projectCanonicalRoot: string;
@@ -950,6 +981,27 @@ export class WorkTurnService {
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
+      ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
+      ...(input.driver.conversationOwnership !== "provider"
+        ? {}
+        : {
+            onSessionReady: (handle: ProviderSessionHandle) => {
+              const resumeCursor = handle.resumeCursor ?? input.resumeCursor;
+              if (handle.sessionId !== input.providerSessionId || resumeCursor === undefined)
+                throw new Error("Provider did not return an exact resumable Work session.");
+              const latest = this.#projection.lookup(input.command.requestId);
+              if (latest === undefined) throw new Error("Work turn is unavailable.");
+              this.#append(latest.requestId, latest.version, "work.turn-updated@1", {
+                kind: "turn-updated",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                status: "running",
+                resumeCursor,
+                updatedAt: decodeTimestamp(this.#clock()),
+              });
+            },
+          }),
       projectRoot: input.projectRoot,
       driver: input.driver,
       signal: input.signal,

@@ -62,7 +62,8 @@ writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ parent: process.pid, 
 setInterval(() => {}, 1000);`,
           ],
           timeoutMs: 1_000,
-          terminationGraceMs: 200,
+          // Use the real cleanup grace: 200 ms can expire while the OS reaps
+          // the killed descendant during the concurrent repository suite.
         }),
       ).rejects.toMatchObject({
         category: "unavailable",
@@ -78,6 +79,30 @@ setInterval(() => {}, 1000);`,
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("runs one termination sequence when process closure races the timeout", async () => {
+    const signals: NodeJS.Signals[] = [];
+    let released = false;
+    await expect(
+      runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: ["-e", "setInterval(() => {}, 1000)"],
+        timeoutMs: 100,
+        terminationGraceMs: 50,
+        processGroupExists: () => !released,
+        killProcessGroup: (pid, signal) => {
+          signals.push(signal);
+          if (signal === "SIGKILL") released = true;
+          try {
+            process.kill(pid, signal);
+          } catch {
+            /* The child may already be reaped. */
+          }
+        },
+      }),
+    ).rejects.toMatchObject({ diagnostic: { stage: "update", kind: "timed-out" } });
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
   it("fails closed when the updater process tree cannot be confirmed gone", async () => {

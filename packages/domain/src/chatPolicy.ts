@@ -237,6 +237,7 @@ export interface BeginChatTurnInput {
   readonly submissionId?: ChatTurn["submissionId"];
   readonly attemptId: ChatAttempt["id"];
   readonly providerSessionId: ProviderSessionId;
+  readonly resumeCursor?: ChatAttempt["resumeCursor"];
   readonly contextManifestId: ContextManifestId;
   readonly userMessageRef: ChatContentReference;
   readonly attachmentIds?: ReadonlyArray<ChatAttachmentId>;
@@ -261,6 +262,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     threadId: thread.id,
     providerInstanceId: thread.providerInstanceId,
     providerSessionId: input.providerSessionId,
+    ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
     outcome: "queued",
@@ -376,6 +378,7 @@ export interface RetryChatTurnInput {
   readonly attemptId: ChatAttempt["id"];
   readonly newAttemptId: ChatAttempt["id"];
   readonly newProviderSessionId: ProviderSessionId;
+  readonly resumeCursor?: ChatAttempt["resumeCursor"];
   readonly newContextManifestId: ContextManifestId;
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
@@ -418,6 +421,7 @@ export function retryChatTurn(
     threadId: attempt.threadId,
     providerInstanceId: attempt.providerInstanceId,
     providerSessionId: input.newProviderSessionId,
+    ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
     outcome: "queued",

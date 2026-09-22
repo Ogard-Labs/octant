@@ -134,6 +134,20 @@ function action(kind: BrowserActionRequest["kind"], target?: string): BrowserAct
 }
 
 describe("PlaywrightBrowserRuntime", () => {
+  it("reads the requested element instead of unrelated body text", async () => {
+    const { runtime, pages } = harness();
+    const signal = new AbortController().signal;
+    await runtime.createContext(firstId, policy, signal);
+    const page = pages[0];
+    if (page === undefined) throw new Error("No fixture page");
+    vi.mocked(page.textContent).mockImplementation(async (selector) =>
+      selector === "h1" ? "Heading" : "Unrelated body text",
+    );
+    const observation = await runtime.act(firstId, action("extract-text", "h1"), signal);
+    expect(observation.extractedText).toBe("Heading");
+    await runtime.closeAll();
+  });
+
   it("instruments a replacement page once, not once per path that reaches it", async () => {
     // A context reports a page before newPage() resolves, so a replacement
     // page reaches the listener while owned.page is still undefined, and again

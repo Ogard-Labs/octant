@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
+  closeSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
   chmodSync,
   constants,
   existsSync,
@@ -56,6 +61,7 @@ export interface PiConfinementPort {
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
+    readonly resume?: boolean;
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly environment: NodeJS.ProcessEnv;
@@ -79,6 +85,7 @@ export interface PiProcessPort {
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
+    readonly resume?: boolean;
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
     /** The Pi provider the thread's model runs on; only its credentials reach the process. */
@@ -311,6 +318,7 @@ export function piArguments(
   mode: PiSessionMode,
   executionPolicy: ProviderExecutionPolicy,
   appToolNames: ReadonlyArray<string> = [],
+  resumePath?: string,
 ): ReadonlyArray<string> {
   const builtInTools =
     mode === "chat"
@@ -334,9 +342,39 @@ export function piArguments(
     ...tools,
     "--session-dir",
     sessionDirectory,
-    "--session-id",
-    sessionId,
+    ...(resumePath === undefined ? ["--session-id", sessionId] : ["--session", resumePath]),
   ];
+}
+
+function existingPiHistory(directory: string, sessionId: string, root: string): string | undefined {
+  const matches = readdirSync(directory).filter((name) => name.endsWith(`_${sessionId}.jsonl`));
+  if (matches.length !== 1) return undefined;
+  const name = matches[0];
+  if (name === undefined) return undefined;
+  const path = join(directory, name);
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    if (!fstatSync(descriptor).isFile()) return undefined;
+    const buffer = Buffer.alloc(8192);
+    const length = readSync(descriptor, buffer, 0, buffer.length, 0);
+    const line = buffer.subarray(0, length).toString("utf8").split("\n")[0];
+    if (line === undefined) return undefined;
+    const header: unknown = JSON.parse(line);
+    if (
+      typeof header !== "object" ||
+      header === null ||
+      !("type" in header) ||
+      header.type !== "session" ||
+      !("id" in header) ||
+      header.id !== sessionId ||
+      !("cwd" in header) ||
+      header.cwd !== root
+    )
+      return undefined;
+    return path;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function validateBinary(binaryPath: string): ProviderFailure | undefined {
@@ -477,6 +515,17 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         );
         const root =
           input.root === piHome ? piHome : yield* existingDirectory(input.root, "Pi Project root");
+        const resumePath =
+          input.resume === true
+            ? yield* Effect.try({
+                try: () => existingPiHistory(sessionDirectory, input.sessionId, root),
+                catch: () => failure("stale-resume", "Pi native history could not be verified."),
+              })
+            : undefined;
+        if (input.resume === true && resumePath === undefined)
+          return yield* Effect.fail(
+            failure("stale-resume", "Pi native history is missing or belongs to another Project."),
+          );
         const tools = input.tools ?? [];
         if (tools.length > 0 && input.toolBridge === undefined) {
           return yield* Effect.fail(
@@ -537,6 +586,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           input.mode,
           input.executionPolicy,
           tools.map((tool) => tool.name),
+          resumePath,
         );
         if (input.executionPolicy === "full-access") {
           return { command: input.binaryPath, args, cwd: root, environment };

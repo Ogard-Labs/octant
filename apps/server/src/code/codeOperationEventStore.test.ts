@@ -14,7 +14,7 @@ import {
   type CodeOperationEvent,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -135,6 +135,39 @@ describe("CodeOperationEventStore", () => {
       status: "ok",
       frames: [{ threadId: otherThreadId, operationId: otherOperationId, cursor: 1 }],
     });
+    fixture.connection.close();
+  });
+
+  it("recovers the latest native binding without replaying conversation history", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const ready = decodeCodeOperationEvent({
+      kind: "provider-session-ready",
+      sessionId: "89000000-0000-4000-8000-000000000050",
+      providerInstanceId: "89000000-0000-4000-8000-000000000040",
+      modelId: "model-one",
+      checkoutId: "89000000-0000-4000-8000-000000000060",
+      resumeCursor: { driverKind: "codex", value: "native-one" },
+    });
+    store.append({ threadId, operationId, expectedCursor: 0, event: ready });
+    for (let cursor = 1; cursor <= 500; cursor++)
+      store.append({ threadId, operationId, expectedCursor: cursor, event: stateEvent("running") });
+    const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+    expect(store.providerSessionForThread(threadId, otherOperationId)).toMatchObject({
+      status: "ok",
+      session: ready,
+    });
+    expect(store.providerSessionForThread(otherThreadId, otherOperationId)).toEqual({
+      status: "ok",
+      priorTurn: false,
+    });
+    expect(replay).not.toHaveBeenCalled();
+    const plan = fixture.connection
+      .prepare(`EXPLAIN QUERY PLAN SELECT global_sequence FROM event_journal
+      WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+      AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ? ORDER BY global_sequence DESC LIMIT 1`)
+      .all("code-operation", String(threadId), "provider-session-ready");
+    expect(JSON.stringify(plan)).toContain("event_journal_thread_kind_sequence");
     fixture.connection.close();
   });
 
@@ -455,6 +488,54 @@ describe("CodeOperationEventStore", () => {
       { operationId: incompleteOperation, status: "incomplete" },
     ]);
     fixture.connection.close();
+  });
+
+  it("preserves reported cache counters when conversation usage is rebuilt", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const store = createStore(first.journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt: {
+          contentId: "89000000-0000-4000-8000-000000000031",
+          digest: "e".repeat(64),
+          byteLength: 4,
+        },
+      }),
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: {
+        kind: "usage",
+        inputTokens: 20,
+        outputTokens: 3,
+        cacheReadInputTokens: 7,
+        cacheWriteInputTokens: 2,
+      },
+    });
+    first.connection.close();
+    const reopened = openJournal(path);
+    const result = createStore(reopened.journal).conversation({
+      threadId,
+      afterCursor: 0,
+      limit: 10,
+    });
+    expect(result.turns[0]?.usage).toEqual({
+      inputTokens: 20,
+      outputTokens: 3,
+      cacheReadInputTokens: 7,
+      cacheWriteInputTokens: 2,
+    });
+    reopened.connection.close();
   });
 
   it("drops a provider limit the thread's previous provider left behind", () => {

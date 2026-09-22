@@ -30,6 +30,110 @@ const capabilities = {
 } as const;
 
 describe("ProviderRuntimeRegistry", () => {
+  it("expires idle native sessions and retains only four most recently released runtimes", async () => {
+    vi.useFakeTimers();
+    const registry = new ProviderRuntimeRegistry();
+    const closes: Array<ReturnType<typeof vi.fn>> = [];
+    try {
+      for (let index = 0; index < 5; index += 1) {
+        const identity = `session-${index}`;
+        const claim = registry.claimNativeSession(instanceId, identity);
+        if (claim.status !== "claimed") throw new Error("Expected reservation");
+        const close = vi.fn(async () => claim.release());
+        closes.push(close);
+        await registry.retainNativeSessionRuntime(instanceId, identity, {
+          value: index,
+          compatibility: "same",
+          close,
+        });
+      }
+      expect(closes[0]).toHaveBeenCalledTimes(1);
+      expect(closes[1]).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(30_000);
+      for (const close of closes) expect(close).toHaveBeenCalledTimes(1);
+      registry.claimExecutableUpdate("pi", [instanceId]);
+    } finally {
+      await registry.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps ownership through incompatible runtime cleanup and refuses late shutdown admission", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const claim = registry.claimNativeSession(instanceId, "session");
+    if (claim.status !== "claimed") throw new Error("Expected reservation");
+    let finish = () => {};
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const close = vi.fn(async () => {
+      await gate;
+      claim.release();
+    });
+    await registry.retainNativeSessionRuntime(instanceId, "session", {
+      value: 1,
+      compatibility: "old",
+      close,
+    });
+    const taking = registry.takeNativeSessionRuntime(instanceId, "session", "new");
+    expect(registry.claimNativeSession(instanceId, "session").status).toBe("refused");
+    finish();
+    expect(await taking).toBeUndefined();
+    const next = registry.claimNativeSession(instanceId, "session");
+    if (next.status !== "claimed") throw new Error("Expected next reservation");
+    await registry.closeAll();
+    const lateClose = vi.fn(async () => next.release());
+    await registry.retainNativeSessionRuntime(instanceId, "session", {
+      value: 2,
+      compatibility: "new",
+      close: lateClose,
+    });
+    expect(lateClose).toHaveBeenCalledTimes(1);
+    expect(registry.claimNativeSession(instanceId, "another").status).toBe("refused");
+  });
+
+  it("drains parked native runtimes before a CLI update", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const claim = registry.claimNativeSession(instanceId, "session");
+    if (claim.status !== "claimed") throw new Error("Expected reservation");
+    const close = vi.fn(async () => claim.release());
+    await registry.retainNativeSessionRuntime(instanceId, "session", {
+      value: 1,
+      compatibility: "same",
+      close,
+    });
+    registry.claimExecutableUpdate("pi", [instanceId]);
+    expect(await registry.takeNativeSessionRuntime(instanceId, "session", "same")).toBeUndefined();
+    await registry.invalidateRuntime(instanceId);
+    expect(close).toHaveBeenCalledTimes(1);
+    registry.releaseExecutableUpdate("pi");
+    await registry.closeAll();
+  });
+
+  it("excludes updates during native session startup and ignores stale releases", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const first = registry.claimNativeSession(instanceId, "native-session");
+    if (first.status !== "claimed") throw new Error("Expected reservation");
+    expect(registry.claimNativeSession(instanceId, "native-session").status).toBe("refused");
+    expect(() => registry.claimExecutableUpdate("pi", [instanceId])).toThrow(
+      /Stop active sessions/,
+    );
+    await expect(registry.invalidateRuntime(instanceId)).rejects.toThrow(/Stop active sessions/);
+    first.release();
+    const next = registry.claimNativeSession(instanceId, "native-session");
+    if (next.status !== "claimed") throw new Error("Expected next reservation");
+    first.release();
+    expect(registry.claimNativeSession(instanceId, "native-session").status).toBe("refused");
+    next.release();
+    registry.claimExecutableUpdate("pi", [instanceId]);
+    expect(registry.claimNativeSession(instanceId, "native-session")).toMatchObject({
+      status: "refused",
+      failure: { category: "unavailable" },
+    });
+    registry.releaseExecutableUpdate("pi");
+    await expect(registry.invalidateRuntime(instanceId)).resolves.toBeUndefined();
+  });
+
   it("stores observed state independently from durable configuration", () => {
     const registry = new ProviderRuntimeRegistry();
     const observed = decodeProviderObservedState({
@@ -81,8 +185,12 @@ describe("ProviderRuntimeRegistry", () => {
 
   it("shares an in-flight runtime for one instance and isolates different instances", async () => {
     const observedAcquireMs: number[] = [];
+    const acquireKinds: string[] = [];
     const registry = new ProviderRuntimeRegistry({
-      observeAcquireMs: (durationMs) => observedAcquireMs.push(durationMs),
+      observeAcquireMs: (durationMs, kind) => {
+        observedAcquireMs.push(durationMs);
+        acquireKinds.push(kind);
+      },
     });
     let starts = 0;
     const start = async () => ({
@@ -108,7 +216,8 @@ describe("ProviderRuntimeRegistry", () => {
         }),
       ),
     );
-    expect(observedAcquireMs).toHaveLength(2);
+    expect(observedAcquireMs).toHaveLength(4);
+    expect(acquireKinds).toEqual(["started", "reused", "started", "reused"]);
     await registry.closeAll();
   });
 

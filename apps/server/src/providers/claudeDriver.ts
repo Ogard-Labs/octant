@@ -794,6 +794,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   };
   return {
     kind: "claude",
+    conversationOwnership: "provider",
     probe: makeProbe(options, environmentFactory, factories.clock),
     acquire: ({ instanceId, projectRoot }) => {
       if (instanceId !== options.instanceId) {

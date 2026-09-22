@@ -324,6 +324,74 @@ describe("OpenCode driver", () => {
     ]);
   });
 
+  it("reports cumulative usage across every model step in one prompt", async () => {
+    const fixture = driverFixture({
+      events: [
+        stepEndedEvent("provider-session", "message-1", {
+          input: 12,
+          output: 7,
+          reasoning: 3,
+          cache: { read: 2, write: 1 },
+          cost: 0.25,
+        }),
+        stepEndedEvent("provider-session", "message-2", {
+          input: 30,
+          output: 11,
+          reasoning: 5,
+          cache: { read: 4, write: 2 },
+          cost: 0.5,
+        }),
+        idleEvent("provider-session"),
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          const stream = yield* connection.subscribe;
+          const collector = yield* Effect.fork(
+            Stream.runCollect(
+              stream.pipe(
+                Stream.filter((event) => event.sessionId === sessionId),
+                Stream.takeUntil((event) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          return yield* Fiber.join(collector);
+        }),
+      ),
+    );
+
+    expect(
+      Array.from(output).filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "usage" }> =>
+          event.kind === "usage",
+      ),
+    ).toMatchObject([
+      {
+        inputTokens: 12,
+        outputTokens: 7,
+        reasoningTokens: 3,
+        cacheReadInputTokens: 2,
+        cacheWriteInputTokens: 1,
+        costUsd: 0.25,
+      },
+      {
+        inputTokens: 42,
+        outputTokens: 18,
+        reasoningTokens: 8,
+        cacheReadInputTokens: 6,
+        cacheWriteInputTokens: 3,
+        costUsd: 0.75,
+      },
+    ]);
+  });
+
   it("rejects a second start for the same session", async () => {
     const fixture = driverFixture();
     const exit = await Effect.runPromise(
@@ -787,6 +855,60 @@ describe("OpenCode driver", () => {
     ]);
   });
 
+  it("registers current app tools when recovering a native session in a fresh driver", async () => {
+    const fixture = driverFixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "opencode", value: "provider-session" },
+            executionPolicy: "approval-gated",
+            tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+          });
+          yield* connection.send({
+            sessionId,
+            prompt: "Use the browser",
+            attachments: [],
+            tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+          });
+        }),
+      ),
+    );
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("session.create:"))).toBe(false);
+    expect(fixture.calls).toContain("session.promptAsync");
+  });
+
+  it("refuses a replacement native identity returned during resume", async () => {
+    const fixture = driverFixture({ resumedSessionId: "different-session" });
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        Effect.exit(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+            Effect.flatMap((connection) =>
+              connection.resume({
+                sessionId,
+                resumeCursor: { driverKind: "opencode", value: "provider-session" },
+                executionPolicy: "approval-gated",
+                tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("stale-resume");
+    expect(fixture.calls).not.toContain("session.promptAsync");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
+    expect(fixture.calls).not.toContain("session.abort");
+  });
+
   it("rejects resume when the source session belongs to another project root", async () => {
     const fixture = driverFixture({ sessionDirectory: "/tmp/other" });
     const exit = await Effect.runPromise(
@@ -1125,6 +1247,7 @@ function driverFixture(
       | "project-default"
       | (() => "current-session" | "project-default");
     readonly sessionDirectory?: string;
+    readonly resumedSessionId?: string;
     readonly processFailure?: {
       readonly category: "invalid-configuration";
       readonly message: string;
@@ -1170,7 +1293,7 @@ function driverFixture(
       calls.push(`session.create:${permission[0]?.action}`);
       return session;
     },
-    getSession: async () => session,
+    getSession: async () => ({ ...session, id: options.resumedSessionId ?? session.id }),
     prompt: async () => {
       calls.push("session.promptAsync");
     },
@@ -1340,6 +1463,35 @@ function todoEvent(id: string, contents: ReadonlyArray<string>): Event {
 }
 function idleEvent(id: string): Event {
   return { type: "session.idle", properties: { sessionID: id } } as Event;
+}
+function stepEndedEvent(
+  sessionID: string,
+  assistantMessageID: string,
+  usage: {
+    readonly input: number;
+    readonly output: number;
+    readonly reasoning: number;
+    readonly cache: { readonly read: number; readonly write: number };
+    readonly cost: number;
+  },
+): Event {
+  return {
+    id: `step-ended-${assistantMessageID}`,
+    type: "session.next.step.ended",
+    properties: {
+      timestamp: 1,
+      sessionID,
+      assistantMessageID,
+      finish: "stop",
+      cost: usage.cost,
+      tokens: {
+        input: usage.input,
+        output: usage.output,
+        reasoning: usage.reasoning,
+        cache: usage.cache,
+      },
+    },
+  };
 }
 function permissionEvent(id: string, requestId: string): Event {
   return {

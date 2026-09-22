@@ -57,7 +57,14 @@ export function createComputerUseToolService(options: {
       result?: ComputerControlResult;
     }
   >();
-  const owners = new Map<string, ComputerUseOwner>();
+  const owners = new Map<
+    string,
+    {
+      readonly owner: ComputerUseOwner;
+      readonly authority: ToolActionAuthority;
+      readonly expiresAt: number;
+    }
+  >();
   const observations = new Map<
     string,
     { readonly owner: ComputerUseOwner; readonly appId: string }
@@ -192,6 +199,7 @@ export function createComputerUseToolService(options: {
     const authority = options.authority(owner);
     if (
       !options.settings().enabled ||
+      !options.ownerIsCurrent(owner) ||
       owner.executionPolicy === "plan" ||
       authority === undefined ||
       !admitted(owner, false)
@@ -200,13 +208,28 @@ export function createComputerUseToolService(options: {
         "unavailable",
         "Computer use is unavailable for this task's current authority.",
       );
+    const previous = owners.get(ownerKey(owner));
+    if (
+      previous !== undefined &&
+      (previous.expiresAt <= Date.now() || !sameToolActionAuthority(previous.authority, authority))
+    ) {
+      await execute(owner, { operation: "stop" });
+    }
     await options.desktop.configure(options.settings());
     if (!(await options.desktop.reserve(owner)))
       return refused(
         "setup-required",
         "Open Computer use in Settings to enable the plugin and grant Octant's macOS permissions.",
       );
-    owners.set(ownerKey(owner), owner);
+    if (signal?.aborted) {
+      await options.desktop.release(owner);
+      return refused("cancelled", "Computer use was cancelled.");
+    }
+    owners.set(ownerKey(owner), {
+      owner,
+      authority,
+      expiresAt: owners.get(ownerKey(owner))?.expiresAt ?? Date.now() + 5 * 60_000,
+    });
     if (command.operation === "apps") return options.desktop.execute(owner, command, signal);
     const observed =
       "observationId" in command ? observations.get(command.observationId) : undefined;
@@ -307,8 +330,11 @@ export function createComputerUseToolService(options: {
       }
       if (requiresApproval) {
         const approved = view.events.find((event) => event.kind === "approval-approved");
-        if (approved !== undefined)
-          grants.set(grantKey, Date.parse(approved.occurredAt) + 5 * 60_000);
+        if (approved !== undefined) {
+          const expiresAt = Date.parse(approved.occurredAt) + 5 * 60_000;
+          grants.set(grantKey, expiresAt);
+          owners.set(ownerKey(owner), { owner, authority, expiresAt });
+        }
       }
       if (result.kind === "observation") {
         if (observations.size >= 256) observations.clear();
@@ -338,20 +364,28 @@ export function createComputerUseToolService(options: {
             sessionId: action.sessionId,
           });
       }
-      if (!options.settings().enabled) {
-        grants.clear();
-        observations.clear();
-        await Promise.all(
-          [...owners.values()].map((owner) => execute(owner, { operation: "stop" })),
-        );
-      }
+      for (const [key, expiresAt] of grants) if (expiresAt <= Date.now()) grants.delete(key);
+      await Promise.all(
+        [...owners.values()]
+          .filter(({ owner, authority, expiresAt }) => {
+            const current = options.authority(owner);
+            return (
+              !options.settings().enabled ||
+              !options.ownerIsCurrent(owner) ||
+              expiresAt <= Date.now() ||
+              current === undefined ||
+              !sameToolActionAuthority(authority, current)
+            );
+          })
+          .map(({ owner }) => execute(owner, { operation: "stop" })),
+      );
     },
     revokeWindow: async (windowId: ComputerUseOwner["windowId"]) => {
       await runtime.revokeWindow(windowId);
       await Promise.all(
         [...owners.values()]
-          .filter((owner) => owner.windowId === windowId)
-          .map((owner) => execute(owner, { operation: "stop" })),
+          .filter(({ owner }) => owner.windowId === windowId)
+          .map(({ owner }) => execute(owner, { operation: "stop" })),
       );
     },
     toolSet: (
@@ -381,16 +415,37 @@ export function createComputerUseToolService(options: {
             : execute(owner, command, signal);
         },
       });
+      const lifetime = new AbortController();
+      const inFlight = new Set<Promise<ComputerControlResult>>();
       let closing: Promise<void> | undefined;
       return {
         definitions: plugin.definitions,
         close: () => {
-          closing ??= execute(owner, { operation: "stop" }).then(() => undefined);
+          closing ??= (async () => {
+            lifetime.abort();
+            // A completed turn releases its tool handle, not the task's app grant.
+            // Interrupted work still revokes pending approval and stops native input.
+            if (inFlight.size > 0) await execute(owner, { operation: "stop" });
+            await Promise.allSettled(inFlight);
+          })();
           return closing;
         },
         execute: async (input) => {
           if (closing !== undefined) return { result: { error: "tool-closed" }, isError: true };
-          const result = await plugin.execute(input);
+          const execution = plugin.execute({
+            ...input,
+            signal:
+              input.signal === undefined
+                ? lifetime.signal
+                : AbortSignal.any([lifetime.signal, input.signal]),
+          });
+          inFlight.add(execution);
+          let result: ComputerControlResult;
+          try {
+            result = await execution;
+          } finally {
+            inFlight.delete(execution);
+          }
           if (result.kind === "observation" && result.image !== undefined) {
             const { image, ...observation } = result;
             return { result: observation, ...(imagesSupported ? { images: [image] } : {}) };
@@ -403,7 +458,7 @@ export function createComputerUseToolService(options: {
       grants.clear();
       observations.clear();
       await runtime.close();
-      await Promise.all([...owners.values()].map((owner) => options.desktop.release(owner)));
+      await Promise.all([...owners.values()].map(({ owner }) => options.desktop.release(owner)));
       owners.clear();
     },
   };

@@ -57,6 +57,103 @@ function history(): LocalUsageHistoryResponse {
 }
 
 describe("Local provider usage history", () => {
+  it("reports cached input as a share of total input rather than all processed tokens", async () => {
+    render(
+      <ProviderUsageHistoryWorkspace client={{ load: vi.fn().mockResolvedValue(history()) }} />,
+    );
+    expect(await screen.findByText("Input cache hit rate")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByText("Input cache hit rate").parentElement).toHaveTextContent("60%"),
+    );
+  });
+
+  it("weights the cache hit rate by input tokens rather than averaging model percentages", async () => {
+    const data = history();
+    const model = data.models[0];
+    if (model === undefined) throw new Error("Expected a fixture model");
+    const models = [
+      {
+        ...model,
+        key: "small",
+        label: "Small",
+        totals: {
+          ...model.totals,
+          inputTokens: 100,
+          outputTokens: 0,
+          totalTokens: 100,
+          cacheReadInputTokens: 90,
+          uncachedInputTokens: 10,
+        },
+      },
+      {
+        ...model,
+        key: "large",
+        label: "Large",
+        totals: {
+          ...model.totals,
+          inputTokens: 900,
+          outputTokens: 200,
+          totalTokens: 1100,
+          cacheReadInputTokens: 510,
+          uncachedInputTokens: 390,
+        },
+      },
+    ];
+    render(
+      <ProviderUsageHistoryWorkspace
+        client={{ load: vi.fn().mockResolvedValue({ ...data, models }) }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Input cache hit rate").parentElement).toHaveTextContent("60%"),
+    );
+  });
+
+  it("shows a measured zero cache hit rate when all input was uncached", async () => {
+    const data = history();
+    render(
+      <ProviderUsageHistoryWorkspace
+        client={{
+          load: vi
+            .fn()
+            .mockResolvedValue({ ...data, totals: { ...data.totals, cacheReadInputTokens: 0 } }),
+        }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Input cache hit rate").parentElement).toHaveTextContent("0%"),
+    );
+  });
+
+  it.each([
+    { cacheReadInputTokens: undefined },
+    {
+      componentCoverage: {
+        ...history().totals.componentCoverage,
+        cacheRead: { measured: 1, total: 2 },
+      },
+    },
+    { inputTokens: 0, cacheReadInputTokens: 0 },
+    { inputTokens: 100, cacheReadInputTokens: 200 },
+  ])(
+    "leaves the cache hit rate unavailable without a complete valid denominator: %j",
+    async (totals) => {
+      const data = history();
+      render(
+        <ProviderUsageHistoryWorkspace
+          client={{
+            load: vi.fn().mockResolvedValue({ ...data, totals: { ...data.totals, ...totals } }),
+          }}
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByText("Input cache hit rate").parentElement).toHaveTextContent(
+          "Unavailable",
+        ),
+      );
+    },
+  );
+
   it("continues a partial import and replaces its subtotal with the completed reading", async () => {
     const partial = history();
     const complete = { ...history(), totals: { ...history().totals, totalTokens: 2400 } };

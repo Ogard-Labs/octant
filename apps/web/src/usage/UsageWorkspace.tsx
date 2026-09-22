@@ -511,8 +511,12 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
       ) : (
         <>
           <p className="usage-workspace__note">
-            Reuse across every provider instance in range:{" "}
-            <RateMeter label="Token cache hit ratio" ratio={stats.tokenCacheHitRatio} />
+            Reads as a share of reported cache traffic:{" "}
+            <RateMeter label="Cache traffic read share" ratio={stats.tokenCacheHitRatio} />
+          </p>
+          <p className="usage-workspace__note">
+            Reads divided by reads plus writes excludes uncached input, so this is not a
+            prompt-cache hit rate. Unknown counters are not counted as zero.
           </p>
           <div className="usage-table-scroll">
             <table aria-label="Provider prompt cache reuse" className="usage-table">
@@ -522,7 +526,7 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
                   <th scope="col">Requests</th>
                   <th scope="col">Cache read tokens</th>
                   <th scope="col">Cache write tokens</th>
-                  <th scope="col">Reuse</th>
+                  <th scope="col">Read share</th>
                 </tr>
               </thead>
               <tbody>
@@ -532,11 +536,11 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
                       <UsageName kind="provider" id={provider.providerInstanceId} />
                     </th>
                     <td>{provider.requestCount.toLocaleString()}</td>
-                    <td>{provider.cacheReadInputTokens.toLocaleString()}</td>
-                    <td>{provider.cacheWriteInputTokens.toLocaleString()}</td>
+                    <td>{provider.cacheReadInputTokens?.toLocaleString() ?? "Unknown"}</td>
+                    <td>{provider.cacheWriteInputTokens?.toLocaleString() ?? "Unknown"}</td>
                     <td>
                       <RateMeter
-                        label={`${provider.providerInstanceId} prompt cache reuse`}
+                        label={`${provider.providerInstanceId} cache traffic read share`}
                         ratio={provider.hitRatio}
                       />
                     </td>

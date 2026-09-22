@@ -1,3 +1,4 @@
+import { browserToolImage } from "../browser/browserToolImage";
 import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import type {
   BrowserActionRequest,
@@ -14,10 +15,7 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import {
-  MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
-  MAX_BROWSER_TABS_PER_CONTEXT,
-} from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
@@ -768,7 +766,7 @@ async function browserTool(
   if (acted.kind === "failure") return failure(acted.reason);
   if (
     input.operation === "screenshot" &&
-    acted.snapshot.observation?.screenshotDataUrl === undefined
+    browserToolImage(acted.snapshot.observation?.screenshotDataUrl) === undefined
   ) {
     return failure("browser-screenshot-unavailable");
   }
@@ -1423,7 +1421,11 @@ function browserAction(
         ? undefined
         : { ...base, kind: "navigate" as const, target: input.url };
     case "read-page":
-      return { ...base, kind: "extract-text" as const };
+      return {
+        ...base,
+        kind: "extract-text" as const,
+        ...(input.selector === undefined ? {} : { target: input.selector }),
+      };
     case "click":
       return input.selector === undefined
         ? undefined
@@ -1514,7 +1516,11 @@ function terminalSnapshot(
 }
 
 function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
+  const image = includeScreenshot
+    ? browserToolImage(snapshot.observation?.screenshotDataUrl)
+    : undefined;
   return {
+    ...(image === undefined ? {} : { images: [image] }),
     result: {
       status: snapshot.status,
       ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
@@ -1553,12 +1559,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(snapshot.observation.failedRequests === undefined
                 ? {}
                 : { failedRequests: snapshot.observation.failedRequests }),
-              ...(!includeScreenshot || snapshot.observation.screenshotDataUrl === undefined
-                ? {}
-                : snapshot.observation.screenshotDataUrl.length <=
-                    MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS
-                  ? { screenshotDataUrl: snapshot.observation.screenshotDataUrl }
-                  : { screenshotOmitted: "too-large" as const }),
+              ...(includeScreenshot && image === undefined
+                ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
             },
           }),
     },
@@ -1653,7 +1656,8 @@ type BrowserToolInput = {
   readonly expectedObservationRevision?: number;
 } & (
   | { readonly operation: "navigate"; readonly url: string }
-  | { readonly operation: "read-page" | "screenshot" | "stop" }
+  | { readonly operation: "read-page"; readonly selector?: string }
+  | { readonly operation: "screenshot" | "stop" }
   | { readonly operation: "diagnostics" }
   | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
   | { readonly operation: "click" | "wait"; readonly selector: string }
@@ -1750,6 +1754,13 @@ function parseBrowserInput(value: string): BrowserToolInput | undefined {
       };
     }
     case "read-page":
+      if (!only("selector") || (parsed.selector !== undefined && !text("selector", 4096)))
+        return undefined;
+      return {
+        ...common,
+        operation: "read-page",
+        ...(typeof parsed.selector === "string" ? { selector: parsed.selector } : {}),
+      };
     case "screenshot":
     case "diagnostics":
     case "stop":

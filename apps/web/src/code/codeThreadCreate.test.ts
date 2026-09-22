@@ -1,4 +1,4 @@
-import type { CodeCommandResult } from "@octant/contracts/code";
+import { decodeCodeCommandResult, type CodeCommandResult } from "@octant/contracts/code";
 import { describe, expect, it } from "vitest";
 import type { CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
 import { planCodeThreadCreate } from "./codeThreadCreate";
@@ -159,6 +159,41 @@ describe("planCodeThreadCreate", () => {
           : { kind: "command", command: { thread: { profileId } } },
       );
     }
+  });
+
+  it("starts in a plain folder admitted by the server without inventing a checked-out branch", () => {
+    const result = planCodeThreadCreate({
+      composer: composer("current-checkout"),
+      modelId: "qwen-3.6" as never,
+      prepared: decodeCodeCommandResult({
+        kind: "checkout-prepared",
+        bindingRevisionId: ids.binding,
+        checkout: {
+          id: ids.checkout,
+          repositoryId: `repo_${"a".repeat(64)}`,
+          kind: "plain-folder",
+          availability: "available",
+          head: { kind: "none" },
+          observedAt: now,
+        },
+      }) as never,
+      projectId: ids.project as never,
+      providerInstanceId: ids.provider as never,
+      threadId: ids.thread,
+      timestamp: now,
+      title: "Fix search",
+    });
+    expect(result).toMatchObject({
+      kind: "command",
+      command: {
+        kind: "create-code-thread",
+        thread: {
+          checkoutId: ids.checkout,
+          executionPolicy: "approval-gated",
+          deliveryTarget: { branchIntent: "octant/abcd1234" },
+        },
+      },
+    });
   });
 
   it("refuses the current checkout when the prepared head is detached", () => {

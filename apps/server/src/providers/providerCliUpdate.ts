@@ -99,8 +99,14 @@ export async function runProviderCliUpdate(
       result();
     };
     const capturedText = () => decoder.decode(Buffer.concat(captured, capturedBytes));
+    // Timeout and child closure may arrive together. A second SIGTERM can
+    // kill a parent whose one-shot handler was consumed by the first signal,
+    // before it reaps its descendants. Both paths must await the same cleanup.
+    let cleanup: Promise<"released" | "unconfirmed"> | undefined;
+    const releaseTree = () =>
+      (cleanup ??= ensureProcessTreeExited(groupExists, killGroup, graceMs));
     const terminateTree = async (reason: "timeout" | "close") => {
-      const released = await ensureProcessTreeExited(groupExists, killGroup, graceMs);
+      const released = await releaseTree();
       if (released !== "released") {
         settle(() =>
           reject({
@@ -144,7 +150,11 @@ export async function runProviderCliUpdate(
           await terminateTree("timeout");
           return;
         }
-        const released = await ensureProcessTreeExited(groupExists, killGroup, graceMs);
+        const released = await releaseTree();
+        if (timedOut) {
+          await terminateTree("timeout");
+          return;
+        }
         if (released !== "released") {
           settle(() =>
             reject({

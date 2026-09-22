@@ -69,6 +69,8 @@ export interface ProviderSessionHandle {
 }
 
 export interface ProviderSessionResume {
+  /** Current allowed catalogue, reattached without changing native history. */
+  readonly tools?: ReadonlyArray<ProviderToolDefinition>;
   readonly sessionId: ProviderSessionId;
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -89,6 +91,8 @@ export interface ProviderUserInputAnswer {
 }
 
 export interface ProviderDriver {
+  /** Provider-owned conversations must resume; host-owned APIs receive planned history. */
+  readonly conversationOwnership?: "provider" | "host";
   readonly kind: ProviderDriverKind;
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */

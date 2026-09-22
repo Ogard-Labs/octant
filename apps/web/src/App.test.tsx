@@ -135,6 +135,130 @@ function navigatorAssistantClient(
 }
 
 describe("App", () => {
+  it("opens a created Code task while the first provider turn is still starting", async () => {
+    const user = userEvent.setup();
+    const base = codes();
+    const initial = await base.bootstrap();
+    let createdThread = initial.threads[0];
+    const pendingStart = deferred<Awaited<ReturnType<CodeClient["putEvidence"]>>>();
+    const codeApi: CodeClient = {
+      ...base,
+      execute: vi.fn<CodeClient["execute"]>(async (command) => {
+        if (command.kind === "prepare-code-project-checkout") {
+          const checkout = initial.checkouts[0];
+          if (checkout === undefined || createdThread === undefined)
+            throw new Error("Missing fixture");
+          return {
+            kind: "checkout-prepared",
+            bindingRevisionId: createdThread.bindingRevisionId,
+            checkout,
+          };
+        }
+        if (command.kind === "create-code-thread") {
+          createdThread = command.thread;
+          return { kind: "thread-created", thread: command.thread };
+        }
+        throw new Error(`Unexpected ${command.kind}`);
+      }),
+      putEvidence: vi.fn(() => pendingStart.promise),
+      thread: vi.fn(async () => {
+        const view = await base.thread(codeThreadId);
+        if (createdThread === undefined) throw new Error("Missing thread");
+        return { ...view, thread: createdThread };
+      }),
+    };
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+    await user.type(
+      await screen.findByRole("textbox", { name: "First message" }),
+      "Open immediately",
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Open immediately" }),
+    ).toBeVisible();
+    await waitFor(() => expect(codeApi.putEvidence).toHaveBeenCalled());
+    expect(screen.queryByText("Starting the first turn…")).not.toBeInTheDocument();
+  });
+
+  it("restores the first prompt after evidence storage throws in an opened Code task", async () => {
+    const user = userEvent.setup();
+    const base = codes();
+    const initial = await base.bootstrap();
+    let createdThread = initial.threads[0];
+    const codeApi: CodeClient = {
+      ...base,
+      bootstrap: vi.fn(async () => ({
+        ...initial,
+        threads: createdThread === undefined ? initial.threads : [createdThread],
+      })),
+      execute: vi.fn<CodeClient["execute"]>(async (command) => {
+        if (command.kind === "prepare-code-project-checkout") {
+          const checkout = initial.checkouts[0];
+          if (checkout === undefined || createdThread === undefined)
+            throw new Error("Missing fixture");
+          return {
+            kind: "checkout-prepared",
+            bindingRevisionId: createdThread.bindingRevisionId,
+            checkout,
+          };
+        }
+        if (command.kind === "create-code-thread") {
+          createdThread = command.thread;
+          return { kind: "thread-created", thread: command.thread };
+        }
+        throw new Error(`Unexpected ${command.kind}`);
+      }),
+      putEvidence: vi.fn(async () => {
+        throw new Error("Evidence storage unavailable");
+      }),
+      thread: vi.fn(async () => {
+        const view = await base.thread(codeThreadId);
+        if (createdThread === undefined) throw new Error("Missing thread");
+        return { ...view, thread: createdThread };
+      }),
+    };
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+    await user.type(
+      await screen.findByRole("textbox", { name: "First message" }),
+      "Open immediately",
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Open immediately" }),
+    ).toBeVisible();
+    await waitFor(() => expect(codeApi.putEvidence).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue(
+        "Open immediately",
+      ),
+    );
+    expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
+  });
+
   it("tells the user why a Code draft bound to a vanished Project cannot start, and creates nothing", async () => {
     const user = userEvent.setup();
     const codeApi = codesRecordingCreates();

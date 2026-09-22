@@ -3,7 +3,12 @@ import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { BindingRevisionId, ProjectId } from "./projects";
-import { ProviderInstanceId, ProviderModelId, ProviderSessionId } from "./providers";
+import {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderSessionId,
+  ProviderResumeCursor,
+} from "./providers";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
@@ -174,6 +179,7 @@ export const WorkTurnState = Schema.Struct({
   projectId: ProjectId,
   authority: WorkTurnAuthority,
   providerSessionId: Schema.optional(ProviderSessionId),
+  resumeCursor: Schema.optional(ProviderResumeCursor),
   status: WorkTurnLifecycleStatus,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
@@ -323,6 +329,7 @@ export const WorkTurnAccepted = Schema.Struct({
   projectId: ProjectId,
   authority: WorkTurnAuthority,
   providerSessionId: ProviderSessionId,
+  resumeCursor: Schema.optional(ProviderResumeCursor),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
@@ -334,6 +341,7 @@ export const WorkTurnAccepted = Schema.Struct({
 export type WorkTurnAccepted = typeof WorkTurnAccepted.Type;
 
 export const WorkTurnUpdated = Schema.Struct({
+  resumeCursor: Schema.optional(ProviderResumeCursor),
   kind: Schema.Literal("turn-updated"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,

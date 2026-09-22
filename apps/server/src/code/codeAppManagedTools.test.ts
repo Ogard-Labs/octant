@@ -469,6 +469,7 @@ describe("Code app-managed tools", () => {
       32 * 1024,
     );
     expect(result).toMatchObject({ result: { truncated: true }, isError: false });
+    expect(JSON.stringify(result.result)).not.toContain("data:image");
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 
@@ -613,6 +614,40 @@ describe("Code app-managed tools", () => {
       isError: false,
       result: { status: "running", page: { title: "Example", text: "Readable page text" } },
     });
+  });
+
+  it("passes a requested read selector to the browser without changing its authority", async () => {
+    const current = thread();
+    const act = vi.fn(async () => browserSnapshot(browserAuthority()));
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: current,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => browserSnapshot(browserAuthority()),
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+      },
+    });
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read-page", selector: "h1" }),
+    });
+    expect(result.isError).toBe(false);
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          kind: "extract-text",
+          target: "h1",
+          authority: browserAuthority(),
+        }),
+      }),
+    );
   });
 
   it("refuses browser actions after the thread switches to Plan", async () => {
@@ -775,7 +810,7 @@ describe("Code app-managed tools", () => {
     expect(releaseThread).toHaveBeenCalledWith(windowId, threadId);
   });
 
-  it("returns a bounded screenshot data URL to an agent that requests one", async () => {
+  it("returns a bounded image block to an agent that requests a screenshot", async () => {
     const authority = browserAuthority();
     const active = browserSnapshot(authority);
     const screenshotDataUrl = `data:image/jpeg;base64,${"A".repeat(52 * 1024)}`;
@@ -813,8 +848,10 @@ describe("Code app-managed tools", () => {
 
     expect(result).toMatchObject({
       isError: false,
-      result: { page: { screenshotDataUrl } },
+      images: [{ mimeType: "image/jpeg", data: "A".repeat(52 * 1024) }],
+      result: { page: {} },
     });
+    expect(JSON.stringify(result.result)).not.toContain("data:image");
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 
@@ -902,6 +939,7 @@ describe("Code app-managed tools", () => {
     expect(
       (result.result as { page?: { screenshotDataUrl?: string } }).page?.screenshotDataUrl,
     ).toBe(undefined);
+    expect(JSON.stringify(result.result)).not.toContain("data:image");
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 

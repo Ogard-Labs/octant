@@ -18,6 +18,8 @@ export const capabilityLabels: ReadonlyArray<
   ["reasoning", "Reasoning"],
   ["usage", "Usage"],
   ["toolActivity", "Tool activity"],
+  ["appManagedTools", "Octant tools"],
+  ["nativeAttachments", "Native attachments"],
   ["fileChanges", "File changes"],
   ["diffs", "Diffs"],
   ["taskProgress", "Task progress"],

@@ -559,7 +559,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           refuseUnapprovedPage(owned, contents);
           const extractedText = await execute(
             contentsView(owned),
-            "document.body?.innerText?.slice(0, 65536) ?? ''",
+            request.kind === "extract-text" && request.target !== undefined
+              ? `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`
+              : "document.body?.innerText?.slice(0, 65536) ?? ''",
           );
           const text = typeof extractedText === "string" ? extractedText : "";
           const measuredViewport = await execute(

@@ -184,6 +184,28 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap).toEqual(before);
   });
 
+  it("returns a created thread without waiting for another navigation snapshot", async () => {
+    const snapshot = vi
+      .fn()
+      .mockResolvedValueOnce(bootstrap())
+      .mockImplementation(() => new Promise<CodeBootstrap>(() => {}));
+    const created: CodeCommandResult = { kind: "thread-created", thread: thread(2) };
+    const client = fakeClient({ bootstrap: snapshot, execute: vi.fn(async () => created) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let returned: CodeCommandResult | undefined;
+    await act(async () => {
+      void result.current
+        .execute({ kind: "create-code-thread", thread: thread(2) })
+        .then((value) => {
+          returned = value;
+        });
+    });
+    expect(returned).toEqual(created);
+    expect(result.current.status).toBe("ready");
+    expect(result.current.bootstrap?.threads).toContainEqual(created.thread);
+  });
+
   it("projects a managed-thread-created result into both threads and checkouts", async () => {
     const managedCheckoutId = "40000000-0000-4000-8000-000000000009";
     const managedCheckout = {
@@ -1167,14 +1189,28 @@ describe("useCodeController", () => {
         operationId,
         cursor: 1,
         occurredAt: now,
-        event: { kind: "usage", inputTokens: 10, outputTokens: 4, costUsd: 0.01 },
+        event: {
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 4,
+          costUsd: 0.01,
+          cacheReadInputTokens: 3,
+          cacheWriteInputTokens: 1,
+        },
       };
       yield {
         threadId: ids.thread,
         operationId,
         cursor: 2,
         occurredAt: now,
-        event: { kind: "usage", inputTokens: 20, outputTokens: 9, costUsd: 0.02 },
+        event: {
+          kind: "usage",
+          inputTokens: 20,
+          outputTokens: 9,
+          costUsd: 0.02,
+          cacheReadInputTokens: 7,
+          cacheWriteInputTokens: 2,
+        },
       };
       yield {
         threadId: ids.thread,
@@ -1209,6 +1245,54 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.threadUsage.outputTokens).toBe(9));
     expect(result.current.threadUsage.inputTokens).toBe(20);
     expect(result.current.threadUsage.costUsd).toBeCloseTo(0.02);
+    expect(result.current.threadUsage.cacheReadInputTokens).toBe(7);
+    expect(result.current.threadUsage.cacheWriteInputTokens).toBe(2);
+  });
+
+  it("keeps partial cache totals unknown while exposing measured turn coverage", async () => {
+    const client = fakeClient({
+      conversation: vi.fn(async () => ({
+        version: 3,
+        threadId: ids.thread,
+        turns: [
+          {
+            inputTokens: 100,
+            outputTokens: 10,
+            cacheReadInputTokens: 80,
+            cacheWriteInputTokens: 0,
+          },
+          { inputTokens: 200, outputTokens: 20, cacheReadInputTokens: 0 },
+          { inputTokens: 300, outputTokens: 30 },
+        ].map((usage, index) => ({
+          operationId: `70000000-0000-4000-8000-00000000006${index}`,
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          sessionId: "80000000-0000-4000-8000-000000000053",
+          prompt: {
+            contentId: "60000000-0000-4000-8000-000000000053",
+            digest: "a".repeat(64),
+            byteLength: 4,
+          },
+          assistant: [],
+          status: "completed",
+          startedAt: now,
+          updatedAt: now,
+          usage,
+        })),
+        nextCursor: 3,
+        hasMore: false,
+      })) as never,
+      operationContent: vi.fn(async () => new TextEncoder().encode("test")),
+    });
+    const { result } = renderHook(() => useCodeController({ activeThreadId: ids.thread, client }));
+    await waitFor(() => expect(result.current.threadUsage.inputTokens).toBe(600));
+    expect(result.current.threadUsage.cacheReadInputTokens).toBeUndefined();
+    expect(result.current.threadUsage.cacheWriteInputTokens).toBeUndefined();
+    expect(result.current.threadUsage.cacheCoverage).toEqual({
+      reportedTurns: 3,
+      read: { measuredTurns: 2, measuredTokens: 80 },
+      write: { measuredTurns: 1, measuredTokens: 0 },
+    });
   });
 
   it("keeps usage unknown until the thread has a provider report", async () => {
@@ -1216,6 +1300,8 @@ describe("useCodeController", () => {
     const { result } = renderHook(() => useCodeController({ activeThreadId: ids.thread, client }));
     await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
     expect(result.current.threadUsage.inputTokens).toBeUndefined();
+    expect(result.current.threadUsage.cacheReadInputTokens).toBeUndefined();
+    expect(result.current.threadUsage.cacheWriteInputTokens).toBeUndefined();
     expect(result.current.threadUsage.outputTokens).toBeUndefined();
   });
 

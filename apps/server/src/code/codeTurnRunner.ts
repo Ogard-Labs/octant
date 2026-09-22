@@ -6,9 +6,14 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
+  type ProviderResumeCursor,
 } from "@octant/contracts";
 import { Effect, Fiber, Scope, Stream } from "effect";
-import type { ProviderAcquireInput, ProviderConnection } from "@octant/provider-sdk/driver";
+import type {
+  ProviderAcquireInput,
+  ProviderConnection,
+  ProviderSessionHandle,
+} from "@octant/provider-sdk/driver";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
@@ -92,6 +97,9 @@ export interface CodeTurnEvent {
   readonly path?: string;
   readonly change?: string;
   readonly inputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+
   readonly outputTokens?: number;
   readonly costUsd?: number;
   readonly contextWindow?: number;
@@ -109,6 +117,8 @@ export interface CodeTurnRunnerInput {
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
   readonly checkoutRoot: string;
   readonly prompt: string;
+  readonly resumeCursor?: ProviderResumeCursor;
+  readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
   readonly provider: CodeProviderPort;
   readonly context?: Parameters<ProviderConnection["send"]>[0]["context"];
   readonly attachments?: Parameters<ProviderConnection["send"]>[0]["attachments"];
@@ -225,18 +235,32 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled during provider acquisition.");
       }
 
-      yield* connection
-        .start({
-          sessionId: input.sessionId,
-          modelId: input.thread.modelId,
-          ...(input.thread.modelOptionValues === undefined
-            ? {}
-            : { modelOptionValues: input.thread.modelOptionValues }),
-          executionPolicy: input.thread.executionPolicy,
-          tools: input.appManagedTools?.definitions ?? [],
-          ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
-        })
-        .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+      const sessionOptions = {
+        sessionId: input.sessionId,
+        ...(input.thread.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: input.thread.modelOptionValues }),
+        executionPolicy: input.thread.executionPolicy,
+        ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+      };
+      const handle = yield* (
+        input.resumeCursor === undefined
+          ? connection.start({
+              ...sessionOptions,
+              modelId: input.thread.modelId,
+              tools: input.appManagedTools?.definitions ?? [],
+            })
+          : connection.resume({
+              ...sessionOptions,
+              resumeCursor: input.resumeCursor,
+              tools: input.appManagedTools?.definitions ?? [],
+            })
+      ).pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+      if (input.onSessionReady !== undefined) {
+        yield* input
+          .onSessionReady(handle)
+          .pipe(Effect.catchAll((failure) => failForProvider(failure, fail)));
+      }
 
       if (input.signal?.aborted) {
         yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
@@ -630,6 +654,13 @@ function normalizeProviderEvent(
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
         ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+        ...(event.cacheReadInputTokens === undefined
+          ? {}
+          : { cacheReadInputTokens: event.cacheReadInputTokens }),
+        ...(event.cacheWriteInputTokens === undefined
+          ? {}
+          : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+
         ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
         ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
       });

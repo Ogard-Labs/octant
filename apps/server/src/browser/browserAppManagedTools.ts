@@ -1,3 +1,4 @@
+import { browserToolImage } from "./browserToolImage";
 import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import type {
   BrowserActionRequest,
@@ -9,11 +10,7 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import {
-  MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
-  MAX_BROWSER_TABS_PER_CONTEXT,
-  sameToolActionAuthority,
-} from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
@@ -72,12 +69,17 @@ export interface BrowserModelBinding {
 
 type BrowserToolInput =
   | {
+      readonly operation: "read-page";
+      readonly selector?: string;
+      readonly expectedObservationRevision?: number;
+    }
+  | {
       readonly operation: "navigate";
       readonly url: string;
       readonly expectedObservationRevision?: number;
     }
   | {
-      readonly operation: "read-page" | "screenshot" | "stop";
+      readonly operation: "screenshot" | "stop";
       readonly expectedObservationRevision?: number;
     }
   | {
@@ -118,7 +120,6 @@ const hostPolicy: BrowserContextPolicy = {
 export function createBrowserAppManagedTools(
   options: BrowserAppManagedToolsOptions,
 ): AppManagedToolSet {
-  const rememberedContexts = new Set<string>();
   const initialAuthority = options.resolveAuthority(options.threadId, options.mode);
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
     ? [BROWSER_TOOL_DEFINITION]
@@ -140,7 +141,6 @@ export function createBrowserAppManagedTools(
       if (input.operation === "stop") {
         const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
         if (snapshot.context !== undefined) {
-          rememberedContexts.delete(String(snapshot.context.contextId));
           options.modelBindings.delete(String(snapshot.context.contextId));
         }
         return browserResult(
@@ -152,7 +152,7 @@ export function createBrowserAppManagedTools(
       let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
       const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
       if (existing === undefined && snapshot.context !== undefined) {
-        rememberedContexts.delete(String(snapshot.context.contextId));
+        options.modelBindings.delete(String(snapshot.context.contextId));
       }
       const origin =
         existing === undefined
@@ -165,7 +165,13 @@ export function createBrowserAppManagedTools(
           input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
         );
       }
-      if (existing === undefined || !rememberedContexts.has(String(existing.contextId))) {
+      const existingBinding =
+        existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
+      const contextApproved =
+        existingBinding !== undefined &&
+        String(existingBinding.modelId) === String(options.modelId) &&
+        sameToolActionAuthority(existingBinding.authority, authority);
+      if (existing === undefined || !contextApproved) {
         if (options.approvals === undefined) return failure("browser-approval-required");
         const outcome = await options.approvals.request({
           windowId: options.windowId,
@@ -198,7 +204,6 @@ export function createBrowserAppManagedTools(
         snapshot = created;
         if (created.context?.state === "active") {
           const contextId = String(created.context.contextId);
-          rememberedContexts.add(contextId);
           rememberModelBinding(options.modelBindings, contextId, {
             modelId: options.modelId,
             authority,
@@ -234,14 +239,16 @@ export function createBrowserAppManagedTools(
           authority: refreshed,
         });
       }
-      if (!rememberedContexts.has(contextId)) rememberedContexts.add(String(context.contextId));
       const request = browserAction(input, context);
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
       const acted = await options.browser.act({ windowId: options.windowId, request });
       if (signal?.aborted) return failure("tool-interrupted");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
-      if (input.operation === "screenshot" && acted.observation?.screenshotDataUrl === undefined) {
+      if (
+        input.operation === "screenshot" &&
+        browserToolImage(acted.observation?.screenshotDataUrl) === undefined
+      ) {
         return failure("browser-screenshot-unavailable");
       }
       return browserResult(acted, input.operation === "screenshot");
@@ -299,7 +306,11 @@ function browserAction(
     case "navigate":
       return { ...base, kind: "navigate", target: input.url };
     case "read-page":
-      return { ...base, kind: "extract-text" };
+      return {
+        ...base,
+        kind: "extract-text",
+        ...(input.selector === undefined ? {} : { target: input.selector }),
+      };
     case "click":
       return { ...base, kind: "click", target: input.selector };
     case "type":
@@ -350,6 +361,15 @@ function parseInput(value: string): BrowserToolInput | undefined {
     );
   const text = (key: string, max: number) =>
     typeof record[key] === "string" && record[key] !== "" && record[key].length <= max;
+  if (operation === "read-page") {
+    if (!only("selector") || (record.selector !== undefined && !text("selector", 4096)))
+      return undefined;
+    return {
+      ...common,
+      operation,
+      ...(typeof record.selector === "string" ? { selector: record.selector } : {}),
+    };
+  }
   if (operation === "navigate" && only("url") && text("url", 4096))
     return { ...common, operation, url: record.url as string };
   if ((operation === "click" || operation === "wait") && only("selector") && text("selector", 4096))
@@ -385,13 +405,7 @@ function parseInput(value: string): BrowserToolInput | undefined {
       ...(typeof deltaY === "number" ? { deltaY } : {}),
     };
   }
-  if (
-    (operation === "read-page" ||
-      operation === "screenshot" ||
-      operation === "diagnostics" ||
-      operation === "stop") &&
-    only()
-  )
+  if ((operation === "screenshot" || operation === "diagnostics" || operation === "stop") && only())
     return { ...common, operation };
   return undefined;
 }
@@ -406,6 +420,9 @@ function allowedOrigin(value: string): string | undefined {
 }
 
 function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
+  const image = includeScreenshot
+    ? browserToolImage(snapshot.observation?.screenshotDataUrl)
+    : undefined;
   const observation = snapshot.observation;
   const text = observation?.extractedText;
   const bounded =
@@ -413,6 +430,7 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
       ? undefined
       : Buffer.from(text, "utf8").subarray(0, MAX_TEXT_RESULT_BYTES).toString("utf8");
   return {
+    ...(image === undefined ? {} : { images: [image] }),
     result: {
       status: snapshot.status,
       ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
@@ -440,11 +458,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(observation.failedRequests === undefined
                 ? {}
                 : { failedRequests: observation.failedRequests }),
-              ...(!includeScreenshot || observation.screenshotDataUrl === undefined
-                ? {}
-                : observation.screenshotDataUrl.length <= MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS
-                  ? { screenshotDataUrl: observation.screenshotDataUrl }
-                  : { screenshotOmitted: "too-large" as const }),
+              ...(includeScreenshot && image === undefined
+                ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
             },
           }),
     },

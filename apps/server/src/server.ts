@@ -3116,14 +3116,21 @@ export function startOctantServer(
     });
     projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
+    const codeThreadDrivers = new Map<
+      string,
+      { readonly instanceId: string; readonly version: number; readonly driver: ProviderDriver }
+    >();
     let terminalProcessPort: TerminalProcessPort | undefined;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
       options.providerRuntimeRegistry ??
       new ProviderRuntimeRegistry({
         receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
-        observeAcquireMs: (durationMs) =>
-          latencyStats.record("provider-runtime-acquire", durationMs),
+        observeAcquireMs: (durationMs, kind) =>
+          latencyStats.record(
+            kind === "started" ? "provider-runtime-acquire" : "provider-runtime-reuse",
+            durationMs,
+          ),
       });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
@@ -3875,10 +3882,23 @@ export function startOctantServer(
           const instance = persistence.readProviderInstance(thread.providerInstanceId);
           if (instance === undefined || !instance.enabled) return undefined;
           try {
-            return attachWorkRequestRuntime(
+            const key = String(thread.id);
+            const retained = codeThreadDrivers.get(key);
+            if (
+              retained?.instanceId === String(instance.id) &&
+              retained.version === instance.version
+            )
+              return retained.driver;
+            const driver = attachWorkRequestRuntime(
               makeConfiguredProviderDriver(instance, configuredDriverOptions),
               () => workRequestRuntime,
             );
+            codeThreadDrivers.set(key, {
+              instanceId: String(instance.id),
+              version: instance.version,
+              driver,
+            });
+            return driver;
           } catch {
             return undefined;
           }
@@ -8145,6 +8165,11 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            await codeOperationRuntime?.close();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
+          try {
             await warmingProviders;
             await providerRuntimeRegistry.closeAll();
           } catch (error) {
@@ -8152,11 +8177,6 @@ export function startOctantServer(
           }
           try {
             zenService.close();
-          } catch (error) {
-            shutdownFailure ??= error;
-          }
-          try {
-            await codeOperationRuntime?.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

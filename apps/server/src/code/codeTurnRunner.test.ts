@@ -26,6 +26,82 @@ const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000
 const sessionId = decodeProviderSessionId("87000000-0000-4000-8000-000000000002");
 
 describe("CodeTurnRunner", () => {
+  it("resumes the same native session for a follow-up without creating another", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
+    });
+    const resumeCursor = { driverKind: "mistral-vibe", value: "native-session-1" } as const;
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            resumeCursor,
+          }),
+        ),
+      ),
+    );
+    expect(connection.start).not.toHaveBeenCalled();
+    expect(connection.resume).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId, resumeCursor }),
+    );
+    expect(connection.send).toHaveBeenCalledOnce();
+  });
+
+  it("reports a failed resume without sending the message or starting a replacement session", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.empty),
+      resume: vi.fn(() =>
+        Effect.fail<ProviderFailure>({
+          category: "stale-resume",
+          message: "Session is unavailable.",
+        }),
+      ),
+    });
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              resumeCursor: { driverKind: "mistral-vibe", value: "missing-session" },
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(outcome).toMatchObject({
+      _tag: "Left",
+      left: { category: "waiting", message: "Session is unavailable." },
+    });
+    expect(connection.resume).toHaveBeenCalledOnce();
+    expect(connection.start).not.toHaveBeenCalled();
+    expect(connection.send).not.toHaveBeenCalled();
+  });
+
+  it("persists a session-save failure before refusing to send the prompt", async () => {
+    const connection = fakeConnection({ subscribe: Effect.succeed(Stream.empty) });
+    const outcomes: Array<readonly [CodeTurnOutcome, string | undefined]> = [];
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            onSessionReady: () =>
+              Effect.fail({ category: "failed", message: "Session could not be saved." }),
+            persistOutcome: (outcome, failure) =>
+              Effect.sync(() => {
+                outcomes.push([outcome, failure?.message]);
+              }),
+          }),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([["failed", "Session could not be saved."]]);
+  });
+
   it("starts the provider with the reasoning choice saved on the Code thread", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
@@ -504,7 +580,13 @@ describe("CodeTurnRunner", () => {
             prompt: "Choose a target",
             options: ["A", "B"],
           }),
-          event({ kind: "usage", inputTokens: 10, outputTokens: 20 }),
+          event({
+            kind: "usage",
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadInputTokens: 7,
+            cacheWriteInputTokens: 2,
+          }),
           event({
             kind: "child-agent-activity",
             childAgentId: "child-1",
@@ -545,6 +627,10 @@ describe("CodeTurnRunner", () => {
       "tool",
       "completion",
     ]);
+    expect(observed.find((entry) => entry.category === "usage")).toMatchObject({
+      cacheReadInputTokens: 7,
+      cacheWriteInputTokens: 2,
+    });
     expect(observed[1]).toMatchObject({
       executionPolicy: "plan",
       permissionPersistence: "current-session",

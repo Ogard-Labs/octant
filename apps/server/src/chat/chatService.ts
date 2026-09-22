@@ -424,6 +424,7 @@ interface ChatTurnContextPlan {
 }
 
 interface PreparedChatTurn {
+  readonly nativeSession?: ChatAttempt;
   /**
    * The thread as this turn actually runs it. Preparation can move a turn onto
    * the user's fallback route, and the attempt has to record the provider and
@@ -2027,7 +2028,11 @@ export class ChatService {
         turnId,
         ...(command.submissionId === undefined ? {} : { submissionId: command.submissionId }),
         attemptId: this.#uuid() as ChatAttempt["id"],
-        providerSessionId: decodeProviderSessionId(this.#uuid()),
+        providerSessionId:
+          prepared.nativeSession?.providerSessionId ?? decodeProviderSessionId(this.#uuid()),
+        ...(prepared.nativeSession?.resumeCursor === undefined
+          ? {}
+          : { resumeCursor: prepared.nativeSession.resumeCursor }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         userMessageRef,
         ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),
@@ -2415,6 +2420,27 @@ export class ChatService {
           message: "Chat turn is not part of the active conversation.",
         });
       }
+      let providerOwned = false;
+      try {
+        providerOwned =
+          this.#driver(decodeProviderInstanceId(attempt.providerInstanceId))
+            .conversationOwnership === "provider";
+      } catch {
+        // Preserve the existing missing-provider failure from preparation below.
+      }
+      const activeTail = activeChatTurns(view.turns).at(-1);
+      if (
+        providerOwned &&
+        (activeTail === undefined || String(activeTail.id) !== String(turn.id))
+      ) {
+        // A provider-owned conversation has one linear native history. Retrying
+        // an older turn against its current session would mix two timelines.
+        throw new ChatServiceError({
+          category: "unsupported",
+          message:
+            "This provider-owned Chat task can only retry its active tail. Send a correction as a new message to keep the same session.",
+        });
+      }
       if (
         attempt.outcome !== "failed" &&
         attempt.outcome !== "interrupted" &&
@@ -2459,7 +2485,11 @@ export class ChatService {
         turnId: command.turnId,
         attemptId: command.attemptId,
         newAttemptId: this.#uuid() as ChatAttempt["id"],
-        newProviderSessionId: decodeProviderSessionId(this.#uuid()),
+        newProviderSessionId:
+          prepared.nativeSession?.providerSessionId ?? decodeProviderSessionId(this.#uuid()),
+        ...(prepared.nativeSession?.resumeCursor === undefined
+          ? {}
+          : { resumeCursor: prepared.nativeSession.resumeCursor }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
@@ -2519,6 +2549,27 @@ export class ChatService {
         throw new ChatServiceError({
           category: "invalid",
           message: "Chat turn is not part of the active conversation.",
+        });
+      }
+      let providerOwned = false;
+      try {
+        providerOwned =
+          this.#driver(decodeProviderInstanceId(attempt.providerInstanceId))
+            .conversationOwnership === "provider";
+      } catch {
+        // Preserve the existing missing-provider failure from preparation below.
+      }
+      const activeTail = activeChatTurns(view.turns).at(-1);
+      if (
+        providerOwned &&
+        (activeTail === undefined || String(activeTail.id) !== String(turn.id))
+      ) {
+        // A provider-owned conversation has one linear native history. Resuming
+        // an older turn against its current session would mix two timelines.
+        throw new ChatServiceError({
+          category: "unsupported",
+          message:
+            "This provider-owned Chat task can only resume its active tail. Send a correction as a new message to keep the same session.",
         });
       }
       if (attempt.outcome !== "waiting" && attempt.outcome !== "interrupted") {
@@ -2764,6 +2815,42 @@ export class ChatService {
     const providerInstanceId = routed.providerInstanceId;
     const driver = routed.driver;
     const probe = routed.probe;
+    const nativeConversation = driver.conversationOwnership === "provider";
+    const previous = this.#persistence.readChatThreadView(thread.id)?.turns.at(-1)?.attempts.at(-1);
+    let previousNative = false;
+    let previousProviderUnavailable = false;
+    if (previous !== undefined) {
+      try {
+        previousNative =
+          this.#driver(decodeProviderInstanceId(previous.providerInstanceId))
+            .conversationOwnership === "provider";
+      } catch {
+        previousProviderUnavailable = true;
+      }
+    }
+    const nativeSession = nativeConversation ? previous : undefined;
+    if (
+      (nativeConversation || previousNative || previousProviderUnavailable) &&
+      previous !== undefined &&
+      (!nativeConversation ||
+        !previousNative ||
+        previous.resumeCursor === undefined ||
+        String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
+        previous.modelId !== thread.modelId)
+    ) {
+      throw new ChatServiceError({
+        category: "unavailable",
+        message:
+          "This Chat task's native session cannot be recovered under the selected provider and model. Its history has been preserved.",
+      });
+    }
+    if (nativeConversation && historyTurns !== undefined) {
+      throw new ChatServiceError({
+        category: "unsupported",
+        message:
+          "This provider cannot revise earlier native turns without replacing its conversation. Send a correction as a new message to keep the same session.",
+      });
+    }
     const attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
@@ -2822,18 +2909,16 @@ export class ChatService {
       providerFacts.modelLimitObservations,
       providerFacts.serviceLimits,
       researchRoute,
-      historyTurns,
+      nativeConversation ? [] : historyTurns,
       sideChatSourceContext,
       threadMentionContexts,
     );
-    const maintained = await this.#compactDroppedConversation(
-      thread,
-      context,
-      driver,
-      providerInstanceId,
-    );
+    const maintained = nativeConversation
+      ? context
+      : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
     return {
       executionThread: thread,
+      ...(nativeSession === undefined ? {} : { nativeSession }),
       context: maintained,
       attachments,
       researchRoute,
@@ -4214,9 +4299,12 @@ export class ChatService {
           input.mode === "resume" ? "resume" : "provider-handoff",
         );
       }
-      const scratchRoot = await this.#scratchStore.acquire(input.thread.id);
-      const reservationId = decodeCapacityReservationId(this.#uuid());
       const providerInstanceId = decodeProviderInstanceId(input.thread.providerInstanceId);
+      const driver = this.#driver(providerInstanceId);
+      const scratchRoot = await this.#scratchStore.acquire(input.thread.id, {
+        preserveContents: driver.conversationOwnership === "provider",
+      });
+      const reservationId = decodeCapacityReservationId(this.#uuid());
 
       const harnessScope: NativeHarnessTurnScope = {
         threadId: String(input.thread.id),
@@ -4247,7 +4335,7 @@ export class ChatService {
                     }),
                 }),
             scratchRoot,
-            driver: this.#driver(providerInstanceId),
+            driver,
             providerInstanceId,
             serviceLimits: input.prepared.serviceLimits,
             contextSubject: input.prepared.context.subject,
@@ -4262,9 +4350,10 @@ export class ChatService {
             ...(input.prepared.appManagedTools === undefined
               ? {}
               : { appManagedTools: input.prepared.appManagedTools }),
-            ...(input.mode === "resume" && input.attempt.resumeCursor !== undefined
-              ? { mode: "resume" as const, resumeCursor: input.attempt.resumeCursor }
-              : {}),
+            ...(input.mode === "resume" ? { mode: "resume" as const } : {}),
+            ...(input.attempt.resumeCursor === undefined
+              ? {}
+              : { resumeCursor: input.attempt.resumeCursor }),
             clock: () => this.#clock(),
             signal: controller.signal,
             persistAttempt: (attempt) =>

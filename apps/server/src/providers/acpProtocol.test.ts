@@ -223,16 +223,12 @@ describe("ACP protocol boundary", () => {
     stdout.write(
       `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { sessionId: "new", configOptions: [] } })}\n`,
     );
-    stdout.write(
-      `${JSON.stringify({ jsonrpc: "2.0", id: 3, result: { sessionId: "loaded", configOptions: [] } })}\n`,
-    );
-    stdout.write(
-      `${JSON.stringify({ jsonrpc: "2.0", id: 4, result: { sessionId: "resumed", configOptions: [] } })}\n`,
-    );
+    stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, result: { configOptions: [] } })}\n`);
+    stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, result: { configOptions: [] } })}\n`);
     await expect(initialized).resolves.toEqual(initializeResult);
     await expect(created).resolves.toMatchObject({ sessionId: "new" });
-    await expect(loaded).resolves.toMatchObject({ sessionId: "loaded" });
-    await expect(resumed).resolves.toMatchObject({ sessionId: "resumed" });
+    await expect(loaded).resolves.toMatchObject({ sessionId: "agent-session" });
+    await expect(resumed).resolves.toMatchObject({ sessionId: "agent-session" });
     written.dispose();
     await client.close();
   });
@@ -305,6 +301,34 @@ describe("ACP protocol boundary", () => {
     ]);
     await client.close();
   });
+
+  it.each([{ toolCallId: "tool-1" }, { toolCallId: "tool-1", title: null, kind: null }])(
+    "delivers permission requests with partial tool metadata: %j",
+    async (toolCall) => {
+      const { client, stdout } = transport();
+      const requests: AcpServerRequest[] = [];
+      client.onRequest((request) => requests.push(request));
+      stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "permission-1",
+          method: "session/request_permission",
+          params: {
+            sessionId: "session-1",
+            toolCall,
+            options: [
+              { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+              { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+            ],
+          },
+        })}\n`,
+      );
+      await tick();
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.params.toolCall.toolCallId).toBe("tool-1");
+      await client.close();
+    },
+  );
 
   it("fails closed for duplicate IDs, malformed JSON, incomplete lines, and oversized frames", async () => {
     for (const write of [

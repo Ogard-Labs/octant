@@ -26,6 +26,7 @@ export interface PiManagedToolAnswer {
 
 export interface PiManagedToolsBridge {
   readonly config: PiManagedToolBridgeConfig;
+  readonly bind: (execute: ExecuteManagedTool | undefined) => void;
   readonly close: () => Promise<void>;
 }
 
@@ -112,6 +113,15 @@ export async function createPiManagedToolsBridge(
   const token = randomBytes(32).toString("base64url");
   let loopbackHost: string | undefined;
   let closed = false;
+  let binding = { execute, controller: new AbortController() };
+  const bind = (next: ExecuteManagedTool | undefined) => {
+    binding.controller.abort();
+    binding = {
+      execute:
+        next ?? (async () => ({ resultJson: '{"error":"tool-unavailable"}', isError: true })),
+      controller: new AbortController(),
+    };
+  };
   const server = createServer((request, response) => {
     const requestToken = request.headers["x-octant-pi-token"];
     if (
@@ -125,6 +135,8 @@ export async function createPiManagedToolsBridge(
       return;
     }
 
+    // Capture the turn before reading a potentially delayed request body.
+    const admitted = binding;
     void (async () => {
       const body = await readRequestBody(request);
       if (!isRecord(body)) {
@@ -157,7 +169,21 @@ export async function createPiManagedToolsBridge(
       request.once("aborted", cancel);
       response.once("close", cancel);
       try {
-        const answer = await execute({ toolCallId, name, inputJson, signal: controller.signal });
+        admitted.controller.signal.addEventListener("abort", cancel, { once: true });
+        if (admitted.controller.signal.aborted) {
+          controller.abort();
+          responseJson(response, 200, {
+            resultJson: '{"error":"tool-interrupted"}',
+            isError: true,
+          });
+          return;
+        }
+        const answer = await admitted.execute({
+          toolCallId,
+          name,
+          inputJson,
+          signal: controller.signal,
+        });
         settled = true;
         if (!validJson(answer.resultJson)) {
           responseJson(response, 502, { error: "invalid-tool-result" });
@@ -172,6 +198,7 @@ export async function createPiManagedToolsBridge(
         settled = true;
         if (!response.destroyed) responseJson(response, 500, { error: "tool-execution-failed" });
       } finally {
+        admitted.controller.signal.removeEventListener("abort", cancel);
         request.off("aborted", cancel);
         response.off("close", cancel);
       }
@@ -209,9 +236,11 @@ export async function createPiManagedToolsBridge(
 
   return {
     config: { url: `http://${loopbackHost}${path}`, token },
+    bind,
     close: async () => {
       if (closed) return;
       closed = true;
+      bind(undefined);
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => {
         if (!server.listening) {

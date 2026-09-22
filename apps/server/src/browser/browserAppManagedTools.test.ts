@@ -77,6 +77,56 @@ describe("createBrowserAppManagedTools", () => {
     expect(create).toHaveBeenCalledOnce();
   });
 
+  it("keeps the active context's approved model binding across turn tool sets", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000009";
+    const modelBindings = new Map<string, BrowserModelBinding>([
+      [contextId, { modelId, authority }],
+    ]);
+    const approval = vi.fn(async () => "approved" as const);
+    const observed = snapshot({
+      context: {
+        contextId,
+        threadId,
+        authority,
+        state: "active",
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 8,
+          sessionTimeoutMs: 600_000,
+        },
+      } as never,
+    });
+    const act = vi.fn(async () => observed);
+    const make = () =>
+      createBrowserAppManagedTools({
+        windowId,
+        threadId,
+        mode: "chat",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings,
+        executionPolicy: "approval-gated",
+        resolveAuthority: () => authority,
+        browser: {
+          inspectThread: () => observed,
+          create: vi.fn(async () => snapshot()),
+          act,
+          releaseThread: vi.fn(async () => snapshot()),
+        },
+        approvals: { request: approval } as never,
+        uuid: () => crypto.randomUUID(),
+      });
+    for (const tools of [make(), make()]) {
+      expect(
+        await tools.execute({ name: "octant_browser", inputJson: '{"operation":"read-page"}' }),
+      ).toMatchObject({ isError: false });
+    }
+    expect(act).toHaveBeenCalledTimes(2);
+    expect(approval).not.toHaveBeenCalled();
+  });
+
   it("does not start a context when approval is unavailable or Chat is in Plan", async () => {
     const create = vi.fn(async () => snapshot());
     const make = (executionPolicy: "approval-gated" | "plan" = "approval-gated") =>
@@ -374,6 +424,39 @@ describe("browser diagnostics reach the provider-facing result", () => {
       uuid: () => "80000000-0000-4000-8000-000000000001",
     });
   }
+
+  it.each([
+    "data:text/html;base64,aGVsbG8=",
+    "data:image/png;base64,%%%",
+    `data:image/png;base64,${"A".repeat(55 * 1024)}`,
+  ])(
+    "refuses an invalid or oversized screenshot without returning image bytes",
+    async (screenshotDataUrl) => {
+      const tools = toolsFor({ revision: 12, screenshotDataUrl });
+      const result = await tools.execute({
+        name: "octant_browser",
+        inputJson: '{"operation":"screenshot"}',
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        result: { error: "browser-screenshot-unavailable" },
+      });
+      expect(result.images).toBeUndefined();
+    },
+  );
+
+  it("returns screenshots as image blocks without duplicating bytes in text", async () => {
+    const tools = toolsFor({ revision: 12, screenshotDataUrl: "data:image/png;base64,aGVsbG8=" });
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"screenshot"}',
+    });
+    expect(result).toMatchObject({
+      images: [{ mimeType: "image/png", data: "aGVsbG8=" }],
+      isError: false,
+    });
+    expect(JSON.stringify(result.result)).not.toContain("aGVsbG8=");
+  });
 
   it("passes what the page logged and failed to load through to the result", async () => {
     const tools = toolsFor(diagnosticsObservation);

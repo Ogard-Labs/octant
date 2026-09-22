@@ -54,6 +54,8 @@ export interface CodeThreadControllerRegistry extends CodeThreadControllers {
    * refresh, because React may not have published the controller slot yet.
    */
   readonly announceFirstPrompt: (threadId: CodeThreadId, prompt: string | undefined) => void;
+  /** Defer restoration until initial controller loading can no longer replace the draft. */
+  readonly restoreDraft: (threadId: CodeThreadId, prompt: string, refusal?: string) => void;
   readonly publish: (threadId: CodeThreadId, controller: CodeController) => void;
   readonly refreshConversation: (threadId: CodeThreadId) => void;
   readonly release: (threadId: CodeThreadId) => void;
@@ -63,6 +65,10 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const byThread = new Map<string, CodeController>();
   const refreshWhenPublished = new Set<string>();
   const firstPromptWhenPublished = new Map<string, string>();
+  const draftWhenPublished = new Map<
+    string,
+    { readonly prompt: string; readonly refusal: string | undefined }
+  >();
   const listeners = new Set<() => void>();
   const announce = () => {
     for (const listener of listeners) listener();
@@ -78,6 +84,16 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       if (prompt === undefined) firstPromptWhenPublished.delete(key);
       else firstPromptWhenPublished.set(key, prompt);
     },
+    restoreDraft: (threadId, prompt, refusal) => {
+      const key = String(threadId);
+      const controller = byThread.get(key);
+      if (controller === undefined || controller.status !== "ready")
+        draftWhenPublished.set(key, { prompt, refusal });
+      else {
+        controller.setPendingDraft(prompt);
+        if (refusal !== undefined) controller.showTurnRefusal(refusal);
+      }
+    },
     get: (threadId) => byThread.get(String(threadId)),
     publish: (threadId, controller) => {
       const key = String(threadId);
@@ -89,6 +105,12 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       if (firstPrompt !== undefined) {
         firstPromptWhenPublished.delete(key);
         controller.announceFirstPrompt(firstPrompt);
+      }
+      const draft = draftWhenPublished.get(key);
+      if (draft !== undefined && controller.status === "ready") {
+        draftWhenPublished.delete(key);
+        controller.setPendingDraft(draft.prompt);
+        if (draft.refusal !== undefined) controller.showTurnRefusal(draft.refusal);
       }
       if (!refreshWhenPublished.delete(key)) return;
       controller.refreshConversation();
@@ -106,6 +128,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       const key = String(threadId);
       refreshWhenPublished.delete(key);
       firstPromptWhenPublished.delete(key);
+      draftWhenPublished.delete(key);
       if (!byThread.delete(key)) return;
       announce();
     },

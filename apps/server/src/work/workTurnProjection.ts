@@ -34,6 +34,7 @@ export class WorkTurnProjection {
         projectId: accepted.projectId,
         authority: accepted.authority,
         providerSessionId: accepted.providerSessionId,
+        ...(accepted.resumeCursor === undefined ? {} : { resumeCursor: accepted.resumeCursor }),
         status: "accepted",
         prompt: accepted.prompt,
         transcript: [{ role: "user", text: accepted.prompt }],
@@ -82,6 +83,7 @@ export class WorkTurnProjection {
       ] as WorkTurnState["transcript"]);
     const next = decodeWorkTurnState({
       ...current,
+      ...(updated.resumeCursor === undefined ? {} : { resumeCursor: updated.resumeCursor }),
       status: updated.status,
       ...(updated.response === undefined ? {} : { response: updated.response }),
       transcript,
@@ -96,6 +98,11 @@ export class WorkTurnProjection {
 
   lookup(requestId: WorkTurnRequestId): WorkTurnState | undefined {
     return this.#byRequest.get(decodeWorkTurnRequestId(requestId));
+  }
+
+  latestForThread(threadId: WorkThreadId): WorkTurnState | undefined {
+    const requestId = this.#byThread.get(String(threadId))?.at(-1);
+    return requestId === undefined ? undefined : this.#byRequest.get(requestId);
   }
 
   listForThread(threadId: WorkThreadId): ReadonlyArray<WorkTurnState> {

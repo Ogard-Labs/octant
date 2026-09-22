@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http";
 import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import { describe, expect, it, vi } from "vitest";
 import { createAcpManagedToolsBridge } from "./acpManagedTools";
@@ -83,6 +84,59 @@ describe("ACP managed tool bridge", () => {
           isError: false,
         },
       });
+      const next = vi.fn(async () => ({ resultJson: '{"turn":"next"}', isError: false }));
+      const delayedBody = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "octant_browser", arguments: { operation: "read-page" } },
+      });
+      const delayed = new Promise<string>((resolve, reject) => {
+        const request = httpRequest(
+          bridge.server.url,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              Expect: "100-continue",
+              "content-length": Buffer.byteLength(delayedBody),
+            },
+          },
+          (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk: string) => {
+              body += chunk;
+            });
+            response.on("end", () => resolve(body));
+            response.on("error", reject);
+          },
+        );
+        request.on("error", reject);
+        request.on("continue", () => {
+          bridge.bind(next);
+          request.end(delayedBody);
+        });
+        request.flushHeaders();
+      });
+      expect(await delayed).toContain("tool-interrupted");
+      expect(next).not.toHaveBeenCalled();
+      expect(execute).toHaveBeenCalledTimes(1);
+      const fresh = await fetch(bridge.server.url, {
+        method: "POST",
+        headers,
+        body: delayedBody.replace('"id":4', '"id":5'),
+      });
+      expect(await rpcJson(fresh)).toMatchObject({ result: { isError: false } });
+      expect(next).toHaveBeenCalledTimes(1);
+      bridge.bind(undefined);
+      const idle = await fetch(bridge.server.url, {
+        method: "POST",
+        headers,
+        body: delayedBody.replace('"id":4', '"id":6'),
+      });
+      expect(await rpcJson(idle)).toMatchObject({ result: { isError: true } });
+      expect(next).toHaveBeenCalledTimes(1);
       expect(
         (await fetch(bridge.server.url, { method: "POST", headers: commonHeaders })).status,
       ).toBe(400);
@@ -103,6 +157,40 @@ describe("ACP managed tool bridge", () => {
           })
         ).status,
       ).toBe(404);
+      await fetch(bridge.server.url, { method: "DELETE", headers });
+      const reinitialized = await fetch(bridge.server.url, {
+        method: "POST",
+        headers: commonHeaders,
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 7,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "test-acp-reconnect", version: "1" },
+          },
+        }),
+      });
+      expect(reinitialized.status).toBe(200);
+      for (let index = 0; index < 8; index += 1) {
+        const extra = await fetch(bridge.server.url, {
+          method: "POST",
+          headers: commonHeaders,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 8 + index,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "test-acp-bound", version: "1" },
+            },
+          }),
+        });
+        expect(extra.status).toBe(index < 7 ? 200 : 429);
+        await extra.text();
+      }
     } finally {
       await bridge.close();
       await bridge.close();

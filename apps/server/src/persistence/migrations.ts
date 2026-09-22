@@ -1833,6 +1833,14 @@ ALTER TABLE code_runtime_projection
     name: "add_fx_provider_projection",
     sql: ADD_FX_PROVIDER_PROJECTION_SQL,
   },
+  {
+    version: 61,
+    name: "index_thread_event_kind",
+    sql: `CREATE INDEX event_journal_thread_kind_sequence ON event_journal (
+      aggregate_type, CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END,
+      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END, global_sequence DESC
+    );`,
+  },
 ];
 
 interface AppliedMigrationRow {

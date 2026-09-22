@@ -1644,6 +1644,16 @@ export type ProviderRegistryCommandResult = typeof ProviderRegistryCommandResult
 export const ProviderResumeCursor = Schema.Struct({
   driverKind: ProviderDriverKind,
   value: Schema.NonEmptyTrimmedString,
+  /** Host-persisted identity; never authority supplied by a new turn. */
+  binding: Schema.optional(
+    Schema.Struct({
+      instanceId: ProviderInstanceId,
+      sessionId: ProviderSessionId,
+      projectRoot: Schema.NonEmptyTrimmedString,
+      mode: Schema.Literal("chat", "work", "code"),
+      modelId: ProviderModelId,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type ProviderResumeCursor = typeof ProviderResumeCursor.Type;
 

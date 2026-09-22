@@ -157,7 +157,7 @@ describe("Computer use through a provider tool", () => {
       await f.service.close();
     }
   });
-  it("waits for the named app grant before control and releases it when the turn ends", async () => {
+  it("keeps the approved app session available to the same task on its next turn", async () => {
     const f = fixture();
     try {
       const result = f.tools.execute({
@@ -184,6 +184,19 @@ describe("Computer use through a provider tool", () => {
       expect(await result).toMatchObject({ result: { kind: "windows" } });
       expect(f.execute).toHaveBeenCalledOnce();
       await f.tools.close?.();
+      expect(f.release).not.toHaveBeenCalled();
+      const next = f.service.toolSet(owner, computerUseSelection("next-turn"));
+      if (next === undefined) throw new Error("Expected selected plugin.");
+      expect(
+        await next.execute({
+          name: "octant_computer",
+          inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+        }),
+      ).toMatchObject({ result: { kind: "windows" } });
+      expect(f.execute).toHaveBeenCalledTimes(2);
+      await next.close?.();
+      f.revoke();
+      await f.service.sweep();
       expect(f.release).toHaveBeenCalledOnce();
       expect(
         await f.tools.execute({ name: "octant_computer", inputJson: '{"operation":"apps"}' }),

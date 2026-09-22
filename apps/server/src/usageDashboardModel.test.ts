@@ -336,6 +336,24 @@ describe("buildUsageDashboard cache statistics", () => {
     expect(dashboard.cacheStats.tokenCacheHitRatio).toBe(0.6);
   });
 
+  it("keeps missing cache counters unknown and excludes incomplete ratios", () => {
+    const dashboard = build([
+      row({ cacheReadInputTokens: 80 }),
+      row({
+        reconciliationId: "63000000-0000-4000-8000-000000000005",
+        cacheReadInputTokens: 20,
+        cacheWriteInputTokens: 10,
+      }),
+    ]);
+    expect(dashboard.cacheStats.providerTokenCaches[0]).toEqual({
+      providerInstanceId: ids.provider,
+      requestCount: 2,
+      cacheReadInputTokens: 100,
+    });
+    expect(dashboard.cacheStats.tokenCacheHitRatio).toBeUndefined();
+    expect(() => decodeUsageDashboardResponse(dashboard)).not.toThrow();
+  });
+
   it("leaves reuse unavailable rather than zero when no provider reported cache tokens", () => {
     const dashboard = build([row()]);
     expect(dashboard.cacheStats.providerTokenCaches).toEqual([]);

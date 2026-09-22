@@ -195,10 +195,13 @@ host that Electron attached to must be restarted separately — and
 `apps/desktop/src` edits are rebuilt automatically
 the next time you start `bun run dev`.
 
-For Computer use in the macOS development app, run `bun run computer-use:prepare`
-once to download and verify the pinned CuaDriver. Desktop packaging includes
-this step automatically. Select **Computer** from a composer's `@` picker and
-use **Settings → Computer use** for permissions and automatic driver updates.
+Computer use requires the packaged macOS Octant application with its own bundle
+identity and permissions. The source-run Electron shell is not that identity and
+is refused by the native driver startup check. `bun run computer-use:prepare`
+downloads and verifies the pinned CuaDriver for local builds; desktop packaging
+includes this step automatically. In the packaged app, select **Computer** from a
+composer's `@` picker and use **Settings → Computer use** for permissions and
+automatic driver updates.
 
 To run the host without Electron and attach a browser client:
 

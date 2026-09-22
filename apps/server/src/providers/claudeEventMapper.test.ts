@@ -248,7 +248,7 @@ describe("mapClaudeMessage", () => {
     expect(Array.from(label.toolName)).toHaveLength(256);
     expect(label.toolName.endsWith("…")).toBe(true);
     expect(authoritative).toMatchObject([
-      { kind: "event", event: { kind: "usage", inputTokens: 12, outputTokens: 7 } },
+      { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
     ]);
     expect(JSON.stringify([started, authoritative])).not.toContain("private-suffix");
   });
@@ -431,7 +431,7 @@ describe("mapClaudeMessage", () => {
     expect(started).toMatchObject([
       { kind: "event", event: { kind: "tool-start", toolCallId: "tool-1", toolName: "Edit" } },
       { kind: "event", event: { kind: "tool-start", toolCallId: "tool-2", toolName: "Write" } },
-      { kind: "event", event: { kind: "usage", inputTokens: 12, outputTokens: 7 } },
+      { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
     ]);
     expect(events).toMatchObject([
       { kind: "file-change", path: "src/app.ts", change: "modified" },
@@ -711,6 +711,11 @@ describe("mapClaudeMessage", () => {
   });
 
   it.each([
+    {
+      name: "overflowing total input",
+      field: "inputTokens" as const,
+      value: Number.MAX_SAFE_INTEGER,
+    },
     { name: "negative input", field: "inputTokens" as const, value: -1 },
     { name: "fractional output", field: "outputTokens" as const, value: 1.5 },
     {
@@ -1200,7 +1205,7 @@ describe("mapClaudeMessage", () => {
     // only way a cost can reach the thread at all.
     expect(results[0]).toMatchObject({
       kind: "event",
-      event: { kind: "usage", inputTokens: 12, outputTokens: 7, costUsd: 0.0421 },
+      event: { kind: "usage", inputTokens: 17, outputTokens: 7, costUsd: 0.0421 },
     });
   });
 
@@ -1218,7 +1223,7 @@ describe("mapClaudeMessage", () => {
     });
 
     expect(interrupted).toMatchObject([
-      { kind: "event", event: { kind: "usage", inputTokens: 12, outputTokens: 7 } },
+      { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
       {
         kind: "event",
         event: { kind: "interrupted", message: "Claude execution was interrupted." },
@@ -1248,7 +1253,7 @@ describe("mapClaudeMessage", () => {
     });
 
     expect(completed).toMatchObject([
-      { kind: "event", event: { kind: "usage", inputTokens: 12, outputTokens: 7 } },
+      { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
       {
         kind: "event",
         event: {

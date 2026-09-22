@@ -25,7 +25,7 @@ import {
   unsupportedAnswerTool,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, Queue, Scope, Stream } from "effect";
+import { Effect, Exit, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
@@ -128,7 +128,26 @@ interface PendingQuestion {
   readonly skipOptionId?: string;
 }
 
+interface AcpRetainedRuntime {
+  readonly source: AcpNewSessionResult;
+  readonly scope: Scope.CloseableScope;
+  readonly client: AcpClientPort;
+  readonly managedTools: AcpManagedToolsLease | undefined;
+  readonly appManagedTools: ProviderCapabilitySupport;
+  readonly version: string;
+  readonly compatibility: string;
+  readonly history: AcpEventContext["tools"];
+  readonly close: () => Promise<void>;
+  readonly idle: () => void;
+  readonly activate: () => void;
+  readonly isClosed: () => boolean;
+}
+
 interface SessionState {
+  readonly runtime: AcpRetainedRuntime;
+  completed: boolean;
+  readonly releaseOwnership: () => void;
+  readonly releaseTaskOwnership: () => void;
   readonly sessionId: ProviderSessionId;
   readonly sourceSessionId: string;
   readonly modelId: string;
@@ -190,12 +209,16 @@ function baseCapabilities(
 
 function negotiatedAppManagedTools(
   initialized: AcpConnection["initialized"],
+  profile: AcpProviderProfile,
+  version: string,
 ): ProviderCapabilitySupport {
   // The managed bridge is a loopback HTTP endpoint. The current Linux
   // Bubblewrap launch has no narrow host-loopback rule; sharing its network
   // namespace would grant wider egress, so Linux stays fail-closed here.
   return process.platform === "darwin" &&
-    initialized.agentCapabilities.mcpCapabilities?.http === true
+    (initialized.agentCapabilities.mcpCapabilities?.http === true ||
+      (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
+        profile.unadvertisedHttpMcpVersions?.includes(version) === true))
     ? "supported"
     : "unsupported";
 }
@@ -384,7 +407,7 @@ function normalizeProbe(
     ...(credentialStatus === undefined ? {} : { credentialStatus }),
     models,
     capabilities: {
-      ...baseCapabilities(profile, negotiatedAppManagedTools(initialized)),
+      ...baseCapabilities(profile, negotiatedAppManagedTools(initialized, profile, version)),
       resume,
       reasoning,
     },
@@ -565,6 +588,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
 
   return {
     kind: profile.kind,
+    conversationOwnership: "provider",
     ...(profile.authentication.kind === "delegated-browser"
       ? {
           beginAuthentication: ({ instanceId }) => {
@@ -674,8 +698,10 @@ function makeConnection(
   const request = <A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> =>
     Effect.tryPromise({ try: operation, catch: (error) => providerFailure(profile, error) });
   return Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const queue = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
+    const pendingStarts = new Set<Promise<SessionState>>();
+    let connectionClosing = false;
     const runtimeRoot =
       mode === "chat" && profile.chatSessionRoot === "managed-home"
         ? options.managedHome
@@ -700,27 +726,25 @@ function makeConnection(
       state.approvals.clear();
       state.questions.clear();
       state.toolNames.clear();
-      const managedTools = state.managedTools;
       state.managedTools = undefined;
-      await managedTools?.bridge.close().catch(() => undefined);
-      if (profile.closesSessions) {
-        await state.client.closeSession(state.sourceSessionId).catch(() => undefined);
-      }
-      await Effect.runPromise(Scope.close(state.scope, Exit.void));
+      await state.runtime.close();
+      state.releaseOwnership();
       const count = options.runtimeRegistry.activeSessionCount(options.instanceId);
       options.runtimeRegistry.setActiveSessionCount(options.instanceId, Math.max(0, count - 1));
     };
 
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        connectionClosing = true;
+        await Promise.allSettled([...pendingStarts]);
         await Promise.all([...sessions.values()].map(closeState));
         sessions.clear();
-        await Effect.runPromise(Queue.shutdown(queue));
+        await Effect.runPromise(PubSub.shutdown(queue));
       }),
     );
 
     const offer = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(Queue.offer(queue, event));
+      Effect.runFork(PubSub.publish(queue, event));
     };
 
     const requestManagedTool = async (
@@ -734,6 +758,7 @@ function makeConnection(
         state === undefined ||
         !state.toolNames.has(name) ||
         state.closed ||
+        !state.promptActive ||
         state.context.terminal ||
         signal.aborted
       ) {
@@ -790,6 +815,7 @@ function makeConnection(
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
+          state.completed = false;
           state.context.terminal = true;
           offer(
             eventFor(state, factories.clock, {
@@ -804,6 +830,7 @@ function makeConnection(
     const handleRequest = (state: SessionState, requestMessage: AcpServerRequest) => {
       const mapped = mapAcpPermissionRequest(state.context, requestMessage);
       if (mapped.kind === "protocol-failure") {
+        state.completed = false;
         state.context.terminal = true;
         offer(eventFor(state, factories.clock, { kind: "failed", failure: mapped.failure }));
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
@@ -848,6 +875,9 @@ function makeConnection(
       client: AcpClientPort,
       managedTools: AcpManagedToolsLease | undefined,
       appManagedTools: ProviderCapabilitySupport,
+      releaseOwnership: () => void,
+      releaseTaskOwnership: () => void,
+      runtime: AcpRetainedRuntime,
     ): Promise<SessionState> => {
       const previous = sessions.get(input.sessionId);
       if (previous !== undefined) await closeState(previous);
@@ -860,7 +890,7 @@ function makeConnection(
         displayName: name,
         sequence: 1,
         terminal: false,
-        tools: new Map(),
+        tools: new Map(runtime.history),
         requestIds: new Map(),
         makeRequestId: factories.makeRequestId,
       };
@@ -870,6 +900,10 @@ function makeConnection(
       );
       const removeRequest = client.onRequest((message) => handleRequest(state, message));
       state = {
+        runtime,
+        completed: false,
+        releaseOwnership,
+        releaseTaskOwnership,
         sessionId: input.sessionId,
         sourceSessionId: source.sessionId,
         modelId: input.modelId,
@@ -888,6 +922,9 @@ function makeConnection(
         promptActive: false,
         closed: false,
       };
+      managedTools?.bridge.bind((toolName, inputJson, signal, metadata) =>
+        requestManagedTool(state, toolName, inputJson, signal, metadata),
+      );
       sessions.set(input.sessionId, state);
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
@@ -964,151 +1001,364 @@ function makeConnection(
       readonly sourceSessionId?: string;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
-      request(async () => {
-        let scope: Scope.CloseableScope | undefined;
-        let managedTools: AcpManagedToolsLease | undefined;
-        try {
-          const refusal = profile.refuses?.(mode, input.executionPolicy);
-          if (refusal !== undefined) throw failure("incompatible", refusal);
-          if (input.tools.length > 0 && process.platform !== "darwin") {
-            throw failure(
-              "unsupported",
-              "App-managed tools are unsupported by this ACP runtime on this platform.",
-            );
+      request(() => {
+        const pending = (async () => {
+          if (connectionClosing) throw failure("interrupted", "ACP connection is closing.");
+          const previous = sessions.get(input.sessionId);
+          if (previous !== undefined && !previous.closed) {
+            if (
+              input.sourceSessionId === undefined ||
+              (previous.promptActive && !previous.context.terminal)
+            )
+              throw failure("protocol", "ACP session already has an active owner.");
+            await closeState(previous);
+            sessions.delete(input.sessionId);
           }
-          const stateRef: { state?: SessionState } = {};
-          managedTools = await prepareManagedTools(input.tools, stateRef);
-          const started = await startProcess(
-            input.executionPolicy,
-            managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
+          const ownership = options.runtimeRegistry.claimNativeSession(
+            options.instanceId,
+            JSON.stringify(["acp-task", input.sessionId]),
           );
-          scope = started.scope;
-          const { client, connection } = started;
-          const appManagedTools = negotiatedAppManagedTools(connection.initialized);
-          if (input.tools.length > 0 && appManagedTools !== "supported") {
-            throw failure(
-              appManagedTools,
-              "App-managed tools are unsupported by this ACP runtime.",
+          if (ownership.status === "refused") throw ownership.failure;
+          let releaseNative: (() => void) | undefined;
+          const releaseOwnership = () => {
+            releaseNative?.();
+            ownership.release();
+          };
+          const claimNative = (identity: string) => {
+            const claim = options.runtimeRegistry.claimNativeSession(
+              options.instanceId,
+              JSON.stringify(["acp-native", profile.kind, identity]),
             );
-          }
-          const mcpServers = managedTools === undefined ? [] : [managedTools.bridge.server];
-          // A level the agent takes in the session metadata is applied with the
-          // session that selects the model: the agent's own model call resets a
-          // level it did not set, so applying the two separately would drop it.
-          // Nothing else changes shape: a session whose thread carries no level
-          // is opened exactly as the standard path opens it.
-          const requestedLevel = input.modelOptionValues?.[profile.reasoningOptionId];
-          const sessionMeta =
-            requestedLevel === undefined || requestedLevel.trim().length === 0
-              ? undefined
-              : profile.sessionMetaReasoning?.meta({
-                  modelId: input.modelId,
-                  level: requestedLevel,
-                });
-          const sourceSessionId = input.sourceSessionId;
-          const source =
-            sourceSessionId === undefined
-              ? sessionMeta === undefined
-                ? mcpServers.length === 0
-                  ? await client.newSession(runtimeRoot)
-                  : await client.newSession(runtimeRoot, mcpServers)
-                : await client.newSession(runtimeRoot, mcpServers, sessionMeta)
-              : profile.resumeMethod === "session/resume"
+            if (claim.status === "refused") throw claim.failure;
+            releaseNative = claim.release;
+          };
+          let scope: Scope.CloseableScope | undefined;
+          let managedTools: AcpManagedToolsLease | undefined;
+          let registered: SessionState | undefined;
+          let runtime: AcpRetainedRuntime | undefined;
+          const compatibility = JSON.stringify([
+            profile.kind,
+            input.sessionId,
+            options.binaryPath,
+            options.managedHome,
+            projectRoot,
+            mode,
+            input.modelId,
+            input.modelOptionValues ?? {},
+            input.executionPolicy,
+            options.authentication,
+            input.tools,
+          ]);
+          const nativeKey = (identity: string) =>
+            JSON.stringify(["acp-native", profile.kind, identity]);
+          let shutdownRequested = false;
+          let finishStartup = () => {};
+          const startup = new Promise<void>((resolve) => {
+            finishStartup = resolve;
+          });
+          ownership.onShutdown(async () => {
+            shutdownRequested = true;
+            await startup;
+            if (registered !== undefined) await closeState(registered);
+          });
+          try {
+            if (input.sourceSessionId !== undefined) {
+              runtime = (
+                await options.runtimeRegistry.takeNativeSessionRuntime<AcpRetainedRuntime>(
+                  options.instanceId,
+                  nativeKey(input.sourceSessionId),
+                  compatibility,
+                )
+              )?.value;
+              if (runtime?.isClosed()) runtime = undefined;
+              if (runtime !== undefined) {
+                runtime.activate();
+                if (connectionClosing || shutdownRequested)
+                  throw failure("interrupted", "ACP connection is closing.");
+                registered = await register(
+                  input,
+                  runtime.source,
+                  runtime.scope,
+                  runtime.client,
+                  runtime.managedTools,
+                  runtime.appManagedTools,
+                  ownership.release,
+                  ownership.release,
+                  runtime,
+                );
+                return registered;
+              }
+              claimNative(input.sourceSessionId);
+            }
+            const refusal = profile.refuses?.(mode, input.executionPolicy);
+            if (refusal !== undefined) throw failure("incompatible", refusal);
+            if (input.tools.length > 0 && process.platform !== "darwin") {
+              throw failure(
+                "unsupported",
+                "App-managed tools are unsupported by this ACP runtime on this platform.",
+              );
+            }
+            const stateRef: { state?: SessionState } = {};
+            managedTools = await prepareManagedTools(input.tools, stateRef);
+            const started = await startProcess(
+              input.executionPolicy,
+              managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
+            );
+            scope = started.scope;
+            const { client, connection } = started;
+            const appManagedTools = negotiatedAppManagedTools(
+              connection.initialized,
+              profile,
+              connection.version,
+            );
+            if (input.tools.length > 0 && appManagedTools !== "supported") {
+              throw failure(
+                appManagedTools,
+                "App-managed tools are unsupported by this ACP runtime.",
+              );
+            }
+            const mcpServers = managedTools === undefined ? [] : [managedTools.bridge.server];
+            // A level the agent takes in the session metadata is applied with the
+            // session that selects the model: the agent's own model call resets a
+            // level it did not set, so applying the two separately would drop it.
+            // Nothing else changes shape: a session whose thread carries no level
+            // is opened exactly as the standard path opens it.
+            const requestedLevel = input.modelOptionValues?.[profile.reasoningOptionId];
+            const sessionMeta =
+              requestedLevel === undefined || requestedLevel.trim().length === 0
+                ? undefined
+                : profile.sessionMetaReasoning?.meta({
+                    modelId: input.modelId,
+                    level: requestedLevel,
+                  });
+            const sourceSessionId = input.sourceSessionId;
+            // Native resume keeps agent context without replaying its growing
+            // transcript. Retain profile compatibility for older runtimes that
+            // implement resume but do not advertise the optional capability.
+            const resumeWithoutReplay =
+              connection.initialized.agentCapabilities.sessionCapabilities?.resume !== undefined ||
+              profile.resumeMethod === "session/resume";
+            const source =
+              sourceSessionId === undefined
                 ? sessionMeta === undefined
                   ? mcpServers.length === 0
-                    ? await client.resumeSession(sourceSessionId, runtimeRoot)
-                    : await client.resumeSession(sourceSessionId, runtimeRoot, mcpServers)
-                  : await client.resumeSession(
-                      sourceSessionId,
-                      runtimeRoot,
-                      mcpServers,
-                      sessionMeta,
-                    )
-                : sessionMeta === undefined
-                  ? mcpServers.length === 0
-                    ? await client.loadSession(sourceSessionId, runtimeRoot)
-                    : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers)
-                  : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers, sessionMeta);
-          if (managedTools !== undefined) await managedTools.bridge.attested;
-          // A profile that supplies its own request shape is describing an agent
-          // whose reply the standard result schema does not fit, so that reply is
-          // taken as-is. Everything else is standard ACP and stays validated: a
-          // malformed success there would otherwise register a session whose
-          // model and authority mode were never confirmed.
-          // The reply names the model the session opened with, which is the
-          // same confirmation the standard selection would have acted on. A
-          // session that already opened the requested model is left alone,
-          // because switching it would reset the level it was opened with.
-          const modelOpenedWithSession =
-            sessionMeta !== undefined && source.models?.currentModelId === input.modelId;
-          const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
-          // The agent's config options can change with the model selection, so
-          // the reply to each standard call carries the current set; keep the
-          // newest one rather than the session's original list.
-          let configOptions = source.configOptions ?? [];
-          if (!modelOpenedWithSession) {
-            if (setModelCall === undefined) {
-              const result = await client.setConfigOption(source.sessionId, "model", input.modelId);
+                    ? await client.newSession(runtimeRoot)
+                    : await client.newSession(runtimeRoot, mcpServers)
+                  : await client.newSession(runtimeRoot, mcpServers, sessionMeta)
+                : resumeWithoutReplay
+                  ? sessionMeta === undefined
+                    ? mcpServers.length === 0
+                      ? await client.resumeSession(sourceSessionId, runtimeRoot)
+                      : await client.resumeSession(sourceSessionId, runtimeRoot, mcpServers)
+                    : await client.resumeSession(
+                        sourceSessionId,
+                        runtimeRoot,
+                        mcpServers,
+                        sessionMeta,
+                      )
+                  : sessionMeta === undefined
+                    ? mcpServers.length === 0
+                      ? await client.loadSession(sourceSessionId, runtimeRoot)
+                      : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers)
+                    : await client.loadSession(
+                        sourceSessionId,
+                        runtimeRoot,
+                        mcpServers,
+                        sessionMeta,
+                      );
+            if (sourceSessionId !== undefined && source.sessionId !== sourceSessionId)
+              throw failure("stale-resume", "The provider returned a different native session.");
+            if (sourceSessionId === undefined) claimNative(source.sessionId);
+            if (managedTools !== undefined) await managedTools.bridge.attested;
+            // A profile that supplies its own request shape is describing an agent
+            // whose reply the standard result schema does not fit, so that reply is
+            // taken as-is. Everything else is standard ACP and stays validated: a
+            // malformed success there would otherwise register a session whose
+            // model and authority mode were never confirmed.
+            // The reply names the model the session opened with, which is the
+            // same confirmation the standard selection would have acted on. A
+            // session that already opened the requested model is left alone,
+            // because switching it would reset the level it was opened with.
+            const modelOpenedWithSession =
+              sessionMeta !== undefined && source.models?.currentModelId === input.modelId;
+            const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+            // The agent's config options can change with the model selection, so
+            // the reply to each standard call carries the current set; keep the
+            // newest one rather than the session's original list.
+            let configOptions = source.configOptions ?? [];
+            if (!modelOpenedWithSession) {
+              if (setModelCall === undefined) {
+                const result = await client.setConfigOption(
+                  source.sessionId,
+                  "model",
+                  input.modelId,
+                );
+                configOptions = result.configOptions;
+              } else {
+                await client.call(setModelCall.method, setModelCall.params);
+              }
+            }
+            const modeValue = profile.sessionMode(mode, input.executionPolicy);
+            const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
+            if (setModeCall === undefined) {
+              const result = await client.setConfigOption(source.sessionId, "mode", modeValue);
               configOptions = result.configOptions;
             } else {
-              await client.call(setModelCall.method, setModelCall.params);
+              await client.call(setModeCall.method, setModeCall.params);
             }
+            // ACP reports the agent's reasoning control as a session config
+            // option, and a chat turn carries only the prompt, so the level the
+            // user chose for this model is applied here. A value the agent does
+            // not offer is left alone: the probe declares the option from the
+            // agent's own choices, which is the same check from the other side.
+            const reasoningOption = resolveReasoningOption(profile, configOptions);
+            const requestedReasoning =
+              reasoningOption === undefined
+                ? undefined
+                : input.modelOptionValues?.[reasoningOption.id];
+            if (
+              reasoningOption !== undefined &&
+              requestedReasoning !== undefined &&
+              requestedReasoning.trim().length > 0 &&
+              reasoningOption.options.some((choice) => choice.value === requestedReasoning)
+            ) {
+              await client.setConfigOption(
+                source.sessionId,
+                reasoningOption.id,
+                requestedReasoning,
+              );
+            }
+            if (connectionClosing || shutdownRequested)
+              throw failure("interrupted", "ACP connection is closing.");
+            let closed = false;
+            let closing: Promise<void> | undefined;
+            let removeIdle = () => {};
+            const runtimeScope = scope;
+            const runtimeTools = managedTools;
+            const close = (): Promise<void> => {
+              if (closing !== undefined) return closing;
+              closed = true;
+              removeIdle();
+              runtimeTools?.bridge.bind(undefined);
+              closing = (async () => {
+                await runtimeTools?.bridge.close();
+                if (profile.closesSessions)
+                  await client.closeSession(source.sessionId).catch(() => undefined);
+                await Effect.runPromise(Scope.close(runtimeScope, Exit.void));
+                releaseNative?.();
+              })();
+              return closing;
+            };
+            runtime = {
+              source,
+              scope: runtimeScope,
+              client,
+              managedTools: runtimeTools,
+              appManagedTools,
+              version: connection.version,
+              compatibility,
+              history: new Map(),
+              close,
+              isClosed: () => closed,
+              activate: () => {
+                removeIdle();
+                removeIdle = () => {};
+              },
+              idle: () => {
+                runtimeTools?.bridge.bind(undefined);
+                const refuse = () => {
+                  void close().catch(() => undefined);
+                };
+                const removeNotification = client.onNotification(refuse);
+                const removeRequest = client.onRequest(refuse);
+                removeIdle = () => {
+                  removeNotification();
+                  removeRequest();
+                };
+              },
+            };
+            void connection.exited.then(
+              () => close().catch(() => undefined),
+              () => close().catch(() => undefined),
+            );
+            const state = await register(
+              input,
+              source,
+              scope,
+              client,
+              managedTools,
+              appManagedTools,
+              releaseOwnership,
+              ownership.release,
+              runtime,
+            );
+            registered = state;
+            stateRef.state = state;
+            return state;
+          } catch (error) {
+            // The bridge is opened before session/new so the agent can connect to
+            // it during setup. Close it if setup or model selection fails.
+            if (runtime !== undefined) await runtime.close();
+            await managedTools?.bridge.close().catch(() => undefined);
+            if (scope !== undefined) await Effect.runPromise(Scope.close(scope, Exit.void));
+            releaseOwnership();
+            throw error;
+          } finally {
+            finishStartup();
           }
-          const modeValue = profile.sessionMode(mode, input.executionPolicy);
-          const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
-          if (setModeCall === undefined) {
-            const result = await client.setConfigOption(source.sessionId, "mode", modeValue);
-            configOptions = result.configOptions;
-          } else {
-            await client.call(setModeCall.method, setModeCall.params);
-          }
-          // ACP reports the agent's reasoning control as a session config
-          // option, and a chat turn carries only the prompt, so the level the
-          // user chose for this model is applied here. A value the agent does
-          // not offer is left alone: the probe declares the option from the
-          // agent's own choices, which is the same check from the other side.
-          const reasoningOption = resolveReasoningOption(profile, configOptions);
-          const requestedReasoning =
-            reasoningOption === undefined
-              ? undefined
-              : input.modelOptionValues?.[reasoningOption.id];
-          if (
-            reasoningOption !== undefined &&
-            requestedReasoning !== undefined &&
-            requestedReasoning.trim().length > 0 &&
-            reasoningOption.options.some((choice) => choice.value === requestedReasoning)
-          ) {
-            await client.setConfigOption(source.sessionId, reasoningOption.id, requestedReasoning);
-          }
-          const state = await register(input, source, scope, client, managedTools, appManagedTools);
-          stateRef.state = state;
-          return state;
-        } catch (error) {
-          // The bridge is opened before session/new so the agent can connect to
-          // it during setup. Close it if setup or model selection fails.
-          await managedTools?.bridge.close().catch(() => undefined);
-          if (scope !== undefined) await Effect.runPromise(Scope.close(scope, Exit.void));
-          throw error;
-        }
+        })();
+        pendingStarts.add(pending);
+        void pending.finally(() => pendingStarts.delete(pending)).catch(() => undefined);
+        return pending;
       });
 
     return {
       toolRequestSignal: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingToolAnswers.get(requestId)?.controller.signal ??
         AbortSignal.abort(),
-      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      subscribe: Stream.fromPubSub(queue, { scoped: true }),
       start: (input) =>
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map((state) => ({
             sessionId: input.sessionId,
-            resumeCursor: { driverKind: profile.kind, value: state.sourceSessionId },
+            resumeCursor: {
+              driverKind: profile.kind,
+              value: state.sourceSessionId,
+              binding: {
+                instanceId: options.instanceId,
+                sessionId: state.sessionId,
+                projectRoot,
+                mode,
+                modelId: input.modelId,
+              },
+            },
           })),
         ),
       resume: (input) => {
         if (input.resumeCursor.driverKind !== profile.kind) {
           return Effect.fail(failure("stale-resume", `${name} resume identity is incompatible.`));
         }
-        const identity = resumeIdentities.get(input.resumeCursor.value);
+        const binding = input.resumeCursor.binding;
+        if (
+          binding !== undefined &&
+          (binding.instanceId !== options.instanceId ||
+            binding.sessionId !== input.sessionId ||
+            binding.projectRoot !== projectRoot ||
+            binding.mode !== mode)
+        ) {
+          return Effect.fail(
+            failure("stale-resume", "The saved session belongs to another task or Project."),
+          );
+        }
+        const identity =
+          binding === undefined
+            ? resumeIdentities.get(input.resumeCursor.value)
+            : {
+                root: binding.projectRoot,
+                mode: binding.mode,
+                modelId: binding.modelId,
+                tools: input.tools ?? resumeIdentities.get(input.resumeCursor.value)?.tools ?? [],
+              };
         if (identity === undefined || identity.root !== projectRoot || identity.mode !== mode) {
           return Effect.fail(
             failure("stale-resume", `${name} resume identity does not match this Project.`),
@@ -1119,7 +1369,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
-          tools: identity.tools,
+          tools: input.tools ?? identity.tools,
           ...(input.modelOptionValues === undefined
             ? {}
             : { modelOptionValues: input.modelOptionValues }),
@@ -1185,10 +1435,21 @@ function makeConnection(
                         }),
                       );
                     } else if (result.stopReason === "end_turn") {
+                      state.completed = true;
                       offer(
                         eventFor(state, factories.clock, {
                           kind: "completed",
-                          resumeCursor: { driverKind: profile.kind, value: state.sourceSessionId },
+                          resumeCursor: {
+                            driverKind: profile.kind,
+                            value: state.sourceSessionId,
+                            binding: {
+                              instanceId: options.instanceId,
+                              sessionId: state.sessionId,
+                              projectRoot,
+                              mode,
+                              modelId: decodeProviderModelId(state.modelId),
+                            },
+                          },
                         }),
                       );
                     } else {
@@ -1233,8 +1494,41 @@ function makeConnection(
                   .notify("session/cancel", { sessionId: state.sourceSessionId })
                   .catch(() => undefined);
               }
-              await closeState(state);
-              sessions.delete(sessionId);
+              if (
+                state.completed &&
+                profile.retainedSessionVersions?.includes(state.runtime.version) === true &&
+                state.approvals.size === 0 &&
+                state.questions.size === 0 &&
+                state.pendingToolAnswers.size === 0 &&
+                [...state.context.tools.values()].every((tool) => tool.terminal) &&
+                !state.runtime.isClosed()
+              ) {
+                state.closed = true;
+                state.removeNotification();
+                state.removeRequest();
+                state.runtime.history.clear();
+                for (const [id, tool] of [...state.context.tools].slice(-256))
+                  state.runtime.history.set(id, tool);
+                state.runtime.idle();
+                sessions.delete(sessionId);
+                options.runtimeRegistry.setActiveSessionCount(
+                  options.instanceId,
+                  Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
+                );
+                state.releaseTaskOwnership();
+                await options.runtimeRegistry.retainNativeSessionRuntime(
+                  options.instanceId,
+                  JSON.stringify(["acp-native", profile.kind, state.sourceSessionId]),
+                  {
+                    value: state.runtime,
+                    compatibility: state.runtime.compatibility,
+                    close: state.runtime.close,
+                  },
+                );
+              } else {
+                await closeState(state);
+                sessions.delete(sessionId);
+              }
             }),
           ),
         ),

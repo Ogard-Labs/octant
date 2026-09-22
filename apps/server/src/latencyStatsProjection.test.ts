@@ -13,6 +13,7 @@ describe("LatencyStatsProjection", () => {
     projection.record("rpc", 2);
     projection.record("rpc", 15_000);
     projection.record("provider-runtime-acquire", -4.4);
+    projection.record("provider-runtime-reuse", 3);
 
     expect(projection.read()).toEqual({
       measurements: [
@@ -33,6 +34,14 @@ describe("LatencyStatsProjection", () => {
           p50Ms: 0,
           p95Ms: 0,
           maxMs: 0,
+        },
+        {
+          key: "provider-runtime-reuse",
+          label: "Provider runtime reuse",
+          observationCount: 1,
+          p50Ms: 3,
+          p95Ms: 3,
+          maxMs: 3,
         },
       ],
     });

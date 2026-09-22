@@ -13,6 +13,29 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+Code task creation accepts a plain-folder checkout when the server admits it under
+Code settings. The renderer preserves its proposed branch as delivery intent without
+claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
+actions continue to report unavailable for plain folders.
+
+Pi usage is accumulated from completed assistant messages, not streaming usage
+snapshots. Input totals include uncached, cache-read, and cache-write tokens; context
+occupancy describes the latest model call. Totals reset for each turn, including
+retained native processes. If a completed assistant message omits valid usage,
+the turn remains unknown rather than presenting a partial total. Only provider-reported
+costs are recorded, and historical turns are not rewritten.
+
+On host restart, orphaned running Code turns become Waiting in both runtime
+and conversation state. Recovery appends a status event without replacing prompts,
+provider session cursors, or earlier events. Already settled turns remain settled;
+repeated startup does not append duplicate recovery events. A follow-up resumes
+the retained native identity under the ordinary current-authority checks.
+
+Computer observations verify that the requested window still belongs to the
+current application process before requesting its accessibility state or pixels.
+A vanished window returns a window-unavailable refusal directing the caller to
+list current windows; stale IDs are never silently retargeted.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
@@ -569,11 +592,28 @@ planning; it replaces emergency estimates while conflicting model facts retain
 the more conservative bound.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. One operation contributes one request; a later report replaces its
-previous totals. A separate replay checkpoint imports existing Code reports on
+previous totals. Code conversation usage also preserves optional cache-read and cache-write
+counters. Codex native-thread totals are normalized to turn usage before recording;
+missing cache reports remain unknown. ACP and Pi resume cursors carry a durable
+task binding, and resume supplies the currently allowed tool catalogue without
+reconstructing native history. Chat and Work reuse provider-owned sessions across
+follow-ups; Chat retries retain that identity and native scratch files. Native
+Chat editing refuses where rollback is unavailable, so it cannot replace the
+conversation behind the user's back ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
 upgrade without replaying unrelated purged usage. The provider and model are
 those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
 the request-detail table labels them unavailable.
+
+Native Chat, Work, and Code resume acknowledgements may omit an unchanged resume
+cursor. The host retains the already-admitted cursor in that case and persists a
+replacement when one is returned. A changed session identity or an initial native
+session without a recoverable cursor still fails closed; no transcript replay or
+replacement conversation repairs the missing identity. Work and Chat also refuse
+a follow-up that switches between provider-owned and host-owned conversation
+history; switching adapters cannot implicitly replace an existing native task.
+Work also refuses when the previous driver is unavailable and its conversation
+ownership cannot be established.
 
 Optional Project and
 thread token spend ceilings (0060) are host owner policy: the server refuses a

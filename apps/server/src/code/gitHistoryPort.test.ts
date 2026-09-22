@@ -49,7 +49,14 @@ afterEach(() => {
 describe("local Git history", () => {
   it("pages from immutable tips while new commits arrive without changing the checkout", async () => {
     const root = repository();
-    for (let i = 0; i < 102; i++) commit(root, `Saved note ${i}`);
+    // Import the page-sized fixture in one Git process. Hundreds of separate
+    // commits make this pagination assertion depend on host process load.
+    const history = Array.from({ length: 102 }, (_, index) => {
+      const subject = `Saved note ${index}`;
+      return `commit refs/heads/main\ncommitter Octant Test <test@octant.local> ${1_700_000_000 + index} +0000\ndata ${subject.length}\n${subject}\nM 100644 inline note.txt\ndata ${subject.length}\n${subject}\n\n`;
+    }).join("");
+    execFileSync("git", ["-C", root, "fast-import", "--quiet"], { input: history });
+    git(root, "reset", "--hard", "HEAD");
     const reader = port();
     const first = await reader.read(root, decodeGitHistoryQuery({ kind: "history", ...scope }));
     expect(first.status).toBe("history");
