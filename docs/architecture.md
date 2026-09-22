@@ -47,6 +47,12 @@ The Code composer's attached checkout strip keeps its height and border when
 checkout metadata is unavailable. Missing project, branch and diff values stay
 blank; unavailable checkout actions are not shown.
 
+Work follow-up composers use the same attached context strip for their project and
+working folder. Full paths require a matching project binding revision; Work has
+no branch controls. Pane headers show thread titles without repeated project
+labels. Workspace and dock tabs share one compact recipe for geometry, selection,
+and close controls.
+
 ## Overview and principles
 
 Octant is one Electron application that hosts a Bun HTTP server, a React

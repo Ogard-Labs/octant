@@ -153,9 +153,11 @@ describe("SplitWorkspace", () => {
         }
         renderSurface={(surface) => surface.title}
         showProviderIcons
+        contextLabel="repro-work"
       />,
     );
 
+    expect(screen.queryByText("repro-work")).not.toBeInTheDocument();
     expect(screen.getByTitle("Claude")).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
   });

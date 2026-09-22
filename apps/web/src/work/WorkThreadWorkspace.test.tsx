@@ -2,6 +2,7 @@ import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client
 import { WorkTurnClientFailure } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
 import {
+  decodeProjectSummary,
   decodeFileMentionPath,
   decodeUtcTimestamp,
   decodeWorkThread,
@@ -23,6 +24,49 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000b2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("WorkThreadWorkspace", () => {
+  it.each([true, false])(
+    "shows the working folder without borrowing a different binding root (matching: %s)",
+    async (matching) => {
+      const thread = workThread();
+      const project = decodeProjectSummary({
+        id: thread.projectId,
+        type: "work",
+        name: "Research",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1",
+        version: 1,
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt,
+        binding: { canonicalRoot: "/Users/example/Research" },
+        bindingRevisionId: matching
+          ? thread.bindingRevisionId
+          : "30000000-0000-4000-8000-000000000102",
+      });
+      render(
+        <WorkThreadWorkspace
+          initialThread={thread}
+          projects={[project]}
+          threadClient={{
+            bootstrap: vi.fn(),
+            navigation: vi.fn(),
+            execute: vi.fn(),
+            queryBoard: vi.fn(),
+          }}
+          threadId={thread.id}
+          title={thread.title}
+        />,
+      );
+      const strip = await screen.findByRole("group", { name: "Project and folder" });
+      expect(within(strip).getByText("Research")).toBeVisible();
+      expect(within(strip).getByText("research/brief")).toHaveAttribute(
+        "title",
+        matching ? "/Users/example/Research/research/brief" : "research/brief",
+      );
+      expect(strip.closest(".thread-composer__context")).not.toBeNull();
+    },
+  );
+
   it("keeps a Browser approval visible and explains a failed decision", async () => {
     const user = userEvent.setup();
     const approval = {

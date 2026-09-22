@@ -1888,7 +1888,7 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
 
 .workspace-pane[data-active="true"] .workspace-pane__grip {
   color: var(--oct-fg);
-  background: var(--octant-control);
+  background: transparent;
 }
 
 /* The window controls sit in this same band. Keep the reserve a margin, not
@@ -1917,29 +1917,6 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
 }
 .shell--wide-context-open .workspace-pane__header {
   margin-right: 0;
-}
-
-/* After the title, where the work is: Project/branch in the editor's mono at
-   meta ink, the way a person names a change. It is what tells two panes on
-   one Project apart, so it yields before the title does but never vanishes
-   while there is room for a few characters. The close stays visible at rest
-   because it is the pane's one inline action and a hidden close read as no
-   close. */
-.workspace-pane__path {
-  flex: 0 1 auto;
-  min-width: 6ch;
-  max-width: 36ch;
-  overflow: hidden;
-  color: var(--oct-meta);
-  font-family: var(--octant-editor-font-family);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-pane__path::before {
-  content: "·";
-  margin-right: 6px;
 }
 
 /* The request rides inside the grip with the title, so it keeps the title's
@@ -7212,7 +7189,8 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 /* The checkout belongs to the follow-up composer's attached context strip. */
-.code-checkout-bar {
+.code-checkout-bar,
+.work-folder-bar {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -7232,7 +7210,8 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   gap: 6px;
 }
 
-.code-checkout-bar__project {
+.code-checkout-bar__project,
+.work-folder-bar__project {
   flex: 0 1 auto;
   overflow: hidden;
   min-width: 0;
@@ -7242,7 +7221,8 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   white-space: nowrap;
 }
 
-.code-checkout-bar__branch {
+.code-checkout-bar__branch,
+.work-folder-bar__folder {
   overflow: hidden;
   min-width: 0;
   font-family: var(--oct-font-mono);
@@ -10248,4 +10228,69 @@ ul.board-col-body {
   padding: 28px 24px;
   border: 0;
   background: transparent;
+}
+
+/* Workspace conversations and dock tools share one compact tab recipe. */
+.content-tab {
+  display: inline-flex;
+  flex: none;
+  min-width: 0;
+  height: 26px;
+  max-width: 202px;
+  gap: 0;
+  align-items: center;
+  padding: 0;
+  color: var(--oct-meta);
+  background: transparent;
+  border-radius: var(--oct-radius-sm);
+}
+.content-tab:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+.content-tab:has([role="tab"][aria-selected="true"]) {
+  color: var(--oct-fg);
+  background: var(--octant-control);
+  box-shadow: inset 0 0 0 1px var(--octant-border);
+}
+.content-tab > .content-tab__select {
+  height: 26px;
+  min-height: 26px;
+  min-width: 0;
+  max-width: 180px;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--oct-text-xs);
+  transform: none;
+}
+.content-tab > .content-tab__close {
+  width: 22px;
+  min-width: 22px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--oct-meta);
+  opacity: 0;
+  transform: none;
+}
+.content-tab:hover > .content-tab__close,
+.content-tab:focus-within > .content-tab__close,
+.content-tab:has([aria-selected="true"]) > .content-tab__close {
+  opacity: 1;
+}
+.workspace-pane__header:has(.workspace-content-tabs) .workspace-pane__grip {
+  flex: 0 0 auto;
+  padding-inline: 2px;
+  background: transparent;
+}
+.work-folder-bar > svg {
+  flex: 0 0 auto;
+}
+@media (hover: none) {
+  .content-tab > .content-tab__close {
+    opacity: 1;
+  }
 }

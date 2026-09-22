@@ -854,7 +854,10 @@ describe("WorkspaceView pane title facts", () => {
     const chip = within(header).getByText("#917");
     expect(chip).toHaveAttribute("data-tone", "open");
     expect(chip).toHaveAttribute("data-checks", "failing");
-    expect(within(header).getByText("Octant/fix/validation")).toBeVisible();
+    expect(within(header).queryByText("Octant/fix/validation")).not.toBeInTheDocument();
+    expect(
+      within(header).getByTitle("Octant/fix/validation · Drag to move or split"),
+    ).toBeVisible();
 
     // The pane tab's mention is a control, not a mark: it hands the shell the
     // request's full identity so the dock can open it.
