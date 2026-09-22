@@ -48,3 +48,1478 @@
   font-size: var(--oct-text-detail);
   line-height: 1.45;
 }
+
+/* Project surfaces. */
+
+.project-nav {
+  min-height: 0;
+  margin: var(--oct-space-2) 0 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.project-nav__empty,
+.project-nav__status {
+  margin: 0;
+  padding: 6px var(--oct-nav-inset);
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.project-nav__status button {
+  display: block;
+  margin-top: 7px;
+  color: var(--octant-text-secondary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.project-nav__activity-toggle {
+  color: var(--octant-text-muted);
+}
+
+.project-nav__activity-toggle[aria-pressed="true"] {
+  color: var(--octant-text-primary);
+}
+.project-section--unfiled > h2 {
+  margin-bottom: 0;
+  font-weight: 400;
+}
+
+.project-dialog .code-project-views__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+}
+
+/* A Project name is a section header over its thread rows, not a row among
+   them. The folder row already supplies the navigation rhythm, so collapsed
+   folders stay compact instead of floating apart. The three levels stay
+   ordered: rows, Projects, sections. */
+.project-block + .project-block {
+  margin-top: 0;
+}
+
+/* Projects, then Chats: two flat groups parted by one hairline, never cards. */
+.project-section + .project-section {
+  margin-top: var(--oct-space-2);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+/* Child threads stay one compact step inside their folder row, and closer to
+   each other than one Project sits from the next. */
+.project-threads {
+  display: grid;
+  /* The implicit `auto` track sized itself to the longest title, so a long
+     thread name pushed the whole row past the sidebar edge instead of
+     truncating inside it. */
+  grid-template-columns: minmax(0, 1fr);
+  /* Flush. The rows are 30px tall, which already parts them; a gap on top of
+     that made a Project's own threads sit as far apart as two Projects did,
+     so neither reading won. */
+  gap: 0;
+  margin: 2px 0 0;
+  /* Unfiled and archive lists stay aligned to their owning section. Folder
+     children add the relationship cue below without changing those lists. */
+  padding-left: 0;
+}
+
+/* A short rail and one inset make a thread list read as the contents of the
+   folder above it. The rail belongs to the list, so it also covers its quiet
+   folding control without adding a card around every thread. */
+.project-block > .project-threads {
+  margin-inline-start: var(--oct-space-2);
+  padding-inline-start: var(--oct-space-2);
+  border-inline-start: 1px solid var(--oct-hairline);
+}
+
+/* The container carries the system's .sidebar-section label treatment; the h2
+   inside exists for the outline and simply wears the container's quiet type. */
+.project-section__header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-section__header h2 {
+  margin: 0;
+  font: inherit;
+}
+
+.project-section > .sidebar-section {
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The header's controls answer for the section the pointer is already on, so
+   they appear with it, and take no room until then: kept in flow and in the
+   tab order, so focus still reaches them and reveals them, but zero width
+   until the pointer or focus is on the section, so a quiet label is only a
+   label. An open menu holds them visible: they must not vanish out from
+   under the cursor that opened one. */
+.project-section__header-actions {
+  display: flex;
+  width: 0;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+/* Hover-only while there are Projects to look at. An empty section has one
+   next step, adding a Project, and hiding it behind a hover left a new Code
+   or Work sidebar with no visible way to start. */
+.project-section[data-empty="true"] .project-section__header-actions,
+.project-section:hover .project-section__header-actions,
+.project-section:focus-within .project-section__header-actions,
+.project-section__header-actions:has([aria-expanded="true"]),
+.project-section__header-actions:has([data-popup-open]) {
+  width: auto;
+  overflow: visible;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-section__header-actions {
+    transition: none;
+  }
+}
+
+/* Compact header actions: a full 34px square would give the quiet header
+   back the item weight this port removes. */
+.project-section__add,
+.project-section__header .octant-menu__trigger {
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  justify-content: center;
+  padding: 0;
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+}
+
+.project-section__add:hover,
+.project-section__add:focus-visible,
+.project-section__header .octant-menu__trigger:hover,
+.project-section__header .octant-menu__trigger:focus-visible {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.project-row {
+  display: grid;
+  min-width: 0;
+  /* The name, then the row's trailing controls: the folded-Project status
+     roll-up, the context-health mark, the row menu, and new-thread. A control
+     the row is not showing leaves its `auto` track at zero width, so the count
+     costs nothing when it is absent and nothing wraps to a second line when it
+     is not. */
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
+  align-items: center;
+  min-height: var(--oct-nav-row-h);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+}
+
+/* A closed folder has no child rows to space around. Keep that branch of the
+   tree compact while open folders retain the normal navigation rhythm for
+   their visible children. */
+.project-row[data-folder-state="closed"] {
+  min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
+}
+
+.project-row[data-folder-state="closed"] .project-row__select {
+  min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
+}
+
+/* Compact folders still need a full touch target on coarse pointers and
+   narrow windows. Keep the visual rhythm dense on desktop while preserving
+   the interaction surface required by the design contract. */
+@media (pointer: coarse), (max-width: 560px) {
+  .project-row[data-folder-state="closed"],
+  .project-row[data-folder-state="closed"] .project-row__select {
+    min-height: 44px;
+  }
+}
+
+/* The whole row, name and trailing controls together, takes the soft wash
+   under the pointer; the name button inside paints nothing of its own, so
+   the row never shows a second, smaller fill. */
+.project-row:hover {
+  background: var(--oct-fg-soft);
+}
+
+/* The active Project is marked by its label's ink alone: a filled pill would
+   turn the header back into the row the reader keeps mistaking for one. */
+.project-row[data-active="true"] {
+  color: var(--oct-fg);
+}
+
+.project-row__select {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  align-items: center;
+  min-height: var(--oct-nav-row-h);
+  padding: 0 var(--oct-nav-inset);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* The name button is what opens and closes the Project, so the recipe marks
+   it expanded and would fill it; that turned every open Project into a
+   highlighted row, which is the header's mistake all over again. */
+.project-row__select:hover,
+.project-row__select[aria-expanded] {
+  background: transparent;
+}
+
+.project-row__folder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--oct-muted);
+}
+
+.project-row[data-active="true"] .project-row__folder-icon {
+  color: var(--oct-fg);
+}
+
+.project-row__copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+/* Project names belong to the navigation tree, not to a code or metadata
+   register: the 13px row label, one step heavier than the thread titles
+   filed under it. */
+.project-row__copy > span {
+  overflow: hidden;
+  font-family: var(--oct-font-display);
+  font-size: var(--octant-ui-font-size);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row__copy small {
+  color: var(--octant-warning-text);
+  font-size: var(--oct-text-xs);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* The folded Project's roll-up shares the trailing run with the row's
+   controls, and hands its width straight back the moment they arrive. A row is
+   therefore never wider for carrying one, and the name keeps the column it
+   had: the roll-up is for the row the pointer is not on, and the controls are
+   for the row it is. */
+.project-row__rollup {
+  display: inline-grid;
+  /* The count keeps its column whether or not this Project has one, so the
+     marks down a list of folded Projects land on one vertical line instead of
+     stepping left and right with each Project's thread count. */
+  grid-template-columns: auto minmax(10px, auto);
+  align-items: center;
+  gap: 3px;
+  height: var(--oct-nav-row-h);
+  padding-right: var(--oct-space-2);
+  overflow: hidden;
+  color: var(--oct-meta);
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+/* A single thread needs no count: the mark alone already says which state the
+   folded Project is in, and "1" beside it reads as a quantity worth noting. */
+.project-row__rollup-count {
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
+
+.project-row:hover .project-row__rollup,
+.project-row:focus-within .project-row__rollup,
+.project-row:has([aria-expanded="true"]) .project-row__rollup,
+.project-row:has([data-popup-open]) .project-row__rollup {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-row__rollup {
+    transition: none;
+  }
+}
+
+.project-row__action {
+  min-height: var(--oct-nav-row-h);
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font-size: var(--oct-text-xs);
+}
+
+.project-row__action:hover,
+.project-row__action:focus-visible {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.project-row__action:disabled {
+  cursor: default;
+  opacity: 0.18 !important;
+}
+
+/* Zero width until wanted, like the section header's controls: the row is
+   the name alone until the pointer or focus arrives. */
+.project-row__action--icon {
+  width: 0;
+  min-width: 0;
+  /* Square, like a thread row's actions. At the row's own height the hover
+     fill was a 24px by 30px slab beside 24px squares one row down. */
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* Reveal follows the pointer and focus only. The active row used to keep its
+   controls on permanently, which put a menu and an edit button on screen at
+   all times for the one row a user looks at most.
+
+   While a row's menu is open, every one of that row's controls stays revealed,
+   not only the one that opened it. The menu is anchored to its trigger, and
+   moving the pointer off the row to reach the menu collapsed the sibling
+   control beside it, which widened the name column and slid the trigger, and
+   the open menu slid with it, out from under the pointer. */
+.project-row:hover .project-row__action--icon,
+.project-row:focus-within .project-row__action--icon,
+.project-row:has([aria-expanded="true"]) .project-row__action--icon,
+.project-row:has([data-popup-open]) .project-row__action--icon,
+.project-row__action--icon:has([aria-expanded="true"]),
+.project-row__action--icon[aria-expanded="true"],
+.project-row__action--icon[data-popup-open] {
+  width: 24px;
+  min-width: 24px;
+  opacity: 1;
+}
+
+.project-archive {
+  margin-top: var(--oct-space-3);
+}
+
+/* Archive heads its rows the way Projects and Chats head theirs. */
+.project-archive summary {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--oct-nav-inset);
+  color: var(--oct-meta);
+  cursor: pointer;
+  font-size: var(--oct-text-detail);
+  font-weight: 500;
+  list-style: none;
+}
+
+.project-archive summary span {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Snoozed and Completed shelves share the archive shelf's quiet summary
+   row; their rows are ordinary thread rows, so nothing else is restyled. */
+.project-shelf > .project-threads {
+  margin-top: 4px;
+}
+
+.project-row--archived {
+  margin-top: 4px;
+}
+
+.project-row__archived-name {
+  min-width: 0;
+  padding: 7px 8px;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-overview__archived {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-dialog {
+  /*
+   * Said as the shared dialog's own variable, not as a competing max-width.
+   * These dialogs also carry `.octant-dialog__popup`, whose rule is imported
+   * later at the same specificity, so a flat cap here would simply lose and
+   * the dialog would open at the shared default. Surface, border, radius,
+   * and shadow come from the shared dialog chrome and the material layer.
+   */
+  --octant-dialog-width: 380px;
+
+  width: min(100%, 380px);
+  max-width: 380px;
+  height: auto;
+  max-height: min(80vh, 560px);
+  margin: 0;
+  overflow: auto;
+  padding: var(--oct-space-4);
+}
+
+.project-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+/* Mono meta, matching the system's .menu-label/.eyebrow treatment. */
+.project-dialog__header span,
+.project-overview__type,
+.project-overview__root > span {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.project-dialog h1 {
+  margin: 2px 0 0;
+  font-size: var(--oct-text-base);
+  font-weight: 600;
+  letter-spacing: var(--oct-tracking-tight);
+}
+
+.project-dialog > p {
+  margin: var(--oct-space-2) 0 var(--oct-space-4);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-snug);
+}
+
+.project-dialog form,
+.project-dialog label {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+/* Reads as the system's .field label. */
+.project-dialog label {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+/* Drawn to the system's .input/.select/.textarea recipe at the small
+   control height until these controls adopt the classes themselves. */
+.project-dialog input:not([type="checkbox"]):not([type="radio"]),
+.project-dialog select,
+.project-dialog textarea,
+.project-overview__name {
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  font: inherit;
+  font-size: var(--oct-text-sm);
+}
+
+.project-dialog input:not([type="checkbox"]):not([type="radio"]) {
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
+}
+
+.project-dialog select,
+.project-dialog textarea {
+  width: 100%;
+  padding: var(--oct-space-2) var(--oct-space-3);
+}
+
+.project-dialog textarea {
+  min-height: 112px;
+  resize: vertical;
+  line-height: var(--oct-leading-snug);
+}
+
+.project-dialog input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.project-dialog select:focus-visible,
+.project-dialog textarea:focus-visible,
+.project-overview__name:focus-visible {
+  background: var(--octant-control-hover);
+}
+
+/* The caption above the folder chooser. It is a paragraph rather than a label
+   because the control it names is a button, and a label element names a form
+   control; it is drawn to match the real field labels beside it. */
+.project-dialog__field-label {
+  margin: var(--oct-space-1) 0 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+/* The Folder | GitHub source switch sits between the header and the body the
+   chosen side draws, at the enclosed-track segment grammar (0071). */
+.project-dialog__source {
+  margin: var(--oct-space-3) 0 var(--oct-space-4);
+}
+
+.project-dialog__source .segment {
+  flex: 1 1 0;
+}
+
+/* The chooser reads as a field, not as a second submit button: same height,
+   border, and radius as the name input directly above it, so the two facts the
+   dialog is about sit at the same weight. */
+.project-dialog__folder {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  text-align: left;
+}
+
+.project-dialog__folder[data-chosen="false"] {
+  color: var(--oct-muted);
+}
+
+.project-dialog__folder:hover:not(:disabled) {
+  background: var(--oct-fg-soft);
+}
+
+.project-dialog__folder:focus-visible {
+  background: var(--octant-control-hover);
+}
+
+.project-dialog__folder:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.project-dialog__folder svg {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.project-dialog__folder-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-dialog__folder-change {
+  flex: none;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-dialog__git-init {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-base);
+  line-height: 1.35;
+}
+
+.project-dialog__git-init input {
+  margin-top: 0.15rem;
+}
+
+.project-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+/* The remote folder body leads with its chooser instead of trailing with it. */
+.project-dialog__actions--leading {
+  justify-content: flex-start;
+}
+
+.project-button {
+  min-height: 31px;
+  padding: 0 11px;
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+
+.project-button:hover {
+  background: var(--octant-control-pressed);
+}
+
+.project-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.project-button--quiet {
+  color: var(--octant-text-muted);
+  background: transparent;
+}
+
+.project-dialog__status {
+  min-height: 17px;
+  margin: var(--oct-space-2) 0 0 !important;
+  color: var(--oct-warn-fg) !important;
+  font-size: var(--oct-text-xs);
+}
+
+.projects-workspace--detail-only {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
+.projects-directory {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 24px 12px 16px;
+  overflow: hidden;
+  background: var(--octant-sidebar);
+  border-right: 1px solid var(--oct-border);
+  /* Directory chrome, like the sidebar it replaces: labels and statuses are
+     not a document, so a drag across the panel must not select them. Fields
+     opt back in below. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.projects-directory
+  :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.projects-directory__header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 6px 2px;
+}
+
+.projects-directory__header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.projects-directory__dismiss {
+  display: none;
+}
+
+.projects-directory__header h1 {
+  margin: 0;
+}
+
+.projects-directory__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.projects-directory__search > svg {
+  position: absolute;
+  left: 9px;
+  z-index: 1;
+  color: var(--octant-text-muted);
+  pointer-events: none;
+}
+
+.projects-directory__search input {
+  width: 100%;
+  padding-left: 30px;
+}
+
+.projects-directory__modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.projects-directory__modes button {
+  min-width: 0;
+  padding-inline: 4px;
+}
+
+.projects-directory__list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 14px;
+  overflow: auto;
+}
+
+.projects-directory__project {
+  width: 100%;
+  min-height: 48px;
+  gap: 9px;
+  padding-inline: 9px;
+}
+
+.projects-directory__project-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+  text-align: left;
+}
+
+.projects-directory__project-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-directory__project-status {
+  flex: none;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.projects-directory__project-status[data-status="Available"] {
+  color: var(--octant-success-text);
+}
+
+.projects-directory__project-status[data-status="Relink required"] {
+  color: var(--octant-warning-text);
+}
+
+.projects-directory__empty {
+  margin: 10px 8px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview {
+  display: flex;
+  width: min(100% - 48px, 920px);
+  min-height: 100%;
+  flex-direction: column;
+  margin-inline: auto;
+  padding: 20px 0 48px;
+}
+
+.projects-workspace--detail-only > .project-overview {
+  width: 100%;
+  max-width: 980px;
+  min-height: 0;
+  margin-inline: auto;
+  padding: 30px 36px 56px;
+  overflow: auto;
+}
+
+.project-overview__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 18px;
+  padding: 0 0 6px;
+}
+
+.project-overview__identity {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-overview__identity form {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* The type is a chip after the name, the answer to "which kind is this",
+   not an eyebrow above it. */
+.project-overview__type {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The name is the page title, editable in place: it wears no field chrome
+   until pointed at, and keeps the same quiet focus treatment as the shell. */
+.project-overview__title {
+  min-width: 0;
+}
+
+.project-overview__name {
+  width: min(48vw, 520px);
+  min-width: 160px;
+  height: auto;
+  min-height: 0;
+  padding: 2px 6px;
+  margin-inline-start: -6px;
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--oct-radius-sm);
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.project-overview__name:hover {
+  border-color: var(--octant-border);
+}
+
+.project-overview__context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 16px;
+  padding: 0;
+}
+
+.project-overview__root {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview__root > span {
+  flex: none;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.project-overview__root strong {
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-overview__availability {
+  flex: none;
+  color: var(--octant-success-text);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview__description {
+  margin: 4px 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+}
+
+.project-overview__primary {
+  min-width: 0;
+  flex: 1 0 auto;
+}
+
+.project-overview__inspectors {
+  display: grid;
+  margin-top: 34px;
+  border-top: 1px solid var(--oct-border);
+}
+
+.project-overview-inspector {
+  min-width: 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.project-overview-inspector__row {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 9px 0;
+}
+
+.project-overview-inspector__row h2,
+.project-overview-inspector__row p {
+  margin: 0;
+}
+
+.project-overview-inspector__row h2 {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.project-overview-inspector__row p {
+  margin-top: 2px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview-inspector__chevron {
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+button[aria-expanded="true"] > .project-overview-inspector__chevron {
+  transform: rotate(180deg);
+}
+
+.project-overview-inspector__content {
+  padding: 0 0 20px;
+}
+
+.project-overview-inspector__content > .project-provider-policy,
+.project-overview-inspector__content > .project-overview__memory {
+  margin-top: 0;
+}
+
+.project-overview-inspector__content > .project-provider-policy {
+  padding-top: 12px;
+  border-top: 0;
+}
+
+@media (max-width: 920px) {
+  .projects-workspace--detail-only > .project-overview {
+    padding-inline: 24px;
+  }
+
+  .projects-directory__project-status {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .projects-workspace--detail-only > .project-overview {
+    padding: 20px 18px 40px;
+  }
+}
+
+.project-provider-policy {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-top: 24px;
+  padding: 16px 0 18px;
+  border-top: 1px solid var(--oct-border);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.project-provider-policy__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.project-provider-policy__header h2 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.project-provider-policy__header p,
+.project-provider-policy__hint {
+  max-width: 72ch;
+  margin: 4px 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+}
+
+.project-provider-policy__default {
+  flex: none;
+  font-size: var(--oct-text-xs);
+}
+
+.project-provider-policy__mode {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 360px);
+  align-items: center;
+  gap: 10px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.project-provider-policy__providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.project-provider-policy__provider {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  padding: 9px 10px;
+  color: var(--octant-text-primary);
+  background: var(--octant-control);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+}
+
+.project-provider-policy__provider small {
+  grid-column: 2;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.project-provider-policy__empty {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+@media (max-width: 640px) {
+  .project-provider-policy__header {
+    display: grid;
+  }
+
+  .project-provider-policy__mode {
+    grid-template-columns: 1fr;
+  }
+}
+
+.project-overview__warning {
+  flex: none;
+  text-align: right;
+}
+
+.project-overview__warning strong {
+  color: var(--octant-warning-text);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview__warning p {
+  margin: 2px 0 0;
+  color: var(--octant-warning-text);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-overview__status {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview__status:empty {
+  display: none;
+}
+
+.project-overview__archived {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.project-memory-inspector {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-areas:
+    "header"
+    "toolbar"
+    "status"
+    "scroll";
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  background: var(--octant-chrome);
+  border-left: 1px solid var(--octant-border);
+  box-shadow: var(--octant-shadow-overlay);
+}
+
+.project-overview__memory {
+  min-width: 0;
+  min-height: 0;
+  margin-top: 28px;
+}
+
+.project-overview__memory .project-memory-inspector {
+  height: auto;
+  min-height: 0;
+  max-height: min(70vh, 560px);
+  background: transparent;
+  border-left: 0;
+  box-shadow: none;
+}
+
+/* On the Project page the memory heading is one section label among the
+   others, not the panel's own title block. */
+.project-overview__memory .project-memory-inspector__header {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.project-overview__memory .project-memory-inspector__header h2 {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: 0;
+}
+
+.project-memory-inspector--embedded {
+  grid-template-areas:
+    "header"
+    "toolbar"
+    "status"
+    "scroll";
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.project-memory-inspector__project {
+  grid-area: project;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  border-bottom: 1px solid var(--octant-border);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-memory-inspector__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  grid-area: header;
+  padding: 17px 16px 14px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.project-memory-inspector__header > div {
+  min-width: 0;
+}
+
+.project-memory-inspector__header span {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.project-memory-inspector__header h2 {
+  margin: 2px 0 0;
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: -0.025em;
+}
+
+.project-memory-inspector__header p {
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-memory-inspector__header button {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  color: var(--octant-text-muted);
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  place-items: center;
+}
+
+.project-memory-inspector__header button:hover {
+  color: var(--octant-text-primary);
+  background: var(--oct-selection);
+}
+
+.project-memory-inspector__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  grid-area: toolbar;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.project-memory-inspector__toolbar select {
+  min-height: 30px;
+  padding: 0 25px 0 8px;
+  color: var(--octant-text-secondary);
+  background: var(--octant-control);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
+  font: inherit;
+  font-size: var(--oct-text-xs);
+}
+
+.project-memory-status-stack {
+  grid-area: status;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-memory-inspector__readonly,
+.project-memory-status-stack > [role="status"] {
+  margin: 0;
+  padding: 10px 13px;
+  color: var(--octant-text-muted);
+  border-bottom: 1px solid var(--octant-border);
+  font-size: var(--oct-text-xs);
+}
+
+.project-memory-inspector__error {
+  margin: 12px;
+  padding: 12px;
+  color: var(--octant-warning-text);
+  background: var(--octant-warning-surface);
+  border: 1px solid var(--octant-warning-border);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+}
+
+.project-memory-inspector__error p {
+  margin: 0 0 9px;
+}
+
+.project-memory-scroll {
+  grid-area: scroll;
+  min-height: 0;
+  padding: 5px 12px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.project-overview__prompt {
+  display: grid;
+  min-height: 160px;
+  flex: 1;
+  align-content: center;
+  justify-items: center;
+  padding: 32px 20px;
+  text-align: center;
+}
+
+.project-overview__prompt-mark {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-lg);
+  line-height: 1;
+}
+
+.project-overview__prompt h2 {
+  margin: 8px 0 0;
+  font-size: var(--oct-text-xl);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.project-overview__prompt p {
+  max-width: 430px;
+  margin: 6px 0 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+}
+
+.code-overview__toolbar .project-overview__name {
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.code-overview .project-overview__actions {
+  display: grid;
+  width: min(100%, 980px);
+  min-height: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-self: center;
+  gap: 8px;
+  padding: 0 28px 30px;
+  border-bottom: 0;
+}
+
+.code-overview .project-overview__actions .project-button {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  text-align: left;
+}
+
+.code-overview .project-overview__actions .project-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-overview:has(.chat-project-overview--home) .project-overview__toolbar,
+.project-overview:has(.chat-project-overview--home) .project-overview__actions {
+  border-bottom-color: transparent;
+}
+
+.project-overview:has(.chat-project-overview--home) .project-overview__toolbar {
+  padding-bottom: 4px;
+}
+
+.project-overview:has(.chat-project-overview--home) .project-overview__name {
+  width: min(48vw, 420px);
+  font-size: var(--oct-text-xl);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.project-overview:has(.chat-project-overview--home) .project-overview__actions {
+  min-height: 0;
+  padding-top: 0;
+}
+.chat-project-overview__items .project-button span:last-child {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.chat-project-overview__archived > .project-button {
+  min-height: 0;
+  padding: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+@media (max-width: 680px) {
+  .project-nav {
+    max-height: 28vh;
+  }
+
+  .project-dialog {
+    max-width: calc(100vw - 32px);
+  }
+
+  .project-overview__toolbar,
+  .project-overview__context {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .project-overview__toolbar p,
+  .project-overview__warning {
+    text-align: left;
+    white-space: normal;
+  }
+
+  .project-overview__actions {
+    flex-wrap: wrap;
+  }
+
+  .code-overview__toolbar .project-overview__name {
+    font-size: var(--oct-text-xl);
+  }
+
+  .code-overview .project-overview__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-memory-inspector * {
+    transition: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .project-row[data-active="true"] {
+    box-shadow: none;
+    background: var(--octant-control-hover);
+  }
+}
+
+.projects-page-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--octant-app-background);
+}
+
+.projects-page-layer > .projects-directory {
+  width: min(100%, 920px);
+  min-height: 100%;
+  margin-inline: auto;
+  padding: 28px 24px;
+  border: 0;
+  background: transparent;
+}
