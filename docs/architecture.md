@@ -174,7 +174,11 @@ verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.
 This admission ends on cancellation or dispatch completion. Local windows retain
-their selected-Project restriction (ADR 0148).
+their selected-Project restriction (ADR 0148). A killed start can leave the
+control secret with no receipt and no socket; the next acquire quarantines
+that file and continues, and it checks the socket is still absent before the
+move so a peer that bound in the meantime keeps the secret it just wrote. An
+ownership failure names the code, the artifact path, and the next step.
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
