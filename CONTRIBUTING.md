@@ -86,6 +86,21 @@ fix(server): make provider turn timeouts idle-based
 docs: consolidate repository documentation
 ```
 
+## Design changes
+
+Start from the [current design index](docs/design/README.md). Architecture owns
+system boundaries, Workspace owns navigation and interaction, and DESIGN.md
+owns presentation. Update the owning specification in place alongside an
+approved implementation change, and reconcile any conflicting summaries.
+Historical ADRs explain rationale; ordinary changes do not require a new ADR or
+supersession ceremony. A clear maintainer request to change the design authorizes
+the corresponding specification update. Ask about unresolved consequential scope,
+not merely because an old document says something different.
+
+Review the resulting specification and behavior together. Link useful tests or
+rendered evidence in the PR, and distinguish approved design from unfinished
+implementation. See [AGENTS.md](AGENTS.md) for authority and delivery rules.
+
 ## Coding principles
 
 - Decide the outcome and acceptance criteria first, then make the smallest

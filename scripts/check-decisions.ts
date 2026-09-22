@@ -5,14 +5,10 @@ import { fileURLToPath } from "node:url";
 /**
  * Decision record gate.
  *
- * `AGENTS.md` ranks decision records above tests and current code, and tells an
- * agent to read the record that owns the area it is changing. Prose alone cannot
- * hold that: an agent that never opens `docs/decisions/` produces a green pull
- * request, and a record whose status or title drifts out of the index is read as
- * settled when it is not. Nothing else in `bun run verify` looks at these files.
- *
- * This gate enforces the hygiene that makes the records trustworthy enough to
- * rank that highly, whichever agent or person wrote the change.
+ * Current specifications own implementation rules. This gate preserves the
+ * historical archive's identities, references, and index agreement so its
+ * rationale remains discoverable. It does not compare code or specifications
+ * with historical decisions and cannot establish design compliance.
  *
  * Rule A: a record's heading number matches its filename.
  * Rule B: a record declares a status the conventions allow, and a superseding

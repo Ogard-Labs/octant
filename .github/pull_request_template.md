@@ -10,5 +10,5 @@ Commands you ran and what you observed. Mention anything you could not run.
 
 - [ ] Tests cover the changed behavior, or this PR explains why none were practical
 - [ ] `bun run verify` passes locally (or CI is green)
-- [ ] Docs updated when user-visible behavior, setup, or architecture changed
+- [ ] Current specification and affected user docs describe the resulting behavior; conflicting summaries are reconciled
 - [ ] No unrelated changes
