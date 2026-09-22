@@ -306,6 +306,7 @@ export function CodeHome(props: CodeHomeProps) {
                     facts={
                       <ContinueFacts
                         card={card}
+                        detail={badge.detail}
                         projectNames={props.projectNames}
                         providerLabels={props.providerLabels}
                       />
@@ -315,7 +316,6 @@ export function CodeHome(props: CodeHomeProps) {
                     }
                     title={card.title}
                     tone={badge.tone}
-                    {...(badge.detail === undefined ? {} : { detail: badge.detail })}
                     {...(card.lastMeaningfulActivityAt === null
                       ? {}
                       : { updatedAt: card.lastMeaningfulActivityAt })}
@@ -427,6 +427,7 @@ function HomeCard(props: {
  */
 function ContinueFacts(props: {
   readonly card: CodeBoardCard;
+  readonly detail: string | undefined;
   readonly projectNames: ReadonlyMap<string, string> | undefined;
   readonly providerLabels: ReadonlyMap<string, string> | undefined;
 }) {
@@ -466,6 +467,9 @@ function ContinueFacts(props: {
           showState
           state={pullRequest.state}
         />
+      )}
+      {props.detail === undefined ? null : (
+        <span className="code-home__fact code-home__fact--muted">{props.detail}</span>
       )}
       {provider === undefined ? null : (
         <span className="code-home__fact code-home__fact--muted">{provider}</span>
