@@ -505,10 +505,12 @@ describe("SettingsView", () => {
       },
       updateSettings: vi.fn(async () => true),
     } as unknown as CodeController;
-    renderSettings({ codeController });
-
-    navigateTo("Code");
+    renderSettings({
+      codeController,
+      initialDeepLink: { section: "code", setting: "code-default-folder-threads" },
+    });
     expect(screen.getByRole("heading", { name: "Code defaults" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Threads without a Project" })).toHaveFocus();
   });
 
   it("maps the saved sidebar material to the direct translucency switch", async () => {

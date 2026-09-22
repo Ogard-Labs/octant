@@ -55,8 +55,7 @@ describe("WorkComposerAdapter", () => {
     const { rerender } = render(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const level = screen.getByRole("slider", { name: "Effort level" });
-    await user.click(level);
-    await user.keyboard("{End}");
+    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
     await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Draft the brief");
     await user.click(screen.getByRole("button", { name: "Create thread" }));

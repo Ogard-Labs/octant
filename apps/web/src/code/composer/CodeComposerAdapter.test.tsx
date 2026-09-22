@@ -95,9 +95,7 @@ describe("CodeComposerAdapter", () => {
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const effort = screen.getByRole("slider", { name: "Effort level" });
-    await user.click(effort);
-    await user.keyboard("{ArrowRight}");
-    await user.keyboard("{ArrowRight}");
+    fireEvent.change(effort, { target: { value: "2" } });
     expect(effort).toHaveAttribute("aria-valuetext", "High");
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
@@ -109,7 +107,7 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("keeps examples compact and fills the prompt only when an example is chosen", async () => {
+  it("keeps full example descriptions visible and fills the prompt only when chosen", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
     render(
@@ -125,8 +123,7 @@ describe("CodeComposerAdapter", () => {
         ]}
       />,
     );
-    expect(screen.queryByText("Explain the entry points and data flow.")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Show example details" }));
+    expect(screen.queryByRole("button", { name: /example details/i })).toBeNull();
     expect(screen.getByText("Explain the entry points and data flow.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Explain this codebase" }));
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(

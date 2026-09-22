@@ -1,4 +1,5 @@
 import type { CodeSettings } from "@octant/contracts/code";
+import type { SettingsSettingId } from "@octant/contracts";
 import { useState } from "react";
 import { SettingRow } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
@@ -26,6 +27,7 @@ interface CodeSettingsDraft {
 }
 
 export interface CodeSettingsViewProps {
+  readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
   readonly settings: CodeSettings;
 }
@@ -216,6 +218,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
                 : "Lets a Code thread start with no Project chosen, in the Code subfolder of the default folder."
             }
             label="Threads without a Project"
+            focused={props.focusedSetting === "code-default-folder-threads"}
             scope="mode"
             settingId="code-default-folder-threads"
           >

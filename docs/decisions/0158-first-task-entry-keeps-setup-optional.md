@@ -17,6 +17,7 @@ General settings despite having no effect on task readiness or authority.
 - Every setup step remains reachable without a name. Existing answers are
   preserved, and first run still waits for pending writes and avatar imports;
   rejected writes leave it pending, as required by 0019.
+  An invalid replacement name retains the last settled name when setup is skipped.
 - Skipping grants no authority and creates no thread. Provider, Project, model,
   and permission readiness remain checked when work is actually requested.
 - Profile has its own Personal settings destination. Its fields remain open
@@ -24,12 +25,16 @@ General settings despite having no effect on task readiness or authority.
   profile setting continue to reach it.
 - Empty Code entry exposes folder setup and, where available, a direct route
   to the projectless-thread setting. Opening that setting never enables it.
-- Code suggestions are compact labels that fill the existing composer; their
-  full descriptions are available on request. The welcome pattern remains
-  user-controlled under 0091, with a quieter default opacity and intensity.
-- The model picker identifies its active provider, avoids repeating that
-  provider on every row, and names each favorite action for its model.
-  Search and mixed-provider favorites retain provider identity per row.
+- Code suggestions keep their full descriptions visible and fill the existing
+  composer when chosen. The welcome pattern remains user-controlled under
+  0091, with quieter defaults and a clear central reading column.
+- The compact model picker uses a horizontal source bar and single-line model
+  rows where provider and capability information would otherwise repeat.
+  Search, Favorites, and Recent retain provider identity per row. Recent keeps
+  the last five explicit model choices locally; it does not change readiness.
+- Favorite actions name their model. Search leads into keyboard model navigation,
+  and a native range control supports dragging and keyboard adjustment of only
+  the reasoning levels the selected model declares.
 
 ## Consequences
 

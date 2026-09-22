@@ -1856,7 +1856,7 @@ html[data-octant-native-host="true"]
 
 .composer-folder-selector__option[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0.5;
+  color: var(--octant-text-secondary);
 }
 
 .composer-folder-selector__option--selected {
@@ -2647,7 +2647,7 @@ form > .work-composer-adapter__attachments {
   gap: var(--oct-space-2);
 }
 
-/* Examples stay subordinate to the prompt until the person asks for detail. */
+/* Full examples remain visible; their quiet layout keeps the composer primary. */
 .code-home__suggestions {
   display: flex;
   flex-wrap: wrap;
@@ -2661,7 +2661,7 @@ form > .work-composer-adapter__attachments {
   white-space: normal;
 }
 
-.code-home__suggestions[data-expanded="true"] > button:not(.code-home__examples-toggle) {
+.code-home__suggestions > button {
   display: grid;
   flex: 1 1 200px;
   height: auto;
@@ -2669,10 +2669,6 @@ form > .work-composer-adapter__attachments {
   justify-items: start;
   padding: var(--oct-space-3);
   text-align: left;
-}
-
-.code-home__examples-toggle {
-  flex-basis: 100%;
 }
 
 .draft-thread__intent-cards > button {

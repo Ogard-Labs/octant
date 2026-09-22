@@ -505,6 +505,25 @@
   -webkit-mask-composite: source-in;
 }
 
+/* Keep the full welcome reading column clear, including persistent examples.
+   Photos retain their existing mask; the theme pattern lives at the edges. */
+.app-backdrop[data-placement="welcome"][data-octant-app-backdrop="theme"] {
+  mask-image:
+    linear-gradient(
+      to right,
+      currentColor,
+      transparent calc(50% - min(45%, 420px)),
+      transparent calc(50% + min(45%, 420px)),
+      currentColor
+    ),
+    linear-gradient(
+      to bottom,
+      currentColor 30%,
+      color-mix(in srgb, currentColor 35%, transparent) 58%,
+      transparent 86%
+    );
+}
+
 /* Under the whole shell there is no composer to clear; the ground only
    softens toward the bottom, where transcripts and lists do their reading. */
 .app-backdrop[data-placement="shell"] {

@@ -6529,21 +6529,15 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .composer-model-picker__menu {
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: minmax(100px, 30%) minmax(0, 1fr);
-  /* The inline level control sits under the list, spanning both columns. */
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: min(480px, calc(100vw - 24px));
-  /* A fixed box, not a cap. The rail switches provider inside one open menu,
-     and provider lists differ wildly in length — a twelve-model list next to
-     an empty one resized the panel between clicks, so the menu appeared to
-     jump under the pointer. A stable height costs some empty space on short
-     lists and buys a menu that holds still. The list pane scrolls. At 330px,
-     with search, catalogs, and the level control stacked above and below it,
-     the list showed three and a half models. */
-  height: min(60vh, 440px);
+  grid-template-columns: minmax(0, 1fr);
+  /* Sources, results, keyboard help, and reasoning share one compact column. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  width: min(360px, calc(100vw - 24px));
+  /* Keep a stable, compact list as sources change; scroll results internally. */
+  height: min(65vh, 360px);
   /* At enlarged text sizes neither side of the composer fits the full box.
      Use the positioner's available space so reasoning stays inside the window. */
-  max-height: min(var(--available-height, 440px), calc(100dvh - 24px));
+  max-height: min(var(--available-height, 360px), calc(100dvh - 24px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -6559,7 +6553,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   grid-column: 1 / -1;
   display: grid;
   gap: 6px;
-  padding: 10px 14px 10px;
+  padding: 6px 12px 8px;
   border-top: 1px solid var(--octant-border);
 }
 
@@ -6589,92 +6583,34 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   white-space: nowrap;
 }
 
-.composer-model-picker__level-slider {
-  position: relative;
-  /* The knob is centred on its stop, so half of it overhangs each end of the
-     track. Inset by that half, the first and last stops keep the knob inside
-     the popover instead of under its rounded corner. */
-  margin-inline: 7px;
-  height: 18px;
-  cursor: pointer;
+.composer-model-picker__reasoning-slider {
+  height: 24px;
+  background: transparent;
 }
 
-/* The whole range is drawn. Without it the only marks were the stops and the
-   knob, so at Default the slider was a lone dot at the left edge. */
-.composer-model-picker__level-slider::before {
-  position: absolute;
-  top: 50%;
-  inset-inline: 0;
-  height: 4px;
-  translate: 0 -50%;
-  /* The control fill measured 1.3:1 on the popover and vanished; the strong
-     edge reads as a track without competing with the knob. */
-  background: var(--octant-border-strong);
-  border-radius: var(--oct-radius-pill);
-  content: "";
-}
-
-/* Focus is a fill and ink emphasis, as on every other control (0114): the
-   level row takes the control fill, and its label and chosen range go to full
-   ink. A ring around the knob was the only change, and it measured under 2:1. */
-.composer-model-picker__level-slider:focus-visible {
-  outline: none;
-}
-
-.composer-model-picker__level:has(.composer-model-picker__level-slider:focus-visible) {
+.composer-model-picker__level:has(.composer-model-picker__reasoning-slider:focus-visible) {
   background: var(--octant-control-hover);
 }
 
-.composer-model-picker__level:has(.composer-model-picker__level-slider:focus-visible)
+.composer-model-picker__level:has(.composer-model-picker__reasoning-slider:focus-visible)
   .composer-model-picker__level-label {
   color: var(--octant-text-primary);
 }
 
-.composer-model-picker__level-slider:focus-visible .composer-model-picker__level-fill {
-  background: var(--octant-text-primary);
-}
-
-.composer-model-picker__level-fill {
-  position: absolute;
-  top: 50%;
-  inset-inline-start: 0;
+.composer-model-picker__reasoning-slider::-webkit-slider-runnable-track {
   height: 4px;
-  translate: 0 -50%;
+  border-radius: var(--oct-radius-pill);
   background: var(--octant-text-secondary);
-  border-radius: var(--oct-radius-pill);
 }
 
-.composer-model-picker__level-knob {
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  translate: -50% -50%;
-  background: var(--octant-text-primary);
-  border-radius: var(--oct-radius-pill);
-  box-shadow:
-    0 0 0 2px var(--octant-surface),
-    var(--octant-shadow-xs);
-  transition: inset-inline-start var(--oct-motion-fast) var(--oct-ease-standard);
+.composer-model-picker__reasoning-slider::-webkit-slider-thumb {
+  margin-top: -5px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .composer-model-picker__level-knob {
-    transition: none;
-  }
-}
-
-/* Each stop is a notch in the track, one ink on both the empty and the filled
-   range, so the stops read as places the knob can land. */
-.composer-model-picker__level-stop {
-  position: absolute;
-  top: 50%;
-  width: 4px;
+.composer-model-picker__reasoning-slider::-moz-range-track {
   height: 4px;
-  translate: -50% -50%;
-  background: var(--octant-text-muted);
-  border-radius: 50%;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-text-secondary);
 }
 
 .composer-model-picker__level-ends {
@@ -6711,35 +6647,23 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__rail {
-  position: sticky;
-  top: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  height: 100%;
-  padding: 8px 0;
-  overflow-y: auto;
-  scrollbar-color: var(--octant-border-strong) transparent;
+  gap: 4px;
+  padding: 4px 6px;
+  overflow-x: auto;
   scrollbar-width: thin;
-  background: var(--octant-control);
-  border-right: 1px solid var(--octant-border);
-}
-
-.composer-model-picker__rail::-webkit-scrollbar {
-  width: 8px;
+  border-bottom: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__rail-item {
   position: relative;
   display: flex;
-  width: calc(100% - 8px);
-  min-height: 32px;
+  min-height: 28px;
   height: auto;
   flex: 0 0 auto;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 5px;
+  padding: 4px 7px;
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
@@ -6748,12 +6672,16 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__rail-label {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  text-align: left;
-  white-space: normal;
+  white-space: nowrap;
   font-size: var(--oct-text-xs);
   line-height: 1.35;
+}
+
+.composer-model-picker__keyboard-hint {
+  margin: 0;
+  padding: 3px 10px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
 }
 
 .composer-model-picker__rail-item:hover {
@@ -6864,16 +6792,15 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   color: var(--octant-text-muted);
 }
 
-/* Catalog chips wrap within a bounded scroller so names stay reachable
-   without consuming the model list's entire height. */
+/* Catalogs occupy one scrollable row, leaving room for the model list. */
 .composer-model-picker__catalogs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex: 0 0 auto;
   gap: 4px;
-  max-height: 72px;
-  padding: 4px 8px;
-  overflow-y: auto;
+  padding: 3px 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .composer-model-picker__catalog {
@@ -6957,13 +6884,10 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  /* The button recipe fixes a one-line control height. A model row holds a name
-     and a provider line, which measured 34px inside that 32px box, so the text
-     stood proud of the row's hover and selection fill. */
   height: auto;
-  min-height: 40px;
+  min-height: 28px;
   min-width: 0;
-  padding: 5px 4px 5px 9px;
+  padding: 3px 4px 3px 9px;
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
@@ -7021,7 +6945,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   border: 0;
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
-  opacity: 0.55;
+  opacity: 1;
 }
 
 .composer-model-picker__row:hover .composer-model-picker__star,
@@ -7071,8 +6995,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 @media (max-width: 640px) {
   .composer-model-picker__menu {
-    width: calc(100vw - 32px);
-    height: min(70vh, 420px);
+    width: min(360px, calc(100vw - 32px));
   }
 }
 

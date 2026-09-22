@@ -300,8 +300,7 @@ describe("WorkOverview", () => {
     expect(onSelectProvider).toHaveBeenCalledWith({ providerInstanceId: instanceId, modelId });
     await user.click(within(composer).getByRole("button", { name: "Provider and model" }));
     const level = screen.getByRole("slider", { name: "Effort level" });
-    await user.click(level);
-    await user.keyboard("{End}");
+    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
     await user.keyboard("{Escape}");
     await user.type(
       within(composer).getByRole("textbox", { name: "Start a new task" }),

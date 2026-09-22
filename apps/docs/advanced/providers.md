@@ -229,10 +229,14 @@ never silently replaced by API-key modes.
 ## Choosing a model
 
 The **provider-first model picker** groups models by provider instance in the
-order you set in Settings. In Work and Code the picker splits models into
-**"Tool-capable"** and **"Chat and analysis only"**; in Chat it lists
-**"Models"**. Capability badges show **Tools**, **Vision**, **Reasoning**, and
-context limit (for example, **"400K context"**).
+order you set in Settings. Choose a source along the top or search across all
+providers. Native model rows keep the model name prominent; models limited to
+chat and analysis retain that distinction in Work and Code.
+
+Star models for **Favorites**, or use **Recent** for your last five explicit
+choices, saved locally. Both lists show each model's provider. From Search,
+press **Down** to focus the results, use **Up/Down** to browse, and press
+**Enter** to choose. **Escape** closes the picker without changing the selection.
 
 A model that becomes unavailable stays visible on the current selection with
 an actionable reason, so history is never silently rewritten. Model catalogs
@@ -261,7 +265,8 @@ this control both when creating a thread and in an existing thread's composer.
 and passed to the provider when the next turn's session starts. Only values the
 selected model declares are accepted; changing the Work or Code provider or model resets
 the choice to Default. Models without a declared reasoning option do not show
-this control.
+this control. Drag the slider or use the arrow keys to adjust it. **Home** selects
+Default and **End** selects the highest declared level.
 
 Chat also offers the model's other declared options, such as Codex **Service
 tier**, in its composer. Work validates saved options again before starting a

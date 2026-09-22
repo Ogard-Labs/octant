@@ -291,7 +291,7 @@ describe("FirstRunOnboarding", () => {
 
   it("never saves a name the user typed past and can no longer see", async () => {
     const user = userEvent.setup();
-    const props = mount();
+    const props = mount({ profile: emptyProfile });
 
     // Typed one character at a time, the 64th character makes a storable name
     // and the 65th makes the field invalid.
@@ -306,6 +306,16 @@ describe("FirstRunOnboarding", () => {
     expect(props.onSaveProfile).not.toHaveBeenCalledWith(
       expect.objectContaining({ displayName: expect.anything() }),
     );
+  });
+
+  it("keeps the saved name when an invalid replacement is skipped", async () => {
+    const user = userEvent.setup();
+    const props = mount({ profile: namedProfile });
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "A".repeat(65));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+    expect(props.onSaveProfile).toHaveBeenLastCalledWith(namedProfile);
   });
 
   it("walks forward and back without losing the draft", async () => {

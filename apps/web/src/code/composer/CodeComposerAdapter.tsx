@@ -304,7 +304,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setPrompt(promptRequest.text);
     textareaRef.current?.focus();
   }, [promptRequest]);
-  const [showExampleDetails, setShowExampleDetails] = useState(false);
   const applySuggestion = (suggestion: CodeComposerSuggestion) => {
     setPrompt(suggestion.prompt);
     textareaRef.current?.focus();
@@ -896,12 +895,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         {props.suggestions === undefined ||
         props.suggestions.length === 0 ||
         trimmed !== "" ? null : (
-          <div
-            aria-label="Suggested prompts"
-            className="code-home__suggestions"
-            data-expanded={showExampleDetails}
-            role="group"
-          >
+          <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
             {props.suggestions.map((suggestion) => (
               <OctantButton
                 aria-label={suggestion.label}
@@ -913,21 +907,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 variant="ghost"
               >
                 <span className="code-home__suggestion-label">{suggestion.label}</span>
-                {showExampleDetails ? (
-                  <span className="code-home__suggestion-text">{suggestion.prompt}</span>
-                ) : null}
+                <span className="code-home__suggestion-text">{suggestion.prompt}</span>
               </OctantButton>
             ))}
-            <OctantButton
-              aria-expanded={showExampleDetails}
-              className="code-home__examples-toggle"
-              onClick={() => setShowExampleDetails((shown) => !shown)}
-              size="sm"
-              type="button"
-              variant="link"
-            >
-              {showExampleDetails ? "Hide example details" : "Show example details"}
-            </OctantButton>
           </div>
         )}
         {props.beneath}

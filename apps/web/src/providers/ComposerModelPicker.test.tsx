@@ -7,7 +7,7 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerModelPicker } from "./ComposerModelPicker";
@@ -169,6 +169,7 @@ describe("ComposerModelPicker", () => {
     const items = within(rail).getAllByRole("option");
     expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
       "Favorites",
+      "Recent",
       "Local OpenCode",
       "Remote Claude",
     ]);
@@ -201,19 +202,25 @@ describe("ComposerModelPicker", () => {
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
     const modelTwoRow = within(menu).getByRole("option", { name: "Model Two" }).parentElement!;
-    const star = within(modelTwoRow).getByRole("button", { name: "Add Model Two to favorites" });
+    const star = within(modelTwoRow).getByRole("button", {
+      name: "Add Model Two (Local OpenCode) to favorites",
+    });
     expect(star).toHaveAttribute("aria-pressed", "false");
     await user.click(star);
     expect(onSelect).not.toHaveBeenCalled();
     expect(menu).toBeInTheDocument();
     expect(
-      within(modelTwoRow).getByRole("button", { name: "Remove Model Two from favorites" }),
+      within(modelTwoRow).getByRole("button", {
+        name: "Remove Model Two (Local OpenCode) from favorites",
+      }),
     ).toHaveAttribute("aria-pressed", "true");
 
     await user.click(within(menu).getByRole("option", { name: "Remote Claude" }));
     const modelThreeRow = within(menu).getByRole("option", { name: "Model Three" }).parentElement!;
     await user.click(
-      within(modelThreeRow).getByRole("button", { name: "Add Model Three to favorites" }),
+      within(modelThreeRow).getByRole("button", {
+        name: "Add Model Three (Remote Claude) to favorites",
+      }),
     );
 
     await user.click(within(menu).getByRole("option", { name: "Favorites" }));
@@ -234,7 +241,9 @@ describe("ComposerModelPicker", () => {
     expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
     const modelTwoAgain = screen.getByRole("option", { name: "Model Two" }).parentElement!;
     await user.click(
-      within(modelTwoAgain).getByRole("button", { name: "Remove Model Two from favorites" }),
+      within(modelTwoAgain).getByRole("button", {
+        name: "Remove Model Two (Local OpenCode) from favorites",
+      }),
     );
     expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
@@ -376,11 +385,20 @@ describe("ComposerModelPicker", () => {
     expect(level).toHaveAttribute("aria-valuemax", "3");
     expect(level).toHaveAttribute("aria-valuetext", "Medium");
 
-    await user.click(level);
-    await user.keyboard("{ArrowRight}");
+    // jsdom does not implement native range keyboard/drag defaults; the real
+    // app smoke covers those gestures, while this proves the resulting value.
+    fireEvent.change(level, { target: { value: "3" } });
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", "high");
-    await user.keyboard("{Home}");
+    fireEvent.change(level, { target: { value: "0" } });
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
+    onModelOptionChange.mockClear();
+    fireEvent.pointerDown(level);
+    fireEvent.change(level, { target: { value: "1" } });
+    fireEvent.change(level, { target: { value: "3" } });
+    expect(level).toHaveAttribute("aria-valuetext", "High");
+    expect(onModelOptionChange).not.toHaveBeenCalled();
+    fireEvent.pointerUp(level);
+    expect(onModelOptionChange).toHaveBeenCalledExactlyOnceWith("effort", "high");
   });
 
   it("names both ends of the level range under the slider, wherever the knob sits", async () => {
@@ -467,6 +485,54 @@ describe("ComposerModelPicker", () => {
       "aria-valuetext",
       "Medium",
     );
+  });
+
+  it("keeps explicitly chosen models in Recent across picker remounts", async () => {
+    const user = userEvent.setup();
+    const props = {
+      groups: groups(),
+      onSelect: vi.fn(),
+      selectedProviderInstanceId: providerA,
+      selectedModelId: modelOne,
+    };
+    const view = render(<ComposerModelPicker {...props} />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("option", { name: "Recent" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Models you choose appear here.");
+    await user.click(screen.getByRole("option", { name: "Local OpenCode" }));
+    await user.click(screen.getByRole("option", { name: "Model Two" }));
+    view.unmount();
+    render(<ComposerModelPicker {...props} />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("option", { name: "Recent" }));
+    const models = within(screen.getByRole("listbox", { name: "Models" }));
+    expect(models.getByRole("option", { name: "Model Two" })).toHaveTextContent("Local OpenCode");
+    expect(models.getByRole("option", { name: "Model Two" })).toHaveAccessibleDescription(
+      "Local OpenCode",
+    );
+    expect(models.queryByRole("option", { name: "Model One" })).toBeNull();
+  });
+
+  it("lets a keyboard user move from search through models and select without sending", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        onSelect={onSelect}
+        selectedProviderInstanceId={providerA}
+        selectedModelId={modelOne}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("searchbox", { name: "Search models" }));
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: "Model One" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: "Model Two" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerA, modelId: modelTwo });
+    expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
   });
 
   it("keeps the level control out when no reasoning option is declared", async () => {
@@ -630,7 +696,7 @@ describe("ComposerModelPicker with the native harness", () => {
       within(rail)
         .getAllByRole("option")
         .map((item) => item.getAttribute("aria-label")),
-    ).toEqual(["Favorites", "Local OpenCode", "Octant"]);
+    ).toEqual(["Favorites", "Recent", "Local OpenCode", "Octant"]);
     await user.click(within(rail).getByRole("option", { name: "Octant" }));
     const menu = screen.getByRole("dialog", { name: "Choose provider and model" });
     expect(within(menu).getByRole("option", { name: "GPT X" })).toBeVisible();
