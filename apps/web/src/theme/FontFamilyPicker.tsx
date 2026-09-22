@@ -15,7 +15,6 @@ import {
 } from "../ui/base/OctantCombobox";
 
 export interface FontFamilyPickerProps {
-  readonly id?: string;
   readonly label: string;
   readonly onChange: (family: string) => void;
   readonly surface: "ui" | "editor" | "terminal";
@@ -84,11 +83,7 @@ export function FontFamilyPicker(props: FontFamilyPickerProps) {
       value={value}
     >
       <OctantComboboxInputGroup className="settings-font-picker">
-        <OctantComboboxInput
-          {...(props.id === undefined ? {} : { id: props.id })}
-          aria-label={props.label}
-          placeholder="Search fonts…"
-        />
+        <OctantComboboxInput aria-label={props.label} placeholder="Search fonts…" />
         <OctantComboboxTrigger aria-label={`Open ${props.label} options`}>
           <ChevronsUpDown aria-hidden="true" />
         </OctantComboboxTrigger>

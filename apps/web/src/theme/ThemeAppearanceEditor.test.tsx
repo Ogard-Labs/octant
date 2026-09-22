@@ -112,6 +112,10 @@ describe("ThemeAppearanceEditor", () => {
         "appearance.accessibility.reduced-transparency",
       ]),
     );
+    expect(screen.getByRole("group", { name: "Light preset setting" })).toHaveAttribute(
+      "data-setting-id",
+      "appearance.scheme.light-preset",
+    );
   });
 
   it("names a saved system stack as the default face it now means", () => {

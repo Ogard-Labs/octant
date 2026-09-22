@@ -95,15 +95,10 @@ export function ThemeAppearanceEditor(props: {
               </OctantButton>
             ))}
           </div>
-          <SettingRow
-            label={<label htmlFor="appearance-scheme-light-preset">Light preset</label>}
-            scope="app"
-            settingId="appearance.scheme.light-preset"
-          >
+          <SettingRow label="Light preset" scope="app" settingId="appearance.scheme.light-preset">
             <OctantSelectField
               aria-label="Light preset"
               className="settings-view__select"
-              id="appearance-scheme-light-preset"
               onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
               options={availablePresets
                 .filter((preset) => preset.supportedModes.includes("light"))
@@ -111,15 +106,10 @@ export function ThemeAppearanceEditor(props: {
               value={draft.lightPresetId ?? "system"}
             />
           </SettingRow>
-          <SettingRow
-            label={<label htmlFor="appearance-scheme-dark-preset">Dark preset</label>}
-            scope="app"
-            settingId="appearance.scheme.dark-preset"
-          >
+          <SettingRow label="Dark preset" scope="app" settingId="appearance.scheme.dark-preset">
             <OctantSelectField
               aria-label="Dark preset"
               className="settings-view__select"
-              id="appearance-scheme-dark-preset"
               onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
               options={availablePresets
                 .filter((preset) => preset.supportedModes.includes("dark"))
@@ -127,15 +117,10 @@ export function ThemeAppearanceEditor(props: {
               value={draft.darkPresetId ?? "system"}
             />
           </SettingRow>
-          <SettingRow
-            label={<label htmlFor="appearance-density">Density</label>}
-            scope="app"
-            settingId="appearance.density"
-          >
+          <SettingRow label="Density" scope="app" settingId="appearance.density">
             <OctantSelectField
               aria-label="Theme density"
               className="settings-view__select"
-              id="appearance-density"
               onValueChange={(value) =>
                 void theme.applyPatch({
                   density: value as ThemeSettings["density"],
@@ -271,7 +256,6 @@ function TypographyControl(props: {
         settingId={`appearance.typography.${props.surface}.family`}
       >
         <FontFamilyPicker
-          id={`appearance-typography-${props.surface}-family`}
           label={props.familyLabel}
           onChange={(family) => props.onChange({ family })}
           surface={props.surface}
