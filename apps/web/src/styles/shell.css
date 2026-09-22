@@ -2871,7 +2871,7 @@ form > .work-composer-adapter__attachments {
 }
 
 /* The attribute in the selector outranks the card badges' tone fills, which
-   come later in this file; a row's state lives in the dot, not in a pill. */
+   come later in this file; rows use colored text and dots without a pill. */
 .code-home__row .code-home__badge[data-tone] {
   grid-column: 2;
   grid-row: 1;
@@ -2891,24 +2891,20 @@ form > .work-composer-adapter__attachments {
   height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--oct-fg-2);
-  opacity: 0.45;
+  background: currentcolor;
 }
 
-.code-home__row .code-home__badge[data-tone="running"]::before {
-  background: var(--oct-accent-fg);
-  opacity: 1;
+.code-home__row .code-home__badge[data-tone="running"],
+.code-home__row .code-home__badge[data-tone="open"] {
+  color: var(--octant-palette-blue);
 }
 
-.code-home__row .code-home__badge[data-tone="waiting"]::before {
-  background: var(--oct-fg-2);
-  opacity: 0.65;
+.code-home__row .code-home__badge[data-tone="waiting"] {
+  color: var(--octant-palette-yellow);
 }
 
-.code-home__row .code-home__badge[data-tone="done"]::before,
-.code-home__row .code-home__badge[data-tone="merged"]::before {
-  background: var(--octant-success-text);
-  opacity: 1;
+.code-home__row .code-home__badge[data-tone="done"] {
+  color: var(--octant-success-text);
 }
 
 .code-home__row .code-home__card-title {
