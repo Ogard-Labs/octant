@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  gitGlobalConfigReadRoots,
   gitLinkedWorktreeMetadataRules,
   gitShimExtraRules,
   MACOS_GIT_SHIM_READ_PATHS,
@@ -13,7 +12,7 @@ import {
 import { makeSeatbeltConfinementLive, type SeatbeltConfinementPort } from "./seatbeltProfile";
 
 describe("git Seatbelt launch", () => {
-  it("lets confined git read the user's global config alongside the checkout", () => {
+  it("grants confined git no read reach into the user's global config", () => {
     let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
     const confinement: SeatbeltConfinementPort = {
       prepare: (input) => {
@@ -31,7 +30,12 @@ describe("git Seatbelt launch", () => {
       networkEgress: "allow",
     });
     const roots = captured?.readRoots ?? [];
-    for (const root of gitGlobalConfigReadRoots()) expect(roots).toContain(root);
+    // Every confined launch runs GIT_CONFIG_GLOBAL=/dev/null and
+    // GIT_CONFIG_NOSYSTEM=1, so nothing opens these paths and the allowance
+    // would be reach the profile carries for no reader.
+    for (const root of [join(homedir(), ".gitconfig"), join(homedir(), ".config/git")]) {
+      expect(roots).not.toContain(root);
+    }
     expect(roots).toContain("/repo");
     expect(roots).toContain("/opt/toolchain/usr/bin");
   });
@@ -205,49 +209,6 @@ describe("git Seatbelt launch", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
-
-  it("derives global config roots from the home and XDG config directories", () => {
-    const readConfig = () => undefined;
-    expect(gitGlobalConfigReadRoots({ home: "/Users/example", env: {}, readConfig })).toEqual([
-      "/Users/example/.gitconfig",
-      "/Users/example/.config/git",
-    ]);
-    expect(
-      gitGlobalConfigReadRoots({
-        home: "/Users/example",
-        env: { XDG_CONFIG_HOME: "/Users/example/xdg" },
-        readConfig,
-      }),
-    ).toEqual(["/Users/example/.gitconfig", "/Users/example/xdg/git"]);
-  });
-
-  it("follows include and includeIf paths from the global config to a bounded depth", () => {
-    const files = new Map<string, string>([
-      [
-        "/Users/example/.gitconfig",
-        '[user]\n\tname = Example\n[include]\n\tpath = ~/.gitconfig.local\n\tpath = "relative/extra"\n[includeIf "gitdir:~/Dev/"]\n\tpath = /Users/example/Dev/.gitconfig-dev\n[alias]\n\tpath = not-an-include\n',
-      ],
-      [
-        "/Users/example/.gitconfig.local",
-        "[include]\n\tpath = ~/.gitconfig\n\tpath = ~/.gitconfig.work\n",
-      ],
-      ["/Users/example/.gitconfig.work", "[include]\n\tpath = ~/.gitconfig.local\n"],
-    ]);
-    expect(
-      gitGlobalConfigReadRoots({
-        home: "/Users/example",
-        env: {},
-        readConfig: (path) => files.get(path),
-      }),
-    ).toEqual([
-      "/Users/example/.gitconfig",
-      "/Users/example/.config/git",
-      "/Users/example/.gitconfig.local",
-      "/Users/example/.gitconfig.work",
-      "/Users/example/relative/extra",
-      "/Users/example/Dev/.gitconfig-dev",
-    ]);
   });
 
   it("keeps an explicit executable and uses the plain system git off macOS", () => {
