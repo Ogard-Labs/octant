@@ -463,11 +463,11 @@ describe("ChatTurnRunner", () => {
     expect(executeResearch).toHaveBeenCalledTimes(2);
     expect(executeResearch).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ signal: controller.signal }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(executeResearch).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ signal: controller.signal }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(answerTool).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -483,6 +483,223 @@ describe("ChatTurnRunner", () => {
         isError: false,
       }),
     );
+  });
+
+  it("names a tool call that never returns as the turn's failure", async () => {
+    const updates: ChatAttempt[] = [];
+    const toolSignals: AbortSignal[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Queue.offer(queue, {
+          kind: "tool-request",
+          sessionId,
+          requestId: "tool-hang",
+          toolName: "octant_browser",
+          inputJson: "{}",
+        } as never),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+      timeoutMs: 25,
+    });
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: { acquire: () => Effect.succeed(connection) } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            appManagedTools: {
+              definitions: [{ name: "octant_browser" } as never],
+              execute: (input: { signal?: AbortSignal }) => {
+                if (input.signal !== undefined) toolSignals.push(input.signal);
+                return new Promise(() => undefined);
+              },
+              close: async () => undefined,
+            },
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "c".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      ),
+    );
+
+    expect(result).toMatchObject({ _tag: "Left", left: { category: "failed" } });
+    expect(updates.at(-1)?.outcome).toBe("failed");
+    expect(updates.at(-1)?.failure).toEqual({ code: "tool-timed-out" });
+    expect(toolSignals.at(-1)?.aborted).toBe(true);
+  });
+
+  it("names a thrown app-managed tool call as the turn's failure", async () => {
+    const updates: ChatAttempt[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Queue.offer(queue, {
+          kind: "tool-request",
+          sessionId,
+          requestId: "tool-throw",
+          toolName: "octant_browser",
+          inputJson: "{}",
+        } as never),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+    });
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: { acquire: () => Effect.succeed(connection) } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            appManagedTools: {
+              definitions: [{ name: "octant_browser" } as never],
+              execute: async () => {
+                throw new Error("driver blew up");
+              },
+              close: async () => undefined,
+            },
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "c".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      ),
+    );
+
+    expect(result).toMatchObject({ _tag: "Left", left: { category: "failed" } });
+    expect(updates.at(-1)?.outcome).toBe("failed");
+    expect(updates.at(-1)?.failure).toEqual({ code: "tool-failed" });
+  });
+
+  it("names provider silence past the idle window as a timeout on the attempt", async () => {
+    const updates: ChatAttempt[] = [];
+    const connection = {
+      subscribe: Effect.succeed(Stream.never),
+      start: () => Effect.succeed({ sessionId }),
+      send: () => Effect.void,
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+      timeoutMs: 25,
+    });
+
+    const fiber = Effect.runFork(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "c".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    expect(exit._tag).toBe("Failure");
+    expect(updates.at(-1)?.outcome).toBe("interrupted");
+    expect(updates.at(-1)?.failure).toEqual({ code: "timed-out" });
   });
 
   it("maps ambiguous provider death to interrupted, never completed", async () => {
@@ -551,6 +768,7 @@ describe("ChatTurnRunner", () => {
     const exit = await Effect.runPromise(Fiber.await(fiber));
     expect(exit._tag).toBe("Failure");
     expect(updates.map((entry) => entry.outcome)).toContain("interrupted");
+    expect(updates.at(-1)?.failure).toEqual({ code: "incomplete" });
     expect(updates.some((entry) => entry.outcome === "completed")).toBe(false);
   });
 
@@ -1541,6 +1759,11 @@ describe("ChatTurnRunner", () => {
 
       expect(result).toMatchObject({ _tag: "Left", left: { category: publicCategory } });
       expect(updates.at(-1)?.outcome).toBe(durableOutcome);
+      if (durableOutcome === "waiting") {
+        expect(updates.at(-1)?.failure).toBeUndefined();
+      } else {
+        expect(updates.at(-1)?.failure).toEqual({ code: providerCategory });
+      }
     },
   );
 
@@ -2160,7 +2383,9 @@ describe("ChatTurnRunner", () => {
       researchRouter: new ResearchRouter({
         searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
-      timeoutMs: 1_000,
+      // The fixture tool sleeps past a one-second window; the deadline is the
+      // turn's idle window, so give the tool room to answer.
+      timeoutMs: 5_000,
     });
 
     await Effect.runPromise(

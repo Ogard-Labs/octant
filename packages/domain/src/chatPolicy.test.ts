@@ -530,6 +530,23 @@ describe("chat turn and attempt policy", () => {
     expect(interrupted.outcome).toBe("interrupted");
   });
 
+  it("carries a typed failure onto terminal attempts and refuses one on live outcomes", () => {
+    const failed = transitionChatAttempt(makeAttempt("streaming"), {
+      outcome: "failed",
+      updatedAt: later,
+      failure: { code: "timed-out" as never },
+    });
+    expect(failed.failure).toEqual({ code: "timed-out" });
+
+    expect(() =>
+      transitionChatAttempt(makeAttempt("queued"), {
+        outcome: "streaming",
+        updatedAt: later,
+        failure: { code: "timed-out" as never },
+      }),
+    ).toThrow(ChatPolicyRejected);
+  });
+
   it("rejects resume for non-resumable outcomes and preserves session identity for resumable ones", () => {
     const thread = makeThread();
     const baseResumeInput = {

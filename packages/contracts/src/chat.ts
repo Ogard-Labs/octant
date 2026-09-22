@@ -10,9 +10,11 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderProcessDiagnostic,
   ProviderResumeCursor,
   ProviderSessionId,
 } from "./providers";
+import { DiagnosticFailureCode } from "./diagnostics";
 import { PreviewContextSelection } from "./previews";
 import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canvasContext";
 import { GithubIssueContextRequest } from "./githubIssueContext";
@@ -218,6 +220,21 @@ const Usage = Schema.Struct({
   outputTokens: NonNegativeInt,
 }).annotations(strict);
 
+/**
+ * Why a terminal attempt ended, in a shape a client can render. The code is
+ * the bounded slug the diagnostics incident for the same attempt already
+ * carries — a provider failure category when the provider drove the failure,
+ * or the runner's own slug when the turn ended without the provider
+ * answering. The free-form provider message stays off the wire: it can quote
+ * provider output, so only the typed code and the already client-safe process
+ * diagnostic cross.
+ */
+export const ChatAttemptFailure = Schema.Struct({
+  code: DiagnosticFailureCode,
+  diagnostic: Schema.optional(ProviderProcessDiagnostic),
+}).annotations(strict);
+export type ChatAttemptFailure = typeof ChatAttemptFailure.Type;
+
 export const ChatAttempt = Schema.Struct({
   id: ChatAttemptId,
   turnId: ChatTurnId,
@@ -251,6 +268,12 @@ export const ChatAttempt = Schema.Struct({
   answeredQuestions: Schema.optional(
     Schema.Array(ChatAttemptAnsweredQuestion).pipe(Schema.maxItems(8)),
   ),
+  /**
+   * Set on a terminal failure so the transcript can state why the turn ended
+   * instead of offering only a support correlation ID. Absent on successful,
+   * user-cancelled, and still-running attempts.
+   */
+  failure: Schema.optional(ChatAttemptFailure),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 }).annotations(strict);

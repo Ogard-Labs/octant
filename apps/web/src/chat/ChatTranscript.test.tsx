@@ -472,6 +472,51 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("button", { name: "Copy support ID" })).toBeVisible();
   });
 
+  it.each([
+    ["timed-out", "The provider stopped responding and the turn timed out."],
+    ["unavailable", "The provider is unavailable."],
+    ["tool-timed-out", "An app-managed tool call did not return before the turn deadline."],
+  ] as const)("states why a %s turn failed in Octant's own words", (code, sentence) => {
+    const failed = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [{ ...failed, outcome: "failed", failure: { code } }],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(sentence);
+    expect(screen.getByLabelText("Support correlation")).toHaveTextContent(ids.firstAttempt);
+  });
+
+  it("states the timeout cause on an interrupted attempt too", () => {
+    const interrupted = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                { ...interrupted, outcome: "interrupted", failure: { code: "timed-out" } },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The provider stopped responding and the turn timed out.",
+    );
+  });
+
   it.each(["failed", "interrupted"] as const)("retries only %s attempts", async (outcome) => {
     const onRetryAttempt = vi.fn();
     const view = viewFixture({

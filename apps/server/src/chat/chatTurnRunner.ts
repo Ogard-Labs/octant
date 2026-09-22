@@ -2,8 +2,10 @@ import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   decodeChatAttemptQuestion,
   decodeChatFailure,
+  decodeDiagnosticFailureCode,
   UtcTimestamp,
   type ChatAttempt,
+  type ChatAttemptFailure,
   type ChatAttemptOutcome,
   type ChatAttemptQuestion,
   type ChatCitationId,
@@ -24,7 +26,7 @@ import {
 } from "@octant/contracts";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { Deferred, Effect, Fiber, Schema, Scope, Stream } from "effect";
+import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
@@ -294,14 +296,29 @@ export class ChatTurnRunner {
               }).catch(() => undefined),
             );
 
-      const persistOutcome = (outcome: ChatAttemptOutcome) =>
+      const persistOutcome = (outcome: ChatAttemptOutcome, failure?: ChatAttemptFailure) =>
         Effect.gen(function* () {
           if (currentAttempt.outcome === outcome) return;
           currentAttempt = transitionChatAttempt(currentAttempt, {
             outcome,
             updatedAt: updatedAt(),
+            ...(failure === undefined ? {} : { failure }),
           });
           yield* input.persistAttempt(currentAttempt);
+        });
+
+      /**
+       * Ends the turn on a cause the runner itself observed — a tool call
+       * that failed or never returned, a reply that never arrived. The cause
+       * rides on the attempt as a bounded code so the transcript can say what
+       * happened; the thrown ChatFailure keeps carrying the internal detail
+       * for logs.
+       */
+      const failTurn = (failure: ChatAttemptFailure, error: ChatFailure) =>
+        Effect.gen(function* () {
+          yield* persistOutcome("failed", failure);
+          terminalOutcome = "failed";
+          return yield* Effect.fail(error);
         });
 
       capacityScheduler.updateProviderFacts({
@@ -318,7 +335,9 @@ export class ChatTurnRunner {
         origin: "thread",
       });
       if (submission.status === "queued") {
-        yield* persistOutcome("interrupted");
+        yield* persistOutcome("interrupted", {
+          code: decodeDiagnosticFailureCode("capacity-unavailable"),
+        });
         terminalOutcome = "interrupted";
         capacityScheduler.recordTerminal({
           reservationId: input.reservationId,
@@ -343,7 +362,9 @@ export class ChatTurnRunner {
         turnUpperBoundTokens: input.estimatedTokens,
       });
       if (spendAdmission?.status === "refused") {
-        yield* persistOutcome("interrupted");
+        yield* persistOutcome("interrupted", {
+          code: decodeDiagnosticFailureCode(spendAdmission.refusal.kind),
+        });
         terminalOutcome = "interrupted";
         capacityScheduler.recordTerminal({
           reservationId: input.reservationId,
@@ -373,6 +394,16 @@ export class ChatTurnRunner {
             currentAttempt = transitionChatAttempt(currentAttempt, {
               outcome,
               updatedAt: updatedAt(),
+              // Waiting is resumable rather than failed, so the attempt only
+              // records a cause once the outcome states one.
+              ...(outcome === "waiting"
+                ? {}
+                : {
+                    failure: {
+                      code: decodeDiagnosticFailureCode(error.category),
+                      ...(error.diagnostic === undefined ? {} : { diagnostic: error.diagnostic }),
+                    },
+                  }),
             });
             if (outcome === "failed" && input.persistProviderFailure !== undefined) {
               yield* input.persistProviderFailure(currentAttempt, error);
@@ -427,7 +458,12 @@ export class ChatTurnRunner {
             yield* cancelOwnedSession();
             return;
           }
-          yield* persistOutcome(ambiguousRecovery);
+          yield* persistOutcome(
+            ambiguousRecovery,
+            ambiguousRecovery === "waiting"
+              ? undefined
+              : { code: decodeDiagnosticFailureCode("incomplete") },
+          );
           terminalOutcome = ambiguousRecovery;
         });
 
@@ -684,7 +720,9 @@ export class ChatTurnRunner {
               yield* connection
                 .interrupt(input.attempt.providerSessionId)
                 .pipe(Effect.catchAll(() => Effect.void));
-              yield* persistOutcome("interrupted");
+              yield* persistOutcome("interrupted", {
+                code: decodeDiagnosticFailureCode("timed-out"),
+              });
               terminalOutcome = "interrupted";
               return yield* Effect.fail(
                 decodeChatFailure({
@@ -714,7 +752,9 @@ export class ChatTurnRunner {
                 yield* idle.touch;
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > maxEvents) {
-                  yield* persistOutcome("interrupted");
+                  yield* persistOutcome("interrupted", {
+                    code: decodeDiagnosticFailureCode("event-budget-exceeded"),
+                  });
                   terminalOutcome = "interrupted";
                   return yield* Effect.fail(
                     decodeChatFailure({
@@ -904,17 +944,51 @@ export class ChatTurnRunner {
                       return;
                     }
                     selectedResearchBackend = route.backend;
+                    const researchAbort = new AbortController();
+                    const researchSignal =
+                      executionSignal === undefined
+                        ? researchAbort.signal
+                        : AbortSignal.any([executionSignal, researchAbort.signal]);
+                    // App-owned work suspends the idle timeout, so the call
+                    // gets its own copy of the turn's deadline: a research
+                    // request that never returns must end the turn, not
+                    // leave it running forever.
                     const results = yield* idle.during(
-                      Effect.tryPromise({
-                        try: () =>
-                          route.execute({
-                            query: parsedQuery,
-                            limit: 5,
-                            ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                      Effect.raceFirst(
+                        Effect.tryPromise({
+                          try: () =>
+                            route.execute({
+                              query: parsedQuery,
+                              limit: 5,
+                              signal: researchSignal,
+                            }),
+                          catch: () =>
+                            decodeChatFailure({
+                              category: "failed",
+                              message: "Research failed.",
+                            }),
+                        }).pipe(
+                          Effect.catchAll((error) =>
+                            failTurn(
+                              { code: decodeDiagnosticFailureCode("research-failed") },
+                              error,
+                            ),
+                          ),
+                        ),
+                        Effect.andThen(
+                          Effect.sleep(timeoutMs),
+                          Effect.gen(function* () {
+                            researchAbort.abort();
+                            return yield* failTurn(
+                              { code: decodeDiagnosticFailureCode("research-timed-out") },
+                              decodeChatFailure({
+                                category: "failed",
+                                message: "Research did not return before the turn deadline.",
+                              }),
+                            );
                           }),
-                        catch: () =>
-                          decodeChatFailure({ category: "failed", message: "Research failed." }),
-                      }),
+                        ),
+                      ),
                     );
                     if (executionSignal?.aborted) return;
                     yield* connection.answerTool({
@@ -939,20 +1013,49 @@ export class ChatTurnRunner {
                     });
                     return;
                   }
+                  const toolAbort = new AbortController();
+                  const toolSignal =
+                    executionSignal === undefined
+                      ? toolAbort.signal
+                      : AbortSignal.any([executionSignal, toolAbort.signal]);
+                  // App-owned work suspends the idle timeout, so the call gets
+                  // the same window as its own deadline: a tool that never
+                  // returns ends the turn with a named cause instead of
+                  // hanging it past the point the provider went silent.
                   const execution = yield* idle.during(
-                    Effect.tryPromise({
-                      try: () =>
-                        toolSet.execute({
-                          name: event.toolName,
-                          inputJson: event.inputJson,
-                          ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                    Effect.raceFirst(
+                      Effect.tryPromise({
+                        try: () =>
+                          toolSet.execute({
+                            name: event.toolName,
+                            inputJson: event.inputJson,
+                            signal: toolSignal,
+                          }),
+                        catch: () =>
+                          decodeChatFailure({
+                            category: "failed",
+                            message: "App-managed tool execution failed.",
+                          }),
+                      }).pipe(
+                        Effect.catchAll((error) =>
+                          failTurn({ code: decodeDiagnosticFailureCode("tool-failed") }, error),
+                        ),
+                      ),
+                      Effect.andThen(
+                        Effect.sleep(timeoutMs),
+                        Effect.gen(function* () {
+                          toolAbort.abort();
+                          return yield* failTurn(
+                            { code: decodeDiagnosticFailureCode("tool-timed-out") },
+                            decodeChatFailure({
+                              category: "failed",
+                              message:
+                                "An app-managed tool call did not return before the turn deadline.",
+                            }),
+                          );
                         }),
-                      catch: () =>
-                        decodeChatFailure({
-                          category: "failed",
-                          message: "App-managed tool execution failed.",
-                        }),
-                    }),
+                      ),
+                    ),
                   );
                   if (executionSignal?.aborted) return;
                   yield* connection.answerTool({
@@ -1040,9 +1143,8 @@ export class ChatTurnRunner {
                     yield* persistOutcome("streaming");
                   }
                   if (currentAttempt.responseRefs.length === 0 || !sawVisibleResponse) {
-                    yield* persistOutcome("failed");
-                    terminalOutcome = "failed";
-                    return yield* Effect.fail(
+                    return yield* failTurn(
+                      { code: decodeDiagnosticFailureCode("no-visible-reply") },
                       decodeChatFailure({
                         category: "failed",
                         message: "The provider completed without a visible reply.",
@@ -1099,7 +1201,9 @@ export class ChatTurnRunner {
                     terminalOutcome = "completed";
                     return;
                   }
-                  yield* persistOutcome("interrupted");
+                  yield* persistOutcome("interrupted", {
+                    code: decodeDiagnosticFailureCode("interrupted"),
+                  });
                   terminalOutcome = "interrupted";
                   return yield* Effect.fail(
                     decodeChatFailure({ category: "interrupted", message: event.message }),
@@ -1151,6 +1255,13 @@ export class ChatTurnRunner {
         yield* Fiber.interrupt(abortWatcher);
       }
       if (exit._tag === "Failure") {
+        // A provider failure that surfaced mid-turn — from a connection call
+        // inside the event loop rather than acquire or send — still names
+        // its cause on the attempt before the original error propagates.
+        const providerFailure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+        if (providerFailure !== undefined && isProviderFailure(providerFailure)) {
+          yield* persistProviderFailure(providerFailure).pipe(Effect.catchAll(() => Effect.void));
+        }
         if (terminalOutcome === undefined) {
           yield* persistAmbiguousRecovery();
         }

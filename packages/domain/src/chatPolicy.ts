@@ -3,6 +3,7 @@ import {
   decodeChatThread,
   decodeChatTurn,
   type ChatAttempt,
+  type ChatAttemptFailure,
   type ChatAttemptOutcome,
   type ChatAttachmentId,
   type ChatContentReference,
@@ -547,6 +548,11 @@ export function answerChatTurnQuestion(
 export interface TransitionChatAttemptInput {
   readonly outcome: ChatAttemptOutcome;
   readonly updatedAt: UtcTimestamp;
+  /**
+   * Why the attempt ended; only meaningful on a terminal outcome, which is
+   * where the runner stamps it.
+   */
+  readonly failure?: ChatAttemptFailure;
 }
 const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
   "completed",
@@ -580,11 +586,18 @@ export function transitionChatAttempt(
       `Cannot transition attempt from ${attempt.outcome} to ${input.outcome}`,
     );
   }
+  if (input.failure !== undefined && !terminalOutcomes.includes(input.outcome)) {
+    reject(
+      "invalid-attempt-transition",
+      "A failure reason belongs on a terminal outcome, not " + input.outcome,
+    );
+  }
 
   return decodeChatAttempt({
     ...attempt,
     outcome: input.outcome,
     updatedAt: input.updatedAt,
+    ...(input.failure === undefined ? {} : { failure: input.failure }),
   });
 }
 
