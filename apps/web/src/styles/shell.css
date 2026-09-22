@@ -905,6 +905,12 @@ html[data-octant-native-host="true"]
   content: "\25CF ";
 }
 
+.sidebar-navigation__thread-unread {
+  color: var(--octant-text-primary);
+  background: var(--oct-selection);
+  border-color: var(--octant-border-strong);
+}
+
 /* Show more and Show less are one quiet row at the end of a folded list. */
 .project-threads__more {
   min-height: var(--oct-space-6);

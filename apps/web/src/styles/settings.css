@@ -179,7 +179,7 @@
   margin: 0;
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-tight);
+  letter-spacing: -0.03em;
   line-height: 1.2;
 }
 
@@ -225,9 +225,11 @@
   pointer-events: none;
 }
 
-.settings-view__field--search .settings-view__text-input {
-  min-height: 32px;
+.settings-view__field--search .settings-view__text-input,
+.settings-view__field--search input {
+  min-height: 34px;
   background: var(--octant-control);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   padding-right: 34px;

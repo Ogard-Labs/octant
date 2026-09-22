@@ -19,7 +19,6 @@
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";
-@import "./styles/polish.css";
 @import "./styles/remote-pairing.css";
 @import "./styles/remote-shell.css";
 @import "./styles/artifacts.css";
@@ -2020,6 +2019,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-weight: 500;
   user-select: none;
   -webkit-user-select: none;
+  transition:
+    background-color var(--oct-motion-fast) ease,
+    color var(--oct-motion-fast) ease;
 }
 
 .workspace-pane__grip:hover {
@@ -2511,6 +2513,25 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
+}
+
+.provider-card {
+  border-radius: var(--oct-radius-sm);
+  transition:
+    border-color var(--oct-motion-fast) ease,
+    background-color var(--oct-motion-fast) ease;
+}
+
+.provider-card:hover {
+  border-color: var(--octant-border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-pane__grip,
+  .provider-card {
+    animation: none;
+    transition: none;
+  }
 }
 
 .provider-card__guidance,
