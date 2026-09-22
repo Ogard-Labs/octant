@@ -11,9 +11,23 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { cardViewExtras, ThreadBoardBody } from "../board/ThreadBoardView";
+import {
+  activityLabel,
+  defaultBoardStorage,
+  firstOrEmpty,
+  lastUsefulView,
+  readStoredBoolean,
+  readStoredValue,
+  type ActiveFilterLabel,
+  type BoardStorage,
+  type CardFact,
+  type ThreadBoardState,
+  writeStoredBoolean,
+  writeStoredValue,
+} from "../board/threadBoardState";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
-import { ShellState } from "../shell/ShellState";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -36,27 +50,6 @@ const LAYOUT_STORAGE_KEY = "octant.code.board.layout";
 
 type CodeBoardLayout = "board" | "list";
 
-function readStoredLayout(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-): CodeBoardLayout | undefined {
-  try {
-    const value = storage?.getItem(LAYOUT_STORAGE_KEY);
-    return value === "board" || value === "list" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function writeStoredLayout(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-  layout: CodeBoardLayout,
-): void {
-  try {
-    storage?.setItem(LAYOUT_STORAGE_KEY, layout);
-  } catch {
-    // A device that cannot persist the preference still works this session.
-  }
-}
 const ALL_STATUSES: readonly CodeBoardStatus[] = THREAD_BOARD_STATUS_COLUMN_ORDER;
 
 export interface CodeThreadOpenTarget {
@@ -82,12 +75,6 @@ export interface CodeThreadBoardProps {
   readonly isNarrow?: boolean;
 }
 
-type BoardState =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly view: CodeBoardView }
-  | { readonly status: "refreshing"; readonly view: CodeBoardView }
-  | { readonly status: "error"; readonly message: string; readonly view?: CodeBoardView };
-
 interface FilterState {
   readonly text: string;
   readonly statuses: ReadonlySet<CodeBoardStatus>;
@@ -106,18 +93,15 @@ const DEFAULT_FILTERS: FilterState = {
   checks: "any",
 };
 
-function defaultStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
-  try {
-    return globalThis.localStorage ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function CodeThreadBoard(props: CodeThreadBoardProps) {
-  const storage = props.storage ?? defaultStorage();
+  const storage: BoardStorage | undefined = props.storage ?? defaultBoardStorage();
   const [grouping, setGrouping] = useState<CodeBoardGrouping>(
-    () => props.initialGrouping ?? readStoredGrouping(storage) ?? "status",
+    () =>
+      props.initialGrouping ??
+      readStoredValue(storage, GROUPING_STORAGE_KEY, (value) =>
+        value === "status" || value === "project" ? value : undefined,
+      ) ??
+      "status",
   );
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -128,8 +112,13 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   const [showEmptyGroups, setShowEmptyGroups] = useState(
     () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
   );
-  const [layout, setLayout] = useState<CodeBoardLayout>(() => readStoredLayout(storage) ?? "board");
-  const [board, setBoard] = useState<BoardState>({ status: "loading" });
+  const [layout, setLayout] = useState<CodeBoardLayout>(
+    () =>
+      readStoredValue(storage, LAYOUT_STORAGE_KEY, (value) =>
+        value === "board" || value === "list" ? value : undefined,
+      ) ?? "board",
+  );
+  const [board, setBoard] = useState<ThreadBoardState<CodeBoardView>>({ status: "loading" });
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const query = useMemo(() => buildQuery(filters), [filters]);
@@ -177,7 +166,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
 
   function changeGrouping(next: CodeBoardGrouping) {
     setGrouping(next);
-    writeStoredGrouping(storage, next);
+    writeStoredValue(storage, GROUPING_STORAGE_KEY, next);
   }
 
   const projectNames = useMemo(() => {
@@ -392,7 +381,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                   const selected = value[0];
                   if (selected !== "board" && selected !== "list") return;
                   setLayout(selected);
-                  writeStoredLayout(storage, selected);
+                  writeStoredValue(storage, LAYOUT_STORAGE_KEY, selected);
                 }}
                 value={[layout]}
               >
@@ -442,236 +431,46 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         </div>
       )}
 
-      <CodeBoardBody
+      <ThreadBoardBody<CodeBoardCard, CodeBoardColumn, CodeBoardView>
+        activeFilterSummary={
+          activeFilterLabels(filters, projectNames).length === 0
+            ? undefined
+            : activeFilterSummary(filters)
+        }
         board={board}
-        filters={filters}
+        cardsOf={(view) => view.cards}
+        copy={{
+          eyebrow: "Thread board",
+          emptyTitle: "No Code threads yet",
+          emptyFilteredTitle: "No Code threads match these filters",
+          emptyDetail: "Create a Code thread to see it here.",
+        }}
+        groupCards={(cards) => groupCodeBoardCards(cards, grouping, { projects: props.projects })}
         grouping={grouping}
         isNarrow={props.isNarrow === true || layout === "list"}
-        onResetFilters={() => setFilters(DEFAULT_FILTERS)}
-        projectNames={projectNames}
-        projects={props.projects}
+        layout={props.isNarrow === true || layout === "list" ? "list" : "columns"}
+        onClearFilters={() => setFilters(DEFAULT_FILTERS)}
+        renderCard={(card, presentation) => (
+          <CodeBoardCardView
+            card={card}
+            layout={presentation.layout}
+            statusPresentation={presentation.statusPresentation}
+            unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
+            {...cardViewExtras(card, {
+              projectNames,
+              ...(props.providerLabels === undefined
+                ? {}
+                : { providerLabels: props.providerLabels }),
+              ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
+              ...(props.onSelectPullRequest === undefined
+                ? {}
+                : { onSelectPullRequest: props.onSelectPullRequest }),
+            })}
+          />
+        )}
         showEmptyGroups={showEmptyGroups}
-        {...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels })}
-        {...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds })}
-        {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
-        {...(props.onSelectPullRequest === undefined
-          ? {}
-          : { onSelectPullRequest: props.onSelectPullRequest })}
       />
     </Surface>
-  );
-}
-
-function CodeBoardBody(props: {
-  readonly board: BoardState;
-  readonly filters: FilterState;
-  readonly grouping: CodeBoardGrouping;
-  readonly projects: readonly CodeBoardProjectRef[];
-  readonly projectNames: ReadonlyMap<string, string>;
-  readonly providerLabels?: ReadonlyMap<string, string>;
-  readonly unreadThreadIds?: ReadonlySet<string>;
-  readonly showEmptyGroups: boolean;
-  readonly isNarrow: boolean;
-  readonly onResetFilters: () => void;
-  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
-  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-}) {
-  if (props.board.status === "loading") {
-    return (
-      <div className="code-board__body">
-        <ShellState
-          eyebrow="Thread board"
-          message="Loading the board."
-          state="loading"
-          title="Loading"
-        />
-      </div>
-    );
-  }
-  const view = lastUsefulView(props.board);
-  if (view === undefined) {
-    return (
-      <div className="code-board__body">
-        <ShellState
-          eyebrow="Thread board"
-          message={
-            props.board.status === "error" ? props.board.message : "The board is unavailable"
-          }
-          role="alert"
-          state="disconnected"
-          title="The board is unavailable"
-        />
-      </div>
-    );
-  }
-  const refreshNotice =
-    props.board.status === "refreshing" ? (
-      <p className="code-board__note" role="status">
-        Refreshing local board state.
-      </p>
-    ) : props.board.status === "error" ? (
-      <p className="code-board__note" role="alert">
-        {props.board.message} Showing the last useful view.
-      </p>
-    ) : null;
-  const cards = view.cards;
-  const hasActiveFilters = activeFilterLabels(props.filters, props.projectNames).length > 0;
-  // An empty board still shows its workflow: every column stays, each saying
-  // it has nothing, and one quiet line says why the board is empty.
-  const emptyNote =
-    cards.length === 0 ? (
-      <div className="code-board__note" role="status">
-        <span className="oct-row-label">
-          {hasActiveFilters ? "No Code threads match these filters" : "No Code threads yet"}
-        </span>
-        <span>
-          {hasActiveFilters
-            ? activeFilterSummary(props.filters)
-            : "Create a Code thread to see it here."}
-        </span>
-        {hasActiveFilters ? (
-          <OctantButton onClick={props.onResetFilters} size="sm" type="button" variant="ghost">
-            Clear filters
-          </OctantButton>
-        ) : null}
-      </div>
-    ) : null;
-  const columns = groupCodeBoardCards(cards, props.grouping, { projects: props.projects });
-  // Lanes are the workflow on the board; stacked into a list, an empty lane
-  // is only a heading with nothing under it, so the list keeps the groups
-  // that hold work.
-  const visibleColumns =
-    (props.showEmptyGroups && !props.isNarrow) || cards.length === 0
-      ? columns
-      : columns.filter((column) => column.cards.length > 0);
-  return (
-    <div
-      className="code-board__body"
-      data-grouping={props.grouping}
-      data-layout={props.isNarrow ? "list" : "columns"}
-    >
-      {refreshNotice}
-      {emptyNote}
-      {props.isNarrow ? (
-        <CodeBoardListView
-          columns={visibleColumns}
-          projectNames={props.projectNames}
-          {...overlayProps(props)}
-        />
-      ) : (
-        <div className="board" data-grouping={props.grouping}>
-          {visibleColumns.map((column) => (
-            <CodeBoardColumnView
-              column={column}
-              key={column.key}
-              projectNames={props.projectNames}
-              {...overlayProps(props)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CodeBoardListView(props: {
-  readonly columns: readonly CodeBoardColumn[];
-  readonly projectNames: ReadonlyMap<string, string>;
-  readonly providerLabels?: ReadonlyMap<string, string>;
-  readonly unreadThreadIds?: ReadonlySet<string>;
-  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
-  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-}) {
-  return (
-    <div className="code-board__list">
-      {props.columns.map((column) => (
-        <section
-          aria-label={`${column.label} (${column.cards.length})`}
-          className="code-board__list-group"
-          key={column.key}
-        >
-          <header className="code-board__list-head">
-            {column.status === undefined ? null : (
-              <span aria-hidden="true" className={`st st-${column.status}`} />
-            )}
-            <h2 className="oct-section-label">{column.label}</h2>
-            <span aria-hidden="true" className="count oct-meta">
-              {column.cards.length}
-            </span>
-          </header>
-          {column.cards.length === 0 ? (
-            <SurfaceEmpty title="No threads" tone="lane" />
-          ) : (
-            <ul className="issuelist">
-              {column.cards.map((card) => (
-                <li key={String(card.threadId)}>
-                  <CodeBoardCardView
-                    card={card}
-                    layout="list"
-                    statusPresentation="visible"
-                    unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
-                    {...cardViewExtras(card, props)}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function CodeBoardColumnView(props: {
-  readonly column: CodeBoardColumn;
-  readonly projectNames: ReadonlyMap<string, string>;
-  readonly providerLabels?: ReadonlyMap<string, string>;
-  readonly unreadThreadIds?: ReadonlySet<string>;
-  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
-  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-}) {
-  const { column } = props;
-  // A Status column header already states the status visibly, so its cards only
-  // need the status for assistive technology. Project columns carry no status of
-  // their own, so their cards must show it as visible text — the colored dot
-  // alone is not a status.
-  const statusPresentation = column.kind === "status" ? "screen-reader" : "visible";
-  return (
-    <section
-      aria-label={`${column.label} (${column.cards.length})`}
-      className="board-col"
-      data-column-kind={column.kind}
-      data-empty={column.cards.length === 0 ? "true" : "false"}
-    >
-      <header className="board-col-head">
-        {column.status === undefined ? null : (
-          <span aria-hidden="true" className={`st st-${column.status}`} />
-        )}
-        <h2 className="oct-section-label">{column.label}</h2>
-        <span aria-hidden="true" className="count oct-meta">
-          {column.cards.length}
-        </span>
-      </header>
-      {column.cards.length === 0 ? (
-        <div className="board-col-body">
-          <SurfaceEmpty title="No threads" tone="lane" />
-        </div>
-      ) : (
-        <ul className="board-col-body">
-          {column.cards.map((card) => (
-            <li key={String(card.threadId)}>
-              <CodeBoardCardView
-                card={card}
-                layout="card"
-                statusPresentation={statusPresentation}
-                unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
-                {...cardViewExtras(card, props)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 
@@ -777,59 +576,6 @@ function CodeBoardCardView(props: {
   );
 }
 
-function overlayProps(props: {
-  readonly providerLabels?: ReadonlyMap<string, string>;
-  readonly unreadThreadIds?: ReadonlySet<string>;
-  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
-  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-}): {
-  readonly providerLabels?: ReadonlyMap<string, string>;
-  readonly unreadThreadIds?: ReadonlySet<string>;
-  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
-  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-} {
-  return {
-    ...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels }),
-    ...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds }),
-    ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
-    ...(props.onSelectPullRequest === undefined
-      ? {}
-      : { onSelectPullRequest: props.onSelectPullRequest }),
-  };
-}
-
-function lastUsefulView(board: BoardState): CodeBoardView | undefined {
-  if (board.status === "ready" || board.status === "refreshing") return board.view;
-  if (board.status === "error") return board.view;
-  return undefined;
-}
-
-function cardViewExtras(
-  card: CodeBoardCard,
-  props: {
-    readonly projectNames: ReadonlyMap<string, string>;
-    readonly providerLabels?: ReadonlyMap<string, string>;
-    readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
-    readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-  },
-): {
-  readonly projectName?: string;
-  readonly providerLabel?: string;
-  readonly onOpen?: (target: CodeThreadOpenTarget) => void;
-  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
-} {
-  const projectName = props.projectNames.get(String(card.projectId));
-  const providerLabel = props.providerLabels?.get(String(card.providerInstanceId));
-  return {
-    ...(projectName === undefined ? {} : { projectName }),
-    ...(providerLabel === undefined ? {} : { providerLabel }),
-    ...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread }),
-    ...(props.onSelectPullRequest === undefined
-      ? {}
-      : { onSelectPullRequest: props.onSelectPullRequest }),
-  };
-}
-
 function waitingReasonText(card: CodeBoardCard): string | undefined {
   if (card.status !== "waiting") return undefined;
   if (card.recovery.kind === "recovering") {
@@ -839,21 +585,13 @@ function waitingReasonText(card: CodeBoardCard): string | undefined {
   return codeBoardStatusReasonLabel(card.statusReason);
 }
 
-interface CardFact {
-  readonly key: string;
-  readonly text: string;
-  readonly className?: string;
-  readonly icon?: ReactNode;
-  readonly title?: string;
-}
-
 /** The one line under a card title: activity, who runs it, when it last moved. */
 function cardSummary(
   card: CodeBoardCard,
   providerLabel: string | undefined,
   waitingReason: string | undefined,
-): ReadonlyArray<CardFact> {
-  const facts: CardFact[] = [];
+): ReadonlyArray<CardFact<ReactNode>> {
+  const facts: CardFact<ReactNode>[] = [];
   if (waitingReason !== undefined) facts.push({ key: "waiting", text: waitingReason });
   if (card.childAgents.latestSummary !== undefined) {
     facts.push({ key: "activity", text: card.childAgents.latestSummary });
@@ -882,8 +620,8 @@ function cardFacts(
   card: CodeBoardCard,
   projectName: string | undefined,
   providerLabel: string | undefined,
-): ReadonlyArray<CardFact> {
-  const facts: CardFact[] = [];
+): ReadonlyArray<CardFact<ReactNode>> {
+  const facts: CardFact<ReactNode>[] = [];
   const hasPullRequestSummaries =
     card.pullRequestSummaries.items.length > 0 || card.pullRequestSummaries.hiddenCount > 0;
   if (projectName !== undefined) facts.push({ key: "project", text: projectName });
@@ -1045,12 +783,6 @@ function cardDetailRows(
   return rows;
 }
 
-function activityLabel(timestamp: string): string {
-  const parsed = Date.parse(timestamp);
-  if (!Number.isFinite(parsed)) return timestamp;
-  return new Date(parsed).toLocaleString();
-}
-
 function buildQuery(filters: FilterState): CodeBoardQuery {
   const query: {
     version: 1;
@@ -1088,14 +820,6 @@ function statusSummary(statuses: ReadonlySet<CodeBoardStatus>): string {
   return ALL_STATUSES.filter((status) => statuses.has(status))
     .map(codeBoardStatusLabel)
     .join(", ");
-}
-
-interface ActiveFilterLabel {
-  readonly kind: string;
-  readonly label: string;
-  /** The label embeds text a person typed (a search term, a Project name),
-   * so it must render as typed rather than uppercased into a label. */
-  readonly verbatim?: true;
 }
 
 function activeFilterLabels(
@@ -1156,11 +880,6 @@ function activeFilterSummary(filters: FilterState): string {
   return active.length === 0 ? "No filters are active." : `Active filters: ${active.join("; ")}.`;
 }
 
-function firstOrEmpty(values: ReadonlySet<string>): string {
-  for (const value of values) return value;
-  return "";
-}
-
 function deliveryTargetLabel(kind: CodeBoardCard["outcomeKind"]): string {
   switch (kind) {
     case "investigation-result":
@@ -1178,50 +897,4 @@ function recoveryReasonLabel(reason: CodeThreadMetadataRecoveryReason): string {
   return reason === "project-projection-missing"
     ? "Project projection missing"
     : "Operation journal rebuild required";
-}
-
-function readStoredGrouping(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-): CodeBoardGrouping | undefined {
-  try {
-    const value = storage?.getItem(GROUPING_STORAGE_KEY);
-    return value === "status" || value === "project" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function writeStoredGrouping(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-  grouping: CodeBoardGrouping,
-): void {
-  try {
-    storage?.setItem(GROUPING_STORAGE_KEY, grouping);
-  } catch {
-    // A device that cannot persist the preference still works this session.
-  }
-}
-
-function readStoredBoolean(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-  key: string,
-): boolean | undefined {
-  try {
-    const value = storage?.getItem(key);
-    return value === "true" ? true : value === "false" ? false : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function writeStoredBoolean(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-  key: string,
-  value: boolean,
-): void {
-  try {
-    storage?.setItem(key, String(value));
-  } catch {
-    // A device that cannot persist the preference still works this session.
-  }
 }
