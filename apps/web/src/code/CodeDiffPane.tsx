@@ -19,6 +19,7 @@ import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
@@ -343,35 +344,16 @@ function AvailableDiff(
               ) : null}
             </div>
             {confirmingDiscard === selected.path && trackedPath !== undefined ? (
-              <div
-                className="code-diff-pane__confirm"
-                role="alertdialog"
-                aria-label="Discard changes"
+              <OctantConfirmDialog
+                title="Discard changes?"
+                confirmLabel="Discard changes"
+                cancelLabel="Keep changes"
+                pending={discarding}
+                onCancel={() => setConfirmingDiscard(undefined)}
+                onConfirm={() => void discard(trackedPath)}
               >
-                <p>
-                  Discard the uncommitted changes to {selected.path}? Nothing has committed them, so
-                  they cannot be recovered.
-                </p>
-                <div className="code-diff-pane__confirm-actions">
-                  <OctantButton
-                    size="sm"
-                    variant="destructive"
-                    disabled={discarding}
-                    onClick={() => void discard(trackedPath)}
-                    type="button"
-                  >
-                    Discard permanently
-                  </OctantButton>
-                  <OctantButton
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setConfirmingDiscard(undefined)}
-                    type="button"
-                  >
-                    Keep changes
-                  </OctantButton>
-                </div>
-              </div>
+                Discard uncommitted changes to {selected.path}? This cannot be undone.
+              </OctantConfirmDialog>
             ) : null}
             {discardMessage === undefined ? null : (
               <p className="code-diff-pane__discard-message" role="status">
