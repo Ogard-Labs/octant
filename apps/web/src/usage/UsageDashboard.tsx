@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -947,31 +948,28 @@ interface ConfirmDialogProps {
 }
 
 function ConfirmDialog({ action, onCancel, onConfirm }: ConfirmDialogProps) {
-  const message = confirmMessageFor(action);
+  const title =
+    action.kind === "export"
+      ? "Export usage"
+      : action.kind === "reset"
+        ? "Reset all usage?"
+        : "Purge old usage records?";
   return (
-    <div className="usage-dashboard__confirm" role="alertdialog" aria-label="Confirm usage action">
-      <p>{message}</p>
-      <div className="usage-dashboard__confirm-actions">
-        <OctantButton onClick={onCancel} size="sm" type="button" variant="outline">
-          Cancel
-        </OctantButton>
-        {/*
-          Reset and retain purge usage data for good. Backing out and going
-          through with it must not look like the same button, so the one that
-          destroys says so and the way out stays neutral. Export keeps the
-          ordinary treatment: it takes nothing away.
-        */}
-        <OctantButton
-          autoFocus
-          onClick={onConfirm}
-          size="sm"
-          type="button"
-          variant={action.kind === "export" ? "default" : "destructive"}
-        >
-          Confirm
-        </OctantButton>
-      </div>
-    </div>
+    <OctantConfirmDialog
+      title={title}
+      confirmLabel={
+        action.kind === "export"
+          ? `Export ${action.format.toUpperCase()}`
+          : action.kind === "reset"
+            ? "Reset all usage"
+            : "Purge old records"
+      }
+      destructive={action.kind !== "export"}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    >
+      {confirmMessageFor(action)}
+    </OctantConfirmDialog>
   );
 }
 

@@ -202,7 +202,7 @@ describe("Review beside the active thread", () => {
     expect(executeOperation).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "discard-git-changes" }),
     );
-    await user.click(screen.getByRole("button", { name: "Discard permanently" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(requestApproval).toHaveBeenCalled();
     expect(executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "discard-git-changes", paths: ["src/index.ts"] }),

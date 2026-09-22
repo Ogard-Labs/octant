@@ -231,7 +231,10 @@ describe("FirstRunOnboarding", () => {
   it("opens on the profile step with the first field focused", async () => {
     mount();
 
-    expect(screen.getByRole("dialog", { name: "Welcome to Octant" })).toBeVisible();
+    const dialog = screen.getByRole("dialog", { name: "Welcome to Octant" });
+    const heading = screen.getByRole("heading", { name: "Welcome to Octant" });
+    expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
+    expect(heading).toBeVisible();
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveFocus());
     // No account, no sign-in: the surface has to say so, because every other
     // app that asks for a name and an address is asking for an account.
