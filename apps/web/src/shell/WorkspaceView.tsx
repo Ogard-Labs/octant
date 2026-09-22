@@ -1429,6 +1429,7 @@ function renderNonCodeTab(
               threadId={tab.threadId as never}
             >
               <WorkThreadWorkspace
+                projects={props.projects}
                 {...(props.browserAutomationClient === undefined
                   ? {}
                   : { browserAutomationClient: props.browserAutomationClient })}

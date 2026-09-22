@@ -590,7 +590,7 @@ describe("WindowChrome", () => {
       "border-color: var(--octant-border-strong);",
     );
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
-      "background: var(--octant-control);",
+      "background: transparent;",
     );
     expect(cssRule(".shell--sidebar-collapsed .workspace-pane__header")).toContain(
       "padding-left: var(--octant-window-chrome-leading-width",

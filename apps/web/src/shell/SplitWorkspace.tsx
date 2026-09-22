@@ -74,9 +74,8 @@ export interface SplitWorkspaceProps {
   /** The same preference controls provider marks in navigation and pane tabs. */
   readonly showProviderIcons?: boolean;
   /**
-   * The Project the window's panes live in, worn as a chip beside each
-   * thread's title. Every pane shares it: placement across Projects is
-   * server-refused, so one label is true of them all.
+   * Project context for the pane drag handle's tooltip. The visible header
+   * stays focused on the thread title.
    */
   readonly contextLabel?: string;
   /**
@@ -301,6 +300,19 @@ function clampSplitRatio(value: number): number {
   return Number(Math.min(0.8, Math.max(0.2, value)).toFixed(6));
 }
 
+function PaneProviderMark(props: { readonly provider: ThreadProviderIdentity | undefined }) {
+  const provider = props.provider;
+  return provider === undefined ? null : (
+    <span aria-hidden="true" className="workspace-pane__provider" title={provider.displayName}>
+      <ProviderGlyph
+        displayName={provider.displayName}
+        driverKind={provider.driverKind}
+        size={14}
+      />
+    </span>
+  );
+}
+
 function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: WorkspacePane }) {
   const pane = props.pane;
   const surface = pane.surface;
@@ -392,22 +404,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 }
                 onPointerMove={props.drag.onPointerMove}
                 onPointerUp={props.drag.onPointerUp}
-                title="Drag to move or split"
+                title={
+                  path === undefined ? "Drag to move or split" : `${path} · Drag to move or split`
+                }
               >
                 <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
-                {provider === undefined ? null : (
-                  <span
-                    aria-hidden="true"
-                    className="workspace-pane__provider"
-                    title={provider.displayName}
-                  >
-                    <ProviderGlyph
-                      displayName={provider.displayName}
-                      driverKind={provider.driverKind}
-                      size={14}
-                    />
-                  </span>
-                )}
+                <PaneProviderMark provider={showTabs ? undefined : provider} />
                 {pullRequest === undefined ? null : (
                   <PullRequestChip
                     className="workspace-pane__pull-request"
@@ -443,11 +445,23 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     className="workspace-content-tabs__list"
                   >
                     {navigation.map((entry) => (
-                      <div className="workspace-content-tabs__entry" key={entry.id}>
-                        <OctantTabsTab value={entry.id} title={workspaceSurfaceTitle(entry)}>
+                      <div className="workspace-content-tabs__entry content-tab" key={entry.id}>
+                        <OctantTabsTab
+                          className="content-tab__select border-0 bg-transparent text-inherit"
+                          value={entry.id}
+                          title={workspaceSurfaceTitle(entry)}
+                        >
+                          {props.showProviderIcons === false ||
+                          !["chat-thread", "work-thread", "code-overview"].includes(entry.kind) ||
+                          !("threadId" in entry) ? null : (
+                            <PaneProviderMark
+                              provider={props.providerByThreadId?.get(String(entry.threadId))}
+                            />
+                          )}
                           <span>{workspaceSurfaceTitle(entry)}</span>
                         </OctantTabsTab>
                         <OctantIconButton
+                          className="content-tab__close text-muted-foreground"
                           label={`Close ${workspaceSurfaceTitle(entry)}`}
                           onClick={() => props.onCloseContentTab?.(pane.paneId, entry.id)}
                         >
@@ -456,11 +470,15 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                       </div>
                     ))}
                     {localViews.map((view) => (
-                      <div className="workspace-content-tabs__entry" key={view.key}>
-                        <OctantTabsTab value={view.key}>
+                      <div className="workspace-content-tabs__entry content-tab" key={view.key}>
+                        <OctantTabsTab
+                          className="content-tab__select border-0 bg-transparent text-inherit"
+                          value={view.key}
+                        >
                           <span>{view.title}</span>
                         </OctantTabsTab>
                         <OctantIconButton
+                          className="content-tab__close text-muted-foreground"
                           label={`Close ${view.title}`}
                           onClick={() => {
                             setLocalViews((views) => views.filter((item) => item.key !== view.key));
@@ -474,11 +492,6 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   </OctantTabsList>
                 </OctantTabs>
               ) : null}
-              {path === undefined || showTabs ? null : (
-                <span aria-hidden="true" className="workspace-pane__path" title={path}>
-                  {path}
-                </span>
-              )}
               <span
                 aria-hidden="true"
                 className="workspace-pane__window-drag-space window-drag-region"

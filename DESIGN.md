@@ -145,7 +145,21 @@ navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
 
+### Content tabs
+
+Workspace content and dock tool tabs share a compact 26px recipe for height,
+spacing, selected fill and edge, and close controls. Close controls retain their
+width; inactive controls appear on hover or keyboard focus and stay visible on
+touch devices. Thread tabs retain provider marks when enabled. The drag handle
+stays quiet and separate, without a second provider pill or repeated project label.
+
 ### Welcome and composer
+
+Work follow-up composers use the same attached context strip as Code, showing
+the project and working folder instead of Git controls. Full paths require a
+matching project binding revision; missing metadata never borrows another root.
+The strip stays mounted while metadata loads, and full paths are available in
+tooltips. Code retains its checkout, branch, diff, and pull-request controls.
 
 Chat, Work, and Code open on the same screen: the hero question and one
 raised composer. The composer is prompt first, four lines tall before it

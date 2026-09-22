@@ -50,7 +50,7 @@
 /* The bar is the system's .dock-head; the two-ended layout is ours, because
    the surface tabs sit where .dock-head expects a static label, and so is
    the height: the title rail the thread tab band beside it also takes, with
-   the 30px tabs 4px down, so the two hairlines close on one line. */
+   compact tabs 4px down, so the two hairlines close on one line. */
 .right-utility-dock__toolbar {
   min-width: 0;
   min-height: var(--oct-title-rail-h);
@@ -94,23 +94,6 @@
   gap: 2px;
 }
 
-/* A tab is the same object as a thread tab in the title band: a 30px rail
-   tab with a 14px icon, a 13px name, and its own close control that takes no
-   width until wanted. The active one sits on the selection fill; the rest
-   are muted text that firms on hover. No pill border: the bordered pill read
-   as a button, and the border ate two of the rail. */
-.dock-tool-strip__tab {
-  display: inline-flex;
-  flex: none;
-  min-width: 0;
-  height: var(--oct-rail-tab-h);
-  max-width: 12rem;
-  align-items: center;
-  padding-inline-end: 2px;
-  color: var(--oct-muted);
-  border-radius: var(--oct-radius-sm);
-}
-
 .dock-tool-strip:has(.dock-tool-strip__overflow) > .dock-tool-strip__tab {
   max-width: min(12rem, calc(100% - 34px));
 }
@@ -121,65 +104,9 @@
   text-overflow: ellipsis;
 }
 
-.dock-tool-strip__tab:hover {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-/* The tab in front is a different thing from the tab under the pointer, so it
-   is a raised surface with an edge rather than a slightly stronger tint —
-   sharing one ground made hovering look like selecting. */
-.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) {
-  color: var(--oct-fg);
-  background: var(--octant-selection);
-  box-shadow: inset 0 0 0 1px var(--octant-border);
-}
-
-.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]):hover {
-  background: var(--octant-selection);
-}
-
-.dock-tool-strip__select {
-  display: inline-flex;
-  min-width: 0;
-  height: var(--oct-rail-tab-h);
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  overflow: hidden;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font-size: var(--oct-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .dock-tool-strip__select > svg {
   width: var(--oct-icon-sm);
   height: var(--oct-icon-sm);
-}
-
-/* The close control is a quiet 22px × that shows on hover, on focus, and on
-   the tab in front. It keeps its width at all times: a close that took its
-   room only when wanted widened the tab under the pointer and shifted every
-   tab after it, so the strip moved whenever the pointer crossed it. */
-.dock-tool-strip__close {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  min-height: 24px;
-  padding: 0;
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-  opacity: 0;
-}
-
-.dock-tool-strip__tab:hover .dock-tool-strip__close,
-.dock-tool-strip__tab:focus-within .dock-tool-strip__close,
-.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) .dock-tool-strip__close {
-  opacity: 1;
 }
 
 /* In the overflow menu there is no tab to hover, so the control that closes a

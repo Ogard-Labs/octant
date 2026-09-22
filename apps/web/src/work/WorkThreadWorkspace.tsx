@@ -24,7 +24,7 @@ import {
   type WorkTurnState,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
-import type { ProjectId } from "@octant/contracts/projects";
+import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import type { PickerGroup } from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
@@ -38,7 +38,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, CirclePause, Ellipsis, FileText } from "lucide-react";
+import { Check, CirclePause, Ellipsis, FileText, FolderOpen } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -217,6 +217,7 @@ export interface WorkThreadWorkspaceProps {
   readonly threadId: WorkThreadId;
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
+  readonly projects?: ReadonlyArray<ProjectSummary>;
   readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
@@ -1146,6 +1147,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     fileMentions.sync(value, caret);
   }
 
+  const project = props.projects?.find(
+    (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
+  );
+  const folder = thread?.workingDirectory;
+  const root =
+    project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
+      ? project.binding.canonicalRoot
+      : undefined;
+  const path =
+    root === undefined
+      ? folder
+      : folder === undefined || folder === "."
+        ? root
+        : `${root.replace(/[/\\]+$/, "")}/${folder}`;
+
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
       <h1 className="sr-only">{props.title}</h1>
@@ -1384,6 +1400,23 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       )}
       <ThreadComposer
         presentation="follow-up"
+        context={
+          <div className="work-folder-bar" role="group" aria-label="Project and folder">
+            <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+            {project === undefined ? null : (
+              <span className="work-folder-bar__project" title={project.name}>
+                {project.name}
+              </span>
+            )}
+            {path === undefined ? null : (
+              <span className="work-folder-bar__folder" title={path}>
+                {folder === undefined || folder === "."
+                  ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+                  : folder}
+              </span>
+            )}
+          </div>
+        }
         className="thread-composer thread-column"
         chips={
           <>

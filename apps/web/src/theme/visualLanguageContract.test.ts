@@ -373,7 +373,7 @@ describe("the public-block visual language", () => {
     expect(tabs).toContain("data-selected:bg-muted");
     expect(tabs).not.toContain("data-selected:shadow-sm");
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
-    expect(activePane).toMatch(/background:\s*var\(--octant-control\)/);
+    expect(activePane).toMatch(/background:\s*transparent/);
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
   });
 

@@ -9,6 +9,7 @@ import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 const browser = surface("browser");
 const terminal = surface("terminal");
 const files = surface("files");
+const sharedStylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
 const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
 
 function surface(id: "browser" | "terminal" | "files") {
@@ -37,25 +38,29 @@ describe("the right sidebar surface", () => {
 
   it("keeps Add tool beside the visible tabs and draws the tab in front like a thread tab", () => {
     expect(ruleBody(dockStylesheet, ".dock-tool-strip")).toMatch(/flex:\s*0\s+1\s+auto/);
-    // Selected and hovered must not share one tint, or pointing at a tab looks
-    // the same as being on it. The tab in front takes the selection fill and a
-    // hairline edge: the same treatment the workspace thread tabs use, so the
-    // two strips read as one grammar.
+    // Both strips use the shared recipe, including distinct hover and selected
+    // fills and a stable close target that does not shift the tab label.
     const selected = ruleBody(
-      dockStylesheet,
-      '.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"])',
+      sharedStylesheet,
+      '.content-tab:has([role="tab"][aria-selected="true"])',
     );
-    expect(selected).toMatch(/background:\s*var\(--octant-selection\)/);
+    expect(selected).toMatch(/background:\s*var\(--octant-control\)/);
     expect(selected).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--octant-border\)/);
-    expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab:hover")).not.toMatch(
-      /var\(--octant-selection\)/,
+    expect(ruleBody(sharedStylesheet, ".content-tab:hover")).toMatch(
+      /background:\s*var\(--oct-fg-soft\)/,
     );
+    expect(ruleBody(sharedStylesheet, ".content-tab")).toMatch(/height:\s*26px/);
+    expect(ruleBody(sharedStylesheet, ".content-tab > .content-tab__close")).toMatch(
+      /width:\s*22px/,
+    );
+    for (const selector of [
+      ".content-tab > .content-tab__select",
+      ".content-tab > .content-tab__close",
+    ]) {
+      expect(ruleBody(sharedStylesheet, selector)).toMatch(/transform:\s*none/);
+    }
     expect(dockStylesheet).not.toContain("--oct-radius-xs");
-    expect(ruleBody(dockStylesheet, ".dock-tool-strip__close")).toMatch(/width:\s*24px/);
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab")).not.toMatch(/overflow:\s*hidden/);
-    expect(dockStylesheet).toMatch(
-      /\.dock-tool-strip__select:active,\n\.dock-tool-strip__close:active \{\n  transform: none;/,
-    );
   });
   it("shows the active thread work map with no tool open", async () => {
     const user = userEvent.setup();
