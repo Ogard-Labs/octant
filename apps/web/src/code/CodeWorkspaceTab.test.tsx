@@ -69,6 +69,11 @@ describe("native Code workspace approvals", () => {
       [{ effect: { kind: "operation", command: terminal } }],
       [{ effect: { kind: "operation", command: terminal } }],
     ]);
+    const androidRequest = { kind: "open-input", emulatorId: "Pixel_8_API_34" } as never;
+    expect(await approvals?.android?.(androidRequest)).toBe(approvalId);
+    expect(requestCodeOperationApproval.mock.calls[2]).toEqual([
+      { effect: { kind: "android-action", request: androidRequest } },
+    ]);
   });
 
   it("keeps approval unavailable without the native host bridge", () => {

@@ -183,6 +183,36 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("says an input approval covers the Android emulator for a while, not one tap", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: {
+        kind: "android-action",
+        request: {
+          actionId: operationId(820) as never,
+          correlationId: operationId(821) as never,
+          authority: {
+            hostId: "90000000-0000-4000-8000-000000000010" as never,
+            mode: "code" as const,
+            projectId: thread().projectId,
+            providerInstanceId: thread().providerInstanceId,
+            extension: { kind: "core" as const },
+          },
+          threadId,
+          checkoutId,
+          kind: "open-input" as const,
+          emulatorId: "Pixel_8_API_34" as never,
+          requestedBy: { kind: "local-user" as const, actorId: operationId(822) as never },
+          timeoutMs: 30_000,
+          approval: { kind: "pending" as const },
+        },
+      },
+    });
+    expect(challenge?.message).toBe("Allow input to this emulator?");
+    expect(challenge?.detail).toContain("for 15 minutes after each input");
+    fixture.close();
+  });
+
   it("prepares and consumes one-shot approval for the exact core Apple action", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {

@@ -1091,17 +1091,20 @@ describe("the Apple capability as an agent tool", () => {
     const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => appleEvidence());
     const snapshot = vi.fn(async () => appleSnapshot());
     const discover = vi.fn(async () => appleDiscovery());
+    const requestPaneOpen = vi.fn(async () => appleSnapshot());
     const port = {
       resolveAuthority: () => appleAuthority,
       discover,
       execute,
       snapshot,
+      requestPaneOpen,
       ...apple,
     } as never;
     return {
       discover,
       execute,
       snapshot,
+      requestPaneOpen,
       tools: createCodeAppManagedTools({
         windowId,
         thread: thread(threadOverrides),
@@ -1130,8 +1133,10 @@ describe("the Apple capability as an agent tool", () => {
     ).not.toContain("octant_apple");
   });
 
-  it("captures the Simulator screen as a reference, never as bytes in the transcript", async () => {
-    const { execute, tools } = appleTools();
+  it("returns an explicitly requested Simulator screenshot through the provider image channel", async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const readScreenshot = vi.fn(async () => bytes);
+    const { execute, tools } = appleTools({ readScreenshot });
 
     const outcome = await tools.execute({
       name: "octant_apple",
@@ -1157,6 +1162,68 @@ describe("the Apple capability as an agent tool", () => {
       artifacts: [{ kind: "screenshot", reference: "apple-screenshot-1" }],
     });
     expect(JSON.stringify(outcome.result)).not.toContain("PNG");
+    expect(outcome.images).toEqual([
+      { mimeType: "image/png", data: Buffer.from(bytes).toString("base64") },
+    ]);
+    expect(readScreenshot).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "apple-screenshot-1",
+    );
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["invalid", Uint8Array.from([1, 2, 3])],
+    ["oversized", new Uint8Array(1_572_865)],
+  ])("reports %s screenshot images as unavailable", async (_name, bytes) => {
+    const { tools } = appleTools({ readScreenshot: async () => bytes });
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+      }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.images).toBeUndefined();
+    expect(outcome.result).toMatchObject({ error: "screenshot-image-unavailable" });
+  });
+
+  it("does not send a screen when a device action returns screenshot evidence", async () => {
+    const readScreenshot = vi.fn(async () => new Uint8Array());
+    const { tools } = appleTools({ readScreenshot });
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "tap",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+        x: 1,
+        y: 2,
+      }),
+    });
+    expect(readScreenshot).not.toHaveBeenCalled();
+    expect(outcome.images).toBeUndefined();
+  });
+
+  it("does not deliver a screenshot after the turn is cancelled during its read", async () => {
+    const controller = new AbortController();
+    const { tools } = appleTools({
+      readScreenshot: async () => {
+        controller.abort();
+        return Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+      },
+    });
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      signal: controller.signal,
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+      }),
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.images).toBeUndefined();
   });
 
   it("attributes Simulator input to the agent actor on the workbench channel", async () => {
@@ -1312,6 +1379,101 @@ describe("the Apple capability as an agent tool", () => {
     expect(outcome.isError).toBe(true);
     expect(outcome.result).toMatchObject({ outcome: "unauthorized" });
   });
+
+  it("opens the in-app Simulator pane instead of launching Apple's Simulator application", async () => {
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+    const snapshot = vi.fn(async () => ({
+      ...(appleSnapshot() as Record<string, unknown>),
+      simulators: [
+        {
+          simulatorId,
+          name: "iPhone 16",
+          platform: "ios",
+          runtimeVersion: "18.5",
+          state: "booted",
+        },
+      ],
+    }));
+    const requestPaneOpen = vi.fn(async () => snapshot());
+    const { execute, tools } = appleTools({ snapshot, requestPaneOpen } as never);
+
+    const opened = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "open", simulatorId }),
+    } as never);
+    const booted = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    } as never);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ kind: "boot" });
+    expect(requestPaneOpen).toHaveBeenCalled();
+    expect(opened.isError).toBe(false);
+    expect(opened.result).toMatchObject({
+      kind: "open",
+      outcome: "succeeded",
+      opensInAppPane: true,
+    });
+    expect(JSON.stringify(opened.result)).toContain("iOS Simulator pane");
+    expect(JSON.stringify(opened.result)).toContain("Do not launch Simulator.app");
+    expect(booted.result).toMatchObject({ opensInAppPane: true });
+  });
+
+  it("boots a shut-down Simulator when opening the in-app pane, and still does not launch Simulator.app", async () => {
+    const simulatorId = "80000000-0000-4000-8000-000000000001";
+    const snapshot = vi.fn(async () => ({
+      ...(appleSnapshot() as Record<string, unknown>),
+      simulators: [
+        {
+          simulatorId,
+          name: "iPhone 16",
+          platform: "ios",
+          runtimeVersion: "18.5",
+          state: "shutdown",
+        },
+      ],
+    }));
+    const requestPaneOpen = vi.fn(async () => snapshot());
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => ({
+      ...(appleEvidence() as unknown as Record<string, unknown>),
+      kind: "boot",
+      outcome: "succeeded",
+    }));
+    const { tools } = appleTools({ snapshot, requestPaneOpen, execute } as never);
+
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "open", simulatorId }),
+    } as never);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ kind: "boot", simulatorId });
+    expect(requestPaneOpen).toHaveBeenCalled();
+    expect(outcome.isError).toBe(false);
+    expect(outcome.result).toMatchObject({
+      kind: "boot",
+      outcome: "succeeded",
+      opensInAppPane: true,
+    });
+  });
+
+  it("names the in-app pane in the tool description so an agent does not launch Simulator.app", () => {
+    const definition = appleTools().tools.definitions.find(
+      (entry) => entry.name === "octant_apple",
+    );
+    expect(definition?.description).toContain("iOS Simulator pane");
+    expect(definition?.description).toContain("never launch Simulator.app");
+    expect(definition?.inputSchema).toEqual(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          operation: expect.objectContaining({
+            enum: expect.arrayContaining(["open", "boot", "run"]),
+          }),
+        }),
+      }),
+    );
+  });
 });
 
 const appleAuthority: ToolActionAuthority = {
@@ -1354,6 +1516,161 @@ function appleDiscovery() {
     toolchain: { toolchainId: "a", xcodeVersion: "16.4", available: true, sdks: [] },
     workspace: { schemes: ["App"], configurations: ["Debug"] },
     simulators: [],
+  } as never;
+}
+
+describe("the Android capability as an agent tool", () => {
+  function androidTools(
+    android: Partial<Parameters<typeof createCodeAppManagedTools>[0]["android"]> = {},
+    threadOverrides: Partial<CodeThread> = {},
+  ) {
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => androidEvidence());
+    const snapshot = vi.fn(async () => androidSnapshot());
+    const discover = vi.fn(async () => androidDiscovery());
+    const requestPaneOpen = vi.fn(async () => androidSnapshot());
+    const port = {
+      resolveAuthority: () => appleAuthority,
+      discover,
+      execute,
+      snapshot,
+      requestPaneOpen,
+      ...android,
+    } as never;
+    return {
+      discover,
+      execute,
+      snapshot,
+      requestPaneOpen,
+      tools: createCodeAppManagedTools({
+        windowId,
+        thread: thread(threadOverrides),
+        readThread: () => thread(threadOverrides),
+        uuid: uuidFactory(),
+        executeOperation: async () => ({}) as never,
+        terminal: { read: async () => ({}) as never },
+        android: port,
+      }),
+    };
+  }
+
+  it("delivers an explicitly requested Android screenshot through the image channel", async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const readScreenshot = vi.fn(async () => bytes);
+    const { tools } = androidTools({ readScreenshot });
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        emulatorId: "Pixel_Test",
+      }),
+    });
+    expect(outcome.images).toEqual([
+      { mimeType: "image/png", data: Buffer.from(bytes).toString("base64") },
+    ]);
+    expect(readScreenshot).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId }),
+      "android-screenshot-1",
+    );
+  });
+
+  it("offers the Android tool only where the host has an Android capability to lend", () => {
+    expect(androidTools().tools.definitions.map((definition) => definition.name)).toContain(
+      "octant_android",
+    );
+    expect(
+      createCodeAppManagedTools({
+        windowId,
+        thread: thread(),
+        readThread: () => thread(),
+        uuid: uuidFactory(),
+        executeOperation: async () => ({}) as never,
+        terminal: { read: async () => ({}) as never },
+      }).definitions.map((definition) => definition.name),
+    ).not.toContain("octant_android");
+  });
+
+  it("stays unavailable to a thread that is not on full access", async () => {
+    const { execute, snapshot, tools } = androidTools({}, { executionPolicy: "plan" } as never);
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "status" }),
+    } as never);
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toMatchObject({ error: "full-access-required" });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("opens the in-app Android emulator pane instead of an external emulator window", async () => {
+    const emulatorId = "Pixel_8_API_34";
+    const snapshot = vi.fn(async () => ({
+      ...(androidSnapshot() as unknown as Record<string, unknown>),
+      emulators: [{ emulatorId, name: "Pixel 8", state: "booted" }],
+    }));
+    const requestPaneOpen = vi.fn(async () => snapshot());
+    const { execute, tools } = androidTools({ snapshot, requestPaneOpen } as never);
+    const opened = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "open", emulatorId }),
+    } as never);
+    const booted = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "boot", emulatorId }),
+    } as never);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ kind: "boot" });
+    expect(requestPaneOpen).toHaveBeenCalled();
+    expect(opened.isError).toBe(false);
+    expect(opened.result).toMatchObject({
+      kind: "open",
+      outcome: "succeeded",
+      opensInAppPane: true,
+    });
+    expect(JSON.stringify(opened.result)).toContain("Android emulator pane");
+    expect(JSON.stringify(booted.result)).toContain("Do not start an external emulator window");
+  });
+
+  it("names the in-app pane in the tool description", () => {
+    const definition = androidTools().tools.definitions.find(
+      (entry) => entry.name === "octant_android",
+    );
+    expect(definition?.description).toContain("Android emulator pane");
+    expect(definition?.description).toContain("never start an external emulator window");
+  });
+});
+
+function androidEvidence() {
+  return {
+    actionId: "90000000-0000-4000-8000-000000000001",
+    correlationId: "90000000-0000-4000-8000-000000000002",
+    authority: appleAuthority,
+    kind: "screenshot",
+    outcome: "succeeded",
+    diagnostics: [],
+    artifacts: [{ kind: "screenshot", reference: "android-screenshot-1" }],
+    cleanup: "not-required",
+    durationMs: 90,
+    completedAt: "2026-08-06T08:00:01.000Z",
+  } as never;
+}
+
+function androidSnapshot() {
+  return {
+    sequence: 1,
+    snapshotAt: "2026-08-06T08:00:01.000Z",
+    sdk: { sdkId: "a", available: true, discoveredAt: "x" },
+    emulators: [],
+    active: [],
+    recentEvidence: [],
+  } as never;
+}
+
+function androidDiscovery() {
+  return {
+    kind: "discovered",
+    sdk: { sdkId: "a", available: true, discoveredAt: "x" },
+    emulators: [],
   } as never;
 }
 

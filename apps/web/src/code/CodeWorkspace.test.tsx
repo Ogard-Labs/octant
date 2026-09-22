@@ -501,6 +501,111 @@ describe("CodeWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Code overview" })).not.toBeInTheDocument();
   });
+
+  it("asks once to Allow input, then Home runs without another confirmation", async () => {
+    const simulatorId = "90000000-0000-4000-8000-000000000006";
+    let resolveApproval: ((id: string | undefined) => void) | undefined;
+    const requestApproval = vi.fn(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveApproval = resolve;
+        }),
+    );
+    const execute = vi.fn(async () => ({ outcome: "succeeded" }));
+    const simulators = [
+      {
+        simulatorId,
+        name: "iPhone 16",
+        platform: "ios",
+        runtimeVersion: "18.5",
+        state: "booted",
+        udid: simulatorId,
+      },
+    ];
+    const appleToolchainClient = {
+      discover: vi.fn(async () => ({
+        workspace: {
+          projectPath: "Fixture.xcodeproj",
+          projectKind: "xcode-project",
+          schemes: ["Fixture"],
+          configurations: ["Debug"],
+          targets: ["Fixture"],
+          sourceRevision: "a".repeat(40),
+        },
+        toolchain: {
+          available: true,
+          xcodeVersion: "16.4",
+          sdks: [
+            {
+              platform: "ios",
+              canonicalName: "iphonesimulator",
+              displayName: "iOS Simulator",
+              version: "18.5",
+            },
+          ],
+        },
+        simulators,
+      })),
+      snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
+      execute,
+      cancel: vi.fn(),
+      watchScreen: vi.fn(async () => ({
+        status: "failed",
+        message: "The live Simulator view is not available in this test.",
+      })),
+    };
+    render(
+      <CodeWorkspace
+        appleToolchainClient={appleToolchainClient as never}
+        approvals={{ apple: requestApproval }}
+        client={codeClient()}
+        controller={controller("approval-gated")}
+        createUuid={uuidFactory()}
+        hostBridge={
+          {
+            getHostCapabilities: () => ({
+              sidebarVibrancySupported: false,
+              liveSimulatorFrameSupported: true,
+            }),
+          } as never
+        }
+        tab={
+          {
+            id: TAB_ID,
+            kind: "apple-workbench",
+            mode: "code",
+            threadId: ids.thread,
+            title: "iOS Simulator",
+            pane: "device",
+            projectPath: "Fixture.xcodeproj",
+          } as never
+        }
+      />,
+    );
+
+    const home = await screen.findByRole("button", { name: "Home" });
+    fireEvent.click(home);
+    fireEvent.click(home);
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+
+    const allow = await screen.findByRole("button", { name: "Allow input to iPhone 16" });
+    fireEvent.click(allow);
+    fireEvent.click(allow);
+    await waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(1));
+    resolveApproval?.(ids.approval);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "open-input" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ kind: "key-press", key: "home" }),
+    );
+  });
 });
 
 function controller(

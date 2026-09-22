@@ -21,6 +21,10 @@ import {
   createAppleToolchainClient,
   type AppleToolchainClient,
 } from "@octant/client-runtime/apple-toolchain-client";
+import {
+  createAndroidToolchainClient,
+  type AndroidToolchainClient,
+} from "@octant/client-runtime/android-toolchain-client";
 import { createAutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import {
   createBrowserAutomationClient,
@@ -83,6 +87,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly agentRunSettingsClient: AgentRunSettingsClient | undefined;
   readonly nativeHarnessClient: NativeHarnessClient | undefined;
   readonly appleToolchainClient: AppleToolchainClient | undefined;
+  readonly androidToolchainClient?: AndroidToolchainClient;
   readonly automationClient: AutomationClient | undefined;
   readonly browserAutomationClient: BrowserAutomationClient | undefined;
   readonly canvasClient: CanvasClient | undefined;
@@ -106,6 +111,7 @@ export interface LaunchedShellClients {
   readonly agentMessageClient: AgentMessageClient;
   readonly nativeHarnessClient: NativeHarnessClient;
   readonly appleToolchainClient: AppleToolchainClient;
+  readonly androidToolchainClient: AndroidToolchainClient;
   readonly automationClient: AutomationClient;
   readonly automationNotificationClient: ReturnType<typeof createAutomationNotificationClient>;
   readonly browserAutomationClient: BrowserAutomationClient;
@@ -187,6 +193,7 @@ export function createLaunchedShellClients(
     agentRunSettingsClient: options.agentRunSettingsClient ?? createAgentRunSettingsClient(port),
     agentMessageClient: createAgentMessageClient(port),
     appleToolchainClient: options.appleToolchainClient ?? createAppleToolchainClient(port),
+    androidToolchainClient: options.androidToolchainClient ?? createAndroidToolchainClient(port),
     automationClient: options.automationClient ?? createAutomationClient(port),
     automationNotificationClient: createAutomationNotificationClient(port),
     browserAutomationClient: options.browserAutomationClient ?? createBrowserAutomationClient(port),

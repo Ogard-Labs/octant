@@ -396,7 +396,7 @@ top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, and iOS Simulator, as mode and capability allow. Document shows the
+Tests, iOS Simulator, and Android emulator, as mode and capability allow. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
 Chat-authored Canvas) in the dock once per document, never after the person
@@ -411,20 +411,37 @@ pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
-shows a thread-bound live frame — the Simulator's screen streamed through the
+is a device pane: the Simulator's screen streamed through the
 host as it changes, authorized like a screenshot and never stored (see
 [decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
 or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
-states; closing the tab does not shut down the destination. Tap, typed text,
+states; closing the tab does not shut down the destination. An agent's
+`octant_apple` `boot`, `run`, or `open` raises that pane once per request
+instead of launching Simulator.app (see
+[decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
+Apple artifact and restart-receipt reads validate regular-file identity and size
+on an open handle before allocation. Reads reject linked files and size changes,
+with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
+rewritten.
+An Android emulator is a separate dock destination and `octant_android` tool,
+not an iOS helper feature
+([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
+Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed
 attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+On an approval-gated thread, **Allow input** is the confirmation that opens
+that destination; clicks, typing, Home, and Lock never raise it
+([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason. A swipe is a
+and new lines, and every refusal names the helper's own reason. Without that
+helper every input kind is unavailable; Octant does not script Simulator.app
+to inject a tap, swipe, typed text, or key
+([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
 fourth input kind on the same channel, for the pane and for `octant_apple`
 alike, and the live screen is driven directly: a press and release is a tap, a
 drag is one swipe sent when it ends, keys typed on the focused screen go to

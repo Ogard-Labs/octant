@@ -74,6 +74,8 @@ export interface AppleSimulatorLiveFrameInput {
     readonly simulatorId?: AppleSimulatorId;
     readonly reference: string;
   };
+  /** The Simulator an agent just asked the in-app pane to show. */
+  readonly preferredSimulatorId?: AppleSimulatorId;
 }
 
 export function isAppleHostRestartReconciliation(evidence: AppleBuildEvidence): boolean {
@@ -151,7 +153,11 @@ export function presentAppleSimulatorLiveFrame(
       message: "This live frame is bound to a different Code thread and checkout.",
     };
   }
-  const destination = selectLiveDestination(input.simulators, input.latestScreenshot);
+  const destination = selectLiveDestination(
+    input.simulators,
+    input.latestScreenshot,
+    input.preferredSimulatorId,
+  );
   if (input.restartReconciled) {
     return {
       status: "stale-after-restart",
@@ -232,7 +238,14 @@ export function presentAppleSimulatorLiveFrame(
 function selectLiveDestination(
   simulators: ReadonlyArray<AppleSimulatorRecord>,
   latestScreenshot: AppleSimulatorLiveFrameInput["latestScreenshot"],
+  preferredSimulatorId: AppleSimulatorId | undefined,
 ): AppleSimulatorRecord | undefined {
+  if (preferredSimulatorId !== undefined) {
+    const preferred = simulators.find(
+      (candidate) => String(candidate.simulatorId) === String(preferredSimulatorId),
+    );
+    if (preferred !== undefined) return preferred;
+  }
   if (latestScreenshot?.simulatorId !== undefined) {
     const matched = simulators.find(
       (candidate) => candidate.simulatorId === latestScreenshot.simulatorId,

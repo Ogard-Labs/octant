@@ -7,6 +7,8 @@ import { defineConfig } from "vitest/config";
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 const domTestFilesWithoutJsx = [
+  "src/apple/useAppleSimulatorPaneOffer.test.ts",
+  "src/android/useAndroidEmulatorPaneOffer.test.ts",
   "src/code/monacoRuntime.test.ts",
   "src/code/xtermRuntime.test.ts",
   "src/polling/documentVisibility.test.ts",

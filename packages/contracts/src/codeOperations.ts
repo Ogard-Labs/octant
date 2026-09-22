@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ExtensionSelection } from "./extensions";
 import { AppleActionRequest } from "./appleToolchain";
+import { AndroidEmulatorRequest } from "./androidToolchain";
 import {
   CodeAttachmentId,
   CodeAttachmentReference,
@@ -1903,6 +1904,10 @@ export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("apple-action"),
     request: AppleActionRequest,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("android-action"),
+    request: AndroidEmulatorRequest,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),

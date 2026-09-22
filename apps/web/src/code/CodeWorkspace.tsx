@@ -9,10 +9,12 @@ import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-d
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
 import {
+  APPLE_INPUT_GRANT_MS,
   appleInputGrantIsLive,
   appleLiveFrameIsStaleAfterRestart,
   decidesCodeEffectsByApproval,
   isAppleSimulatorInputKind,
+  isAppleSimulatorOpenInputKind,
   latestAppleScreenshotEvidence,
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
@@ -39,6 +41,7 @@ import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type { AndroidEmulatorRequest } from "@octant/contracts/android-toolchain";
 import type {
   AppleActionProgress,
   AppleActionRequest,
@@ -94,6 +97,11 @@ export interface CodeWorkspaceApprovals {
    * refusal rather than sending an action the host would deny.
    */
   readonly apple?: (request: AppleActionRequest) => Promise<string | undefined>;
+  /**
+   * Native confirmation for one Android emulator action. Clicks never use this;
+   * Allow input does.
+   */
+  readonly android?: (request: AndroidEmulatorRequest) => Promise<string | undefined>;
   /** Keeps the desktop-owned approval view anchored to the active composer. */
   readonly updateAnchor?: (bounds: {
     readonly x: number;
@@ -435,6 +443,16 @@ function AppleWorkbenchSurface(props: {
   const scheme = controller.discovery?.workspace.schemes[0];
   const createUuid = props.createUuid;
   const requestApproval = props.requestApproval;
+  // The host opens a grant as soon as the first input is approved, but the
+  // snapshot the pane reads can lag. Observed 2026-09-19: every tap raised
+  // another native confirmation while that snapshot was still empty, so the
+  // live screen asked for permission in a loop. Remembering the Simulator
+  // here skips only what the host would already admit.
+  const rememberedInputGrants = useRef(new Map<string, number>());
+  const inputFlight = useRef(Promise.resolve());
+  // The epoch only wakes this surface after the host records a grant; the
+  // per-Simulator expiry stays in rememberedInputGrants.
+  const [, setRememberedGrantEpoch] = useState(0);
   const [frameAttach, setFrameAttach] = useState<AppleSimulatorLiveFrameAttach>({
     kind: "not-attachable",
     reason:
@@ -475,6 +493,9 @@ function AppleWorkbenchSurface(props: {
               : { simulatorId: latestScreenshot.simulatorId }),
           },
         }),
+    ...(controller.runtime?.paneOpenRequest === undefined
+      ? {}
+      : { preferredSimulatorId: controller.runtime.paneOpenRequest.simulatorId }),
   });
   const screenshotReference =
     liveFrame.status === "live" && liveFrame.screen.kind === "screenshot"
@@ -499,6 +520,16 @@ function AppleWorkbenchSurface(props: {
     ...(screenshotRequest === undefined ? {} : { request: screenshotRequest }),
   });
   const liveSimulatorId = liveFrame.status === "live" ? liveFrame.simulatorId : undefined;
+  const rememberedUntil =
+    liveSimulatorId === undefined
+      ? 0
+      : (rememberedInputGrants.current.get(String(liveSimulatorId)) ?? 0);
+  const inputAllowed =
+    !approvalGated ||
+    (liveSimulatorId !== undefined &&
+      (appleInputGrantIsLive(controller.runtime, String(liveSimulatorId), Date.now()) ||
+        rememberedUntil > Date.now()));
+  const needsAllowInput = approvalGated && !inputAllowed;
   const screenStreamRequest = useMemo(
     () =>
       liveSimulatorId === undefined
@@ -522,6 +553,12 @@ function AppleWorkbenchSurface(props: {
 
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
+      const previous = inputFlight.current;
+      let release = () => {};
+      inputFlight.current = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
       setActionMessage(undefined);
       setBusy(true);
       try {
@@ -541,14 +578,27 @@ function AppleWorkbenchSurface(props: {
         // the bound checkout and goes through the same native confirmation the
         // rest of Code uses.
         let request = base;
-        // One approved input opens its Simulator to this thread for a while;
-        // the host says so in the snapshot, and asking again for every tap
-        // would raise a confirmation the host no longer requires.
-        const inputGranted =
-          isAppleSimulatorInputKind(intent.kind) &&
-          "simulatorId" in intent &&
-          appleInputGrantIsLive(controller.runtime, String(intent.simulatorId), Date.now());
-        if (approvalGated && intent.kind !== "screenshot" && !inputGranted) {
+        const simulatorId = "simulatorId" in intent ? String(intent.simulatorId) : undefined;
+        const now = Date.now();
+        const rememberedUntil =
+          simulatorId === undefined ? 0 : (rememberedInputGrants.current.get(simulatorId) ?? 0);
+        const grantLive =
+          simulatorId !== undefined &&
+          (appleInputGrantIsLive(controller.runtime, simulatorId, now) || rememberedUntil > now);
+        // Clicks, typed keys, Home, and Lock never raise a confirmation. They
+        // ride a live grant or Full access; without either they do not run.
+        if (approvalGated && isAppleSimulatorInputKind(intent.kind) && !grantLive) {
+          setActionMessage("Allow input to this Simulator first.");
+          return;
+        }
+        if (approvalGated && isAppleSimulatorOpenInputKind(intent.kind) && grantLive) {
+          return;
+        }
+        if (
+          approvalGated &&
+          intent.kind !== "screenshot" &&
+          !(isAppleSimulatorInputKind(intent.kind) && grantLive)
+        ) {
           if (requestApproval === undefined) {
             setActionMessage(
               "This window cannot confirm Apple actions. Approve from the desktop app.",
@@ -561,8 +611,28 @@ function AppleWorkbenchSurface(props: {
             return;
           }
           request = { ...base, approval: { kind: "approved", approvalId: approvalId as never } };
+          if (simulatorId !== undefined && isAppleSimulatorOpenInputKind(intent.kind)) {
+            rememberedInputGrants.current.set(simulatorId, Date.now() + APPLE_INPUT_GRANT_MS);
+            setRememberedGrantEpoch(Date.now());
+          }
         }
         const evidence = await controller.execute(request);
+        if (
+          evidence.outcome === "succeeded" &&
+          isAppleSimulatorOpenInputKind(intent.kind) &&
+          simulatorId !== undefined
+        ) {
+          rememberedInputGrants.current.set(simulatorId, Date.now() + APPLE_INPUT_GRANT_MS);
+          setRememberedGrantEpoch(Date.now());
+        }
+        if (
+          evidence.outcome === "succeeded" &&
+          intent.kind === "shutdown" &&
+          simulatorId !== undefined
+        ) {
+          rememberedInputGrants.current.delete(simulatorId);
+          setRememberedGrantEpoch(Date.now());
+        }
         if (evidence.outcome !== "succeeded") {
           setActionMessage(`Apple ${intent.kind} ${evidence.outcome.replace("-", " ")}.`);
         }
@@ -570,6 +640,7 @@ function AppleWorkbenchSurface(props: {
         setActionMessage("The Apple toolchain service did not answer this action.");
       } finally {
         setBusy(false);
+        release();
       }
     },
     [
@@ -626,6 +697,9 @@ function AppleWorkbenchSurface(props: {
       onCancel={(actionId) => void cancel(actionId)}
       onRetry={controller.retry}
       onRun={(intent) => void run(intent)}
+      inputAllowed={inputAllowed}
+      needsAllowInput={needsAllowInput}
+      {...(props.tab.pane === "device" ? { variant: "device" as const } : {})}
     />
   );
 }
@@ -684,6 +758,14 @@ function appleActionRequest(input: {
       return { ...base, kind: "shutdown", simulatorId: intent.simulatorId, timeoutMs: 30_000 };
     case "screenshot":
       return { ...base, kind: "screenshot", simulatorId: intent.simulatorId, timeoutMs: 30_000 };
+    case "open-input":
+      return {
+        ...base,
+        kind: "open-input",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        timeoutMs: 30_000,
+      };
     case "tap":
       return {
         ...base,

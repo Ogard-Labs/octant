@@ -18,12 +18,20 @@ import {
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
   MAX_BROWSER_TABS_PER_CONTEXT,
 } from "@octant/contracts";
-import type {
-  AppleActionRequest,
-  AppleBuildEvidence,
-  AppleDiscoveryRequest,
-  AppleRuntimeSnapshot,
-  ApplePlatform,
+import {
+  decodeAppleSimulatorId,
+  decodeAndroidEmulatorId,
+  type AppleActionRequest,
+  type AppleBuildEvidence,
+  type AppleDiscoveryRequest,
+  type AppleRuntimeSnapshot,
+  type ApplePlatform,
+  type AppleSimulatorId,
+  type AndroidDiscoveryRequest,
+  type AndroidEmulatorEvidence,
+  type AndroidEmulatorId,
+  type AndroidEmulatorRequest,
+  type AndroidRuntimeSnapshot,
 } from "@octant/contracts";
 import {
   clampTurnAccessPosture,
@@ -31,6 +39,7 @@ import {
   isToolAllowedByAllowlist,
 } from "@octant/domain";
 import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
+import type { AndroidDiscoveryResult } from "../android/androidToolchainService";
 import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
@@ -49,6 +58,7 @@ const TERMINAL_COMPLETION_POLL_MS = 50;
 export const CODE_BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
 export const CODE_TERMINAL_TOOL_NAME = "octant_terminal";
 export const CODE_APPLE_TOOL_NAME = "octant_apple";
+export const CODE_ANDROID_TOOL_NAME = "octant_android";
 export const CODE_BOARD_TOOL_NAME = "octant_board";
 export const CODE_PROPOSE_THREAD_TOOL_NAME = "octant_propose_thread";
 
@@ -108,7 +118,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot and shutdown control the selected Simulator; screenshot observes it. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -121,6 +131,7 @@ const appleDefinition = {
           "test",
           "run",
           "boot",
+          "open",
           "shutdown",
           "screenshot",
           "tap",
@@ -146,6 +157,45 @@ const appleDefinition = {
   },
 } as const;
 
+const androidDefinition = {
+  name: CODE_ANDROID_TOOL_NAME,
+  description:
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: [
+          "discover",
+          "status",
+          "open",
+          "boot",
+          "shutdown",
+          "screenshot",
+          "tap",
+          "swipe",
+          "type-text",
+          "key-press",
+          "install",
+          "launch",
+        ],
+      },
+      emulatorId: { type: "string" },
+      x: { type: "number" },
+      y: { type: "number" },
+      toX: { type: "number" },
+      toY: { type: "number" },
+      durationMs: { type: "number" },
+      text: { type: "string" },
+      key: { type: "string" },
+      apkPath: { type: "string" },
+      packageName: { type: "string" },
+    },
+    required: ["operation"],
+  },
+} as const;
+
 /**
  * What the Apple capability lends one Code thread's agent.
  *
@@ -154,7 +204,19 @@ const appleDefinition = {
  * decides. The tool takes no shortcut a person operating the workbench could
  * not take, and mints no destination of its own.
  */
-export interface CodeAppleToolPort {
+interface CodeDeviceScreenshotPort {
+  readonly readScreenshot: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    reference: string,
+  ) => Promise<Uint8Array | undefined>;
+}
+
+export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
   readonly resolveAuthority: (
     windowId: WindowId,
     thread: CodeThread,
@@ -175,6 +237,47 @@ export interface CodeAppleToolPort {
       readonly checkoutId: CodeThread["checkoutId"];
     },
   ) => Promise<AppleRuntimeSnapshot | undefined>;
+  readonly requestPaneOpen: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    simulatorId: AppleSimulatorId,
+  ) => Promise<AppleRuntimeSnapshot | undefined>;
+}
+
+export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
+  readonly resolveAuthority: (
+    windowId: WindowId,
+    thread: CodeThread,
+  ) => ToolActionAuthority | undefined;
+  readonly discover: (
+    windowId: WindowId,
+    request: AndroidDiscoveryRequest,
+  ) => Promise<AndroidDiscoveryResult | undefined>;
+  readonly execute: (
+    windowId: WindowId,
+    request: AndroidEmulatorRequest,
+  ) => Promise<AndroidEmulatorEvidence | undefined>;
+  readonly snapshot: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+  ) => Promise<AndroidRuntimeSnapshot | undefined>;
+  readonly requestPaneOpen: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+    emulatorId: AndroidEmulatorId,
+  ) => Promise<AndroidRuntimeSnapshot | undefined>;
 }
 
 export interface CodeAppManagedToolsOptions {
@@ -252,6 +355,7 @@ export interface CodeAppManagedToolsOptions {
     ) => Promise<BrowserAutomationSnapshot>;
   };
   readonly apple?: CodeAppleToolPort;
+  readonly android?: CodeAndroidToolPort;
   /**
    * What the planner capability lends one thread's agent: a read of its own
    * Project's server-authoritative board, and an advisory work proposal that
@@ -297,6 +401,7 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       BROWSER_TOOL_DEFINITION,
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
+      ...(options.android === undefined ? [] : [androidDefinition]),
       // The planner tools appear only in the currently designated planner
       // thread. Any other thread that calls them anyway is refused by name
       // below with a value, never a throw.
@@ -333,6 +438,9 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       }
       if (name === CODE_APPLE_TOOL_NAME && options.apple !== undefined) {
         return appleTool(options, parseAppleInput(inputJson), signal);
+      }
+      if (name === CODE_ANDROID_TOOL_NAME && options.android !== undefined) {
+        return androidTool(options, parseAndroidInput(inputJson), signal);
       }
       return failure("tool-unavailable");
     },
@@ -742,34 +850,381 @@ async function appleTool(
     };
   }
 
+  if (input.operation === "open") {
+    if (input.simulatorId === undefined) return failure("invalid-apple-input");
+    const snapshot = await apple.snapshot(options.windowId, scope);
+    if (snapshot === undefined) return failure("apple-unavailable");
+    const destination = snapshot.simulators.find(
+      (simulator) => String(simulator.simulatorId) === input.simulatorId,
+    );
+    if (destination === undefined) {
+      return failure(
+        "simulator-not-found",
+        "No Simulator with that identity is available on this thread.",
+      );
+    }
+    if (destination.state === "unavailable") {
+      return failure("unavailable", "That Simulator destination is unavailable.");
+    }
+    if (destination.state === "booted" || destination.state === "booting") {
+      await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
+      return {
+        result: inAppPaneResult({
+          kind: "open",
+          outcome: "succeeded",
+          simulatorId: String(destination.simulatorId),
+          state: destination.state,
+        }),
+        isError: false,
+      };
+    }
+    const request = appleActionRequest({ ...input, operation: "boot" }, scope, options.uuid);
+    if (request === undefined) return failure("invalid-apple-input");
+    if (signal?.aborted) return failure("tool-interrupted");
+    await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
+    const evidence = await apple.execute(options.windowId, request);
+    if (evidence === undefined) return failure("apple-unavailable");
+    return appleEvidenceResult(evidence, true);
+  }
+
   if (signal?.aborted) return failure("tool-interrupted");
   const request = appleActionRequest(input, scope, options.uuid);
   if (request === undefined) return failure("invalid-apple-input");
+  const opensPane =
+    (input.operation === "boot" || input.operation === "run") && input.simulatorId !== undefined;
+  if (opensPane && input.simulatorId !== undefined) {
+    const simulatorId = decodeToolSimulatorId(input.simulatorId);
+    if (simulatorId !== undefined) {
+      await apple.requestPaneOpen(options.windowId, scope, simulatorId);
+    }
+  }
   const evidence = await apple.execute(options.windowId, request);
   if (evidence === undefined) return failure("apple-unavailable");
-  return {
-    result: {
-      kind: evidence.kind,
-      outcome: evidence.outcome,
-      cleanup: evidence.cleanup,
-      durationMs: evidence.durationMs,
-      diagnostics: evidence.diagnostics
-        .slice(0, MAX_APPLE_RESULT_DIAGNOSTICS)
-        .map((diagnostic) => ({
-          severity: diagnostic.severity,
-          message: diagnostic.message,
-          ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
+  const result = appleEvidenceResult(evidence, opensPane);
+  if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
+  if (signal?.aborted) return failure("tool-interrupted");
+  const reference = evidence.artifacts.find(
+    (artifact) => artifact.kind === "screenshot",
+  )?.reference;
+  const bytes =
+    reference === undefined
+      ? undefined
+      : await apple.readScreenshot(options.windowId, scope, reference);
+  if (signal?.aborted) return failure("tool-interrupted");
+  return deviceScreenshotResult(result, bytes);
+}
+
+const ANDROID_BOOT_TIMEOUT_MS = 180_000;
+const ANDROID_ACTION_TIMEOUT_MS = 60_000;
+const IN_APP_ANDROID_PANE_NOTE =
+  "The emulator is showing in Octant's Android emulator pane. Do not start an external emulator window as the place to look.";
+
+async function androidTool(
+  options: CodeAppManagedToolsOptions,
+  input: AndroidToolInput | undefined,
+  signal?: AbortSignal,
+) {
+  const android = options.android;
+  if (input === undefined || android === undefined) return failure("invalid-android-input");
+  const authority = android.resolveAuthority(options.windowId, options.thread);
+  if (authority === undefined) return failure("android-authority-unavailable");
+  const scope = {
+    authority,
+    threadId: options.thread.id,
+    checkoutId: options.thread.checkoutId,
+  } as const;
+
+  if (input.operation === "status") {
+    const snapshot = await android.snapshot(options.windowId, scope);
+    if (snapshot === undefined) return failure("android-unavailable");
+    return {
+      result: {
+        sdkAvailable: snapshot.sdk.available,
+        emulators: snapshot.emulators.map((emulator) => ({
+          emulatorId: String(emulator.emulatorId),
+          name: emulator.name,
+          state: emulator.state,
+          ...(emulator.serial === undefined ? {} : { serial: emulator.serial }),
         })),
-      // References, never bytes. A captured screen is an artifact the host
-      // holds; putting it in a tool result would put the Simulator's screen
-      // into the provider transcript.
-      artifacts: evidence.artifacts.map((artifact) => ({
-        kind: artifact.kind,
-        reference: artifact.reference,
-      })),
-    },
+        running: snapshot.active.map((progress) => ({
+          actionId: String(progress.actionId),
+          kind: progress.kind,
+          step: progress.step,
+        })),
+      },
+      isError: false,
+    };
+  }
+
+  if (input.operation === "discover") {
+    const discovered = await android.discover(options.windowId, {
+      ...scope,
+      actionId: options.uuid() as AndroidDiscoveryRequest["actionId"],
+      correlationId: options.uuid() as AndroidDiscoveryRequest["correlationId"],
+    });
+    if (discovered === undefined) return failure("android-unavailable");
+    if (discovered.kind === "failure") {
+      return failure(discovered.failure.category, discovered.failure.message);
+    }
+    return {
+      result: {
+        sdkAvailable: discovered.sdk.available,
+        emulators: discovered.emulators.map((emulator) => ({
+          emulatorId: String(emulator.emulatorId),
+          name: emulator.name,
+          state: emulator.state,
+        })),
+      },
+      isError: false,
+    };
+  }
+
+  if (input.operation === "open") {
+    if (input.emulatorId === undefined) return failure("invalid-android-input");
+    const snapshot = await android.snapshot(options.windowId, scope);
+    if (snapshot === undefined) return failure("android-unavailable");
+    const destination = snapshot.emulators.find(
+      (emulator) => String(emulator.emulatorId) === input.emulatorId,
+    );
+    if (destination === undefined) {
+      return failure(
+        "emulator-not-found",
+        "No Android emulator with that identity is available on this thread.",
+      );
+    }
+    if (destination.state === "unavailable") {
+      return failure("unavailable", "That Android emulator destination is unavailable.");
+    }
+    if (destination.state === "booted" || destination.state === "booting") {
+      await android.requestPaneOpen(options.windowId, scope, destination.emulatorId);
+      return {
+        result: inAppAndroidPaneResult({
+          kind: "open",
+          outcome: "succeeded",
+          emulatorId: String(destination.emulatorId),
+          state: destination.state,
+        }),
+        isError: false,
+      };
+    }
+    const request = androidActionRequest({ ...input, operation: "boot" }, scope, options.uuid);
+    if (request === undefined) return failure("invalid-android-input");
+    if (signal?.aborted) return failure("tool-interrupted");
+    await android.requestPaneOpen(options.windowId, scope, destination.emulatorId);
+    const evidence = await android.execute(options.windowId, request);
+    if (evidence === undefined) return failure("android-unavailable");
+    return androidEvidenceResult(evidence, true);
+  }
+
+  if (signal?.aborted) return failure("tool-interrupted");
+  const request = androidActionRequest(input, scope, options.uuid);
+  if (request === undefined) return failure("invalid-android-input");
+  const opensPane =
+    (input.operation === "boot" || input.operation === "install" || input.operation === "launch") &&
+    input.emulatorId !== undefined;
+  if (opensPane && input.emulatorId !== undefined) {
+    const emulatorId = decodeToolEmulatorId(input.emulatorId);
+    if (emulatorId !== undefined) {
+      await android.requestPaneOpen(options.windowId, scope, emulatorId);
+    }
+  }
+  const evidence = await android.execute(options.windowId, request);
+  if (evidence === undefined) return failure("android-unavailable");
+  const result = androidEvidenceResult(evidence, opensPane);
+  if (input.operation !== "screenshot" || evidence.outcome !== "succeeded") return result;
+  if (signal?.aborted) return failure("tool-interrupted");
+  const reference = evidence.artifacts.find(
+    (artifact) => artifact.kind === "screenshot",
+  )?.reference;
+  const bytes =
+    reference === undefined
+      ? undefined
+      : await android.readScreenshot(options.windowId, scope, reference);
+  if (signal?.aborted) return failure("tool-interrupted");
+  return deviceScreenshotResult(result, bytes);
+}
+
+function inAppAndroidPaneResult<T extends Record<string, unknown>>(
+  result: T,
+): T & { readonly opensInAppPane: true; readonly pane: string } {
+  return { ...result, opensInAppPane: true, pane: IN_APP_ANDROID_PANE_NOTE };
+}
+
+function androidEvidenceResult(evidence: AndroidEmulatorEvidence, opensPane: boolean) {
+  const result = {
+    kind: evidence.kind,
+    outcome: evidence.outcome,
+    cleanup: evidence.cleanup,
+    durationMs: evidence.durationMs,
+    diagnostics: evidence.diagnostics.slice(0, MAX_APPLE_RESULT_DIAGNOSTICS).map((diagnostic) => ({
+      severity: diagnostic.severity,
+      message: diagnostic.message,
+    })),
+    artifacts: evidence.artifacts.map((artifact) => ({
+      kind: artifact.kind,
+      reference: artifact.reference,
+    })),
+  };
+  return {
+    result: opensPane && evidence.outcome === "succeeded" ? inAppAndroidPaneResult(result) : result,
     isError: evidence.outcome !== "succeeded",
   };
+}
+
+function decodeToolEmulatorId(value: string): AndroidEmulatorId | undefined {
+  try {
+    return decodeAndroidEmulatorId(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function androidActionRequest(
+  input: AndroidToolInput,
+  scope: {
+    readonly authority: ToolActionAuthority;
+    readonly threadId: CodeThread["id"];
+    readonly checkoutId: CodeThread["checkoutId"];
+  },
+  uuid: () => string,
+): AndroidEmulatorRequest | undefined {
+  if (input.emulatorId === undefined) return undefined;
+  const emulatorId = decodeToolEmulatorId(input.emulatorId);
+  if (emulatorId === undefined) return undefined;
+  const base = {
+    ...scope,
+    actionId: uuid() as AndroidEmulatorRequest["actionId"],
+    correlationId: uuid() as AndroidEmulatorRequest["correlationId"],
+    approval: { kind: "not-required" as const },
+    emulatorId,
+  };
+  switch (input.operation) {
+    case "boot":
+    case "shutdown":
+    case "screenshot":
+      return {
+        ...base,
+        kind: input.operation,
+        timeoutMs: input.operation === "boot" ? ANDROID_BOOT_TIMEOUT_MS : ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "install":
+      if (input.apkPath === undefined) return undefined;
+      return {
+        ...base,
+        kind: "install",
+        apkPath: input.apkPath as AndroidEmulatorRequest["apkPath"],
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "launch":
+      if (input.packageName === undefined) return undefined;
+      return {
+        ...base,
+        kind: "launch",
+        packageName: input.packageName as AndroidEmulatorRequest["packageName"],
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "tap":
+    case "swipe":
+    case "type-text":
+    case "key-press": {
+      const requestedBy = agentEventActor(scope.authority, scope.threadId, uuid);
+      if (input.operation === "swipe") {
+        if (
+          input.x === undefined ||
+          input.y === undefined ||
+          input.toX === undefined ||
+          input.toY === undefined
+        ) {
+          return undefined;
+        }
+        const durationMs =
+          input.durationMs === undefined ? undefined : Math.round(input.durationMs);
+        if (durationMs !== undefined && !(durationMs >= 50 && durationMs <= 5_000)) {
+          return undefined;
+        }
+        return {
+          ...base,
+          kind: "swipe",
+          requestedBy,
+          point: { x: input.x, y: input.y },
+          toPoint: { x: input.toX, y: input.toY },
+          ...(durationMs === undefined ? {} : { durationMs }),
+          timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+        };
+      }
+      if (input.operation === "tap") {
+        if (input.x === undefined || input.y === undefined) return undefined;
+        return {
+          ...base,
+          kind: "tap",
+          requestedBy,
+          point: { x: input.x, y: input.y },
+          timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+        };
+      }
+      if (input.operation === "type-text") {
+        if (input.text === undefined || input.text.trim().length === 0) return undefined;
+        return {
+          ...base,
+          kind: "type-text",
+          requestedBy,
+          text: input.text,
+          timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+        };
+      }
+      if (input.key === undefined) return undefined;
+      return {
+        ...base,
+        kind: "key-press",
+        requestedBy,
+        key: input.key,
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+      };
+    }
+    default:
+      return undefined;
+  }
+}
+
+const IN_APP_PANE_NOTE =
+  "The Simulator is showing in Octant's iOS Simulator pane. Do not launch Simulator.app, run open -a Simulator, or start serve-sim.";
+
+function inAppPaneResult<T extends Record<string, unknown>>(
+  result: T,
+): T & { readonly opensInAppPane: true; readonly pane: string } {
+  return { ...result, opensInAppPane: true, pane: IN_APP_PANE_NOTE };
+}
+
+function appleEvidenceResult(evidence: AppleBuildEvidence, opensPane: boolean) {
+  const result = {
+    kind: evidence.kind,
+    outcome: evidence.outcome,
+    cleanup: evidence.cleanup,
+    durationMs: evidence.durationMs,
+    diagnostics: evidence.diagnostics.slice(0, MAX_APPLE_RESULT_DIAGNOSTICS).map((diagnostic) => ({
+      severity: diagnostic.severity,
+      message: diagnostic.message,
+      ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
+    })),
+    // Durable evidence keeps references; explicit screenshot calls attach
+    // bytes separately through the provider image channel.
+    artifacts: evidence.artifacts.map((artifact) => ({
+      kind: artifact.kind,
+      reference: artifact.reference,
+    })),
+  };
+  return {
+    result: opensPane && evidence.outcome === "succeeded" ? inAppPaneResult(result) : result,
+    isError: evidence.outcome !== "succeeded",
+  };
+}
+
+function decodeToolSimulatorId(value: string): AppleSimulatorId | undefined {
+  try {
+    return decodeAppleSimulatorId(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function appleActionRequest(
@@ -1123,6 +1578,7 @@ interface AppleToolInput {
     | "test"
     | "run"
     | "boot"
+    | "open"
     | "shutdown"
     | "screenshot"
     | "tap"
@@ -1141,6 +1597,32 @@ interface AppleToolInput {
   readonly durationMs?: number;
   readonly text?: string;
   readonly key?: string;
+}
+
+interface AndroidToolInput {
+  readonly operation:
+    | "discover"
+    | "status"
+    | "open"
+    | "boot"
+    | "shutdown"
+    | "screenshot"
+    | "tap"
+    | "swipe"
+    | "type-text"
+    | "key-press"
+    | "install"
+    | "launch";
+  readonly emulatorId?: string;
+  readonly x?: number;
+  readonly y?: number;
+  readonly toX?: number;
+  readonly toY?: number;
+  readonly durationMs?: number;
+  readonly text?: string;
+  readonly key?: string;
+  readonly apkPath?: string;
+  readonly packageName?: string;
 }
 
 interface ProposeThreadToolInput {
@@ -1305,6 +1787,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "test" &&
     operation !== "run" &&
     operation !== "boot" &&
+    operation !== "open" &&
     operation !== "shutdown" &&
     operation !== "screenshot" &&
     operation !== "tap" &&
@@ -1343,6 +1826,59 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     return undefined;
   }
   return parsed as unknown as AppleToolInput;
+}
+
+function parseAndroidInput(value: string): AndroidToolInput | undefined {
+  const parsed = parseObject(
+    value,
+    new Set([
+      "operation",
+      "emulatorId",
+      "x",
+      "y",
+      "toX",
+      "toY",
+      "durationMs",
+      "text",
+      "key",
+      "apkPath",
+      "packageName",
+    ]),
+  );
+  if (parsed === undefined) return undefined;
+  const operation = parsed.operation;
+  if (
+    operation !== "discover" &&
+    operation !== "status" &&
+    operation !== "open" &&
+    operation !== "boot" &&
+    operation !== "shutdown" &&
+    operation !== "screenshot" &&
+    operation !== "tap" &&
+    operation !== "swipe" &&
+    operation !== "type-text" &&
+    operation !== "key-press" &&
+    operation !== "install" &&
+    operation !== "launch"
+  ) {
+    return undefined;
+  }
+  for (const field of ["emulatorId", "text", "key", "apkPath", "packageName"] as const) {
+    if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
+  }
+  for (const field of ["x", "y", "toX", "toY", "durationMs"] as const) {
+    if (parsed[field] !== undefined && !Number.isFinite(parsed[field])) return undefined;
+  }
+  for (const field of ["x", "y", "toX", "toY"] as const) {
+    if (typeof parsed[field] === "number" && parsed[field] < 0) return undefined;
+  }
+  if (
+    typeof parsed.text === "string" &&
+    Buffer.byteLength(parsed.text, "utf8") > MAX_TOOL_INPUT_BYTES
+  ) {
+    return undefined;
+  }
+  return parsed as unknown as AndroidToolInput;
 }
 
 function profileToolConstraintFailure(thread: CodeThread, toolName: string): string | undefined {
@@ -1505,4 +2041,33 @@ function postureRefusal(error: string) {
 
 function defaultWait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function deviceScreenshotResult<T extends { readonly result: object; readonly isError: boolean }>(
+  evidence: T,
+  bytes: Uint8Array | undefined,
+) {
+  // The wire allows 2 MiB of base64. Refuse whole images instead of truncating
+  // or resizing them and invalidating the pixel coordinates used for input.
+  const maxBytes = 1_572_864;
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (
+    bytes === undefined ||
+    bytes.byteLength > maxBytes ||
+    !pngSignature.every((byte, index) => bytes[index] === byte)
+  ) {
+    return {
+      result: {
+        ...evidence.result,
+        error: "screenshot-image-unavailable",
+        message:
+          "The screenshot could not be delivered as a provider image. Do not infer screen contents from the artifact reference.",
+      },
+      isError: true,
+    };
+  }
+  return {
+    ...evidence,
+    images: [{ mimeType: "image/png" as const, data: Buffer.from(bytes).toString("base64") }],
+  };
 }

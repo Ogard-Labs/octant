@@ -80,6 +80,7 @@ describe("which live tools the dock may offer", () => {
     expect(
       isDockToolLaunchable("ios-simulator", { ...capabilities, hasAppleSimulator: true }),
     ).toBe(true);
+    expect(isDockToolLaunchable("android-emulator", capabilities)).toBe(true);
   });
 
   it("offers Agents for an existing thread even before the first child exists", () => {

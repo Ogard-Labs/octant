@@ -143,6 +143,11 @@ describe("Simulator input grants", () => {
     now = minutes(44);
     expect(grants.isOpen(scope(iphone))).toBe(true);
 
+    now = minutes(50);
+    grants.afterAction(who(), { kind: "open-input", simulatorId: iphone }, "succeeded");
+    now = minutes(64);
+    expect(grants.isOpen(scope(iphone))).toBe(true);
+
     // A shutdown that failed leaves the session as it was; one that worked ends it for everyone.
     grants.afterAction(who(), { kind: "shutdown", simulatorId: iphone }, "failed");
     expect(grants.isOpen(scope(iphone))).toBe(true);

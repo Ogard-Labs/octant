@@ -11,6 +11,10 @@ vi.mock("../code/CodeWorkspaceTab", () => ({
   ),
 }));
 
+vi.mock("../android/AndroidEmulatorPane", () => ({
+  AndroidEmulatorPane: () => <p>android-emulator-pane</p>,
+}));
+
 vi.mock("../browser/BrowserWorkspace", () => ({
   BrowserWorkspace: (props: { readonly tab: { readonly threadId?: string } }) => (
     <p>{`browser:${props.tab.threadId ?? "none"}`}</p>
@@ -372,5 +376,23 @@ describe("thread utility dock content", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+  });
+
+  it("renders the Android emulator pane from a Code thread without an Xcode project", async () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        androidToolchainClient={{ execute: vi.fn() } as never}
+        surface="android-emulator"
+      />,
+    );
+    expect(await screen.findByText("android-emulator-pane")).toBeVisible();
+  });
+
+  it("states why Android emulator is unavailable when the toolchain client is missing", async () => {
+    render(<ThreadUtilityDockContent {...props()} surface="android-emulator" />);
+    expect(
+      await screen.findByRole("heading", { name: "Android emulator is unavailable" }),
+    ).toBeVisible();
   });
 });

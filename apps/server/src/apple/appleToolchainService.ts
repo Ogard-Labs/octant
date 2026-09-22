@@ -27,7 +27,9 @@ import {
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
   isAppleSimulatorInputKind,
+  isAppleSimulatorOpenInputKind,
   redactedAppleInputDiagnostic,
+  redactedAppleOpenInputDiagnostic,
   type AppleExecutionScope,
 } from "@octant/domain";
 import { defaultTemporaryDirectory } from "../code/repositoryTestProcessPort";
@@ -93,9 +95,9 @@ export interface AppleToolchainServiceOptions {
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
   /**
-   * Optional XCTest-less Simulator input injector. Tests and reviewed host
-   * adapters supply this; when absent, Darwin hosts attempt Simulator.app
-   * Accessibility via osascript and other hosts report unavailable.
+   * Optional XCTest-less Simulator input injector. Tests and the desktop's
+   * device helper supply this. When it is absent, every input kind is
+   * unavailable: Octant does not script Simulator.app.
    */
   readonly injectSimulatorInput?: (
     request: AppleSimulatorRequest,
@@ -191,6 +193,21 @@ export class AppleToolchainService {
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
   readonly #captureDirectory: string;
   readonly #capturePrefix: string;
+  /**
+   * The last requested pane for each task. Concurrent tasks cannot replace
+   * one another's requests; snapshot checkout checks keep requests scoped.
+   */
+  readonly #paneOpenRequests = new Map<
+    string,
+    {
+      readonly threadId: AppleExecutionContext["threadId"];
+      readonly checkoutId: AppleExecutionContext["checkoutId"];
+      readonly requestId: string;
+      readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+      readonly projectPath?: AppleWorkspaceDiscovery["projectPath"];
+      readonly requestedAt: string;
+    }
+  >();
   // Files a running capture owns. A capture may run for minutes, so its file's
   // age says nothing about whether it was abandoned; only this does. Shared by
   // every service in the process: a replaced service's later sweeps would
@@ -335,7 +352,10 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
   ): Promise<AppleBuildEvidence> {
     const startedAt = this.#options.now();
-    if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
+    if (
+      !isBuildRequest(request) &&
+      (isAppleSimulatorInputKind(request.kind) || isAppleSimulatorOpenInputKind(request.kind))
+    ) {
       const prior = this.#findCompletedInput(request, context);
       if (prior !== undefined) return replayedFrom(prior);
     }
@@ -429,6 +449,7 @@ export class AppleToolchainService {
   }
 
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
+    const paneOpenRequest = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAppleRuntimeSnapshot({
       sequence: this.#sequence,
       snapshotAt: this.#options.now(),
@@ -440,7 +461,50 @@ export class AppleToolchainService {
       recentEvidence: this.#recent
         .filter((entry) => recentEvidenceMatches(entry, context))
         .map(({ evidence }) => evidence),
+      ...(paneOpenRequest !== undefined &&
+      paneOpenRequest.threadId === context.threadId &&
+      paneOpenRequest.checkoutId === context.checkoutId
+        ? {
+            paneOpenRequest: {
+              requestId: paneOpenRequest.requestId,
+              simulatorId: paneOpenRequest.simulatorId,
+              ...(paneOpenRequest.projectPath === undefined
+                ? {}
+                : { projectPath: paneOpenRequest.projectPath }),
+              requestedAt: paneOpenRequest.requestedAt,
+            },
+          }
+        : {}),
     });
+  }
+
+  /**
+   * Asks the renderer to show this Simulator in the in-app pane. The request
+   * is host memory only: it is not journaled, and a restart forgets it.
+   */
+  requestPaneOpen(
+    context: AppleExecutionContext,
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+  ): AppleRuntimeSnapshot {
+    const projectPath = this.#findDiscovery(context)?.workspace.projectPath;
+    // Pane-open intents are transient UI hints, not task history. Keep recent
+    // requests without retaining every task visited during the host lifetime.
+    const threadKey = String(context.threadId);
+    this.#paneOpenRequests.delete(threadKey);
+    if (this.#paneOpenRequests.size >= 256) {
+      const oldest = this.#paneOpenRequests.keys().next().value;
+      if (oldest !== undefined) this.#paneOpenRequests.delete(oldest);
+    }
+    this.#paneOpenRequests.set(threadKey, {
+      threadId: context.threadId,
+      checkoutId: context.checkoutId,
+      requestId: this.#options.newId(),
+      simulatorId,
+      ...(projectPath === undefined ? {} : { projectPath }),
+      requestedAt: this.#options.now(),
+    });
+    this.#sequence += 1;
+    return this.snapshot(context);
   }
 
   async reconcileAfterRestart(
@@ -504,8 +568,12 @@ export class AppleToolchainService {
     await Promise.allSettled(activeActions.map(({ done }) => done));
   }
 
-  #findDiscovery(request: AppleActionRequest): DiscoveryCacheEntry | undefined {
-    if ("projectPath" in request) {
+  #findDiscovery(
+    request: Pick<AppleActionRequest, "threadId" | "checkoutId"> & {
+      readonly projectPath?: string;
+    },
+  ): DiscoveryCacheEntry | undefined {
+    if (request.projectPath !== undefined) {
       return this.#discovery.get(
         discoveryKey(request.threadId, request.checkoutId, request.projectPath),
       );
@@ -562,19 +630,27 @@ export class AppleToolchainService {
     try {
       if (request.kind === "boot") {
         this.#advance(active, "preparing-destination");
-        terminal = await this.#command(
-          ["xcrun", "simctl", "boot", request.simulatorId],
-          context,
-          request.timeoutMs,
-          signal,
-        );
-        if (succeeded(terminal)) {
+        const previous = this.#simulatorState(request.simulatorId);
+        this.#setSimulatorState(request.simulatorId, "booting");
+        try {
           terminal = await this.#command(
-            ["xcrun", "simctl", "bootstatus", request.simulatorId, "-b"],
+            ["xcrun", "simctl", "boot", request.simulatorId],
             context,
             request.timeoutMs,
             signal,
           );
+          if (succeeded(terminal)) {
+            terminal = await this.#command(
+              ["xcrun", "simctl", "bootstatus", request.simulatorId, "-b"],
+              context,
+              request.timeoutMs,
+              signal,
+            );
+          }
+          this.#settleBoot(request.simulatorId, previous, succeeded(terminal));
+        } catch (error) {
+          this.#settleBoot(request.simulatorId, previous, false);
+          throw error;
         }
       } else if (request.kind === "shutdown") {
         this.#advance(active, "cleaning-up");
@@ -672,6 +748,22 @@ export class AppleToolchainService {
             }
           }
         }
+      } else if (!isBuildRequest(request) && isAppleSimulatorOpenInputKind(request.kind)) {
+        // Allow input opens the grant on the host; this action itself injects
+        // nothing, so it must not wait on a helper the destination does not need.
+        this.#advance(active, "completed", "completed");
+        const note = redactedAppleOpenInputDiagnostic();
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        return evidence(
+          request,
+          "succeeded",
+          startedAt,
+          this.#options.now(),
+          [note],
+          [{ kind: "log", reference: logReference }],
+          "not-required",
+        );
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
         terminal = await this.#command(
@@ -795,9 +887,6 @@ export class AppleToolchainService {
         throw new Error("Apple action kind is unsupported.");
       }
       outputs.push(terminal.stdout, terminal.stderr);
-      if (succeeded(terminal) && request.kind === "boot") {
-        this.#setSimulatorState(request.simulatorId, "booted");
-      }
       if (succeeded(terminal) && request.kind === "shutdown") {
         this.#setSimulatorState(request.simulatorId, "shutdown");
       }
@@ -870,21 +959,31 @@ export class AppleToolchainService {
       this.#setSimulatorState(simulatorId, "booted");
       return result;
     }
-    result = await this.#command(
-      ["xcrun", "simctl", "boot", simulatorId],
-      context,
-      timeoutMs,
-      signal,
-    );
-    if (!succeeded(result)) return result;
-    result = await this.#command(
-      ["xcrun", "simctl", "bootstatus", simulatorId, "-b"],
-      context,
-      timeoutMs,
-      signal,
-    );
-    if (succeeded(result)) this.#setSimulatorState(simulatorId, "booted");
-    return result;
+    const previous = this.#simulatorState(simulatorId);
+    this.#setSimulatorState(simulatorId, "booting");
+    try {
+      result = await this.#command(
+        ["xcrun", "simctl", "boot", simulatorId],
+        context,
+        timeoutMs,
+        signal,
+      );
+      if (!succeeded(result)) {
+        this.#settleBoot(simulatorId, previous, false);
+        return result;
+      }
+      result = await this.#command(
+        ["xcrun", "simctl", "bootstatus", simulatorId, "-b"],
+        context,
+        timeoutMs,
+        signal,
+      );
+      this.#settleBoot(simulatorId, previous, succeeded(result));
+      return result;
+    } catch (error) {
+      this.#settleBoot(simulatorId, previous, false);
+      throw error;
+    }
   }
 
   #findCompletedInput(
@@ -926,25 +1025,13 @@ export class AppleToolchainService {
         "Simulator input injection is unavailable on this host. Open the thread on the Mac that owns the destination.",
       );
     }
-    const argv = darwinSimulatorInputArgv(request);
-    if (argv === undefined) {
-      if (request.kind === "tap" && request.point !== undefined && request.target === undefined) {
-        return unavailableInputResult(
-          "Coordinate taps require a reviewed injectSimulatorInput adapter or a semantic target. Darwin Accessibility fallback refuses guessed screen coordinates.",
-        );
-      }
-      if (request.kind === "swipe") {
-        return unavailableInputResult(
-          "A swipe needs the Octant desktop app's device helper; this host has none.",
-        );
-      }
-      return unavailableInputResult("Simulator input request is incomplete for host injection.");
-    }
-    return this.#command(argv, context, request.timeoutMs, signal);
+    return unavailableInputResult(
+      "Simulator input needs the Octant desktop app's device helper. This host has none, and input never activates Simulator.app.",
+    );
   }
 
   /**
-   * Bound a host adapter the same way `#command` bounds osascript: a
+   * Bound a host adapter the same way `#command` bounds a process: a
    * non-settling injector must not leave the action stuck in `#active`.
    */
   async #runInjectedInput(
@@ -1051,6 +1138,26 @@ export class AppleToolchainService {
     if (this.#options.writeArtifact === undefined) return;
     const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
     await this.#options.writeArtifact(reference, new Uint8Array(bytes));
+  }
+
+  #simulatorState(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+  ): AppleSimulatorRecord["state"] | undefined {
+    return this.#lastSimulators.find((record) => String(record.simulatorId) === String(simulatorId))
+      ?.state;
+  }
+
+  /**
+   * The in-app pane treats booting as in-flight and offers Boot only from
+   * shutdown. A failed, cancelled, or timed-out boot must not leave the
+   * destination stuck, or a retry is refused as destination-not-shutdown.
+   */
+  #settleBoot(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+    previous: AppleSimulatorRecord["state"] | undefined,
+    ready: boolean,
+  ): void {
+    this.#setSimulatorState(simulatorId, ready ? "booted" : (previous ?? "shutdown"));
   }
 
   #setSimulatorState(
@@ -1733,90 +1840,4 @@ function unavailableInputResult(message: string): AppleProcessResult {
     parserFailed: false,
     cleanupUncertain: false,
   };
-}
-
-/**
- * XCTest-less Darwin injection via Simulator.app Accessibility. Typed text is
- * passed only as an osascript argument for execution — never mirrored into
- * durable logs by the caller. Prefer a reviewed injectSimulatorInput adapter
- * when one is configured on the host.
- *
- * Point taps are not emitted on this fallback: live-frame pixels are not
- * Simulator content coordinates, and a wrong `click at` can leave the
- * Simulator window. Prefer semantic `target`, or supply `injectSimulatorInput`
- * for accurate mapping.
- */
-function darwinSimulatorInputArgv(
-  request: AppleSimulatorRequest,
-): ReadonlyArray<string> | undefined {
-  if (request.kind === "tap") {
-    if (request.target !== undefined) {
-      const target = escapeAppleScriptString(request.target);
-      return [
-        "osascript",
-        "-e",
-        'tell application "Simulator" to activate',
-        "-e",
-        `tell application "System Events" to tell process "Simulator" to click UI element "${target}" of window 1`,
-      ];
-    }
-    if (request.point !== undefined) {
-      // Live-frame pixels are not Simulator content or screen coordinates.
-      // Without a reviewed adapter (or a semantic target), refuse rather than
-      // guessing chrome offsets and risking clicks outside Simulator.app.
-      return undefined;
-    }
-    return undefined;
-  }
-  if (request.kind === "type-text") {
-    if (request.text === undefined) return undefined;
-    const text = escapeAppleScriptString(request.text);
-    return [
-      "osascript",
-      "-e",
-      'tell application "Simulator" to activate',
-      "-e",
-      `tell application "System Events" to keystroke "${text}"`,
-    ];
-  }
-  if (request.kind === "key-press") {
-    if (request.key === undefined) return undefined;
-    const code = appleScriptKeyCode(request.key);
-    if (code === undefined) return undefined;
-    return [
-      "osascript",
-      "-e",
-      'tell application "Simulator" to activate',
-      "-e",
-      `tell application "System Events" to key code ${code}`,
-    ];
-  }
-  return undefined;
-}
-
-function escapeAppleScriptString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function appleScriptKeyCode(key: string): number | undefined {
-  switch (key.toLowerCase()) {
-    case "return":
-    case "enter":
-      return 36;
-    case "escape":
-    case "esc":
-      return 53;
-    case "tab":
-      return 48;
-    case "delete":
-    case "backspace":
-      return 51;
-    case "space":
-      return 49;
-    case "home":
-      // Hardware Home is not a keystroke; callers should prefer a reviewed injector.
-      return undefined;
-    default:
-      return undefined;
-  }
 }

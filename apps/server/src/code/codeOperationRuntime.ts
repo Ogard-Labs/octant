@@ -15,6 +15,7 @@ import {
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
+  type AndroidEmulatorRequest,
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
@@ -63,6 +64,9 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   isAppleSimulatorInputKind,
+  isAppleSimulatorOpenInputKind,
+  isAndroidEmulatorInputKind,
+  isAndroidEmulatorOpenInputKind,
   harnessAutoReviewEffective,
   unsupportedModelOptionValues,
 } from "@octant/domain";
@@ -222,6 +226,8 @@ export interface CodeOperationRuntimeOptions {
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   /** The app-managed Apple capability, when this host has an Apple toolchain. */
   readonly appleToolchain?: CodeAppManagedToolsOptions["apple"];
+  /** The app-managed Android emulator capability. */
+  readonly androidToolchain?: CodeAppManagedToolsOptions["android"];
   /**
    * The planner capability: a Project-board read and an advisory work
    * proposal, both answered only for the Project's designated planner thread.
@@ -360,6 +366,7 @@ export interface CodeOperationRuntime {
   ): Promise<CodeOperationApprovalReceipt | undefined>;
   cancelApproval?(windowId: WindowId, confirmation: CodeOperationApprovalConfirmation): void;
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
+  validateAndroidApproval(windowId: WindowId, request: AndroidEmulatorRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
    * Shows a native-harness question on the thread's running turn so it is
@@ -667,6 +674,14 @@ export function createCodeOperationRuntime(
         const resolved = await resolveAppleApprovalScope(options, windowId, request.effect.request);
         thread = resolved?.thread;
         checkout = resolved?.checkout;
+      } else if (request.effect.kind === "android-action") {
+        const resolved = await resolveAndroidApprovalScope(
+          options,
+          windowId,
+          request.effect.request,
+        );
+        thread = resolved?.thread;
+        checkout = resolved?.checkout;
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -807,6 +822,19 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-action", request },
+        contextDigest: approvalContextDigest(context),
+        approvalId: request.approval.approvalId,
+      });
+    },
+    validateAndroidApproval: async (windowId, request) => {
+      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
+      const resolved = await resolveAndroidApprovalScope(options, windowId, request);
+      if (resolved === undefined) return false;
+      const context = await approvalContext(options, undefined, resolved.thread, resolved.checkout);
+      if (context === undefined) return false;
+      return await approvalValidator.validate({
+        windowId,
+        effect: { kind: "android-action", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1086,6 +1114,26 @@ async function resolveAppleApprovalScope(
   windowId: WindowId,
   request: AppleActionRequest,
 ): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
+  return resolveDeviceApprovalScope(options, windowId, request);
+}
+
+async function resolveAndroidApprovalScope(
+  options: CodeOperationRuntimeOptions,
+  windowId: WindowId,
+  request: AndroidEmulatorRequest,
+): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
+  return resolveDeviceApprovalScope(options, windowId, request);
+}
+
+async function resolveDeviceApprovalScope(
+  options: CodeOperationRuntimeOptions,
+  windowId: WindowId,
+  request: {
+    readonly threadId: CodeThread["id"];
+    readonly checkoutId: CodeCheckoutIdentity["id"];
+    readonly authority: AppleActionRequest["authority"];
+  },
+): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
   const thread = options.persistence.readCodeThread(request.threadId);
   const checkout = options.persistence.readCodeCheckout(request.checkoutId);
   if (
@@ -1136,9 +1184,11 @@ function approvalPrompt(
     message = "Elevate this Code thread to full access?";
     effectDetail = `Full repository and shell access · ${persistenceLabel(effect.permissionPersistence)}`;
   } else if (effect.kind === "apple-action") {
-    // Input is approved once per Simulator, not once per tap, and the dialog
-    // says what that approval covers.
-    const input = isAppleSimulatorInputKind(effect.request.kind);
+    // Allow input is approved once per Simulator, not once per tap, and the
+    // dialog says what that approval covers. Clicks never raise it.
+    const input =
+      isAppleSimulatorInputKind(effect.request.kind) ||
+      isAppleSimulatorOpenInputKind(effect.request.kind);
     message = input ? "Allow input to this Simulator?" : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
       ...(input
@@ -1155,6 +1205,22 @@ function approvalPrompt(
       ...("scheme" in effect.request && effect.request.scheme !== undefined
         ? [`Scheme: ${effect.request.scheme}`]
         : []),
+    ].join("\n");
+  } else if (effect.kind === "android-action") {
+    const input =
+      isAndroidEmulatorInputKind(effect.request.kind) ||
+      isAndroidEmulatorOpenInputKind(effect.request.kind);
+    message = input ? "Allow input to this emulator?" : `Allow Android ${effect.request.kind}?`;
+    effectDetail = [
+      ...(input
+        ? ["Covers taps, swipes, typing and keys on this emulator for 15 minutes after each input."]
+        : []),
+      `Action: ${effect.request.kind}`,
+      `Emulator: ${effect.request.emulatorId}`,
+      ...(effect.request.apkPath === undefined ? [] : [`APK: ${effect.request.apkPath}`]),
+      ...(effect.request.packageName === undefined
+        ? []
+        : [`Package: ${effect.request.packageName}`]),
     ].join("\n");
   } else {
     const command = effect.command;
@@ -1807,6 +1873,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     ...(this.#options.appleToolchain === undefined
                       ? {}
                       : { apple: this.#options.appleToolchain }),
+                    ...(this.#options.androidToolchain === undefined
+                      ? {}
+                      : { android: this.#options.androidToolchain }),
                     ...(this.#options.planner === undefined
                       ? {}
                       : { planner: this.#options.planner }),

@@ -92,6 +92,7 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "terminate",
   "logs",
   "screenshot",
+  "open-input",
   "tap",
   "swipe",
   "type-text",
@@ -110,6 +111,7 @@ export const AppleActionKind = Schema.Literal(
   "terminate",
   "logs",
   "screenshot",
+  "open-input",
   "tap",
   "swipe",
   "type-text",
@@ -161,8 +163,9 @@ export const AppleSimulatorRequest = Schema.Struct({
     ),
   ),
   /**
-   * Who petitioned this Simulator action. Required for tap, type-text, and
-   * key-press so a pane click is never confused with an agent tool call.
+   * Who petitioned this Simulator action. Required for Allow input, tap,
+   * type-text, and key-press so a pane click is never confused with an agent
+   * tool call.
    */
   requestedBy: Schema.optional(EventActor),
   /** Prefer a stable accessibility identifier or role when the destination names one. */
@@ -192,6 +195,9 @@ export const AppleSimulatorRequest = Schema.Struct({
         request.bundleIdentifier === undefined
       ) {
         return false;
+      }
+      if (request.kind === "open-input") {
+        return request.requestedBy !== undefined;
       }
       if (request.kind === "tap") {
         return (
@@ -301,6 +307,7 @@ export const AppleBuildEvidence = Schema.Struct({
   .pipe(
     Schema.filter((evidence) => {
       if (
+        evidence.kind === "open-input" ||
         evidence.kind === "tap" ||
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
@@ -355,6 +362,19 @@ export const AppleRuntimeSnapshot = Schema.Struct({
     Schema.Array(
       Schema.Struct({ simulatorId: AppleSimulatorId, expiresAt: UtcTimestamp }).annotations(strict),
     ).pipe(Schema.maxItems(256)),
+  ),
+  /**
+   * The in-app Simulator pane this thread should show, when an agent just
+   * asked to attach. The host decides; the renderer consumes each requestId
+   * once and never infers authority from it.
+   */
+  paneOpenRequest: Schema.optional(
+    Schema.Struct({
+      requestId: Schema.UUID,
+      simulatorId: AppleSimulatorId,
+      projectPath: Schema.optional(AppleProjectPath),
+      requestedAt: UtcTimestamp,
+    }).annotations(strict),
   ),
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;

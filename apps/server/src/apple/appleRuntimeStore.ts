@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeAppleActionKind,
@@ -52,9 +53,7 @@ export class AppleRuntimeStore {
   async readArtifact(reference: string): Promise<Uint8Array | undefined> {
     if (!SAFE_REFERENCE.test(reference)) return undefined;
     try {
-      const bytes = await readFile(join(this.#artifactRoot, reference));
-      if (bytes.byteLength > MAX_ARTIFACT_BYTES) return undefined;
-      return new Uint8Array(bytes);
+      return await readStoredFile(join(this.#artifactRoot, reference), MAX_ARTIFACT_BYTES);
     } catch {
       return undefined;
     }
@@ -75,8 +74,8 @@ export class AppleRuntimeStore {
 
   async loadReceipts(): Promise<ReadonlyArray<AppleRuntimeReceipt>> {
     try {
-      const payload = await readFile(this.#receiptPath);
-      if (payload.byteLength > MAX_RECEIPT_BYTES) return [];
+      const payload = await readStoredFile(this.#receiptPath, MAX_RECEIPT_BYTES);
+      if (payload === undefined) return [];
       const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload));
       if (!Array.isArray(parsed) || parsed.length > MAX_RECEIPTS) return [];
       return parsed.map(validateReceipt);
@@ -131,4 +130,24 @@ function validateReceipt(value: unknown): AppleRuntimeReceipt {
     ...(requestedBy === undefined ? {} : { requestedBy }),
     startedAt: decodeTimestamp(input.startedAt),
   };
+}
+
+// Bound allocation before reading, and use the same handle for metadata and bytes.
+// The extra byte detects growth without allocating beyond the admitted size.
+async function readStoredFile(path: string, maximumBytes: number): Promise<Uint8Array | undefined> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const status = await file.stat();
+    if (!status.isFile() || status.nlink !== 1 || status.size > maximumBytes) return undefined;
+    const bytes = new Uint8Array(status.size + 1);
+    let length = 0;
+    while (length < bytes.byteLength) {
+      const result = await file.read(bytes, length, bytes.byteLength - length, length);
+      if (result.bytesRead === 0) break;
+      length += result.bytesRead;
+    }
+    return length === status.size ? bytes.subarray(0, length) : undefined;
+  } finally {
+    await file.close();
+  }
 }

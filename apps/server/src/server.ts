@@ -26,6 +26,7 @@ import {
   type DiscoveryCandidate,
   LOCAL_TOOL_HOST_ID,
   type AppleRpcEnvelope,
+  type AndroidRpcEnvelope,
   decodeAgentRunParentThreadId,
   decodeChatThreadId,
   decodeCodeCheckoutId,
@@ -627,6 +628,14 @@ import { SimulatorInputGrants } from "./apple/simulatorInputGrants";
 import { createDesktopSimulatorDevicePort } from "./apple/desktopSimulatorDevicePort";
 import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDesktop";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
+import {
+  AndroidToolchainService,
+  isReplayedAndroidEvidence,
+  type AndroidExecutionContext,
+} from "./android/androidToolchainService";
+import { AndroidRuntimeStore } from "./android/androidRuntimeStore";
+import { spawnDetachedProcess } from "./android/spawnDetachedProcess";
+import { createAndroidToolchainRouteHandler } from "./androidToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
 import { ZenFocusZoneStore } from "./zen/zenFocusZoneStore";
@@ -665,6 +674,9 @@ import {
   chatTurnAnsweredAttempt,
   decidesCodeEffectsByApproval,
   isAppleSimulatorInputKind,
+  appleActionOpensInputGrant,
+  isAndroidEmulatorInputKind,
+  androidActionOpensInputGrant,
   defaultShellSettings,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
@@ -1653,6 +1665,7 @@ export function startOctantServer(
     const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
     const processAuthorityClock = new ProcessAuthorityClock();
     const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
+    const androidInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
     const machineChangeFeed = new MachineChangeFeed();
     const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
       machineChangeFeed.publishCommitted(append),
@@ -1696,6 +1709,7 @@ export function startOctantServer(
         revokeShellWindow?.(windowId);
         codeApprovalStore.revokeWindow(windowId);
         simulatorInputGrants.revokeWindow(String(windowId));
+        androidInputGrants.revokeWindow(String(windowId));
         extensionToolApprovalService.revokeWindow(windowId);
         browserToolApprovalService?.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
@@ -3943,6 +3957,17 @@ export function startOctantServer(
             await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
+          readScreenshot: async (windowId, scope, reference) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            const artifact = await appleToolchainService.readScreenshotArtifact(reference, context);
+            return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
           snapshot: async (windowId, scope) => {
             const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
@@ -3951,6 +3976,93 @@ export function startOctantServer(
               checkoutId: scope.checkoutId,
             });
             return context === undefined ? undefined : appleToolchainService.snapshot(context);
+          },
+          requestPaneOpen: async (windowId, scope, simulatorId) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return appleToolchainService.requestPaneOpen(context, simulatorId);
+          },
+        },
+        androidToolchain: {
+          resolveAuthority: (_windowId, thread) => ({
+            hostId: LOCAL_TOOL_HOST_ID,
+            mode: "code" as const,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            extension: { kind: "core" as const },
+          }),
+          discover: async (windowId, request) => {
+            const context = await resolveAndroidContext(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "android-discovery-request", request },
+            );
+            if (context === undefined) return undefined;
+            return await androidToolchainService.discover(request, context);
+          },
+          execute: async (windowId, request) => {
+            const context = await resolveAndroidContext(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "android-action-request", request },
+            );
+            if (context === undefined) return undefined;
+            const evidence = await androidToolchainService.execute(request, context);
+            if (!isReplayedAndroidEvidence(evidence)) {
+              androidInputGrants.settle(
+                String(windowId),
+                { kind: request.kind, simulatorId: request.emulatorId },
+                evidence,
+                context,
+              );
+            }
+            return evidence;
+          },
+          readScreenshot: async (windowId, scope, reference) => {
+            const context = await resolveAndroidContext(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            const artifact = await androidToolchainService.readScreenshotArtifact(
+              reference,
+              context,
+            );
+            return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
+          snapshot: async (windowId, scope) => {
+            const context = await resolveAndroidContext(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            return context === undefined ? undefined : androidToolchainService.snapshot(context);
+          },
+          requestPaneOpen: async (windowId, scope, emulatorId) => {
+            const context = await resolveAndroidContext(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return androidToolchainService.requestPaneOpen(context, emulatorId);
           },
         },
         credentialResolver: { resolve: async () => undefined },
@@ -4303,6 +4415,10 @@ export function startOctantServer(
         action !== undefined && isAppleSimulatorInputKind(action.kind) && "simulatorId" in action
           ? action.simulatorId
           : undefined;
+      const grantDestinationId =
+        action !== undefined && appleActionOpensInputGrant(action.kind) && "simulatorId" in action
+          ? action.simulatorId
+          : undefined;
       let approvalValid: boolean;
       let inputGranted = false;
       if (action === undefined || effectiveThread.executionPolicy === "full-access") {
@@ -4317,21 +4433,20 @@ export function startOctantServer(
           simulatorId: String(inputSimulatorId),
         })
       ) {
-        // One approved input opened this Simulator to this window on this
-        // thread; confirming every tap made the live device unusable. The grant
-        // is the window's, like the approval it came from, so another client on
-        // the thread does not ride it. The policy accepts the grant in place of
-        // a one-shot approval on the request.
+        // One Allow input opened this Simulator to this window on this thread;
+        // clicks then ride the grant. The grant is the window's, like the
+        // approval it came from, so another client on the thread does not ride
+        // it. Allow input itself never skips its confirmation this way.
         approvalValid = true;
         inputGranted = true;
       } else {
         approvalValid =
           (await codeOperationRuntime?.validateAppleApproval(windowId, action)) ?? false;
-        if (approvalValid && inputSimulatorId !== undefined) {
+        if (approvalValid && grantDestinationId !== undefined) {
           simulatorInputGrants.open({
             windowId: String(windowId),
             threadId: String(thread.id),
-            simulatorId: String(inputSimulatorId),
+            simulatorId: String(grantDestinationId),
           });
         }
       }
@@ -4367,6 +4482,142 @@ export function startOctantServer(
               ),
           }),
       recordEvidence: recordAppleEvidence,
+      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
+    const androidRuntimeStore = new AndroidRuntimeStore(
+      join(providerDataDirectory, "android-runtime"),
+    );
+    const androidProcess = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "android-runtime", "test-receipts"),
+      allowSimulatorControl: true,
+    });
+    yield* Effect.promise(() => androidProcess.reconcile());
+    const androidToolchainService = new AndroidToolchainService({
+      execute: (input, signal) => androidProcess.execute(input, signal),
+      spawnDetached: spawnDetachedProcess,
+      observeEmulators: (emulators) =>
+        androidInputGrants.closeUnlessBooted(
+          emulators.map((emulator) => ({
+            simulatorId: emulator.emulatorId,
+            state: emulator.state,
+          })),
+        ),
+      realpath,
+      writeArtifact: (reference, bytes, scope) =>
+        androidRuntimeStore.writeArtifact(reference, bytes, scope),
+      readArtifact: (reference, scope) => androidRuntimeStore.readArtifact(reference, scope),
+      now: () => new Date().toISOString(),
+      newId: randomUUID,
+    });
+    const androidRootProbe = decodeCodeRelativePath("package.json");
+    const resolveAndroidContext = async (
+      windowId: WindowId,
+      scope: {
+        readonly authority: import("@octant/contracts").ToolActionAuthority;
+        readonly threadId: import("@octant/contracts").CodeThreadId;
+        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
+      },
+      envelope: AndroidRpcEnvelope,
+    ): Promise<AndroidExecutionContext | undefined> => {
+      const thread = persistence.readCodeThread(scope.threadId);
+      const checkout = persistence.readCodeCheckout(scope.checkoutId);
+      if (
+        thread === undefined ||
+        checkout === undefined ||
+        thread.checkoutId !== checkout.id ||
+        thread.repositoryId !== checkout.repositoryId ||
+        thread.lifecycle !== "active" ||
+        checkout.availability !== "available" ||
+        scope.authority.hostId !== LOCAL_TOOL_HOST_ID ||
+        scope.authority.mode !== "code" ||
+        scope.authority.projectId !== thread.projectId ||
+        scope.authority.providerInstanceId !== thread.providerInstanceId ||
+        scope.authority.extension.kind !== "core"
+      ) {
+        return undefined;
+      }
+      const projects = await projectService.bootstrap(windowId);
+      if (
+        !projects.active.some(
+          (project) => project.id === thread.projectId && project.type === "code",
+        )
+      ) {
+        return undefined;
+      }
+      const resolvedRoot = await roots.resolve(windowId, thread, checkout, androidRootProbe);
+      if (resolvedRoot === undefined) return undefined;
+      if (
+        scope.authority.worktreeId !== undefined &&
+        String(scope.authority.worktreeId) !== String(checkout.id)
+      ) {
+        return undefined;
+      }
+      const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
+      const action = envelope.kind === "android-action-request" ? envelope.request : undefined;
+      const inputEmulatorId =
+        action !== undefined && isAndroidEmulatorInputKind(action.kind)
+          ? action.emulatorId
+          : undefined;
+      const grantDestinationId =
+        action !== undefined && androidActionOpensInputGrant(action.kind)
+          ? action.emulatorId
+          : undefined;
+      let approvalValid: boolean;
+      let inputGranted = false;
+      if (action === undefined || effectiveThread.executionPolicy === "full-access") {
+        approvalValid = true;
+      } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
+        approvalValid = false;
+      } else if (
+        inputEmulatorId !== undefined &&
+        androidInputGrants.isOpen({
+          windowId: String(windowId),
+          threadId: String(thread.id),
+          simulatorId: String(inputEmulatorId),
+        })
+      ) {
+        approvalValid = true;
+        inputGranted = true;
+      } else {
+        approvalValid =
+          (await codeOperationRuntime?.validateAndroidApproval(windowId, action)) ?? false;
+        if (approvalValid && grantDestinationId !== undefined) {
+          androidInputGrants.open({
+            windowId: String(windowId),
+            threadId: String(thread.id),
+            simulatorId: String(grantDestinationId),
+          });
+        }
+      }
+      return {
+        authority: scope.authority,
+        threadId: thread.id,
+        checkoutId: checkout.id,
+        checkoutRoot: resolvedRoot.rootPath,
+        artifactRoot: androidRuntimeStore.artifactRoot,
+        executionPolicy: effectiveThread.executionPolicy,
+        approvalValid,
+        ...(inputGranted ? { inputGranted } : {}),
+      };
+    };
+    const androidToolchainRoutes = createAndroidToolchainRouteHandler({
+      windowAuthorityStore,
+      service: androidToolchainService,
+      resolveContext: resolveAndroidContext,
+      afterAction: (windowId, request, evidence, context) => {
+        if (isReplayedAndroidEvidence(evidence)) return;
+        androidInputGrants.settle(
+          String(windowId),
+          { kind: request.kind, simulatorId: request.emulatorId },
+          evidence,
+          context,
+        );
+      },
+      inputGrants: (windowId, threadId) =>
+        androidInputGrants.list(String(windowId), String(threadId)).map((grant) => ({
+          emulatorId: grant.simulatorId,
+          expiresAt: grant.expiresAt,
+        })),
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     yield* Effect.promise(async () => {
@@ -7453,6 +7704,7 @@ export function startOctantServer(
       (await previewHandoffBridgeRoutes(request)) ??
       (await codeRoutes(request)) ??
       (await appleToolchainRoutes(request)) ??
+      (await androidToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
@@ -7889,6 +8141,7 @@ export function startOctantServer(
           }
           try {
             await appleToolchainService.close();
+            await androidToolchainService.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

@@ -3,6 +3,7 @@ export * from "./agentRunSettingsClient";
 export * from "./agentMessageClient";
 export * from "./agentProfileClient";
 export * from "./appleToolchainClient";
+export * from "./androidToolchainClient";
 export * from "./automationClient";
 export * from "./bindFetchPort";
 export * from "./browserAutomationClient";

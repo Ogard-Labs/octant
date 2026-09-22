@@ -10,6 +10,8 @@ import {
   isCoreAppleCapability,
   isToolchainAvailable,
   isAppleSimulatorInputKind,
+  isAppleSimulatorOpenInputKind,
+  appleActionOpensInputGrant,
   redactedAppleInputDiagnostic,
 } from "./appleToolchainPolicy";
 import type {
@@ -448,6 +450,24 @@ describe("Simulator frame input", () => {
     });
   });
 
+  it("treats Allow input as the confirmation that opens a Simulator, not as a click", () => {
+    const openInput = {
+      ...tap,
+      kind: "open-input" as const,
+      point: undefined,
+    };
+    const withoutToken = { ...openInput, approval: { kind: "not-required" as const } };
+    expect(isAppleSimulatorOpenInputKind("open-input")).toBe(true);
+    expect(isAppleSimulatorInputKind("open-input")).toBe(false);
+    expect(evaluateAppleSimulatorRequest(openInput, scope, [booted])).toEqual({ kind: "allowed" });
+    expect(
+      evaluateAppleSimulatorRequest(withoutToken, { ...scope, inputGranted: true }, [booted]),
+    ).toMatchObject({ reason: "approval-required" });
+    expect(
+      evaluateAppleSimulatorRequest(openInput, scope, [{ ...booted, state: "shutdown" }]),
+    ).toMatchObject({ kind: "denied", reason: "destination-not-booted" });
+  });
+
   it("treats tap, type-text, and key-press as destination effects that need a booted Simulator", () => {
     expect(isAppleSimulatorInputKind("tap")).toBe(true);
     expect(evaluateAppleSimulatorRequest(tap, scope, [booted])).toEqual({ kind: "allowed" });
@@ -459,6 +479,11 @@ describe("Simulator frame input", () => {
   it("treats a swipe as input like a tap, and records where it went without anything typed", () => {
     const swipe = { ...tap, kind: "swipe" as const, toPoint: { x: 12, y: 300 } };
     expect(isAppleSimulatorInputKind("swipe")).toBe(true);
+    expect(isAppleSimulatorInputKind("open-input")).toBe(false);
+    expect(isAppleSimulatorOpenInputKind("open-input")).toBe(true);
+    expect(appleActionOpensInputGrant("open-input")).toBe(true);
+    expect(appleActionOpensInputGrant("tap")).toBe(true);
+    expect(appleActionOpensInputGrant("shutdown")).toBe(false);
     expect(evaluateAppleSimulatorRequest(swipe, scope, [booted])).toEqual({ kind: "allowed" });
     expect(
       evaluateAppleSimulatorRequest(swipe, { ...scope, executionPolicy: "plan" }, [booted]),

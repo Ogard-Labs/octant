@@ -60,26 +60,40 @@ shows the project path, the "Apple development" eyebrow, Xcode version,
 scheme, revision, SDK count, Simulator count, **Actions**, **Simulator
 destinations**, **Current progress**, and **Validation evidence**.
 
-The iOS Simulator dock tab shows a live frame bound to the owning Code thread
-and checkout. Its states are setup, unavailable, booting, live, interrupted,
-and stale after a host restart. Under the Octant desktop app a live frame
-shows the Simulator's screen as it changes, so you see what a tap or an
-agent's action did without capturing in between. Frames are sent only when the
-screen changes, and they are never stored: nothing of the live view is written
-to disk, to the journal, or into a model's context. **Capture screen** is
-still how a screen becomes validation evidence. When the host has no live
-view, the frame shows the latest captured still instead. Remote, Linux, and headless clients
-say the native frame is not attachable instead of hanging or inventing a
-picture. Closing the tab unmounts the view only; it does not shut down,
-erase, or transfer the destination.
+The iOS Simulator dock tab is a device pane bound to the owning Code thread
+and checkout: the live frame, a compact destination rail (Boot, Capture
+screen, Shut down), Home and Lock, and in-flight progress. It does not show
+scheme facts, Build, Test, or the validation-evidence dump — those stay on
+the Apple workbench command. Its states are setup, unavailable, booting, live,
+interrupted, and stale after a host restart. Under the Octant desktop app a
+live frame shows the Simulator's screen as it changes, so you see what a tap
+or an agent's action did without capturing in between. Frames are sent only
+when the screen changes, and they are never stored: nothing of the live view
+is written to disk, to the journal, or into a model's context. **Capture
+screen** is still how a screen becomes validation evidence. When the host has
+no live view, the frame shows the latest captured still instead. Remote,
+Linux, and headless clients say the native frame is not attachable instead of
+hanging or inventing a picture. Closing the tab unmounts the view only; it
+does not shut down, erase, or transfer the destination.
+
+An agent's `octant_apple` `boot`, `run`, or `open` opens that pane beside the
+transcript. `open` boots a shut-down destination and otherwise only shows the
+pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim: the
+in-app pane is the live device. The pane opens once per request; a tab you
+closed stays closed until the agent asks again.
 
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
 requests, and the Octant desktop app delivers them to the Simulator through a
 small native helper it ships. Nothing comes to the foreground and no macOS
-Accessibility permission is needed. A tap lands on the point you click on the
-captured screen. **Type** sends letters, digits, spaces, and new lines; text
+Accessibility permission is needed. Without that helper, tap, swipe, typing,
+and keys are unavailable — Octant does not launch or script Simulator.app to
+deliver them. A tap lands on the point you click on the
+captured screen. On an approval-gated thread, **Allow input** is the one
+confirmation that opens that Simulator; clicks, typing, Home, and Lock never
+raise a dialog. That grant covers input for fifteen minutes after each
+input. **Type** sends letters, digits, spaces, and new lines; text
 with any other character is refused whole rather than typed wrong, because a
 Simulator maps key positions with its own keyboard language. For the same
 reason typing works on a Simulator whose keyboard language uses a QWERTY
@@ -91,7 +105,7 @@ later. When the host cannot deliver an input action, the evidence names the
 host's refusal rather than reading as interrupted. Remote, Linux, and
 headless clients stay read-only. Typed characters never land in durable
 evidence, and neither does the reason a type-text action failed, since it can
-quote the script. Destination actions remain on the workbench list: each
+quote what was typed. Destination actions remain on the workbench list: each
 Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,
@@ -117,13 +131,13 @@ running can be **Cancel**led from **Current progress**.
 
 An approval-gated Code thread asks for confirmation before each of these, the
 same confirmation the rest of Code uses. Input to the device is the exception
-to "each": the first tap, typed text or key to a Simulator asks once, and that
-approval keeps the Simulator open to input from that window, on that thread,
-for fifteen minutes after each input, so driving the live frame is not a dialog
-per touch. Another window or browser tab on the same thread asks for its own
-confirmation. Shutting the Simulator down, closing the window, or restarting
-Octant ends it. So does a refresh that finds the Simulator no longer booted,
-even if it was shut down from Xcode. **Capture screen**
+to "each": **Allow input** asks once, and that approval keeps the Simulator
+open to input from that window, on that thread, for fifteen minutes after each
+input, so driving the live frame is not a dialog per touch. Clicks never open
+that confirmation. Another window or browser tab on the same thread asks for
+its own confirmation. Shutting the Simulator down, closing the window, or
+restarting Octant ends it. So does a refresh that finds the Simulator no
+longer booted, even if it was shut down from Xcode. **Capture screen**
 asks for nothing: reading
 a booted Simulator's screen changes nothing, so it works under Plan mode too.
 A capture is recorded as a **screenshot** artifact in **Validation evidence**
@@ -137,8 +151,10 @@ no such command. `Package.swift` is not listed.
 
 A Code thread on **Full access** also reaches these actions through the
 app-managed `octant_apple` tool, so an agent can discover the toolchain, read
-Simulator state, build, test, run, boot, shut down, capture the screen, and
-inject tap, swipe, typed text, and hardware keys. Pane-driven input journals as
+Simulator state, build, test, run, boot, open the in-app pane, shut down,
+capture the screen, and inject tap, swipe, typed text, and hardware keys.
+`boot`, `run`, and `open` show the Simulator in Octant's iOS Simulator pane
+— never by launching Simulator.app. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`. The host binds both to
 the same thread and checkout and refuses them with the same policy; the tool
 is unavailable under Plan and approval-gated postures. The workbench never
@@ -173,6 +189,7 @@ the core Apple path.
 
 ## Next steps
 
+- [Android emulator](/advanced/android-emulator) for the separate in-app AVD destination
 - [Browser and computer use](/advanced/browser-and-computer-use) for the host-owned computer-use surface
 - [Plugins and skills](/advanced/plugins-and-skills) for optional extension content
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries

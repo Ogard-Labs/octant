@@ -2,6 +2,8 @@ import type {
   AppleBuildRequest,
   AppleDiscoveryRequest,
   AppleSimulatorRequest,
+  AppleSimulatorRecord,
+  AppleRuntimeSnapshot,
   ToolActionAuthority,
   ToolActionCancellation,
 } from "@octant/contracts";
@@ -19,6 +21,10 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   ): Promise<any>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   snapshot(context: ExecutionContext): any;
+  requestPaneOpen(
+    context: ExecutionContext,
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+  ): AppleRuntimeSnapshot;
   close(): Promise<void>;
   reconcileAfterRestart(
     receipts: ReadonlyArray<Record<string, unknown>>,
@@ -676,6 +682,100 @@ describe("AppleToolchainService lifecycle", () => {
       context,
     );
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+  });
+
+  it("puts a Simulator back to shutdown when boot does not become ready, so Boot can be offered again", async () => {
+    const execute = discoveryExecutor();
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockResolvedValue(processResult("ok\n"));
+    await service.execute(
+      simulatorRequest({
+        kind: "shutdown",
+        actionId: "30000000-0000-4000-8000-000000000021" as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+    execute.mockResolvedValue(processResult("", { exitCode: 1, stderr: "Unable to boot" }));
+    const failed = await service.execute(
+      simulatorRequest({
+        kind: "boot",
+        actionId: "30000000-0000-4000-8000-000000000022" as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    expect(failed.outcome).not.toBe("succeeded");
+    expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+    execute.mockResolvedValue(processResult("ok\n"));
+    const retried = await service.execute(
+      simulatorRequest({
+        kind: "boot",
+        actionId: "30000000-0000-4000-8000-000000000023" as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    expect(retried.outcome).toBe("succeeded");
+    expect(service.snapshot(context).simulators[0]?.state).toBe("booted");
+  });
+
+  it("stamps an in-app pane request on the snapshot for that thread only", async () => {
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const simulatorId = service.snapshot(context).simulators[0]?.simulatorId;
+    if (simulatorId === undefined) throw new Error("expected a discovered Simulator");
+    const opened = (
+      service as unknown as {
+        requestPaneOpen: (
+          scope: ExecutionContext,
+          id: typeof simulatorId,
+        ) => {
+          readonly paneOpenRequest?: {
+            readonly requestId: string;
+            readonly simulatorId: typeof simulatorId;
+            readonly requestedAt: string;
+          };
+        };
+      }
+    ).requestPaneOpen(context, simulatorId);
+    expect(opened.paneOpenRequest).toEqual({
+      requestId: "30000000-0000-4000-8000-000000000012",
+      simulatorId,
+      projectPath: discoveryRequest.projectPath,
+      requestedAt: "2026-07-27T20:00:00.000Z",
+    });
+    expect(
+      service.snapshot({
+        ...context,
+        threadId: "30000000-0000-4000-8000-000000000099" as never,
+      }).paneOpenRequest,
+    ).toBeUndefined();
+    const other = { ...context, threadId: "30000000-0000-4000-8000-000000000099" as never };
+    service.requestPaneOpen(other, simulatorId);
+    expect(service.snapshot(context).paneOpenRequest).toEqual(opened.paneOpenRequest);
+    expect(service.snapshot(other).paneOpenRequest).toBeDefined();
+    for (let index = 0; index < 256; index += 1) {
+      service.requestPaneOpen(
+        { ...context, threadId: `40000000-0000-4000-8000-${String(index).padStart(12, "0")}` },
+        simulatorId,
+      );
+      if (index === 128) service.requestPaneOpen(context, simulatorId);
+    }
+    expect(service.snapshot(other).paneOpenRequest).toBeUndefined();
+    expect(service.snapshot(context).paneOpenRequest).toBeDefined();
   });
 
   it("keeps a shutdown that finished while a slower discovery was still reading", async () => {
@@ -1534,6 +1634,37 @@ describe("AppleToolchainService Simulator input", () => {
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 
+  it("opens a Simulator to input without injecting anything", async () => {
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const gated = {
+      ...context,
+      executionPolicy: "approval-gated" as const,
+      approvalValid: true,
+    };
+    await service.discover(discoveryRequest, gated);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "open-input",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      gated,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.kind).toBe("open-input");
+    expect(JSON.stringify(evidence.diagnostics)).toContain("Input is allowed to this Simulator.");
+    expect(injectSimulatorInput).not.toHaveBeenCalled();
+  });
+
   it("replaces host paths in the reason an action recorded no evidence", async () => {
     const discovery = discoveryExecutor();
     const execute = vi.fn(async (input: { readonly argv: readonly string[] }) => {
@@ -1684,26 +1815,20 @@ describe("AppleToolchainService Simulator input", () => {
   });
 
   it("names the host's refusal when a key-press fails instead of reading as interrupted", async () => {
-    // Observed 2026-09-19 under the packaged app: osascript exited 1 with
-    // "Connection Invalid error for service com.apple.hiservices-xpcservice."
-    // and the person saw "Apple key-press interrupted." with an empty log.
-    const discovery = discoveryExecutor();
-    const execute = vi.fn(async (input: { readonly argv: readonly string[] }) =>
-      input.argv[0] === "osascript"
-        ? processResult("", {
-            exitCode: 1,
-            stderr:
-              "2026-09-19 16:30:07.225 osascript[11087:11470129] Error received in message reply handler: Connection invalid\n" +
-              "2026-09-19 16:30:07.225 osascript[11087:11470132] Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
-              `2026-09-19 16:30:07.226 osascript[11087:11470129] script at ${context.checkoutRoot}/run.scpt`,
-          })
-        : discovery(input as never),
-    );
+    // Observed 2026-09-19 under the packaged app: a failed inject used to
+    // surface as "Apple key-press interrupted." with an empty log.
+    const execute = discoveryExecutor();
     const artifacts = new Map<string, Uint8Array>();
     const service = new AppleToolchainService({
-      execute: execute as never,
-      // The osascript fallback is Darwin-only; CI runs this suite on Linux too.
-      platform: "darwin",
+      execute,
+      injectSimulatorInput: async () =>
+        processResult("", {
+          exitCode: 1,
+          stderr:
+            "2026-09-19 16:30:07.225 helper: Connection invalid\n" +
+            "Connection Invalid error for service com.apple.hiservices-xpcservice.\n" +
+            `script at ${context.checkoutRoot}/run.scpt`,
+        }),
       writeArtifact: async (reference: string, bytes: Uint8Array) => {
         artifacts.set(reference, bytes);
       },
@@ -1822,7 +1947,7 @@ describe("AppleToolchainService Simulator input", () => {
     expect(evidence.diagnostics[0]?.message).toContain("Open the thread on the Mac");
   });
 
-  it("refuses Darwin coordinate taps without a reviewed injector or semantic target", async () => {
+  it("reports every input kind unavailable on Darwin when the host has no device helper, and never runs osascript", async () => {
     const execute = discoveryExecutor();
     const service = new AppleToolchainService({
       execute,
@@ -1833,18 +1958,61 @@ describe("AppleToolchainService Simulator input", () => {
       newId: () => "30000000-0000-4000-8000-000000000012",
     });
     await service.discover(discoveryRequest, context);
-    const evidence = await service.execute(
+    const kinds = [
       simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000021" as never,
         kind: "tap",
         bundleIdentifier: undefined,
         requestedBy: actor,
         point: { x: 10, y: 20 },
         approval: { kind: "approved", approvalId: ids.approval as never },
       }),
-      context,
-    );
-    expect(evidence.outcome).toBe("unavailable");
-    expect(JSON.stringify(evidence.diagnostics)).toContain("Coordinate taps require");
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000022" as never,
+        kind: "tap",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        target: "Login",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000023" as never,
+        kind: "type-text",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        text: "hello",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000024" as never,
+        kind: "key-press",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        key: "return",
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      simulatorRequest({
+        actionId: "30000000-0000-4000-8000-000000000025" as never,
+        kind: "swipe",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        point: { x: 10, y: 200 },
+        toPoint: { x: 10, y: 40 },
+        durationMs: 250,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      } as never),
+    ];
+    for (const request of kinds) {
+      const evidence = await service.execute(request, context);
+      expect(evidence.outcome).toBe("unavailable");
+      if (request.kind === "type-text") {
+        expect(JSON.stringify(evidence.diagnostics)).toContain("text redacted");
+        expect(JSON.stringify(evidence.diagnostics)).not.toContain("hello");
+      } else {
+        expect(JSON.stringify(evidence.diagnostics)).toContain("device helper");
+        expect(JSON.stringify(evidence.diagnostics)).toContain("never activates Simulator.app");
+      }
+    }
     expect(execute).not.toHaveBeenCalledWith(
       expect.objectContaining({ argv: expect.arrayContaining(["osascript"]) }),
       expect.anything(),

@@ -59,6 +59,53 @@ describe("AppleSimulatorLiveFrameView", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("keeps the Type field on the in-app device pane when the still fallback is showing", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "The destination is live.",
+    };
+    render(
+      <AppleSimulatorLiveFrameView
+        chrome="device"
+        frame={frame}
+        inputEnabled
+        onInput={vi.fn()}
+        screenUrl="https://octant.test/apple-screenshot-live"
+      />,
+    );
+    expect(screen.getByLabelText("Type into Simulator")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Home" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Lock" })).toBeVisible();
+  });
+
+  it("hides the evidence dump and Type field on a streamed in-app device pane", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "The destination is live.",
+    };
+    render(
+      <AppleSimulatorLiveFrameView
+        chrome="device"
+        frame={frame}
+        inputEnabled
+        liveScreen={{ status: "live", screen: { width: 1206, height: 2622 }, attach: vi.fn() }}
+        onInput={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("apple-screenshot-live")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Type into Simulator")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Home" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Lock" })).toBeVisible();
+  });
+
   it("reports a pending capture until the host-held image URL is available", () => {
     const frame: AppleSimulatorLiveFrame = {
       status: "live",

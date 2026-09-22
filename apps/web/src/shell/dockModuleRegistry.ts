@@ -25,6 +25,7 @@ const ProjectPullRequestsModule = lazy(() => import("../dockModules/ProjectPullR
 const TerminalModule = lazy(() => import("../dockModules/TerminalModule"));
 const TestsModule = lazy(() => import("../dockModules/TestsModule"));
 const SimulatorModule = lazy(() => import("../dockModules/SimulatorModule"));
+const AndroidEmulatorModule = lazy(() => import("../dockModules/AndroidEmulatorModule"));
 const EnvironmentModule = lazy(() => import("../dockModules/EnvironmentModule"));
 
 /** Closed module allowlist. Runtime availability remains owned by the host. */
@@ -163,6 +164,17 @@ export const dockModules: Readonly<
         "serverUrl",
         "subject",
         "utilityTabId",
+        "windowCapability",
+      ]),
+    ),
+  "android-emulator": (props) =>
+    createElement(
+      AndroidEmulatorModule,
+      inputs(props, [
+        "androidToolchainClient",
+        "codeController",
+        "hostBridge",
+        "subject",
         "windowCapability",
       ]),
     ),

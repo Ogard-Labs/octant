@@ -323,6 +323,8 @@ describe("Apple runtime contracts", () => {
     expect(decode({ ...base, kind: "type-text", text: "hello" }).text).toBe("hello");
     expect(decode({ ...base, kind: "type-text", text: " spaced " }).text).toBe(" spaced ");
     expect(decode({ ...base, kind: "key-press", key: "return" }).key).toBe("return");
+    expect(decode({ ...base, kind: "open-input" }).kind).toBe("open-input");
+    expect(() => decode({ ...base, kind: "open-input", requestedBy: undefined })).toThrow();
     expect(() => decode({ ...base, kind: "tap" })).toThrow();
     expect(() =>
       decode({ ...base, kind: "type-text", text: "hello", requestedBy: undefined }),
@@ -396,6 +398,26 @@ describe("Apple runtime contracts", () => {
       recentEvidence: [],
     });
     expect(snapshot.active[0].step).toBe("testing");
+    expect(snapshot.paneOpenRequest).toBeUndefined();
+    const opening = (decodeSnapshot as (value: unknown) => any)({
+      ...snapshot,
+      paneOpenRequest: {
+        requestId: "10000000-0000-4000-8000-000000000013",
+        simulatorId: "10000000-0000-4000-8000-000000000014",
+        requestedAt: "2026-07-27T20:00:01.000Z",
+      },
+    });
+    expect(opening.paneOpenRequest.simulatorId).toBe("10000000-0000-4000-8000-000000000014");
+    expect(() =>
+      (decodeSnapshot as (value: unknown) => any)({
+        ...snapshot,
+        paneOpenRequest: {
+          requestId: "not-a-uuid",
+          simulatorId: "10000000-0000-4000-8000-000000000014",
+          requestedAt: "2026-07-27T20:00:01.000Z",
+        },
+      }),
+    ).toThrow();
   });
 
   it("decodes project discovery without exposing an absolute repository path", () => {

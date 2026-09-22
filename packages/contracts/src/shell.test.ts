@@ -637,6 +637,12 @@ describe("Code workspace tabs", () => {
       threadId: ids.thread,
       projectPath: "Fixture/Fixture.xcodeproj",
     },
+    {
+      kind: "apple-workbench",
+      threadId: ids.thread,
+      projectPath: "Fixture/Fixture.xcodeproj",
+      pane: "device",
+    },
   ] as const)("decodes a strict $kind tab scoped to Code", (specific) => {
     const codeTab = {
       ...specific,
