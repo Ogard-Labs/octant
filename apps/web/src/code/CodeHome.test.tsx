@@ -135,6 +135,31 @@ function card(overrides: Partial<CodeBoardCard>): CodeBoardCard {
 }
 
 describe("CodeHome", () => {
+  it("keeps local threads available without integrations and resumes them with the keyboard", async () => {
+    const user = userEvent.setup();
+    const onOpenThread = vi.fn();
+    const thread = card({
+      title: "Continue a long-running investigation with all of its context intact",
+    });
+    render(
+      <CodeHome
+        onPickGithub={vi.fn()}
+        onPickIssue={vi.fn()}
+        continueCards={{ kind: "ready", cards: [thread] }}
+        onOpenThread={onOpenThread}
+      />,
+    );
+    const section = screen.getByRole("region", { name: "Continue" });
+    expect(within(section).getByTitle(thread.title)).toBeVisible();
+    const row = within(section).getByRole("button");
+    row.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith({
+      threadId: thread.threadId,
+      projectId: thread.projectId,
+    });
+  });
+
   it("lists assigned work, open issues nobody took, and the latest threads with their delivery state", async () => {
     const user = userEvent.setup();
     const onPickGithub = vi.fn();

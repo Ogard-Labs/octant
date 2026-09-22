@@ -28,6 +28,9 @@ General settings despite having no effect on task readiness or authority.
 - Code suggestions keep their full descriptions visible and fill the existing
   composer when chosen. The welcome pattern remains user-controlled under
   0091, with quieter defaults and a clear central reading column.
+- Continue retains recent threads and their status, Project, branch, provider,
+  pull-request details, and resume action. Rows adapt to the workspace width;
+  background refresh keeps the previous list visible until new data arrives.
 - The compact model picker uses a horizontal source bar and single-line model
   rows where provider and capability information would otherwise repeat.
   Search, Favorites, and Recent retain provider identity per row. Recent keeps

@@ -405,7 +405,12 @@ function HomeCard(props: {
           </span>
         )}
       </span>
-      <span className="code-home__card-title">{props.title}</span>
+      <span
+        className="code-home__card-title"
+        title={props.layout === "row" ? props.title : undefined}
+      >
+        {props.title}
+      </span>
       {props.facts !== undefined ? (
         props.facts
       ) : props.meta === undefined || props.meta === "" ? null : (
