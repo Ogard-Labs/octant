@@ -1245,6 +1245,46 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.queryByRole("button", { name: /Old/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Collapse auroradocs" })).not.toBeInTheDocument();
   });
+
+  it("explains an activity window that matched no threads instead of a blank sidebar", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({ filters: { activity: "today" } }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={new Date("2026-08-23T15:00:00.000Z")}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-old",
+            title: "Old",
+            updatedAt: "2026-08-01T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "No threads match the current filters. Nothing was deleted — clear search or filters to see more.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Old/i })).not.toBeInTheDocument();
+  });
+
 });
 
 describe("ProjectSidebarSection Code and Work recents", () => {
