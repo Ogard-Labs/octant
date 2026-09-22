@@ -15,7 +15,6 @@ import {
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
-  gitGlobalConfigReadRoots,
   gitLinkedWorktreeMetadataRules,
   gitShimExtraRules,
   type GitSeatbeltPortOptions,
@@ -248,7 +247,6 @@ export class GitHistoryPort {
         ...metadata,
         binaryDirectory,
         dirname(binaryDirectory),
-        ...gitGlobalConfigReadRoots(),
       ],
       ...(extraRules.length === 0 ? {} : { extraRules }),
     });
