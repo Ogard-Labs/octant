@@ -99,6 +99,21 @@ describe("ThemeAppearanceEditor", () => {
     }
   });
 
+  it("accessibility switches render as setting rows", () => {
+    render(<ThemeAppearanceEditor controller={controller()} />);
+
+    const settingIds = screen
+      .getAllByTestId("setting-row")
+      .map((row) => row.getAttribute("data-setting-id"));
+    expect(settingIds).toEqual(
+      expect.arrayContaining([
+        "appearance.accessibility.reduced-motion",
+        "appearance.accessibility.increased-contrast",
+        "appearance.accessibility.reduced-transparency",
+      ]),
+    );
+  });
+
   it("names a saved system stack as the default face it now means", () => {
     // Settings saved while the system face was the default hold its stack
     // verbatim. That string means "the default", so the picker names the face
