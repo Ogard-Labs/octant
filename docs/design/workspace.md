@@ -65,6 +65,11 @@ References are cleared when the pane or its authority context changes; reload
 restores only the authoritative visible surface. Closing image creation stops
 observation, while only Cancel job cancels generation on the host. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
+Thread titles appear once in the title row. Project context remains in the drag
+handle tooltip and in the Work composer's attached project/folder strip. Tab
+geometry and close-control presentation are shared with dock tools under
+[Content tabs](../../DESIGN.md#content-tabs).
+
 These tabs add no persisted layout or authority; see
 [decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
 Several same-authority threads can be pinned or dropped into

@@ -178,7 +178,6 @@ links from specifications remain useful for rationale and supporting detail.
 | [0156](0156-content-opens-beside-the-conversation.md) | Content opens beside the conversation | Accepted |
 
 | [0157](0157-native-resume-keeps-a-durable-identity.md) | Native resume keeps a durable identity | Accepted |
-| [0158](0158-thread-titles-and-composer-location.md) | Thread titles and composer location | Accepted |
 
 ## Recording architectural rationale
 
