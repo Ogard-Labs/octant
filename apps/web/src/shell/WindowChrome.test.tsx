@@ -384,6 +384,18 @@ describe("WindowChrome", () => {
     expect(projects).toContain("margin-top: 0;");
     expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
 
+    // A closed folder has no child rows to separate from its neighbours, so
+    // it uses a 28px header rhythm instead of spending the full thread-row
+    // height on an empty branch of the tree.
+    const closedProject = cssRule('.project-row[data-folder-state="closed"]');
+    expect(closedProject).toContain("min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));");
+    const closedProjectSelect = cssRule(
+      '.project-row[data-folder-state="closed"] .project-row__select',
+    );
+    expect(closedProjectSelect).toContain(
+      "min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));",
+    );
+
     // The nested list is a folder child: a small inset and rail make that
     // relationship visible without giving every thread its own card.
     const nestedRows = cssRule(".project-block > .project-threads");

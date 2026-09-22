@@ -1327,6 +1327,17 @@ h6 {
   color: var(--oct-muted);
 }
 
+/* A closed folder has no child rows to space around. Keep that branch of the
+   tree compact while open folders retain the normal navigation rhythm for
+   their visible children. */
+.project-row[data-folder-state="closed"] {
+  min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
+}
+
+.project-row[data-folder-state="closed"] .project-row__select {
+  min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
+}
+
 /* The whole row, name and trailing controls together, takes the soft wash
    under the pointer; the name button inside paints nothing of its own, so
    the row never shows a second, smaller fill. */

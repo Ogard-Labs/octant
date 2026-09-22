@@ -881,6 +881,7 @@ function ProjectGroup(props: {
           <div className="project-block" key={project.id}>
             <div
               className="project-row"
+              data-folder-state={showNested && expanded ? "open" : "closed"}
               // A selected thread already marks the row the reader chose. The
               // Project it lives in stays the active Project, but it does not
               // wear the same selected background and compete with it.
