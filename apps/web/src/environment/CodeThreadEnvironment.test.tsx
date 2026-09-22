@@ -140,7 +140,9 @@ describe("CodeThreadEnvironment", () => {
     expect(client.environmentForThread).not.toHaveBeenCalled();
     rerender(view("available"));
 
-    expect(await screen.findByLabelText("Checkout")).toHaveTextContent("feature/issue-204");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Checkout")).toHaveTextContent("feature/issue-204"),
+    );
   });
 
   it("renders the code workspace children inside the content area", () => {

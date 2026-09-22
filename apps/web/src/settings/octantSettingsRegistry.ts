@@ -21,14 +21,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work profile name email avatar updates version release threads completed archive snooze",
+        "general enabled modes startup default chat work updates version release threads completed archive snooze",
       settings: [
-        {
-          id: settingId("user-profile"),
-          label: "Your profile",
-          scope: "app",
-          keywords: "profile name email avatar gravatar initials colour color picture",
-        },
         {
           id: settingId("enable-chat"),
           label: "Enable Chat",
@@ -68,6 +62,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "marketplace fetches skills npm github registry catalog search inspect install privacy off",
+        },
+      ],
+    },
+    {
+      id: "profile",
+      label: "Profile",
+      scope: "app",
+      keywords: "profile name email avatar gravatar initials colour color picture identity",
+      settings: [
+        {
+          id: settingId("user-profile"),
+          label: "Your profile",
+          scope: "app",
+          keywords: "profile name email avatar gravatar initials colour color picture",
         },
       ],
     },
@@ -291,6 +299,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads",
       settings: [
+        {
+          id: settingId("code-default-folder-threads"),
+          label: "Threads without a Project",
+          scope: "mode",
+          keywords: "default folder projectless no project git repository",
+        },
         {
           id: settingId("open-in-applications"),
           label: "Open in applications",

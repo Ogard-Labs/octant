@@ -273,9 +273,9 @@ describe("resolveEffectiveSidebarBackground", () => {
 describe("application background policy", () => {
   const resolvedDefaults = {
     patternEnabled: true,
-    patternOpacity: 0.55,
+    patternOpacity: 0.22,
     patternSpeed: 1,
-    patternIntensity: 0.6,
+    patternIntensity: 0.35,
     photoDithered: true,
     photoOpacity: 0.42,
     scope: "welcome",

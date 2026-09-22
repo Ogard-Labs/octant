@@ -405,6 +405,7 @@ export interface WorkspaceViewProps {
   readonly onDraftCancelFirstTurn?: () => void;
   readonly onAttachFolder?: () => void;
   readonly onOpenDraftThread?: (mode: "work" | "code") => void;
+  readonly onOpenCodeSettings?: () => void;
   readonly onOpenProviderSettings?: () => void;
   readonly onOpenSettings?: () => void;
   readonly providerReady?: boolean;
@@ -1204,6 +1205,9 @@ function renderNonCodeTab(
             ? {}
             : { onCreateProject: props.onCreateProject })}
           {...(props.defaultFolder === undefined ? {} : { defaultFolder: props.defaultFolder })}
+          {...(props.onOpenCodeSettings === undefined
+            ? {}
+            : { onOpenCodeSettings: props.onOpenCodeSettings })}
           {...(props.codeDefaultFolderThreads === undefined
             ? {}
             : { codeDefaultFolderThreads: props.codeDefaultFolderThreads })}

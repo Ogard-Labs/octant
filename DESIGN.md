@@ -157,6 +157,18 @@ The row wraps rather than grows: a control that needs a list ("Create
 from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
 
+First-run setup is optional from its first step. Skipping preserves settled answers,
+waits for pending writes, and grants no authority. Profile editing has its own
+Personal settings destination. Code suggestions keep their full descriptions
+visible; Continue retains compact recent-task rows and their status and Git cues.
+Empty Code entry offers folder setup and a direct route to Code settings.
+
+The compact model picker uses explicit horizontal provider selection, sub-provider
+grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
+discrete stops, and filled range. Explicit model and reasoning choices are remembered
+locally for new threads; reasoning is keyed by provider/model and restored only while
+supported. Existing thread selections remain authoritative.
+
 The screen sits on the application ground (0091, 0129): an ordered-dither cloud
 drawn from the theme's bounded pattern palette at one cell per three pixels, one of the
 first-party Zen backgrounds with its still-frame fallback, a person's photo

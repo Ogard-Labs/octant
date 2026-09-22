@@ -253,23 +253,20 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
   });
 
-  it("leaves Profile open, like the routine General groups around it", () => {
+  it("keeps General focused on defaults and opens profile editing from Personal settings", () => {
     renderSettings();
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Updates" })).toBeVisible();
+    navigateTo("Profile");
+    expect(screen.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
+    expect(screen.getByLabelText("Name")).toBeVisible();
+    expect(screen.getByLabelText("Name").closest("details")).toBeNull();
+  });
 
-    // Your name, picture and avatar colour are identity, not an advanced
-    // option, so reaching them costs no click. It used to be a disclosure
-    // whose collapsed summary previewed the display name.
-    const heading = screen.getByRole("heading", { name: "Profile" });
-    expect(heading.closest(".settings-card-section")).toHaveClass("settings-card-section--open");
-    expect(heading.closest("details")).toBeNull();
-    // The row it used to hide is on the page without being opened.
-    expect(document.querySelector('[data-setting-id="user-profile"]')).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: "Available modes" }).closest(".settings-card-section"),
-    ).toHaveClass("settings-card-section--open");
-    const modes = screen.getByRole("heading", { name: "Available modes" });
-    const profile = screen.getByRole("heading", { name: "Profile" });
-    expect(modes.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  it("keeps existing profile setting links pointed at the profile editor", () => {
+    renderSettings({ initialDeepLink: { section: "general", setting: "user-profile" } });
+    expect(screen.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
+    expect(screen.getByLabelText("Name")).toBeVisible();
   });
 
   it("moves keyboard shortcuts out of General into a dedicated section", () => {
@@ -508,10 +505,12 @@ describe("SettingsView", () => {
       },
       updateSettings: vi.fn(async () => true),
     } as unknown as CodeController;
-    renderSettings({ codeController });
-
-    navigateTo("Code");
+    renderSettings({
+      codeController,
+      initialDeepLink: { section: "code", setting: "code-default-folder-threads" },
+    });
     expect(screen.getByRole("heading", { name: "Code defaults" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Threads without a Project" })).toHaveFocus();
   });
 
   it("maps the saved sidebar material to the direct translucency switch", async () => {

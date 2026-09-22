@@ -461,9 +461,9 @@ describe("sidebar background contracts", () => {
 describe("application background contracts", () => {
   const tuning = {
     patternEnabled: true,
-    patternOpacity: 55,
+    patternOpacity: 22,
     patternSpeed: 50,
-    patternIntensity: 60,
+    patternIntensity: 35,
     photoDithered: true,
     photoOpacity: 42,
     scope: "welcome",

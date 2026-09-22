@@ -42,7 +42,7 @@ Projects support the following operations:
 
 ## Project quick start
 
-Chat and Work Project overviews can start a thread directly. Their model pickers offer the selected model's declared reasoning or effort levels. The chosen level is applied before the first message and remains part of that thread's model settings. Choosing **Default** leaves the provider default in effect; changing the provider or model clears the quick-start level choice.
+Chat and Work Project overviews can start a thread directly. Their model pickers offer the selected model's declared reasoning or effort levels. The chosen level is applied before the first message and remains part of that thread's model settings. Choosing **Default** leaves the provider default in effect; changing the provider or model restores its last supported quick-start reasoning choice, or the provider default when none was remembered.
 
 ## Project hierarchy
 

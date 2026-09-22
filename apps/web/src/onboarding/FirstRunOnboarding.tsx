@@ -3,9 +3,9 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { NavigatorAssistantModelRef } from "@octant/contracts/navigator-assistant";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { enabledModes, isNamed, isProfileConfigured } from "@octant/domain";
+import { enabledModes, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -106,8 +106,7 @@ type SetupWrite<Answer> = (answer: Answer) => Promise<boolean>;
  * It exists to get a new user from a clean launch to a real thread without a
  * hidden prerequisite. Five setup steps — profile, workspace, providers,
  * default model, Navigator — then a readiness view that reports provider,
- * Project, and a mode-valid default model separately. Setup steps except the
- * name can be walked past; the handoff does not invent readiness they skipped.
+ * Project, and a mode-valid default model separately. Setup steps can be walked past; the handoff does not invent readiness they skipped.
  *
  * Answers are recorded as they are made, so quitting mid-way keeps what was
  * already chosen; only the first-run *outcome* is recorded at the end.
@@ -131,10 +130,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [syncedProfile, setSyncedProfile] = useState<UserProfile>(props.profile);
   const [importing, setImporting] = useState(false);
   const [resolving, setResolving] = useState(false);
-  // Whether the reader has tried to go on, skip, or dismiss without a name.
-  // The requirement reads as help until then: the step used to open with its
-  // one field already marked invalid, before anything had been typed.
-  const [nameAsked, setNameAsked] = useState(false);
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const answerLost = useRef(false);
   const nameField = useRef<HTMLInputElement>(null);
@@ -157,11 +152,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // picture or a model the user explicitly chose, so an answer stays busy from
   // the click until the last of those writes has been accepted.
   const busy = controller.submitting !== undefined || importing || resolving;
-  // The one answer first run does not walk past. Everything the app says about
-  // the reader — the sidebar, a thread, a shared surface — needs something to
-  // call them, and it reads the draft rather than the saved profile so a name
-  // just typed unblocks the step whether or not its write has landed yet.
-  const unnamed = !isNamed(profileDraft);
   const availableModes = enabledModes({
     chatEnabled: props.workspace.chatEnabled,
     workEnabled: props.workspace.workEnabled,
@@ -194,11 +184,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       props.readiness.overall,
     ],
   );
-
-  // Returning to the first step mounts the field a render later than the ask.
-  useEffect(() => {
-    if (nameAsked && step === "profile") nameField.current?.focus();
-  }, [nameAsked, step]);
 
   if (!controller.visible) return null;
 
@@ -277,39 +262,18 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     track(props.onSaveProfile(profileDraft));
   }
 
-  /**
-   * Answer an attempt to leave without the one required answer.
-   *
-   * Every way out of the first step refuses while there is no name. Refusing
-   * silently made Continue, Skip, and Escape all look broken, so the refusal is
-   * said where the answer goes: the field takes focus and states what it needs.
-   */
-  function askForName() {
-    setNameAsked(true);
-    // The name field lives on the first step. A profile can come back unnamed
-    // while a later step is up (the host refused a conflicting write and the
-    // draft followed it), and asking there pointed at a field that was not on
-    // screen, so Continue looked dead.
-    if (step !== "profile") {
-      setHandoffOpen(false);
-      setStep("profile");
-    }
-    nameField.current?.focus();
-  }
-
   function goTo(target: FirstRunStepId) {
     // Leaving the profile step flushes its draft, so walking away mid-import
     // would flush the profile without the picture and unmount the editor that
     // was going to report it.
     if (importing) return;
-    if (unnamed && target !== "profile") return;
     if (step === "profile" && target !== "profile") flushProfile();
     setHandoffOpen(false);
     setStep(target);
   }
 
   function openHandoff() {
-    if (importing || unnamed) return;
+    if (importing) return;
     if (step === "profile") flushProfile();
     setHandoffOpen(true);
   }
@@ -341,17 +305,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function skip() {
-    // Escape and a backdrop press arrive here too, and would leave the host
-    // with nothing to call the reader.
-    if (unnamed) {
-      askForName();
-      return;
-    }
     void resolveWith(controller.skip);
   }
 
   async function resolveWith(record: () => void, after?: () => void) {
-    if (importing || resolving || unnamed) return;
+    if (importing || resolving) return;
     flushProfile();
     setResolving(true);
     const accepted = await settleWrites();
@@ -402,7 +360,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   data-progress={
                     descriptor.current ? "current" : descriptor.configured ? "completed" : "pending"
                   }
-                  disabled={importing || (unnamed && descriptor.id !== "profile")}
+                  disabled={importing}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
                   variant={descriptor.current ? "secondary" : "ghost"}
@@ -455,7 +413,8 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             <div className="first-run__step">
               <p className="first-run__intro">
                 Octant has no account and signs you in to nothing. Choose the name and avatar shown
-                inside the app. Everything except your name is optional and stays on this Mac.
+                inside the app. Everything is optional and stays on this Mac. You can skip setup and
+                change it later in Settings.
               </p>
               <ProfileEditor
                 nameRef={nameField}
@@ -475,8 +434,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   track(props.onSaveProfile(next));
                 }}
                 profile={profileDraft}
-                requiredNameAsked={nameAsked}
-                requiredNameMessage="Enter a name to continue."
                 {...(props.avatarEnvironment === undefined
                   ? {}
                   : { environment: props.avatarEnvironment })}
@@ -573,15 +530,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 Back
               </OctantButton>
             ) : null}
-            {/* Skipping cannot be honoured without a name, so it is not offered
-                until there is one, rather than shown and dead. */}
-            {unnamed ? null : (
-              <OctantButton disabled={busy || blocked} onClick={skip} type="button" variant="ghost">
-                {controller.submitting === "skipped" ? "Skipping…" : "Skip for now"}
-              </OctantButton>
-            )}
+            <OctantButton disabled={busy || blocked} onClick={skip} type="button" variant="ghost">
+              {controller.submitting === "skipped" ? "Skipping…" : "Skip setup"}
+            </OctantButton>
             {handoffOpen ? (
-              <OctantButton disabled={busy || blocked || unnamed} onClick={finish} type="button">
+              <OctantButton disabled={busy || blocked} onClick={finish} type="button">
                 {controller.submitting === "completed"
                   ? "Saving…"
                   : importing
@@ -592,10 +545,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               <OctantButton
                 disabled={importing}
                 onClick={() => {
-                  if (unnamed) {
-                    askForName();
-                    return;
-                  }
                   if (forward === undefined) openHandoff();
                   else goTo(forward);
                 }}

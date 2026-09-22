@@ -85,6 +85,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
   latestProfile.current = props.profile;
   const pendingCommit = useRef(false);
   const reported = useRef<UserProfile | undefined>(undefined);
+  const settledName = useRef(props.profile.displayName);
 
   // The typed fields keep their own text so a half-typed value survives
   // normalization, which means an owner that replaces the profile — a store
@@ -95,11 +96,12 @@ export function ProfileEditor(props: ProfileEditorProps) {
   if (syncedProfile !== props.profile) {
     setSyncedProfile(props.profile);
     // An owner re-renders with what this editor just reported, and that echo
-    // is not an external update. Text the contract refuses is reported as no
-    // value at all, so adopting the echo would erase the entry the user still
+    // is not an external update. Text the contract refuses cannot be reported
+    // verbatim, so adopting the echo would erase the entry the user still
     // has in front of them — together with the message saying what to fix.
     const echo = reported.current !== undefined && sameProfile(props.profile, reported.current);
     if (!echo) {
+      settledName.current = props.profile.displayName;
       const name = props.profile.displayName ?? "";
       const email = props.profile.email ?? "";
       if (name !== nameDraft.trim()) setNameDraft(name);
@@ -143,15 +145,13 @@ export function ProfileEditor(props: ProfileEditorProps) {
     setNameDraft(value);
     const trimmed = value.trim();
     const { displayName: _cleared, ...rest } = props.profile;
-    // A name the contract would refuse is not written, and neither is the last
-    // one that would have been: a name typed past the limit one character at a
-    // time leaves the owner holding the prefix that was still valid, which the
-    // field no longer shows and the user never settled on. Clearing it keeps
-    // the owner's draft equal to what is on screen, so anything written later
-    // is something the user can see. Reporting the problem here, while the
-    // field still holds it, is the only point at which they can fix it.
-    const storable = trimmed !== "" && nameValidationMessage(trimmed) === undefined;
-    apply(storable ? { ...rest, displayName: trimmed } : rest, settled);
+    // An invalid replacement must neither erase the saved name nor persist an
+    // intermediate prefix the person typed past. Keep the last settled answer
+    // while leaving the invalid text and its explanation visible for correction.
+    const valid = nameValidationMessage(trimmed) === undefined;
+    if (valid && settled) settledName.current = trimmed === "" ? undefined : trimmed;
+    const name = valid ? trimmed : settledName.current;
+    apply(name === undefined || name === "" ? rest : { ...rest, displayName: name }, settled);
   }
 
   function setEmail(value: string, settled: boolean) {

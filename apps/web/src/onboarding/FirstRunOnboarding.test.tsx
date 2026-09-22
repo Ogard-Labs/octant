@@ -101,7 +101,7 @@ function controller(
 
 const emptyProfile: UserProfile = { accent: "indigo", avatar: { kind: "initials" } };
 /**
- * First run does not walk past the name, so a test about any later step starts
+ * Tests that exercise saving an existing profile start
  * from a host that already has one.
  */
 const namedProfile: UserProfile = { ...emptyProfile, displayName: "Ada Lovelace" };
@@ -238,46 +238,27 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByText(/no account and signs you in to nothing/)).toBeVisible();
   });
 
-  it("asks for a name as help, and calls it missing only once the reader tries to leave", async () => {
+  it("lets an unnamed person skip setup without creating a profile or starting work", async () => {
     const user = userEvent.setup();
     const props = mount({ profile: emptyProfile });
-    const name = screen.getByLabelText("Name");
 
-    // The requirement is said up front, as help under the field. Nothing has
-    // been done wrong yet, so nothing is marked wrong.
-    expect(screen.getByText("Enter a name to continue.")).toBeVisible();
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(name).not.toHaveAttribute("aria-invalid", "true");
-    // Skipping cannot be honoured without a name, so it is absent, not dead.
-    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
-    expect(screen.getByRole("button", { name: /Providers/ })).toBeDisabled();
+    expect(screen.queryByText("Enter a name to continue.")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
-    // Continue answers instead of sitting disabled: the field says what it
-    // needs and takes focus.
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a name to continue");
-    expect(name).toHaveAttribute("aria-invalid", "true");
-    expect(name).toHaveFocus();
-    expect(screen.getByRole("heading", { name: "About you" })).toBeVisible();
-
-    await user.type(name, "Ada");
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
-    expect(props.controller.skip).not.toHaveBeenCalled();
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+    expect(props.onSaveProfile).not.toHaveBeenCalled();
+    expect(props.onStartThread).not.toHaveBeenCalled();
   });
 
-  it("says why it will not close when it is dismissed without a name", async () => {
+  it("allows setup steps and dismissal without a display name", async () => {
     const user = userEvent.setup();
     const props = mount({ profile: emptyProfile });
 
-    // Dismissing is one of this dialog's exits, and it would leave the host
-    // with no name at all, so it refuses. The refusal used to be silent, which
-    // made Escape look broken.
+    await user.click(screen.getByRole("button", { name: /Providers/ }));
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
     await user.keyboard("{Escape}");
-
-    expect(props.controller.skip).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a name to continue");
-    expect(screen.getByLabelText("Name")).toHaveFocus();
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+    expect(props.onSaveProfile).not.toHaveBeenCalled();
   });
 
   it("saves the profile when the step is left, not on every keystroke", async () => {
@@ -310,17 +291,14 @@ describe("FirstRunOnboarding", () => {
 
   it("never saves a name the user typed past and can no longer see", async () => {
     const user = userEvent.setup();
-    const props = mount();
+    const props = mount({ profile: emptyProfile });
 
     // Typed one character at a time, the 64th character makes a storable name
     // and the 65th makes the field invalid.
     await user.type(screen.getByLabelText("Name"), "A".repeat(65));
-    // A name past the limit is no name, so Skip is not offered and Continue
-    // asks for one instead of leaving. (Skip used to sit disabled here, so a
-    // click on it proved nothing.)
-    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "About you" })).toBeVisible();
+    expect(screen.getByRole("alert")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
 
     // The 64-character prefix is not an answer: the user never settled on it
     // and the field stopped showing it. Saving it here would journal a name
@@ -328,6 +306,16 @@ describe("FirstRunOnboarding", () => {
     expect(props.onSaveProfile).not.toHaveBeenCalledWith(
       expect.objectContaining({ displayName: expect.anything() }),
     );
+  });
+
+  it("keeps the saved name when an invalid replacement is skipped", async () => {
+    const user = userEvent.setup();
+    const props = mount({ profile: namedProfile });
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "A".repeat(65));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+    expect(props.onSaveProfile).toHaveBeenLastCalledWith(namedProfile);
   });
 
   it("walks forward and back without losing the draft", async () => {
@@ -442,7 +430,7 @@ describe("FirstRunOnboarding", () => {
     const props = mount({ onSaveProfile: vi.fn(async () => false), profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     expect(props.onSaveProfile).toHaveBeenCalledWith(
       expect.objectContaining({ displayName: "Ada" }),
@@ -531,13 +519,13 @@ describe("FirstRunOnboarding", () => {
 
     await user.click(screen.getByRole("button", { name: /Workspace/ }));
     await user.click(screen.getByRole("radio", { name: "Dark" }));
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(props.controller.skip).not.toHaveBeenCalled();
 
     // The discarded write must not hold the surface shut for the rest of the
     // session; answering again has to be able to resolve first run.
     await user.click(screen.getByRole("radio", { name: "Light" }));
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
   });
@@ -548,13 +536,13 @@ describe("FirstRunOnboarding", () => {
 
     await user.click(screen.getByRole("button", { name: /Workspace/ }));
     await user.click(screen.getByRole("radio", { name: "Dark" }));
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(props.controller.skip).not.toHaveBeenCalled();
 
     // The refused answer is gone, so a second click has nothing left to wait
     // for. Reading that as consent would record the outcome over the answer
     // the user never got to give again.
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
     expect(props.controller.skip).not.toHaveBeenCalled();
@@ -619,21 +607,15 @@ describe("FirstRunOnboarding", () => {
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
-  it("goes back to the name field when the name is missing on a later step", async () => {
+  it("keeps the current setup step when the host returns an unnamed profile", async () => {
     const user = userEvent.setup();
     const view = mount({ profile: namedProfile });
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
-
-    // The host can hand back an unnamed profile while a later step is up, for
-    // instance after refusing a conflicting write. Asking for the name there
-    // pointed at a field that was not on screen, so Continue looked dead.
     view.rerender({ profile: emptyProfile });
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    const name = await screen.findByLabelText("Name");
-    await waitFor(() => expect(name).toHaveFocus());
-    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
   });
 
   it("keeps a name the user typed even when they skip the rest of first run", async () => {
@@ -641,7 +623,7 @@ describe("FirstRunOnboarding", () => {
     const props = mount({ profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     // Skipping declines the remaining setup; it does not throw away an answer
     // the user already gave.
@@ -684,9 +666,7 @@ describe("FirstRunOnboarding", () => {
 
     // The import reports its picture as a later change. Answering first run
     // now would hide this surface before that change ever arrived.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled());
 
     // Escape reaches the same answer without touching a button, so guarding
     // only the footer would still lose the picture.
@@ -701,8 +681,8 @@ describe("FirstRunOnboarding", () => {
     expect(props.controller.defer).not.toHaveBeenCalled();
 
     release(new Response("binary", { status: 200 }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Skip setup" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     expect(props.onSaveProfile).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -863,7 +843,7 @@ describe("FirstRunOnboarding", () => {
     const props = mount(readyHandoff());
 
     await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     expect(props.controller.skip).toHaveBeenCalledOnce();
     expect(props.controller.complete).not.toHaveBeenCalled();
@@ -886,7 +866,7 @@ describe("FirstRunOnboarding", () => {
     });
 
     expect(screen.getByRole("alert")).toHaveTextContent("cannot reach the host");
-    expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled();
 
     await openHandoff(user);
     expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
@@ -899,7 +879,7 @@ describe("FirstRunOnboarding", () => {
     await openHandoff(user);
 
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled();
   });
 
   it("marks a step configured only once the host holds a real answer", async () => {

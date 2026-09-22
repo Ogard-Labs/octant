@@ -1,3 +1,5 @@
+import { useMenuBarTasks } from "./shell/useMenuBarTasks";
+import { MODEL_CHOICE_CHANGED, readLastModelChoice } from "./providers/modelChoiceMemory";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
@@ -872,10 +874,27 @@ function LaunchedShell(
   const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
-  const [draftProviderInstanceId, setDraftProviderInstanceId] =
-    useState<import("@octant/contracts/providers").ProviderInstanceId>();
-  const [draftModelId, setDraftModelId] =
-    useState<import("@octant/contracts/providers").ProviderModelId>();
+  const [draftProviderInstanceId, setDraftProviderInstanceId] = useState<
+    import("@octant/contracts/providers").ProviderInstanceId | undefined
+  >(() => readLastModelChoice()?.providerInstanceId);
+  const [draftModelId, setDraftModelId] = useState<
+    import("@octant/contracts/providers").ProviderModelId | undefined
+  >(() => readLastModelChoice()?.modelId);
+  useEffect(() => {
+    const restore = () => {
+      const choice = readLastModelChoice();
+      if (choice !== undefined) {
+        setDraftProviderInstanceId(choice.providerInstanceId);
+        setDraftModelId(choice.modelId);
+      }
+    };
+    window.addEventListener(MODEL_CHOICE_CHANGED, restore);
+    window.addEventListener("storage", restore);
+    return () => {
+      window.removeEventListener(MODEL_CHOICE_CHANGED, restore);
+      window.removeEventListener("storage", restore);
+    };
+  }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
@@ -3250,6 +3269,20 @@ function LaunchedShell(
     providerController.instances,
     workNavigation.navigation,
   ]);
+
+  useMenuBarTasks({
+    bridge: props.hostBridge,
+    ready: controller.status === "ready",
+    chat: navigationModel.markedChatNavigation,
+    work: navigationModel.workProjectThreads,
+    code: navigationModel.codeProjectThreads,
+    onSelect: (target) => {
+      if (controller.status !== "ready") return;
+      if (target.mode === "chat") selectChatThread(target.threadId);
+      else if (target.mode === "work") selectWorkThread(target.threadId);
+      else selectCodeThread(target.threadId);
+    },
+  });
 
   function mergeProjectPullRequest(
     method: CodeProjectPullRequestMergeMethod,
@@ -6072,6 +6105,12 @@ function LaunchedShell(
                       ? {}
                       : { onDraftPendingMessage: draftPendingMessage })}
                     onAttachFolder={() => openProjectCreate()}
+                    onOpenCodeSettings={() =>
+                      void controller.openSettings({
+                        section: "code",
+                        setting: "code-default-folder-threads",
+                      })
+                    }
                     onOpenProviderSettings={() =>
                       void controller.openSettings({ section: "providers" })
                     }

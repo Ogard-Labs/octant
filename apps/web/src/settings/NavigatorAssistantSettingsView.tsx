@@ -85,6 +85,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             settingId="default-model"
           >
             <ComposerModelPicker
+              rememberChoice={false}
               menuSide="bottom"
               unselectedLabel="Choose model"
               ariaLabel="Navigator default model"
@@ -123,6 +124,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             settingId="vision-reviewer"
           >
             <ComposerModelPicker
+              rememberChoice={false}
               menuSide="bottom"
               unselectedLabel="Choose model"
               ariaLabel="Navigator vision reviewer"

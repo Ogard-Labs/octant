@@ -1,3 +1,4 @@
+import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
 import { useComposerTip } from "../../composer/useComposerTip";
 import {
@@ -100,13 +101,15 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
-  const modelKey = `${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
-  const [optionState, setOptionState] = useState<{
-    readonly key: string;
-    readonly values: ProviderModelOptionValues;
-  }>({ key: modelKey, values: {} });
-  if (optionState.key !== modelKey) setOptionState({ key: modelKey, values: {} });
-  const modelOptionValues = optionState.key === modelKey ? optionState.values : {};
+  const {
+    modelKey,
+    modelOptionValues,
+    setModelChoice: setOptionState,
+  } = useDraftModelOptions(
+    props.providerGroups ?? [],
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
 
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,

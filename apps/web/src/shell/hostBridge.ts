@@ -1,5 +1,12 @@
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
+export interface MenuBarTask {
+  readonly mode: "chat" | "work" | "code";
+  readonly threadId: string;
+  readonly title: string;
+  readonly activity: "working" | "attention" | "unread";
+}
+
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
@@ -339,6 +346,10 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
   readonly openComputerUsePermissionSettings?: () => Promise<void>;
   readonly checkComputerUseUpdates?: () => Promise<unknown>;
   readonly notifyAttention?: (request: AttentionNotificationRequest) => Promise<void>;
+  readonly setMenuBarTasks?: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
+  readonly subscribeMenuBarTask?: (
+    listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
+  ) => () => void;
   readonly setAttentionBadge?: (count: number) => Promise<void>;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;

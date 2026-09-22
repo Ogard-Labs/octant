@@ -1,6 +1,6 @@
 # 0033. First run asks what to call you
 
-**Status:** Accepted
+**Status:** Superseded by 0158
 
 ## Context
 

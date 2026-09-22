@@ -89,6 +89,26 @@ describe("SettingRow", () => {
     expect(screen.getByRole("slider", { name: "Sidebar width" })).not.toHaveFocus();
   });
 
+  it("focuses the explanation when a deep-linked setting is disabled", () => {
+    render(
+      <SettingRow
+        settingId="code-default-folder-threads"
+        label="Threads without a Project"
+        description="Turn off the Git requirement first."
+        scope="mode"
+        focused
+      >
+        <button disabled role="switch" aria-checked={false}>
+          Threads without a Project
+        </button>
+      </SettingRow>,
+    );
+    const row = screen.getByTestId("setting-row");
+    expect(row).toHaveFocus();
+    expect(row).toHaveAccessibleName("Threads without a Project setting");
+    expect(row).toHaveAccessibleDescription(/Turn off the Git requirement first/);
+  });
+
   it("forwards onChange of an embedded switch through the control slot", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

@@ -5,6 +5,7 @@ describe("octantSettingsRegistry", () => {
   it("registers only sections with working content, in IA order", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
+      "profile",
       "appearance",
       "keybindings",
       "chat",
@@ -136,13 +137,16 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("keeps opaque sections without individual settings and registers the Code app launcher", () => {
+  it("keeps opaque sections without individual settings and registers the Code setup destinations", () => {
     for (const id of ["chat", "providers", "skills", "usage"] as const) {
       const section = octantSettingsRegistry.sections.find((s) => s.id === id);
       expect(section?.settings).toEqual([]);
     }
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
-    expect(code?.settings.map((setting) => setting.id)).toEqual(["open-in-applications"]);
+    expect(code?.settings.map((setting) => setting.id)).toEqual([
+      "code-default-folder-threads",
+      "open-in-applications",
+    ]);
   });
 
   it("registers the Agents section as an opaque destination for the creation-posture policy", () => {

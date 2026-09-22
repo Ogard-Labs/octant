@@ -197,11 +197,11 @@ const AppBackgroundTuning = {
   /** Whether the animated/dithered theme pattern is visible over the ground. */
   patternEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /** How much of the pattern shows over the ground; 0 hides it. */
-  patternOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 55 }),
+  patternOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 22 }),
   /** How fast the pattern drifts; 0 holds it still. */
   patternSpeed: Schema.optionalWith(AppBackgroundPercent, { default: () => 50 }),
   /** How much of the field the pattern fills at its densest. */
-  patternIntensity: Schema.optionalWith(AppBackgroundPercent, { default: () => 60 }),
+  patternIntensity: Schema.optionalWith(AppBackgroundPercent, { default: () => 35 }),
   /** Whether a photo keeps the ordered-dither print treatment. */
   photoDithered: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /** How much of a photo shows through the page. */

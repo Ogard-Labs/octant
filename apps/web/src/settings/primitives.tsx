@@ -80,23 +80,28 @@ export function SettingRow({
       ancestor = ancestor.parentElement;
     }
     const control = rowRef.current.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ':is(button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])):not(:disabled):not([aria-disabled="true"])',
     );
     if (control !== null) {
       control.focus();
       control.scrollIntoView?.({ block: "center" });
     } else {
+      rowRef.current.focus();
       rowRef.current.scrollIntoView?.({ block: "center" });
     }
   }, [focused]);
 
   return (
     <div
+      aria-label={`${label} setting`}
+      aria-describedby={`${settingId}-description`}
       className="setrow"
       data-focused={focused ? "true" : "false"}
       data-setting-id={settingId}
       data-testid="setting-row"
       ref={rowRef}
+      role="group"
+      tabIndex={-1}
     >
       {/* The label always exists — Settings search and deep links resolve
           against it, and a screen reader still needs it to say which setting

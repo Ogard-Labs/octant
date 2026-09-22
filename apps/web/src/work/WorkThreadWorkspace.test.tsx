@@ -106,8 +106,7 @@ describe("WorkThreadWorkspace", () => {
     await screen.findByLabelText("Bound provider and model");
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const levels = await screen.findByRole("slider", { name: "Effort level" });
-    await user.click(levels);
-    await user.keyboard("{End}");
+    fireEvent.change(levels, { target: { value: levels.getAttribute("max") } });
     await waitFor(() =>
       expect(execute).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -119,7 +118,7 @@ describe("WorkThreadWorkspace", () => {
       ),
     );
     expect(levels).toHaveAttribute("aria-valuetext", "High");
-    await user.keyboard("{Home}");
+    fireEvent.change(levels, { target: { value: "0" } });
     await waitFor(() =>
       expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} })),
     );

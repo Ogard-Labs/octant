@@ -223,12 +223,14 @@ describe("desktop preload bridge", () => {
       "setApprovalSurfacePalette",
       "setAttentionBadge",
       "setAutomaticAppUpdateChecks",
+      "setMenuBarTasks",
       "setProviderCredential",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
       "subscribeCodeDeepLinks",
+      "subscribeMenuBarTask",
       "subscribeOpenSettings",
       "subscribeProjectWindowCapability",
       "subscribeResolvedMaterial",
@@ -757,6 +759,34 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.startNewAgent, registered);
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.startNewAgent, registered);
+  });
+
+  it("publishes bounded menu tasks and ignores malformed task activations", async () => {
+    let receive: ((event: unknown, value: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        receive = listener as typeof receive;
+      }),
+      removeListener: vi.fn(),
+    };
+    const bridge = createHostBridge(ipc, projectWindowCapability);
+    const task = {
+      threadId: "thread-a",
+      title: "Review plan",
+      mode: "work" as const,
+      activity: "attention" as const,
+    };
+    await bridge.setMenuBarTasks([task]);
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.menuBarTasks, [task]);
+    const listener = vi.fn();
+    const unsubscribe = bridge.subscribeMenuBarTask(listener);
+    receive?.({}, { mode: "unknown", threadId: "a" });
+    receive?.({}, { mode: "work", threadId: "thread-a" });
+    expect(listener).toHaveBeenCalledExactlyOnceWith({ mode: "work", threadId: "thread-a" });
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.menuBarTask, receive);
+    await expect(bridge.setMenuBarTasks(Array.from({ length: 19 }, () => task))).rejects.toThrow();
   });
 
   it("forwards native Settings menu events without exposing IPC", () => {

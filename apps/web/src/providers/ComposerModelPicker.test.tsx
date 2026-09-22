@@ -7,9 +7,15 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useDraftModelOptions } from "./useDraftModelOptions";
+import {
+  rememberModelChoice,
+  readRememberedModelOptions,
+  readLastModelChoice,
+} from "./modelChoiceMemory";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 
 const providerA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
@@ -23,7 +29,53 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
-  it("keeps the current model label while hovering providers that do not contain it", async () => {
+  it("restores reasoning on a new draft only for the exact model's supported levels", () => {
+    const selection = { providerInstanceId: providerA, modelId: modelOne };
+    const source = groups().map((group) => ({
+      ...group,
+      sections: group.sections.map((section) => ({
+        ...section,
+        models: section.models.map((entry) => ({
+          ...entry,
+          model: {
+            ...entry.model,
+            options: [
+              {
+                kind: "selection" as const,
+                id: "effort",
+                displayName: "Effort",
+                values: ["low", "high"] as const,
+              },
+            ],
+          },
+        })),
+      })),
+    }));
+    rememberModelChoice(selection, { id: "effort", value: "high" });
+    const first = renderHook(() => useDraftModelOptions(source, providerA, modelOne));
+    expect(first.result.current.modelOptionValues).toEqual({ effort: "high" });
+    first.unmount();
+    const next = renderHook(() => useDraftModelOptions(source, providerA, modelOne));
+    expect(next.result.current.modelOptionValues).toEqual({ effort: "high" });
+    expect(
+      readRememberedModelOptions(source, { providerInstanceId: providerB, modelId: modelOne }),
+    ).toEqual({});
+    expect(readRememberedModelOptions(groups(), selection)).toEqual({});
+    rememberModelChoice(selection, { id: "effort", value: "unsupported" });
+    expect(readRememberedModelOptions(source, selection)).toEqual({});
+    rememberModelChoice(selection, { id: "effort", value: undefined });
+    expect(readRememberedModelOptions(source, selection)).toEqual({});
+    next.unmount();
+  });
+
+  it("recovers from malformed preferences without blocking model selection", () => {
+    localStorage.setItem("octant.models.last-choice.v1", "{broken");
+    expect(readLastModelChoice()).toBeUndefined();
+    rememberModelChoice({ providerInstanceId: providerA, modelId: modelOne });
+    expect(readLastModelChoice()).toEqual({ providerInstanceId: providerA, modelId: modelOne });
+  });
+
+  it("changes provider catalogs only on an explicit click", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
@@ -40,6 +92,8 @@ describe("ComposerModelPicker", () => {
     expect(trigger).toHaveTextContent("current-model");
     await user.click(trigger);
     await user.hover(screen.getByRole("option", { name: "Remote Claude" }));
+    expect(screen.queryByRole("option", { name: "Model Three" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Remote Claude" }));
     expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
     expect(trigger).toHaveTextContent("current-model");
     expect(onSelect).not.toHaveBeenCalled();
@@ -160,7 +214,7 @@ describe("ComposerModelPicker", () => {
     expect(within(menu).queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
   });
 
-  it("renders the provider rail as icon-only buttons with accessible names", async () => {
+  it("labels providers visibly and removes repeated provider text from their model rows", async () => {
     const user = userEvent.setup();
     render(<ComposerModelPicker groups={groups()} onSelect={vi.fn()} />);
 
@@ -169,10 +223,14 @@ describe("ComposerModelPicker", () => {
     const items = within(rail).getAllByRole("option");
     expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
       "Favorites",
+      "Recent",
       "Local OpenCode",
       "Remote Claude",
     ]);
-    for (const item of items) expect(item).toHaveTextContent("");
+    for (const item of items) expect(item).toHaveTextContent(item.getAttribute("aria-label") ?? "");
+    expect(screen.getByRole("option", { name: "Model One" })).not.toHaveTextContent(
+      "Local OpenCode",
+    );
     expect(items[0]?.querySelector("svg")).not.toBeNull();
     expect(within(rail).getByRole("option", { name: "Local OpenCode" })).toHaveAttribute(
       "aria-selected",
@@ -198,18 +256,26 @@ describe("ComposerModelPicker", () => {
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
     const modelTwoRow = within(menu).getByRole("option", { name: "Model Two" }).parentElement!;
-    const star = within(modelTwoRow).getByRole("button", { name: "Add to favorites" });
+    const star = within(modelTwoRow).getByRole("button", {
+      name: "Add Model Two (Local OpenCode) to favorites",
+    });
     expect(star).toHaveAttribute("aria-pressed", "false");
     await user.click(star);
     expect(onSelect).not.toHaveBeenCalled();
     expect(menu).toBeInTheDocument();
     expect(
-      within(modelTwoRow).getByRole("button", { name: "Remove from favorites" }),
+      within(modelTwoRow).getByRole("button", {
+        name: "Remove Model Two (Local OpenCode) from favorites",
+      }),
     ).toHaveAttribute("aria-pressed", "true");
 
     await user.click(within(menu).getByRole("option", { name: "Remote Claude" }));
     const modelThreeRow = within(menu).getByRole("option", { name: "Model Three" }).parentElement!;
-    await user.click(within(modelThreeRow).getByRole("button", { name: "Add to favorites" }));
+    await user.click(
+      within(modelThreeRow).getByRole("button", {
+        name: "Add Model Three (Remote Claude) to favorites",
+      }),
+    );
 
     await user.click(within(menu).getByRole("option", { name: "Favorites" }));
     const favoriteNames = within(within(menu).getByRole("listbox", { name: "Models" }))
@@ -228,7 +294,11 @@ describe("ComposerModelPicker", () => {
     await user.click(await screen.findByRole("option", { name: "Favorites" }));
     expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
     const modelTwoAgain = screen.getByRole("option", { name: "Model Two" }).parentElement!;
-    await user.click(within(modelTwoAgain).getByRole("button", { name: "Remove from favorites" }));
+    await user.click(
+      within(modelTwoAgain).getByRole("button", {
+        name: "Remove Model Two (Local OpenCode) from favorites",
+      }),
+    );
     expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
   });
@@ -369,14 +439,26 @@ describe("ComposerModelPicker", () => {
     expect(level).toHaveAttribute("aria-valuemax", "3");
     expect(level).toHaveAttribute("aria-valuetext", "Medium");
 
-    await user.click(level);
-    await user.keyboard("{ArrowRight}");
+    // jsdom does not implement native range keyboard/drag defaults; the real
+    // app smoke covers those gestures, while this proves the resulting value.
+    fireEvent.change(level, { target: { value: "3" } });
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", "high");
-    await user.keyboard("{Home}");
+    expect(readLastModelChoice()).toEqual({ providerInstanceId: providerA, modelId: modelOne });
+    fireEvent.change(level, { target: { value: "0" } });
     expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
+    await user.click(screen.getByRole("button", { name: "Reset reasoning to provider default" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
+    onModelOptionChange.mockClear();
+    fireEvent.pointerDown(level);
+    fireEvent.change(level, { target: { value: "1" } });
+    fireEvent.change(level, { target: { value: "3" } });
+    expect(level).toHaveAttribute("aria-valuetext", "High");
+    expect(onModelOptionChange).not.toHaveBeenCalled();
+    fireEvent.pointerUp(level);
+    expect(onModelOptionChange).toHaveBeenCalledExactlyOnceWith("effort", "high");
   });
 
-  it("names both ends of the level range under the slider, wherever the knob sits", async () => {
+  it("exposes the reasoning range and current level without extra endpoint labels", async () => {
     const user = userEvent.setup();
     render(
       <ComposerModelPicker
@@ -398,10 +480,9 @@ describe("ComposerModelPicker", () => {
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const slider = await screen.findByRole("slider", { name: "Effort level" });
-    // Stops alone gave no sense of the range: at Default the knob sat on the
-    // left with nothing saying what lay to its right.
-    const ends = slider.nextElementSibling;
-    expect(ends).toHaveTextContent(/^DefaultHigh$/);
+    expect(slider).toHaveAttribute("aria-valuemin", "0");
+    expect(slider).toHaveAttribute("aria-valuemax", "3");
+    expect(slider).toHaveAttribute("aria-valuetext", "Medium");
   });
 
   it("spells out a provider's extra-high level instead of capitalising its id", async () => {
@@ -460,6 +541,54 @@ describe("ComposerModelPicker", () => {
       "aria-valuetext",
       "Medium",
     );
+  });
+
+  it("keeps explicitly chosen models in Recent across picker remounts", async () => {
+    const user = userEvent.setup();
+    const props = {
+      groups: groups(),
+      onSelect: vi.fn(),
+      selectedProviderInstanceId: providerA,
+      selectedModelId: modelOne,
+    };
+    const view = render(<ComposerModelPicker {...props} />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("option", { name: "Recent" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Models you choose appear here.");
+    await user.click(screen.getByRole("option", { name: "Local OpenCode" }));
+    await user.click(screen.getByRole("option", { name: "Model Two" }));
+    view.unmount();
+    render(<ComposerModelPicker {...props} />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("option", { name: "Recent" }));
+    const models = within(screen.getByRole("listbox", { name: "Models" }));
+    expect(models.getByRole("option", { name: "Model Two" })).toHaveTextContent("Local OpenCode");
+    expect(models.getByRole("option", { name: "Model Two" })).toHaveAccessibleDescription(
+      "Local OpenCode",
+    );
+    expect(models.queryByRole("option", { name: "Model One" })).toBeNull();
+  });
+
+  it("lets a keyboard user move from search through models and select without sending", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        onSelect={onSelect}
+        selectedProviderInstanceId={providerA}
+        selectedModelId={modelOne}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("searchbox", { name: "Search models" }));
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: "Model One" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: "Model Two" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerA, modelId: modelTwo });
+    expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
   });
 
   it("keeps the level control out when no reasoning option is declared", async () => {
@@ -623,7 +752,7 @@ describe("ComposerModelPicker with the native harness", () => {
       within(rail)
         .getAllByRole("option")
         .map((item) => item.getAttribute("aria-label")),
-    ).toEqual(["Favorites", "Local OpenCode", "Octant"]);
+    ).toEqual(["Favorites", "Recent", "Local OpenCode", "Octant"]);
     await user.click(within(rail).getByRole("option", { name: "Octant" }));
     const menu = screen.getByRole("dialog", { name: "Choose provider and model" });
     expect(within(menu).getByRole("option", { name: "GPT X" })).toBeVisible();

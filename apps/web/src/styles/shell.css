@@ -1856,7 +1856,7 @@ html[data-octant-native-host="true"]
 
 .composer-folder-selector__option[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0.5;
+  color: var(--octant-text-secondary);
 }
 
 .composer-folder-selector__option--selected {
@@ -1882,6 +1882,13 @@ html[data-octant-native-host="true"]
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-folder-selector__option-reason {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .composer-folder-selector__check {
@@ -2634,21 +2641,36 @@ form > .work-composer-adapter__attachments {
    on the card fill, a 13px title, and a 12px line saying what it fills in.
    The button is the card, so the paint keys on the element inside the cards
    group rather than on a class the button recipe owns. */
-.code-home__suggestions,
 .draft-thread__intent-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--oct-space-2);
 }
 
-/* The Code prompts sit a clear step under the composer: pressed up against
-   its band they read as part of the card, and the prompt lost its edge. */
+/* Full examples remain visible; their quiet layout keeps the composer primary. */
 .code-home__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--oct-space-2);
   width: min(100%, 704px);
-  margin: 40px auto 0;
+  margin: var(--oct-space-4) auto 0;
 }
 
-.code-home__suggestions > button,
+.code-home__suggestions > button {
+  white-space: normal;
+}
+
+.code-home__suggestions > button {
+  display: grid;
+  flex: 1 1 200px;
+  height: auto;
+  gap: var(--oct-space-1);
+  justify-items: start;
+  padding: var(--oct-space-3);
+  text-align: left;
+}
+
 .draft-thread__intent-cards > button {
   display: grid;
   height: auto;
@@ -2669,7 +2691,6 @@ form > .work-composer-adapter__attachments {
     transform var(--oct-motion-base) var(--oct-ease-standard);
 }
 
-.code-home__suggestions > button:hover:not(:disabled),
 .draft-thread__intent-cards > button:hover:not(:disabled) {
   border-color: var(--octant-border-strong);
   background: var(--octant-card);
@@ -2812,12 +2833,12 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-card);
 }
 
-/* Continue lists what already exists, so it reads as rows over hairlines: a
-   status dot and its word, the title on one line, the facts beneath it, and
-   the age at the end. The row is the ghost button recipe as it comes; the
-   hairlines belong to the list items and the dot to the badge. */
-/* No top rule: the section head above already draws one, and the two together
-   read as a doubled line under every section heading. */
+/* Keep the thread title first and the state at the trailing edge. Container
+   sizing follows the workspace pane, including when the dock is open. */
+.code-home__section:has(.code-home__grid--rows) {
+  container-type: inline-size;
+}
+
 .code-home__grid--rows {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
@@ -2832,14 +2853,14 @@ form > .work-composer-adapter__attachments {
   width: 100%;
   height: auto;
   min-height: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto auto;
   align-items: center;
   justify-content: stretch;
   justify-items: start;
   column-gap: 12px;
   row-gap: 3px;
-  padding: 10px 8px;
+  padding: 9px 8px;
   font-weight: 400;
   text-align: left;
   white-space: normal;
@@ -2850,11 +2871,12 @@ form > .work-composer-adapter__attachments {
 }
 
 /* The attribute in the selector outranks the card badges' tone fills, which
-   come later in this file; a row's state lives in the dot, not in a pill. */
+   come later in this file; rows use colored text and dots without a pill. */
 .code-home__row .code-home__badge[data-tone] {
-  grid-row: 1 / 3;
-  grid-column: 1;
-  min-width: 76px;
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
   padding: 0;
   color: var(--oct-meta);
   background: transparent;
@@ -2869,47 +2891,79 @@ form > .work-composer-adapter__attachments {
   height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--oct-fg-2);
-  opacity: 0.45;
+  background: currentcolor;
 }
 
-.code-home__row .code-home__badge[data-tone="running"]::before {
-  background: var(--oct-accent-fg);
-  opacity: 1;
+.code-home__row .code-home__badge[data-tone="running"],
+.code-home__row .code-home__badge[data-tone="open"] {
+  color: var(--octant-palette-blue);
 }
 
-.code-home__row .code-home__badge[data-tone="waiting"]::before {
-  background: var(--oct-fg-2);
-  opacity: 0.65;
+.code-home__row .code-home__badge[data-tone="waiting"] {
+  color: var(--octant-palette-yellow);
 }
 
-.code-home__row .code-home__badge[data-tone="done"]::before,
-.code-home__row .code-home__badge[data-tone="merged"]::before {
-  background: var(--octant-success-text);
-  opacity: 1;
+.code-home__row .code-home__badge[data-tone="done"] {
+  color: var(--octant-success-text);
 }
 
 .code-home__row .code-home__card-title {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
 }
 
 .code-home__row .code-home__facts {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 2;
+  gap: 2px 10px;
+  color: var(--oct-meta);
 }
 
 .code-home__row .code-home__card-age {
-  grid-column: 3;
-  grid-row: 1;
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  align-self: start;
   margin-left: 0;
 }
 
-.code-home__row .code-home__card-detail {
-  grid-column: 3;
-  grid-row: 2;
-  justify-self: end;
+/* Long repository and branch names must not widen a narrow workspace. */
+.code-home__row .code-home__fact {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.code-home__row .code-home__fact-note {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@container (max-width: 440px) {
+  .code-home__row {
+    row-gap: 4px;
+    padding: 9px 8px;
+  }
+
+  .code-home__row .code-home__badge[data-tone] {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .code-home__row .code-home__card-age {
+    grid-row: 1;
+  }
+
+  .code-home__row .code-home__card-title {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .code-home__row .code-home__facts {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
 }
 
 .code-home__card-head {
@@ -3018,6 +3072,25 @@ form > .work-composer-adapter__attachments {
 .code-home__fact-note,
 .code-home__fact--muted {
   color: var(--oct-meta);
+}
+
+.code-home__fact--branch,
+.code-home__fact--branch > svg {
+  color: var(--octant-palette-blue);
+}
+
+.code-home__insertions {
+  color: var(--octant-success-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-home__deletions {
+  color: var(--octant-danger-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-home__facts .pull-request-chip {
+  background: color-mix(in srgb, currentcolor 10%, transparent);
 }
 
 /* One pull-request mark wherever a request is named (home list, pane title,
@@ -3147,4 +3220,20 @@ form > .work-composer-adapter__attachments {
 .whats-new__empty {
   margin: 0;
   color: var(--octant-text-secondary);
+}
+
+.code-home__project-setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  width: min(100%, 704px);
+  margin: var(--oct-space-3) auto 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
+.code-home__project-setup p {
+  margin: 0;
 }

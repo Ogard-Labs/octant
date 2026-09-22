@@ -306,6 +306,7 @@ export function CodeHome(props: CodeHomeProps) {
                     facts={
                       <ContinueFacts
                         card={card}
+                        detail={badge.detail}
                         projectNames={props.projectNames}
                         providerLabels={props.providerLabels}
                       />
@@ -315,7 +316,6 @@ export function CodeHome(props: CodeHomeProps) {
                     }
                     title={card.title}
                     tone={badge.tone}
-                    {...(badge.detail === undefined ? {} : { detail: badge.detail })}
                     {...(card.lastMeaningfulActivityAt === null
                       ? {}
                       : { updatedAt: card.lastMeaningfulActivityAt })}
@@ -405,7 +405,12 @@ function HomeCard(props: {
           </span>
         )}
       </span>
-      <span className="code-home__card-title">{props.title}</span>
+      <span
+        className="code-home__card-title"
+        title={props.layout === "row" ? props.title : undefined}
+      >
+        {props.title}
+      </span>
       {props.facts !== undefined ? (
         props.facts
       ) : props.meta === undefined || props.meta === "" ? null : (
@@ -422,6 +427,7 @@ function HomeCard(props: {
  */
 function ContinueFacts(props: {
   readonly card: CodeBoardCard;
+  readonly detail: string | undefined;
   readonly projectNames: ReadonlyMap<string, string> | undefined;
   readonly providerLabels: ReadonlyMap<string, string> | undefined;
 }) {
@@ -443,7 +449,7 @@ function ContinueFacts(props: {
       )}
       {branch === undefined ? null : (
         <span
-          className="code-home__fact"
+          className="code-home__fact code-home__fact--branch"
           title={card.checkoutKind === "managed-worktree" ? "Managed worktree" : undefined}
         >
           <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
@@ -461,6 +467,22 @@ function ContinueFacts(props: {
           showState
           state={pullRequest.state}
         />
+      )}
+      {props.detail === undefined || card.changedFiles.kind !== "observed" ? null : (
+        <span className="code-home__fact">
+          <span
+            className="code-home__insertions"
+            title={`${card.changedFiles.insertions} lines added`}
+          >
+            +{card.changedFiles.insertions}
+          </span>{" "}
+          <span
+            className="code-home__deletions"
+            title={`${card.changedFiles.deletions} lines deleted`}
+          >
+            −{card.changedFiles.deletions}
+          </span>
+        </span>
       )}
       {provider === undefined ? null : (
         <span className="code-home__fact code-home__fact--muted">{provider}</span>

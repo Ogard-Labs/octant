@@ -1,3 +1,4 @@
+import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
 import { useComposerTip } from "../../composer/useComposerTip";
 import {
@@ -47,6 +48,7 @@ import { FolderOpen, GitBranch } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -127,6 +129,7 @@ export interface CodeComposerAdapterProps {
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
   readonly folderControl?: ReactNode;
+  readonly projectSetup?: ReactNode;
   /**
    * Optional GitHub repository selection slot rendered on the context tray.
    * Host, Octant Project, and GitHub repository stay distinct visible selections.
@@ -217,14 +220,13 @@ function selectedProviderFamily(
 const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
+  const suggestionDescriptionId = useId();
   const [prompt, setPrompt] = useNewTaskPrompt();
-  const modelKey = `${props.selectedProviderInstanceId}:${props.selectedModelId}`;
-  const [modelChoice, setModelChoice] = useState<{
-    readonly key: string;
-    readonly values: ProviderModelOptionValues;
-  }>({ key: modelKey, values: {} });
-  if (modelChoice.key !== modelKey) setModelChoice({ key: modelKey, values: {} });
-  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+  const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
+    props.providerGroups ?? [],
+    props.selectedProviderInstanceId,
+    props.selectedModelId,
+  );
 
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
@@ -866,6 +868,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         </div>
 
+        {props.projectSetup}
+
         {/* Start from origin only decides where a new worktree branches from.
               Binding the current checkout resolves no source, so the control
               would be a lie rather than a choice. */}
@@ -895,6 +899,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
             {props.suggestions.map((suggestion) => (
               <OctantButton
+                aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
+                aria-label={suggestion.label}
                 disabled={props.creating}
                 key={suggestion.id}
                 onClick={() => applySuggestion(suggestion)}
@@ -903,7 +909,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 variant="ghost"
               >
                 <span className="code-home__suggestion-label">{suggestion.label}</span>
-                <span className="code-home__suggestion-text">{suggestion.prompt}</span>
+                <span
+                  className="code-home__suggestion-text"
+                  id={`${suggestionDescriptionId}-${suggestion.id}`}
+                >
+                  {suggestion.prompt}
+                </span>
               </OctantButton>
             ))}
           </div>

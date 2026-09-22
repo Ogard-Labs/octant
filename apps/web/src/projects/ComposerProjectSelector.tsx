@@ -364,7 +364,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                               {entry.rootPath}
                             </span>
                             {entry.disabledReason === undefined ? null : (
-                              <span className="composer-folder-selector__option-path">
+                              <span className="composer-folder-selector__option-reason">
                                 {entry.disabledReason}
                               </span>
                             )}

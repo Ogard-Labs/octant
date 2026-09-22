@@ -1173,8 +1173,7 @@ describe("CodeThreadWorkspace", () => {
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const levels = screen.getByRole("slider", { name: "Effort level" });
-    await user.click(levels);
-    await user.keyboard("{End}");
+    fireEvent.change(levels, { target: { value: levels.getAttribute("max") } });
     expect(execute).toHaveBeenCalledWith({
       kind: "change-code-thread-provider",
       threadId,
@@ -1198,7 +1197,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await user.keyboard("{Home}");
+    fireEvent.change(levels, { target: { value: "0" } });
     expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} }));
   });
 

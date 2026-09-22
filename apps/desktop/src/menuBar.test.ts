@@ -2,32 +2,93 @@ import { describe, expect, it } from "vitest";
 import { buildMenuBarItems, formatRedactedHostDiagnostics } from "./menuBar";
 
 describe("macOS menu-bar host controls", () => {
-  it("shows non-sensitive host state, activity, and attention without thread content", () => {
+  it("keeps everyday actions above host controls and hides empty activity", () => {
     const items = buildMenuBarItems({
-      state: "attention-required",
+      state: "running",
       ownership: "desktop-owned",
-      activeAgentCount: 3,
-      attentionRequired: true,
+      activeAgentCount: 0,
+      attentionRequired: false,
     });
-
-    expect(items.map((item) => item.label)).toEqual(
-      expect.arrayContaining(["Host: Attention needed", "Active agents: 3", "Attention needed"]),
-    );
-    expect(items.map((item) => item.label).join(" ")).not.toMatch(/prompt|thread|secret/i);
+    expect(items.map((item) => item.label).filter(Boolean)).toEqual([
+      "Open Octant",
+      "New task…",
+      "Local host",
+      "Quit Octant",
+    ]);
+    expect(
+      items
+        .find((item) => item.id === "local-host")
+        ?.submenu?.map((item) => item.label)
+        .filter(Boolean),
+    ).toEqual([
+      "Status: Running",
+      "Open local web app",
+      "Stop local host",
+      "Restart local host",
+      "Open redacted diagnostics",
+    ]);
   });
 
   it("disables lifecycle mutations for a separately managed host", () => {
-    const items = buildMenuBarItems({
+    const root = buildMenuBarItems({
       state: "running",
       ownership: "managed",
       activeAgentCount: 0,
       attentionRequired: false,
     });
 
+    const items = [...root, ...(root.find((item) => item.id === "local-host")?.submenu ?? [])];
     expect(items.find((item) => item.id === "stop-host")).toMatchObject({ enabled: false });
     expect(items.find((item) => item.id === "restart-host")).toMatchObject({ enabled: false });
     expect(items.find((item) => item.id === "open-web")).toMatchObject({ enabled: true });
     expect(items.find((item) => item.id === "start-new-agent")).toMatchObject({ enabled: true });
+  });
+
+  it("groups resumable tasks and keeps stopped hosts free of stale tasks", () => {
+    const snapshot = {
+      state: "running" as const,
+      ownership: "desktop-owned" as const,
+      activeAgentCount: 1,
+      attentionRequired: true,
+    };
+    const tasks = [
+      {
+        threadId: "a",
+        mode: "code" as const,
+        title: "Fix startup",
+        activity: "working" as const,
+        windowId: 1,
+      },
+      {
+        threadId: "b",
+        mode: "work" as const,
+        title: "Review plan",
+        activity: "attention" as const,
+        windowId: 1,
+      },
+    ];
+    const items = buildMenuBarItems(snapshot, tasks);
+    expect(items.map((item) => item.label).filter(Boolean)).toEqual([
+      "Open Octant",
+      "New task…",
+      "Needs attention · 1",
+      "Review plan",
+      "Running · 1",
+      "Fix startup",
+      "Local host",
+      "Quit Octant",
+    ]);
+    expect(items.find((item) => item.label === "Fix startup")?.task).toEqual(tasks[0]);
+    expect(
+      buildMenuBarItems({ ...snapshot, state: "stopped" }, tasks).some((item) => item.task),
+    ).toBe(false);
+    const host = buildMenuBarItems({ ...snapshot, state: "stopped" }).find(
+      (item) => item.id === "local-host",
+    );
+    expect(host?.submenu?.filter((item) => item.enabled).map((item) => item.label)).toEqual([
+      "Start local host",
+      "Open redacted diagnostics",
+    ]);
   });
 
   it("emits bounded redacted diagnostics", () => {
@@ -55,7 +116,7 @@ describe("macOS menu-bar host controls", () => {
 
     expect(items.at(-1)).toEqual({
       id: "fully-quit",
-      label: "Fully quit Octant",
+      label: "Quit Octant",
       enabled: true,
     });
   });

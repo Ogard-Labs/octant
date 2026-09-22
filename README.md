@@ -174,8 +174,9 @@ is out of scope for this dogfood path.
 Local data uses the XDG layout (`~/.local/share/octant/` by default; override
 with `OCTANT_DATA_DIR`).
 
-On first run, the welcome surface collects a name and optional workspace
-choices, then reports provider, Project, and a mode-valid default model
+On first run, the welcome surface offers an optional name and workspace
+choices. Skip setup is available from the first step. The readiness view
+reports provider, Project, and a mode-valid default model
 separately. One action starts a real thread when those facts are true; a
 missing prerequisite opens its exact setup surface and returns to the same
 draft.

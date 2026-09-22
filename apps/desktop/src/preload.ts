@@ -1,3 +1,4 @@
+import { decodeMenuBarTasks, type MenuBarTask } from "./menuBar";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
@@ -6,6 +7,8 @@ import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 export const HOST_BRIDGE_KEY = "octantHost";
 
 export const IPC_CHANNELS = {
+  menuBarTasks: "octant:menu:tasks",
+  menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
   browserSurfaceAttach: "octant:browser-surface:attach",
@@ -368,6 +371,10 @@ export interface AttentionNotificationBridgeRequest {
 }
 
 export interface OctantHostBridge {
+  readonly setMenuBarTasks: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
+  readonly subscribeMenuBarTask: (
+    listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
+  ) => () => void;
   readonly getComputerUseStatus: () => Promise<unknown>;
   readonly requestComputerUsePermissions: () => Promise<unknown>;
   readonly openComputerUsePermissionSettings: () => Promise<void>;
@@ -504,6 +511,25 @@ export function createHostBridge(
             threadId: initialProjectTarget.threadId,
           });
   return Object.freeze({
+    setMenuBarTasks: async (tasks: ReadonlyArray<MenuBarTask>) => {
+      await invoke(IPC_CHANNELS.menuBarTasks, decodeMenuBarTasks(tasks));
+    },
+    subscribeMenuBarTask: (listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void) => {
+      const receive: DeepLinkListener = (_event, target) => {
+        if (
+          typeof target !== "object" ||
+          target === null ||
+          !("mode" in target) ||
+          !("threadId" in target) ||
+          (target.mode !== "chat" && target.mode !== "work" && target.mode !== "code") ||
+          typeof target.threadId !== "string"
+        )
+          return;
+        listener({ mode: target.mode, threadId: target.threadId });
+      };
+      ipc.on(IPC_CHANNELS.menuBarTask, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.menuBarTask, receive);
+    },
     notifyAttention: (request: AttentionNotificationBridgeRequest) => {
       try {
         validateAttentionNotificationRequest(request);

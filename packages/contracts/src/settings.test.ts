@@ -12,6 +12,7 @@ describe("SettingsSectionId", () => {
   it("enumerates the durable Settings information architecture", () => {
     expect(SETTINGS_SECTION_IDS).toEqual([
       "general",
+      "profile",
       "appearance",
       "keybindings",
       "chat",

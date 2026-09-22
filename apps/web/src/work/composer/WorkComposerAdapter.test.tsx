@@ -55,8 +55,7 @@ describe("WorkComposerAdapter", () => {
     const { rerender } = render(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const level = screen.getByRole("slider", { name: "Effort level" });
-    await user.click(level);
-    await user.keyboard("{End}");
+    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
     await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Draft the brief");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -73,11 +72,10 @@ describe("WorkComposerAdapter", () => {
     );
     rerender(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    // Changing the model clears the thread's effort choice, so the knob
-    // falls back to the first stop: the provider default.
+    // Returning to this model restores its last supported effort choice.
     expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
       "aria-valuetext",
-      "Default",
+      "High",
     );
   });
 
