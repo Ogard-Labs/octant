@@ -5,7 +5,7 @@ import type { UserProfile } from "@octant/contracts/user-profile";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { enabledModes, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -119,6 +119,7 @@ type SetupWrite<Answer> = (answer: Answer) => Promise<boolean>;
  * recording skip would hide first run from someone who simply backed out.
  */
 export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
+  const titleId = useId();
   const { controller } = props;
   const [step, setStep] = useState<FirstRunStepId>("profile");
   const [handoffOpen, setHandoffOpen] = useState(false);
@@ -344,12 +345,15 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       className="first-run"
       initialFocus={step === "profile" ? nameField : providerAction}
       label="Welcome to Octant"
+      labelledBy={titleId}
       onClose={skip}
       open
     >
       <div className="first-run__body">
         <nav aria-label="Setup steps" className="first-run__rail">
-          <h2 className="first-run__title">Welcome to Octant</h2>
+          <h2 className="first-run__title" id={titleId}>
+            Welcome to Octant
+          </h2>
           <ol className="first-run__rail-list">
             {steps.map((descriptor, index) => (
               <li key={descriptor.id}>

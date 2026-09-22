@@ -109,6 +109,7 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
       className="project-dialog"
       initialFocus={nameInputRef}
       label="Create Project"
+      labelledBy="create-project-title"
       onClose={requestClose}
       open
       popupId="create-project-dialog"
@@ -435,6 +436,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           className="project-dialog"
           initialFocus={nameInputRef}
           label="Create Project"
+          labelledBy="create-project-title"
           onClose={requestClose}
           open
           popupId="create-project-dialog"
@@ -482,6 +484,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
       <OctantDialog
         className="project-dialog"
         label="Create Project"
+        labelledBy="create-project-title"
         onClose={props.onClose}
         open
         popupId="create-project-dialog"
@@ -519,6 +522,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         className="project-dialog"
         {...(source === "folder" ? { initialFocus: nameInputRef } : {})}
         label="Create Project"
+        labelledBy="create-project-title"
         onClose={requestClose}
         open
         popupId="create-project-dialog"

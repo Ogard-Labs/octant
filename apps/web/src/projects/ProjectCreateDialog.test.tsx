@@ -58,6 +58,10 @@ describe("ProjectCreateDialog renderer flows", () => {
       />,
     );
 
+    const dialog = screen.getByRole("dialog", { name: "Create Project" });
+    const heading = screen.getByRole("heading", { name: "Create Project" });
+    expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
+    expect(heading).toBeVisible();
     await user.type(screen.getByLabelText("Project name"), "Research");
     await user.click(screen.getByRole("button", { name: "Create Project" }));
 
