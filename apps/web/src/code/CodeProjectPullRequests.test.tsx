@@ -20,7 +20,7 @@ const workProjectId = decodeProjectId("10000000-0000-4000-8000-000000000003");
 const threadId = "20000000-0000-4000-8000-000000000001";
 const generatedAt = "2026-08-22T08:00:00.000Z";
 
-const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
+const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
 
 function ruleBody(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

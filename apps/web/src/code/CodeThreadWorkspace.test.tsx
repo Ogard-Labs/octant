@@ -1133,7 +1133,7 @@ describe("CodeThreadWorkspace", () => {
   });
 
   it("keeps the transcript top-aligned like a conversation instead of bottom-anchoring it", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
     expect(styles).toMatch(/\.code-thread-workspace__transcript\s*\{[^}]*margin:\s*0 auto;/);
     expect(styles).not.toMatch(
       /\.code-thread-workspace__transcript\s*\{[^}]*margin:\s*auto auto 0;/,
@@ -2825,7 +2825,7 @@ describe("CodeThreadWorkspace", () => {
     // The band above the transcript is chrome for live child runs, and the slot
     // that reports them renders nothing for a thread with none — so the band
     // collapses rather than painting a bare rule over an empty strip.
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
     expect(styles).toMatch(
       /\.code-thread-workspace__header:has\(> \.code-thread-workspace__header-row:empty\)\s*\{\s*display:\s*none;/,
     );
