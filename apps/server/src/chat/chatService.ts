@@ -2551,6 +2551,27 @@ export class ChatService {
           message: "Chat turn is not part of the active conversation.",
         });
       }
+      let providerOwned = false;
+      try {
+        providerOwned =
+          this.#driver(decodeProviderInstanceId(attempt.providerInstanceId))
+            .conversationOwnership === "provider";
+      } catch {
+        // Preserve the existing missing-provider failure from preparation below.
+      }
+      const activeTail = activeChatTurns(view.turns).at(-1);
+      if (
+        providerOwned &&
+        (activeTail === undefined || String(activeTail.id) !== String(turn.id))
+      ) {
+        // A provider-owned conversation has one linear native history. Resuming
+        // an older turn against its current session would mix two timelines.
+        throw new ChatServiceError({
+          category: "unsupported",
+          message:
+            "This provider-owned Chat task can only resume its active tail. Send a correction as a new message to keep the same session.",
+        });
+      }
       if (attempt.outcome !== "waiting" && attempt.outcome !== "interrupted") {
         throw new ChatServiceError(
           decodeChatFailure({

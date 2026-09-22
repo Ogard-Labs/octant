@@ -3977,6 +3977,65 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns).toEqual(beforeRetry.turns);
   });
 
+  it("refuses to resume an older turn in a provider-owned conversation", async () => {
+    const { service, fakeDriver } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "interrupted",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Resume native tail",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    const first = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "First request",
+    });
+    if (first.kind !== "turn-created") throw new Error("Expected first turn.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "interrupted",
+    );
+    const afterFirst = service.read(created.thread.id);
+    const firstTurn = afterFirst.turns[0];
+    const firstAttempt = firstTurn?.attempts[0];
+    if (firstTurn === undefined || firstAttempt === undefined) {
+      throw new Error("Expected the first interrupted native turn.");
+    }
+
+    const second = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: afterFirst.thread.version,
+      prompt: "Second request",
+    });
+    if (second.kind !== "turn-created") throw new Error("Expected second turn.");
+    await until(
+      () => service.read(created.thread.id).turns[1]?.attempts[0]?.outcome === "interrupted",
+    );
+    const beforeResume = service.read(created.thread.id);
+    const resumeCount = fakeDriver.resumeInputs.length;
+
+    await expect(
+      service.execute({
+        kind: "resume-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: beforeResume.thread.version,
+        turnId: firstTurn.id,
+        attemptId: firstAttempt.id,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unsupported",
+        message: expect.stringContaining("active tail"),
+      },
+    });
+    expect(fakeDriver.resumeInputs).toHaveLength(resumeCount);
+    expect(service.read(created.thread.id).turns).toEqual(beforeResume.turns);
+  });
+
   it("preserves native history when an earlier message cannot be edited in place", async () => {
     const { service, fakeDriver } = openFixture({ nativeConversation: true });
     const created = await service.execute({
