@@ -1,8 +1,16 @@
-# Architecture decision records
+# Historical design decisions
 
-Short records of the durable architectural decisions behind Octant. Each ADR
-states context, the decision as concrete rules, and consequences. They are the
-distilled successor of the earlier long-form design specifications.
+This directory preserves the reasoning and alternatives behind earlier choices.
+Start implementation from the [current design index](../design/README.md),
+[architecture](../architecture.md), [workspace specification](../design/workspace.md),
+and [DESIGN.md](../../DESIGN.md). Edit the relevant current specification with an
+approved change; an old ADR does not independently block it.
+
+Records remain at their existing paths so code comments, PRs, and external links
+keep resolving. Their status labels describe the historical record, not today's
+approval or implementation coverage. A partially superseded record may still say
+`Accepted`; consult the current specification for the effective rule. Existing
+links from specifications remain useful for rationale and supporting detail.
 
 ## Index
 
@@ -171,25 +179,33 @@ distilled successor of the earlier long-form design specifications.
 
 | [0157](0157-native-resume-keeps-a-durable-identity.md) | Native resume keeps a durable identity | Accepted |
 
-## Adding an ADR
+## Recording architectural rationale
 
-- Take the next number (`00NN-short-slug.md`); never renumber existing records.
-- Use the sections `# 00NN. Title`, `**Status:**`, `## Context`, `## Decision`,
-  `## Consequences`, and optionally `## Related`; keep it under about 90 lines.
-- Status is one of `Proposed` (agreed direction, not yet implemented),
-  `Accepted` (implemented and enforced), `Superseded by 00NN`, or `Deprecated`.
-- To change an `Accepted` decision, write a new ADR and add
-  `**Status:** Superseded by 00NN` to the old one; do not edit history in place.
-  A superseding number always points at a later record.
-- A scoped exception may partially supersede one rule without replacing the
-  whole record: leave the older record `Accepted`, and make the newer ADR name
-  the exact rule it supersedes and state which remaining rules still stand.
-- A `Proposed` record is still being agreed, so it is revised in place. There is
-  no history to preserve until it is accepted, and superseding a proposal with a
-  second proposal would leave two records describing one undecided direction.
-- Add the record to the index above in the same change. `bun run decisions:check`
-  gates numbering, status, required sections, and index agreement, and checks
-  against the merge base that an `Accepted` number still holds the record it
-  held. That last check needs history: it skips with a stated reason on a
-  shallow or base-less clone rather than failing one. Set
-  `OCTANT_DECISIONS_BASE` to compare against a different ref.
+Routine layout, defaults, and implementation choices are documented by editing
+the current specification in the implementation PR. Git and the PR retain their
+history. A separate record is optional when a durable architectural tradeoff
+benefits from preserving its context and alternatives, such as journal authority,
+plugin trust, confinement, or signed updates.
+
+When adding such a record:
+
+- Keep the effective rule in the current specification and link to the rationale.
+  The record does not establish a parallel approval gate.
+- Take the next number (`00NN-short-slug.md`); keep existing identities and paths.
+- Use `# 00NN. Title`, `**Status:**`, `## Context`, `## Decision`,
+  `## Consequences`, and optionally `## Related`; aim for about 90 lines.
+- For new records, `Proposed` means a candidate not yet approved; `Accepted`
+  means the maintainer approved the decision, independently of implementation.
+  `Superseded by 00NN` and `Deprecated` describe retired rationale. Older labels
+  retain their historical meaning and are not reclassified by this convention.
+- Preserve an accepted record's account of the original decision. Add a link or
+  clarification when useful; write a later rationale record only when a new
+  consequential tradeoff merits one. A current-specification edit does not require
+  a superseding record or status change in the archive.
+- Revise a proposal in place while it is being considered. Its presence does not
+  constrain unrelated implementation.
+- Add new records to the index in the same change. `bun run decisions:check`
+  checks archive numbering, sections, index agreement, references, and historical
+  identities. It does not enforce old decisions against current specifications
+  or prove implementation compliance. Its history check explicitly skips when
+  the clone lacks a usable base; `OCTANT_DECISIONS_BASE` selects another base.
