@@ -36,6 +36,10 @@ import {
 } from "./codexEventMapper";
 import type { CodexAppServerConnection, CodexProcessPort } from "./codexProcess";
 import {
+  codexProviderCredential,
+  type CodexProviderCredential,
+} from "./codexProviderCredential";
+import {
   decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
   decodeModelListResult,
@@ -124,6 +128,12 @@ export interface CodexDriverOptions {
   readonly permissionPersistence?: () => PermissionPersistence;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
+  /**
+   * The host environment the runtime's allowlist is applied to when the
+   * active provider's credential is probed. Injectable so the check can be
+   * exercised without mutating process.env.
+   */
+  readonly environment?: NodeJS.ProcessEnv;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
   readonly taskId?: () => string;
@@ -534,6 +544,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               accountResult,
               models,
               clock(),
+              codexProviderCredential(options.environment ?? process.env),
             );
             // Publish the fresh catalog like the other drivers do, so a caller
             // that probes before opening a session (Chat probes before every
@@ -642,6 +653,7 @@ function normalizeProbe(
   accountResult: CodexAccountReadResult,
   sourceModels: ReadonlyArray<CodexModelListResult["data"][number]>,
   observedAt: string,
+  providerCredential?: CodexProviderCredential,
 ): ProviderProbeResult {
   const models = sourceModels
     .filter((source) => !source.hidden && source.id.trim().length > 0)
@@ -694,8 +706,20 @@ function normalizeProbe(
         ],
       };
     });
+  // account/read answers requiresOpenaiAuth: false for a provider that
+  // authenticates outside the OpenAI login without checking whether that
+  // credential exists — Bedrock's answer is byte-identical with or without a
+  // credential in the environment. The provider's own env_key, absent from
+  // the runtime's allowlisted environment, is the missing piece the probe has
+  // to name itself.
+  const missingCredential =
+    !accountResult.requiresOpenaiAuth && providerCredential?.present === false
+      ? providerCredential.envKey
+      : undefined;
   const ready =
-    models.length > 0 && (accountResult.account !== null || !accountResult.requiresOpenaiAuth);
+    models.length > 0 &&
+    missingCredential === undefined &&
+    (accountResult.account !== null || !accountResult.requiresOpenaiAuth);
   return decodeProviderProbeResult({
     instanceId,
     readiness: ready ? "ready" : "unauthenticated",
@@ -705,7 +729,12 @@ function normalizeProbe(
     capabilities: codexChatCapabilities(models),
     ...(ready
       ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp }
-      : { message: "Authenticate Codex and make at least one usable model available." }),
+      : {
+          message:
+            missingCredential === undefined
+              ? "Authenticate Codex and make at least one usable model available."
+              : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
+        }),
     observedAt: observedAt as UtcTimestamp,
   });
 }
