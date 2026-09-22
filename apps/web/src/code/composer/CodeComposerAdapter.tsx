@@ -54,7 +54,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
-import { selectedProviderFamily } from "../../providers/providerFamily";
+import { providerFamilyForThread } from "../../providers/providerFamily";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -220,7 +220,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
   });
-  const selectedFamily = selectedProviderFamily(
+  const selectedFamily = providerFamilyForThread(
     props.providerGroups,
     props.selectedProviderInstanceId,
   );

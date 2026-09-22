@@ -12,6 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
+const LOCAL_SERVERS_UNAVAILABLE = "Octant Local servers are unavailable.";
+
 export type LocalServersStatus = "idle" | "loading" | "ready" | "error";
 
 /** Refresh cadence while the section is visible. Hidden panels never scan. */
@@ -146,7 +148,7 @@ export function useLocalServersController(
         // failure the user should see.
         if (!mounted.current || request !== generation.current || controller.signal.aborted) return;
         if (reason !== "poll") setStatus("error");
-        setErrorMessage(failureMessage(error, "Octant Local servers are unavailable."));
+        setErrorMessage(failureMessage(error, LOCAL_SERVERS_UNAVAILABLE));
       } finally {
         if (active.current === controller) active.current = undefined;
       }
@@ -204,7 +206,7 @@ export function useLocalServersController(
       } catch (error) {
         setFailure({
           category: "unavailable",
-          message: failureMessage(error, "Octant Local servers are unavailable.") as never,
+          message: failureMessage(error, LOCAL_SERVERS_UNAVAILABLE) as never,
         });
         return undefined;
       } finally {
@@ -248,7 +250,7 @@ export function useLocalServersController(
         if (mounted.current) {
           setFailure({
             category: "unavailable",
-            message: failureMessage(error, "Octant Local servers are unavailable.") as never,
+            message: failureMessage(error, LOCAL_SERVERS_UNAVAILABLE) as never,
           });
         }
         return false;

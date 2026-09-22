@@ -15,10 +15,3 @@ export function providerFamilyForThread(
     ? group.instance.driverKind
     : undefined;
 }
-
-export function selectedProviderFamily(
-  groups: ReadonlyArray<PickerGroup>,
-  selectedProviderInstanceId: ProviderInstanceId | undefined,
-): ExtensionProviderFamily | undefined {
-  return providerFamilyForThread(groups, selectedProviderInstanceId);
-}

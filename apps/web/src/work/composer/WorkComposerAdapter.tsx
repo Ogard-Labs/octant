@@ -35,7 +35,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
-import { selectedProviderFamily } from "../../providers/providerFamily";
+import { providerFamilyForThread } from "../../providers/providerFamily";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -116,7 +116,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
   });
-  const selectedFamily = selectedProviderFamily(
+  const selectedFamily = providerFamilyForThread(
     props.providerGroups,
     props.selectedProviderInstanceId,
   );

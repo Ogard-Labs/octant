@@ -12,6 +12,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import type { ProjectMemoryStatus } from "./useProjectController";
 
+const PROJECT_UNAVAILABLE = "Octant Project service is unavailable.";
+
 export interface ProjectMemoryController {
   readonly busy: boolean;
   readonly clear: () => void;
@@ -86,7 +88,7 @@ export function useProjectMemory(
         setMemory(undefined);
         ownerProjectId.current = undefined;
         setStatus("error");
-        setErrorMessage(failureMessage(error, "Octant Project service is unavailable."));
+        setErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
       }
     },
     [client],
@@ -118,7 +120,7 @@ export function useProjectMemory(
           await load(visibleProjectId, "conflict");
           return false;
         }
-        const message = failureMessage(error, "Octant Project service is unavailable.");
+        const message = failureMessage(error, PROJECT_UNAVAILABLE);
         setErrorMessage(message);
         return false;
       } finally {
@@ -195,7 +197,7 @@ export function useProjectMemory(
         destinationMemory = await client.memory(destinationProjectId);
       } catch (error) {
         if (mounted.current && disclosure === disclosureGeneration.current) {
-          setErrorMessage(failureMessage(error, "Octant Project service is unavailable."));
+          setErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
         }
         operation.current = false;
         if (mounted.current) setBusy(false);

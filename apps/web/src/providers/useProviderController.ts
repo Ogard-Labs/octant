@@ -51,6 +51,8 @@ import {
   type ProviderCredentialStatus,
 } from "../shell/hostBridge";
 
+const PROVIDER_UNAVAILABLE = "Octant Provider service is unavailable.";
+
 export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
 
 export interface ProviderControllerOptions {
@@ -262,7 +264,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     } catch (error) {
       if (mounted.current) {
         setStatus("disconnected");
-        setMessage(failureMessage(error, "Octant Provider service is unavailable."));
+        setMessage(failureMessage(error, PROVIDER_UNAVAILABLE));
       }
       return false;
     }
@@ -287,7 +289,7 @@ export function useProviderController(options: ProviderControllerOptions) {
       const domainDetail = domainValidationMessage(error);
       const message =
         fixedMessage === undefined
-          ? failureMessage(error, "Octant Provider service is unavailable.")
+          ? failureMessage(error, PROVIDER_UNAVAILABLE)
           : domainDetail.length > 0
             ? `${fixedMessage} ${domainDetail}`
             : fixedMessage;
@@ -1270,8 +1272,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         }
         return result.attempt;
       } catch (error) {
-        if (mounted.current)
-          setMessage(failureMessage(error, "Octant Provider service is unavailable."));
+        if (mounted.current) setMessage(failureMessage(error, PROVIDER_UNAVAILABLE));
         return undefined;
       } finally {
         if (mounted.current) setBusy(false);
@@ -1301,8 +1302,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         }
         return true;
       } catch (error) {
-        if (mounted.current)
-          setMessage(failureMessage(error, "Octant Provider service is unavailable."));
+        if (mounted.current) setMessage(failureMessage(error, PROVIDER_UNAVAILABLE));
         return false;
       } finally {
         if (mounted.current) setBusy(false);
@@ -3306,7 +3306,7 @@ function redactedProbeFailureMessage(error: unknown): string {
         : error,
     );
   } catch {
-    return "Octant Provider service is unavailable.";
+    return PROVIDER_UNAVAILABLE;
   }
   const diagnostic = formatProviderProcessDiagnostic(failure.diagnostic);
   if (failure.diagnostic?.stage === "update" && diagnostic !== undefined) {
@@ -3327,7 +3327,7 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (failure.category === "unavailable" && failure.message.startsWith("Provider CLI update")) {
     return failure.message;
   }
-  return "Octant Provider service is unavailable.";
+  return PROVIDER_UNAVAILABLE;
 }
 
 function isInterruptedFailure(error: unknown): boolean {
