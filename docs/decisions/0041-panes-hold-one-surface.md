@@ -18,6 +18,10 @@ behind a separate Back to workspace step.
 
 ## Decision
 
+The September 7 removal of content navigation is superseded by
+[0156](0156-content-opens-beside-the-conversation.md) for files, previews, canvases,
+and image creation. The one-authoritative-surface and reauthorization rules remain.
+
 The server-authoritative workspace remains a recursive split tree whose leaf is
 one pane holding exactly one surface. The renderer may additionally present a
 window-local thread strip as navigation history. (Amended 2026-09-07: the

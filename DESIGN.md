@@ -153,8 +153,8 @@ printed through the same dither with the cloud over it, or the plain page.
 Behind a start screen the ground is masked away behind the composer and fades
 out below it, so the prompt and the recent-thread list read on the plain
 page. A person may instead put the ground behind everything, sidebar
-included, where the workspace stays transparent over it and transcript
-responses carry their own reading cards. The pattern's opacity, speed, and
+included. Conversations soften it beneath one continuous reading background
+so agent replies remain bare prose (0155). The pattern's opacity, speed, and
 intensity and a photo's opacity are dials on the same row. Most presets use the
 resolved accent alone; Pride carries a six-colour spectrum and Norway carries
 red, white, and blue. The semantic accent remains the first ink, so overrides
@@ -242,10 +242,13 @@ between rows. A person's message is a right-aligned bubble (`turn-user`,
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
-produced is boxed. The one exception is a workspace with no reading surface
-under it (the application ground behind everything, or a translucent
-workspace), where a reply carries a reading card; over the application
-ground that card, the bubble, and the composer are glass (0150). Running text keeps a 72ch
+produced is boxed. Over the application ground, the conversation supplies one quiet,
+continuous reading background that admits a little more atmosphere at its
+outer edges (0155). Replies remain bare prose, including on translucent
+workspaces; user bubbles and the composer retain glass over the application
+ground (0150). Reduced transparency keeps the reading background opaque.
+The follow-up composer has 24px of space above it outside the transcript
+scroll frame, so a reply never touches the input. Running text keeps a 72ch
 measure; tables and code blocks run the column's width, ending on the same edge
 as the composer; markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
@@ -1098,3 +1101,26 @@ show individual nodes rather than inventing graph edges across omitted commits.
 Loading, unavailable, no-result, shallow, and truncated states remain explicit.
 Historical file inspection is read-only. Existing unified diffs and Monaco own
 diff presentation; file disclosures mount only their open preview.
+
+### Compact task controls
+
+The right Tools launcher starts directly beneath the window control rail, without
+an extra top spacer. While a Code turn runs, its composer action is **Queue
+message**; an accepted queued message shows **Queued** instead of instructions
+about Enter. The idle action sends normally.
+
+Native Code approvals use a compact 216px surface above the composer, with a
+scrollable action and scope description, collapsible authority details, and a
+fixed Cancel/Allow row. Duration remains in the host description; the button
+does not imply a one-shot grant when the action grants access for the session.
+Keyboard focus has a visible outline. Enter never implicitly grants access.
+
+The Pull requests dock packs its search, freshness, repository heading, and rows
+at the top of its scroll area. In the dock, status badges sit beneath each title
+instead of taking title width; long titles and metadata wrap within the panel.
+
+Main-pane content opens in a closable tab beside its conversation. Files, previews,
+and canvases retain navigation references, and selecting one uses the ordinary
+host-authorized open command. Image creation is a pane-owned view that retains
+its draft while the user switches back to the conversation. The strip occupies
+the existing pane title row rather than adding a second header.

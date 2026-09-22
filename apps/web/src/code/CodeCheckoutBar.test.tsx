@@ -19,9 +19,10 @@ function facts(overrides: Partial<CodeCheckoutFacts> = {}): CodeCheckoutFacts {
 }
 
 describe("CodeCheckoutBar", () => {
-  it("says nothing at all until a checkout has been observed", () => {
-    const { container } = render(<CodeCheckoutBar />);
-    expect(container).toBeEmptyDOMElement();
+  it("keeps a blank checkout row until checkout details are available", () => {
+    render(<CodeCheckoutBar onCreatePullRequest={vi.fn()} />);
+    expect(screen.getByLabelText("Checkout")).toBeEmptyDOMElement();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("names the checkout the next message will be typed against", () => {

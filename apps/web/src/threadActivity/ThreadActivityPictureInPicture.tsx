@@ -338,6 +338,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       aria-label="Thread activity preview"
       className="thread-activity-pip"
       data-activity-kind={activeKind}
+      data-approval={currentComputerSession?.pendingApproval !== undefined ? "pending" : undefined}
     >
       {/* The preview is the pictures, stacked, and nothing else at rest:
               each card's name, status, and controls sit over its top edge and
@@ -389,12 +390,16 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
           />
           <div className="thread-activity-pip__controls">
             <span className="thread-activity-pip__identity">
-              <span className="thread-activity-pip__pulse" />
+              {currentComputerSession.pendingApproval === undefined ? (
+                <span className="thread-activity-pip__pulse" />
+              ) : null}
               <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
               <strong>Computer Use</strong>
-              <span>
-                {activityStatus("computer-use", currentBrowserSnapshot, currentComputerSession)}
-              </span>
+              {currentComputerSession.pendingApproval === undefined ? (
+                <span>
+                  {activityStatus("computer-use", currentBrowserSnapshot, currentComputerSession)}
+                </span>
+              ) : null}
             </span>
             <span className="thread-activity-pip__header-actions">
               {currentBrowserSnapshot === undefined ? (
@@ -498,19 +503,15 @@ function ComputerUseActivityPreview(props: {
   readonly onDeny: () => void;
   readonly session: ComputerUseSessionView;
 }) {
-  return (
-    <div className="thread-activity-pip__visual thread-activity-pip__empty">
-      <MonitorUp aria-hidden="true" size={24} strokeWidth={1.5} />
-      <strong>{computerUseState(props.session.state)}</strong>
-      <span>
-        {props.session.pendingApproval?.summary ??
-          "Native pixels stay on the authoritative host; activity and approvals remain visible."}
-      </span>
-      {props.session.pendingApproval === undefined ? null : (
-        <div className="thread-activity-pip__approval">
-          <OctantButton disabled={props.busy} onClick={props.onApprove} size="sm" type="button">
-            Approve once
-          </OctantButton>
+  if (props.session.pendingApproval !== undefined) {
+    return (
+      <div className="thread-activity-pip__permission">
+        <div className="thread-activity-pip__permission-title">
+          <MonitorUp aria-hidden="true" size={16} strokeWidth={1.7} />
+          <h3>Allow computer access?</h3>
+        </div>
+        <p>{props.session.pendingApproval.summary}</p>
+        <div className="thread-activity-pip__permission-actions">
           <OctantButton
             disabled={props.busy}
             onClick={props.onDeny}
@@ -520,8 +521,20 @@ function ComputerUseActivityPreview(props: {
           >
             Deny
           </OctantButton>
+          <OctantButton disabled={props.busy} onClick={props.onApprove} size="sm" type="button">
+            Approve once
+          </OctantButton>
         </div>
-      )}
+      </div>
+    );
+  }
+  return (
+    <div className="thread-activity-pip__visual thread-activity-pip__empty">
+      <MonitorUp aria-hidden="true" size={24} strokeWidth={1.5} />
+      <strong>{computerUseState(props.session.state)}</strong>
+      <span>
+        Native pixels stay on the authoritative host; activity and approvals remain visible.
+      </span>
     </div>
   );
 }

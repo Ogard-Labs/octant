@@ -419,7 +419,14 @@ function planStateDirectories(
   stateDirectories: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
   for (const path of stateDirectories) {
-    if (path === boundRoot) {
+    let canonicalPath = path;
+    try {
+      canonicalPath = realpathSync(path);
+    } catch {
+      // A provider may create its state directory during launch; preserve the
+      // configured path when it does not exist yet.
+    }
+    if (canonicalPath === boundRoot) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
         "Claude Plan confinement cannot use a project root that is also a runtime state directory.",

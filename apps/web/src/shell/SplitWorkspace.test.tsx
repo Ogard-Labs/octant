@@ -20,6 +20,88 @@ const secondPaneId = decodePaneId("00000000-0000-4000-8000-000000000622");
 const splitNodeId = "00000000-0000-4000-8000-000000000610";
 
 describe("SplitWorkspace", () => {
+  it("keeps a restored file closable even when it is the only content tab", async () => {
+    const user = userEvent.setup();
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "code-file",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        threadId: "00000000-0000-4000-8000-000000000614",
+        title: "README.md",
+        relativePath: "README.md",
+      },
+    });
+    const onCloseContentTab = vi.fn();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        onCloseContentTab={onCloseContentTab}
+        renderSurface={() => <p>File content</p>}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "README.md" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Close README.md" }));
+    expect(onCloseContentTab).toHaveBeenCalledWith(
+      firstPaneId,
+      "00000000-0000-4000-8000-000000000613",
+    );
+  });
+
+  it("keeps the current pane surface visible when remembered content is stale", () => {
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-0000-0000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "code-file",
+        id: "00000000-0000-0000-0000-000000000613",
+        mode: "code",
+        threadId: "00000000-0000-0000-0000-000000000614",
+        title: "Current file",
+        relativePath: "current-file.ts",
+      },
+    });
+    const contentTabs = new Map([
+      [
+        firstPaneId,
+        [
+          {
+            kind: "code-file",
+            id: "00000000-0000-0000-0000-000000000631",
+            mode: "code",
+            threadId: "00000000-0000-0000-0000-000000000632",
+            title: "Closed file",
+            relativePath: "closed-file.ts",
+          },
+          {
+            kind: "code-file",
+            id: "00000000-0000-0000-0000-000000000633",
+            mode: "code",
+            threadId: "00000000-0000-0000-0000-000000000634",
+            title: "Another closed file",
+            relativePath: "another-closed-file.ts",
+          },
+        ] as never,
+      ],
+    ]);
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contentTabs={contentTabs}
+        layout={layout}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: "Current file" })).toBeVisible();
+    expect(screen.queryByRole("tab", { name: "Closed file" })).not.toBeInTheDocument();
+  });
+
   it("labels a restored Code welcome pane as New task", () => {
     const layout = decodeWorkspaceLayoutNode({
       kind: "pane",

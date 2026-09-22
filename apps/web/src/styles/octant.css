@@ -2489,14 +2489,8 @@ input.switch:checked::after {
   text-align: end;
 }
 
-/* The agent's turn is the transcript's reading surface. The workspace ground
-   stays visible around it, while one theme-owned card contains prose, tool
-   output, and turn metadata without introducing a second glass material. */
-/* A reply is bare prose on the reading surface (DESIGN.md, Transcript). Only
-   the work a turn produced is boxed: code blocks, tool rows, requests. The
-   reading card below is for the one case that needs it; worn everywhere, it
-   made every answer read as a widget and left the reserved action row as a
-   dead band inside the card's bottom edge. */
+/* Replies read as prose on the conversation's shared ground (0155).
+   Only structured results, code, and requests need their own containers. */
 .turn-agent {
   min-width: 0;
   padding: 0;
@@ -2507,17 +2501,6 @@ input.switch:checked::after {
   font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
 }
-/* With the application ground behind everything, or a translucent workspace,
-   there is no reading surface under the prose: the workspace is transparent
-   over a photo or a moving pattern. There a reply carries its own card. */
-.shell--app-backdrop .turn-agent,
-.shell--workspace-material-translucent .turn-agent {
-  padding: 14px 16px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-}
-
 .turn-agent > p {
   margin: 0 0 var(--oct-space-3);
 }
@@ -4463,13 +4446,13 @@ input.switch:checked::after {
 }
 /* The frame at the foot of an open thread, in every mode: it takes the
    thread column, floats over the transcript's scroll edge, and keeps one
-   distance from the window's bottom. Chat, Work, and Code each placed it
-   with their own margins before this. */
+   distance from the window's bottom. The top margin stays outside the scroll
+   frame so a partially visible reply cannot touch the input while scrolling. */
 .composer.thread-composer {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  margin: 0 auto 12px;
+  margin: 24px auto 12px;
 }
 
 /* Existing conversations keep the message surface distinct from its binding.
@@ -5971,20 +5954,16 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   }
 }
 
-/* A thread over the application ground meets the condition glass is for: a
-   ground the person chose, with the work floating on it (0150). Painted
-   opaque, the reply card, the person's bubble, and the composer read as
-   slabs stamped on the picture, and the ground survived only between them.
-   They take the thick step Zen's cards take, because each carries running
-   text, and the same floor under the tint keeps that text legible over a
-   white photo. The ordinary paints above stay the fallback: reduced
-   transparency, an engine without the filter, or a browser that cannot say
-   whether transparency is welcome all keep them. */
+/* Input surfaces retain the glass material over the application ground
+   (0150, narrowed by 0155). Replies share the quiet conversation ground;
+   adding glass to each one would bring back the repeated card silhouettes.
+   The floor protects input text over bright photos. Reduced transparency
+   and engines without the filter keep the ordinary opaque paints. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   @media (prefers-reduced-transparency: no-preference) {
     html:not([data-octant-reduced-transparency="true"])
       .shell--app-backdrop
-      :is(.turn-agent, .turn-user .bubble, .composer) {
+      :is(.turn-user .bubble, .composer) {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));

@@ -204,7 +204,7 @@ describe("App", () => {
     }
   });
 
-  it("renders the authoritative Code overview and thread navigation", async () => {
+  it("renders the authoritative Code conversation and thread navigation", async () => {
     const codeApi = codes();
     render(
       <App
@@ -218,7 +218,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
     const projectsDestination = screen.getByRole("button", { name: "Projects" });
     expect(projectsDestination).toBeVisible();
     await userEvent.click(projectsDestination);
@@ -243,7 +243,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Show sidebar" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
     expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
@@ -294,7 +294,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "More destinations" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
 

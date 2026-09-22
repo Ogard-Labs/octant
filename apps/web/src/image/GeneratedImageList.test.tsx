@@ -1,3 +1,4 @@
+import { WorkspaceContentViewContext } from "../shell/WorkspaceContentView";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
@@ -180,6 +181,33 @@ describe("GeneratedImageList polling", () => {
     );
 
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens an image revision beside the conversation with its own artifact identity", async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    const job = completedJob();
+    const client = {
+      list: vi.fn(async () => ({ jobs: [job] })),
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    } as unknown as ImageGenerationClient;
+    render(
+      <WorkspaceContentViewContext.Provider value={{ open }}>
+        <GeneratedImageList
+          client={client}
+          profiles={[profile()]}
+          scopeId={scopeId}
+          threadKind="chat-thread"
+        />
+      </WorkspaceContentViewContext.Provider>,
+    );
+    await user.click(await screen.findByRole("button", { name: "Revise" }));
+    expect(open).toHaveBeenCalledWith(
+      `image-generation:chat-thread:${scopeId}:${job.artifacts[0]?.attachmentId}`,
+      "Revise image",
+      expect.any(Function),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("shows a revision the moment it is enqueued instead of after the idle cadence", async () => {

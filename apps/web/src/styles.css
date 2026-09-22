@@ -307,6 +307,44 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.thread-activity-pip[data-approval="pending"] {
+  width: min(360px, calc(100% - 32px));
+}
+
+.thread-activity-pip__permission {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  text-align: left;
+}
+
+.thread-activity-pip__permission-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--octant-text-primary);
+}
+
+.thread-activity-pip__permission-title h3 {
+  margin: 0;
+  font-size: var(--oct-text-detail);
+  font-weight: 500;
+}
+
+.thread-activity-pip__permission p {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.thread-activity-pip__permission-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* One floating picture per tool, and nothing around it. */
 .thread-activity-pip__card {
   position: relative;
@@ -1152,16 +1190,11 @@ h6 {
 }
 
 /* A Project name is a section header over its thread rows, not a row among
-   them: generous room above each header, none below, and no per-row seams.
-
-   2px was the same step the thread rows inside a Project use, so a sidebar of
-   several Projects read as one unbroken list and a Project header looked like
-   another thread. The gap between Projects is now wide enough to group at a
-   glance, and the rows inside one are pulled tighter than that gap, so the
-   two readings do not compete: the eye finds the Project first, then its
-   threads. The three levels stay ordered: rows, Projects, sections. */
+   them. The folder row already supplies the navigation rhythm, so collapsed
+   folders stay compact instead of floating apart. The three levels stay
+   ordered: rows, Projects, sections. */
 .project-block + .project-block {
-  margin-top: var(--oct-space-4);
+  margin-top: 0;
 }
 
 /* Projects, then Chats: two flat groups parted by one hairline, never cards. */
@@ -1184,11 +1217,18 @@ h6 {
      so neither reading won. */
   gap: 0;
   margin: 2px 0 0;
-  /* No indent of its own. An indented list made a thread's selection fill
-     start 16px from the sidebar's edge and end 8px from it, while every other
-     row's fill sat 8px from both; the Project's heavier name and the rows'
-     provider marks are what say these threads belong to it. */
+  /* Unfiled and archive lists stay aligned to their owning section. Folder
+     children add the relationship cue below without changing those lists. */
   padding-left: 0;
+}
+
+/* A short rail and one inset make a thread list read as the contents of the
+   folder above it. The rail belongs to the list, so it also covers its quiet
+   folding control without adding a card around every thread. */
+.project-block > .project-threads {
+  margin-inline-start: var(--oct-space-2);
+  padding-inline-start: var(--oct-space-2);
+  border-inline-start: 1px solid var(--oct-hairline);
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1285,6 +1325,27 @@ h6 {
   border: 0;
   border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
+}
+
+/* A closed folder has no child rows to space around. Keep that branch of the
+   tree compact while open folders retain the normal navigation rhythm for
+   their visible children. */
+.project-row[data-folder-state="closed"] {
+  min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
+}
+
+.project-row[data-folder-state="closed"] .project-row__select {
+  min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));
+}
+
+/* Compact folders still need a full touch target on coarse pointers and
+   narrow windows. Keep the visual rhythm dense on desktop while preserving
+   the interaction surface required by the design contract. */
+@media (pointer: coarse), (max-width: 560px) {
+  .project-row[data-folder-state="closed"],
+  .project-row[data-folder-state="closed"] .project-row__select {
+    min-height: 44px;
+  }
 }
 
 /* The whole row, name and trailing controls together, takes the soft wash
@@ -2173,6 +2234,53 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: auto;
   place-items: start stretch;
   padding: 0;
+}
+
+.workspace-pane__panel[hidden] {
+  display: none;
+}
+
+.workspace-content-tabs {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.workspace-content-tabs__list {
+  width: max-content;
+  max-width: none;
+  gap: 4px;
+}
+
+.workspace-content-tabs__entry {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.workspace-pane__header:has(.workspace-content-tabs) .workspace-pane__window-drag-space {
+  flex: 0 0 12px;
+}
+
+.workspace-content-tabs__entry [role="tab"] {
+  max-width: 220px;
+}
+
+.workspace-content-tabs__entry [role="tab"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-content-view {
+  padding: var(--oct-space-4);
+  align-content: start;
+}
+
+.workspace-content-view > form {
+  width: min(100%, 640px);
+  margin-inline: auto;
 }
 
 .rail-placeholder {
@@ -9869,6 +9977,7 @@ ul.board-col-body {
    its content, so this root owns the scroll a long Project needs; without it
    the rows past the dock's height were cut off and unreachable. */
 .code-project-pull-requests[data-presentation="dock"] {
+  align-content: start;
   height: 100%;
   min-height: 0;
   overflow: auto;
@@ -9876,6 +9985,7 @@ ul.board-col-body {
 }
 
 .code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__groups {
+  align-content: start;
   gap: var(--oct-space-4);
 }
 
@@ -9886,6 +9996,29 @@ ul.board-col-body {
 .code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row {
   min-height: 0;
   padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .surface-toolbar {
+  flex-wrap: wrap;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__meta {
+  grid-column: 1;
+  grid-row: auto;
+  justify-content: flex-start;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__details {
+  flex-wrap: wrap;
 }
 
 .linear-issues {

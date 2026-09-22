@@ -369,19 +369,55 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("parts one Project from the next by more than it parts two threads", () => {
+  it("keeps collapsed Projects in a compact folder list", () => {
     // Three levels, ordered: rows inside a Project, then Projects, then the
-    // sections a hairline divides. A Project block used the same 2px step as
-    // the rows inside it, so a sidebar of several Projects read as one
-    // unbroken list and a Project header looked like another thread.
+    // sections a hairline divides. A folder row already has the navigation
+    // row height, so another block margin leaves collapsed folders floating
+    // apart and makes the sidebar feel like a sparse stack of cards.
     const rows = cssRule(".project-threads");
     const projects = cssRule(".project-block + .project-block");
     const sections = cssRule(".project-section + .project-section");
 
-    // Rows sit flush inside a Project; the Project gap is what the eye finds.
+    // Rows and collapsed folder rows sit flush; the section boundary is what
+    // the eye finds when a larger separation is needed.
     expect(rows).toContain("gap: 0;");
-    expect(projects).toContain("margin-top: var(--oct-space-4);");
+    expect(projects).toContain("margin-top: 0;");
     expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
+
+    // A closed folder has no child rows to separate from its neighbours, so
+    // it uses a 28px header rhythm instead of spending the full thread-row
+    // height on an empty branch of the tree.
+    const closedProject = cssRule('.project-row[data-folder-state="closed"]');
+    expect(closedProject).toContain("min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));");
+    const closedProjectSelect = cssRule(
+      '.project-row[data-folder-state="closed"] .project-row__select',
+    );
+    expect(closedProjectSelect).toContain(
+      "min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));",
+    );
+    const touchFolderRules = atRuleBlock("@media (pointer: coarse), (max-width: 560px)");
+    expect(touchFolderRules).toContain('.project-row[data-folder-state="closed"]');
+    expect(touchFolderRules).toContain("min-height: 44px;");
+
+    // The nested list is a folder child: a small inset and rail make that
+    // relationship visible without giving every thread its own card.
+    const nestedRows = cssRule(".project-block > .project-threads");
+    expect(nestedRows).toContain("padding-inline-start: var(--oct-space-2);");
+    expect(nestedRows).toContain("margin-inline-start: var(--oct-space-2);");
+    expect(nestedRows).toContain("border-inline-start: 1px solid var(--oct-hairline);");
+
+    // Folding is a navigation aid, so its control should recede below a
+    // normal thread row while remaining keyboard reachable.
+    const more = cssRule(".project-threads__more");
+    expect(more).toContain("min-height: var(--oct-space-6);");
+    expect(more).toContain("font-size: var(--oct-text-xs);");
+    expect(more).toContain("opacity: 0.78;");
+
+    // Project actions are available on hover/focus, not as permanent noise
+    // beside every folder.
+    const projectActions = cssRule(".project-row__action--icon");
+    expect(projectActions).toContain("width: 0;");
+    expect(projectActions).toContain("opacity: 0;");
   });
 
   it("keeps the ground behind the start screen rather than over its cards", () => {
@@ -652,7 +688,7 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("leaves the application ground visible around contained transcript responses", () => {
+  it("gives conversations one legible reading surface over the application ground", () => {
     expect(cssRule(".shell--app-backdrop.shell-frame > .workspace-layer")).toContain(
       "background: transparent;",
     );
@@ -661,17 +697,17 @@ describe("WindowChrome", () => {
       ".shell--app-backdrop.shell-frame .work-thread-workspace",
       ".shell--app-backdrop.shell-frame .code-thread-workspace",
     ]) {
-      expect(cssRule(workspace)).toContain("background: transparent;");
+      expect(cssRule(workspace)).toContain("background: var(--octant-workspace);");
     }
   });
 
-  it("lets the ground read through a thread's reply, bubble, and composer unless transparency is reduced", () => {
+  it("keeps glass on input surfaces without enclosing agent replies", () => {
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\s+/g, " ");
     const glass =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-agent, \.turn-user \.bubble, \.composer\) \{([^}]*)\}/,
+        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-user \.bubble, \.composer\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.

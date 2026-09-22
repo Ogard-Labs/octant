@@ -1,3 +1,5 @@
+import { useWorkspaceContentView } from "../shell/WorkspaceContentView";
+import { ImageGenerationContent } from "./ImageGenerationAction";
 import type {
   ImageArtifactRecord,
   ImageGenerationProfileView,
@@ -24,6 +26,7 @@ export interface GeneratedImageListProps {
 }
 
 export function GeneratedImageList(props: GeneratedImageListProps) {
+  const workspace = useWorkspaceContentView();
   const [jobs, setJobs] = useState<ReadonlyArray<ImageJob>>([]);
   const [revise, setRevise] = useState<
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
@@ -135,9 +138,32 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
                 {...(props.onSaveToProject === undefined
                   ? {}
                   : { onSaveToProject: props.onSaveToProject })}
-                onRevise={(nextJob, nextArtifact) =>
-                  setRevise({ job: nextJob, artifact: nextArtifact })
-                }
+                onRevise={(nextJob, nextArtifact) => {
+                  if (workspace === undefined) {
+                    setRevise({ job: nextJob, artifact: nextArtifact });
+                    return;
+                  }
+                  workspace.open(
+                    `image-generation:${props.threadKind}:${props.scopeId}:${nextArtifact.attachmentId}`,
+                    "Revise image",
+                    (close) => (
+                      <ImageGenerationContent
+                        client={props.client}
+                        profiles={props.profiles}
+                        scopeId={props.scopeId}
+                        threadKind={props.threadKind}
+                        parentArtifactRef={{
+                          attachmentId: nextArtifact.attachmentId,
+                          hash: nextArtifact.hash,
+                          size: nextArtifact.size,
+                          mime: nextArtifact.mime,
+                        }}
+                        onCloseWorkspace={close}
+                        onEnqueued={() => refreshRef.current()}
+                      />
+                    ),
+                  );
+                }}
               />
             ))
           )}

@@ -165,8 +165,9 @@ distilled successor of the earlier long-form design specifications.
 | [0151](0151-the-agent-opens-the-in-app-simulator-pane.md) | The agent opens the in-app Simulator pane | Accepted |
 | [0152](0152-allow-input-opens-a-device-to-clicks.md) | Allow input opens a device to clicks | Accepted |
 | [0153](0153-android-emulator-is-a-separate-device-destination.md) | Android emulator is a separate in-app device destination | Accepted |
-
 | [0154](0154-explicit-device-screenshots-reach-the-provider.md) | Explicit device screenshots reach the provider | Accepted |
+| [0155](0155-conversations-share-a-quiet-reading-surface.md) | Conversations share a quiet reading surface | Accepted |
+| [0156](0156-content-opens-beside-the-conversation.md) | Content opens beside the conversation | Accepted |
 
 ## Adding an ADR
 

@@ -528,5 +528,6 @@ describe("CodeProjectPullRequests", () => {
     expect(dock).toMatch(/height:\s*100%/);
     expect(dock).toMatch(/min-height:\s*0/);
     expect(dock).toMatch(/overflow:\s*auto/);
+    expect(dock).toMatch(/align-content:\s*start/);
   });
 });

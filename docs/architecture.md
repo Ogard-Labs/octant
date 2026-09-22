@@ -20,6 +20,10 @@ command definition. Cancellation during discovery prevents process launch; runti
 shutdown also cancels pending discovery and waits for it to settle. Thread and
 checkout authority checks still precede both run and cancellation.
 
+The Code composer's attached checkout strip keeps its height and border when
+checkout metadata is unavailable. Missing project, branch and diff values stay
+blank; unavailable checkout actions are not shown.
+
 ## Overview and principles
 
 Octant is one Electron application that hosts a Bun HTTP server, a React
@@ -376,8 +380,13 @@ see [decisions/0088-completed-and-snoozed-threads.md](decisions/0088-completed-a
 
 **Current shipped behavior.** The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome — with no tab strip; the sidebar
-is the switcher. Several same-authority threads can be pinned or dropped into
+overview, a utility surface, or a mode welcome. A pane retains renderer-session
+navigation tabs for conversations, files, previews, and canvases; selecting a
+tab reopens that surface through the authoritative command path. Image creation
+and revision occupy pane-owned tabs whose drafts remain mounted while switching
+back to the conversation. These tabs add no persisted layout or authority; see
+[decision 0156](decisions/0156-content-opens-beside-the-conversation.md).
+Several same-authority threads can be pinned or dropped into
 that tree; pointer activity and keyboard input give exactly one pane a visible
 accessible active state. Completed layout operations go through
 server-authoritative workspace commands. One visible tree belongs to one

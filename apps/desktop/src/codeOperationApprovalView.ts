@@ -617,13 +617,14 @@ ${approvalPaletteCss(palette)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:transparent}
 body{color:var(--approval-fg);font:13px/1.45 'Inter Variable',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-main{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--approval-border);border-radius:20px;background:var(--approval-bg)}
+main{height:100%;display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--approval-border);border-radius:12px;background:var(--approval-bg)}
+.content{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto;flex:1}
 h1{margin:0;font-size:14px;line-height:1.35;font-weight:500}p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-#detail{color:var(--approval-muted);overflow:auto;min-height:0;flex:1}
-details{color:var(--approval-muted);overflow:auto;max-height:45%;flex-shrink:0}summary{cursor:pointer;font-size:12px}
+#detail{color:var(--approval-muted)}
+details{color:var(--approval-muted)}summary{cursor:pointer;font-size:12px}
 #identity,#digests{padding-top:8px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
 #queue:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}#queue-count{color:var(--approval-muted)}
 .actions{display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;margin-top:auto}
-button{border:1px solid var(--approval-border);border-radius:8px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:none}button:focus-visible{filter:brightness(.9)}button:disabled{opacity:.5;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
-</style></head><body><main id="approval" aria-live="polite"><h1 id="message">Preparing approval…</h1><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Approve once</button></div></main></body></html>`;
+button{border:1px solid var(--approval-border);border-radius:8px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:2px solid var(--approval-primary);outline-offset:2px}button:disabled{opacity:.5;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
+</style></head><body><main id="approval" aria-live="polite"><div class="content"><h1 id="message">Preparing approval…</h1><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details></div><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Allow</button></div></main></body></html>`;
 }

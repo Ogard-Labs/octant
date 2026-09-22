@@ -13,7 +13,9 @@ import { OctantButton } from "../ui/base/OctantButton";
  */
 export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => void }) {
   const checkout = useCodeCheckout();
-  if (checkout === undefined) return null;
+  // The attached strip is part of the composer even while its metadata is
+  // unavailable; returning null collapses its border and shifts the controls.
+  if (checkout === undefined) return <div aria-label="Checkout" className="code-checkout-bar" />;
   const repositoryName =
     checkout.repositoryRoot
       .replace(/[\\/]+$/, "")
