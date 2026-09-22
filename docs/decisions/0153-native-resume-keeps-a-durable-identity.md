@@ -1,4 +1,4 @@
-# 0151. Native resume keeps a durable identity
+# 0153. Native resume keeps a durable identity
 
 **Status:** Accepted
 
