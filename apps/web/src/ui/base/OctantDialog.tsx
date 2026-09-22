@@ -14,6 +14,9 @@ export interface OctantDialogProps {
   readonly className?: string;
   readonly initialFocus?: RefObject<HTMLElement | null>;
   readonly label: string;
+  /** Existing visible heading; omitting it retains the hidden title for specialized layouts. */
+  readonly labelledBy?: string;
+  readonly describedBy?: string;
   readonly onClose: () => void;
   readonly open: boolean;
   readonly popupId?: string;
@@ -37,12 +40,16 @@ export function OctantDialog(props: OctantDialogProps) {
         />
         <DialogViewport className="octant-dialog__viewport window-no-drag">
           <DialogPopup
+            {...(props.labelledBy === undefined ? {} : { "aria-labelledby": props.labelledBy })}
+            {...(props.describedBy === undefined ? {} : { "aria-describedby": props.describedBy })}
             className={cn("octant-dialog__popup window-no-drag", props.className)}
             finalFocus={props.restoreFocus}
             id={props.popupId}
             initialFocus={props.initialFocus}
           >
-            <DialogTitle className="sr-only">{props.label}</DialogTitle>
+            {props.labelledBy === undefined ? (
+              <DialogTitle className="sr-only">{props.label}</DialogTitle>
+            ) : null}
             {props.children}
           </DialogPopup>
         </DialogViewport>

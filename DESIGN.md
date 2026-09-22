@@ -953,6 +953,34 @@ space after the same traffic-light width the sidebar uses.
 Packaged smoke checks both compact geometry and real native state transitions
 for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
+### Confirmation and dialog behavior
+
+Ordinary usage reset/retention and Git discard confirmations use the shared
+`OctantConfirmDialog` over `OctantDialog`. The safe action receives initial focus;
+Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
+focus to the opener. Git confirmations consistently offer **Keep changes** and
+**Discard changes**. Their existing host approvals, receipts, and observed-state
+checks remain separate and mandatory.
+
+The pull-request merge warning stays inline and nonmodal. Opening it focuses
+Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
+or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
+An attempted merge keeps its existing freshness and reviewed-head checks, and
+focus moves to its result when the attempt completes. It is not a trusted task
+approval surface.
+
+A dialog with a visible heading uses that heading as its accessible name through
+`labelledBy`; specialized palettes and dock dialogs without one retain the hidden
+title. Do not add a second visible header. Shared dialog popups and backdrops
+suppress entrance motion under the persisted reduced-motion setting as well as
+the OS preference.
+
+Sidebar operation progress and results stay visible until dismissed or replaced
+by a later operation, rather than expiring while work is still running. The
+compact notice has a keyboard-accessible Dismiss action. Export files remain in
+downloads and hand-off documents remain in the dock; this single latest-result
+surface is not a notification history or queue.
+
 ## Accessibility and reliability
 
 - Every product-owned scroll surface inherits the global thin scrollbar

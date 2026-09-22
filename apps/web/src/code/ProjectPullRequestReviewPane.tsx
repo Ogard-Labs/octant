@@ -7,7 +7,7 @@ import type {
   CodeProjectPullRequestMergeOutcome,
 } from "@octant/contracts";
 import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -70,6 +70,11 @@ export interface ProjectPullRequestReviewPaneProps {
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {
   const { detail } = props;
+  const mergeOpener = useRef<HTMLButtonElement>(null);
+  const cancelMerge = useRef<HTMLButtonElement>(null);
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const mergeResult = useRef<HTMLParagraphElement>(null);
+  const focusResultAfterAttempt = useRef(false);
   const [mergeMethod, setMergeMethod] = useState<CodeProjectPullRequestMergeMethod>("squash");
   const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
   const [mergePending, setMergePending] = useState(false);
@@ -86,12 +91,30 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
     !waiting;
   const githubUrl = safeGithubUrl(detail.url);
 
+  useEffect(() => {
+    if (mergePending) return;
+    if (mergeConfirmationOpen) cancelMerge.current?.focus();
+    else if (focusResultAfterAttempt.current) {
+      focusResultAfterAttempt.current = false;
+      mergeResult.current?.focus();
+    }
+  }, [mergeConfirmationOpen, mergePending]);
+
+  function cancelConfirmation() {
+    if (mergePending) return;
+    setMergeConfirmationOpen(false);
+    const target = mergeOpener.current;
+    if (target !== null && !target.disabled) target.focus();
+    else reviewHeading.current?.focus();
+  }
+
   async function confirmMerge(): Promise<void> {
     if (props.onMerge === undefined || !mergeAvailable) return;
     setMergePending(true);
     setMergeOutcome(undefined);
     try {
       const outcome = await props.onMerge(mergeMethod, detail.headSha);
+      focusResultAfterAttempt.current = true;
       setMergeOutcome(outcome);
       setMergeConfirmationOpen(false);
       if (outcome.status === "merged") props.onRefresh?.();
@@ -110,7 +133,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>Pull request #{detail.number}</span>
           </div>
-          <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
+          <h1 ref={reviewHeading} tabIndex={-1}>
+            {detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}
+          </h1>
           <p className="code-pr-review__meta">
             <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
               {PR_STATE_LABELS[detail.pullRequestState]}
@@ -160,7 +185,11 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               />
               <OctantButton
                 disabled={!mergeAvailable || mergePending}
-                onClick={() => setMergeConfirmationOpen(true)}
+                ref={mergeOpener}
+                onClick={() => {
+                  setMergeOutcome(undefined);
+                  setMergeConfirmationOpen(true);
+                }}
                 size="sm"
                 title={
                   mergeAvailable
@@ -202,7 +231,14 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         <div
           aria-label="Confirm pull-request merge"
           className="code-pr-review__merge-confirmation"
-          role="alertdialog"
+          role="region"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !mergePending) {
+              event.preventDefault();
+              event.stopPropagation();
+              cancelConfirmation();
+            }
+          }}
         >
           <strong>Merge pull request #{detail.number}?</strong>
           {mergeAvailable ? (
@@ -219,7 +255,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <div className="code-pr-review__actions">
             <OctantButton
               disabled={mergePending}
-              onClick={() => setMergeConfirmationOpen(false)}
+              ref={cancelMerge}
+              onClick={cancelConfirmation}
               size="sm"
               type="button"
               variant="ghost"
@@ -240,6 +277,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       ) : null}
       {mergeOutcome === undefined ? null : (
         <p
+          ref={mergeResult}
+          tabIndex={-1}
           className={`code-pr-review__merge-result code-pr-review__merge-result--${mergeOutcome.status}`}
           role={mergeOutcome.status === "merged" ? "status" : "alert"}
         >

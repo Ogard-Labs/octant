@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeGitPane } from "./CodeGitPane";
 import {
@@ -206,6 +207,7 @@ describe("CodeGitPane", () => {
   });
 
   it("asks before discarding and sends nothing if the answer is to keep the changes", async () => {
+    const user = userEvent.setup();
     const client = codeClient();
     render(
       <CodeGitPane
@@ -218,15 +220,22 @@ describe("CodeGitPane", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard 1 file" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
+    await user.click(screen.getByRole("button", { name: "Discard 1 file" }));
     expect(client.executeOperation).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Keep changes" }));
+    const opener = screen.getByRole("button", { name: "Discard 1 file", hidden: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Keep changes" })).toHaveFocus());
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(client.executeOperation).not.toHaveBeenCalled();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Keep changes" }));
+    await waitFor(() => expect(opener).toHaveFocus());
     expect(client.executeOperation).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Discard 1 file" }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await user.click(screen.getByRole("button", { name: "Discard 1 file" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "discard-git-changes", paths: ["src/changed.ts"] }),
