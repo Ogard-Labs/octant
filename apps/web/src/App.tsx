@@ -92,13 +92,7 @@ import type {
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
-import {
-  decodeWindowId,
-  decodeWorkspaceTabId,
-  type PaneId,
-  type WindowId,
-  type WorkspaceTab,
-} from "@octant/contracts/shell";
+import { type PaneId, type WindowId } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -123,11 +117,10 @@ import {
   preselectCreateHost,
   resolveDraftProviderSelection,
 } from "@octant/domain";
-import type { CreateHostViewScope, ModelPickerSelection, PickerGroup } from "@octant/domain";
+import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
 import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestination";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
 import {
-  lazy,
   Suspense,
   useCallback,
   useEffect,
@@ -150,6 +143,7 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
 import {
   openDedicatedBrowserContext,
@@ -298,7 +292,6 @@ import {
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
-  type RightUtilityDockTabDescriptor,
 } from "./shell/rightUtilityDockModel";
 import {
   addThreadUtilityTab,
@@ -318,6 +311,17 @@ import {
   updateThreadUtilityTabBrowserContext,
   updateUtilityTabBrowserContext,
 } from "./shell/rightUtilityDockSelection";
+import { describeUtilityTabs } from "./shell/utilityTabs";
+import { threadDragSurface } from "./shell/threadDragSurface";
+import {
+  RemotePairingView,
+  UsageWorkspace,
+  ZenCanvasCard,
+  ZenResearchDock,
+  ZenSurface,
+  ZenTerminalCard,
+} from "./shell/deferredSurfaces";
+import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
   isDockToolLaunchable,
@@ -389,27 +393,6 @@ import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
 import { useCommandSkills } from "./palette/useCommandSkills";
 
-const UsageWorkspace = lazy(() =>
-  import("./usage/UsageWorkspace").then((module) => ({ default: module.UsageWorkspace })),
-);
-// Surfaces most sessions never open stay out of the first bundle: pairing a
-// remote device and Zen.
-const RemotePairingView = lazy(() =>
-  import("./remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
-);
-const ZenSurface = lazy(() =>
-  import("./zen/ZenSurface").then((module) => ({ default: module.ZenSurface })),
-);
-const ZenCanvasCard = lazy(() =>
-  import("./zen/ZenCanvasCard").then((module) => ({ default: module.ZenCanvasCard })),
-);
-const ZenResearchDock = lazy(() =>
-  import("./zen/ZenResearchDock").then((module) => ({ default: module.ZenResearchDock })),
-);
-const ZenTerminalCard = lazy(() =>
-  import("./zen/ZenTerminalCard").then((module) => ({ default: module.ZenTerminalCard })),
-);
-
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
 export type { DraftProjectResolution } from "./shell/draftThreadResolution";
@@ -419,36 +402,6 @@ export { activeCodeThreadTabId, openLocalCodeThreadIds } from "./shell/workspace
 interface InspectorOpener {
   readonly element: HTMLElement;
   readonly logicalTarget: "dock";
-}
-
-function windowIdFromHostBridge(hostBridge: OctantHostBridge | undefined): WindowId | undefined {
-  if (hostBridge?.windowId === undefined) return undefined;
-  try {
-    return decodeWindowId(hostBridge.windowId);
-  } catch {
-    return undefined;
-  }
-}
-
-function describeUtilityTabs(
-  tabs: ReadonlyArray<ThreadUtilityDockTab>,
-): ReadonlyArray<RightUtilityDockTabDescriptor> {
-  const totals = new Map<RightUtilityDockSurfaceId, number>();
-  for (const tab of tabs) totals.set(tab.surface, (totals.get(tab.surface) ?? 0) + 1);
-  const seen = new Map<RightUtilityDockSurfaceId, number>();
-  return tabs.flatMap((tab) => {
-    const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tab.surface);
-    if (surface === undefined) return [];
-    const index = (seen.get(tab.surface) ?? 0) + 1;
-    seen.set(tab.surface, index);
-    return [
-      {
-        id: tab.id,
-        label: (totals.get(tab.surface) ?? 0) > 1 ? `${surface.label} ${index}` : surface.label,
-        surface,
-      },
-    ];
-  });
 }
 
 export interface AppProps {
@@ -6613,60 +6566,10 @@ function LaunchedShell(
   );
 }
 
-/**
- * The surface a sidebar thread row stands for while it is being dragged. It is
- * minted exactly like the row's click-open would mint it — same kind, same
- * identity fields, no hostId the click path would not resolve — so the domain's
- * visible-surface dedupe treats the drop and the click as the same thread.
- */
-function threadDragSurface(mode: OctantMode, row: SidebarThreadDragRow): WorkspaceTab {
-  const id = decodeWorkspaceTabId(crypto.randomUUID());
-  if (mode === "chat") {
-    return {
-      kind: "chat-thread",
-      id,
-      threadId: decodeChatThreadId(row.threadId),
-      mode,
-      title: row.title,
-    };
-  }
-  if (mode === "code") {
-    return {
-      kind: "code-overview",
-      id,
-      threadId: decodeCodeThreadId(row.threadId),
-      mode,
-      title: row.title,
-    };
-  }
-  return {
-    kind: "work-thread",
-    id,
-    threadId: decodeWorkThreadId(row.threadId),
-    mode,
-    title: row.title,
-  };
-}
-
 function focusLogicalOpener(opener: InspectorOpener): void {
   const current =
     opener.element.isConnected && opener.element.closest("[hidden]") === null
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
-}
-
-function firstSelectableProviderSelection(
-  groups: ReadonlyArray<PickerGroup>,
-): ModelPickerSelection | undefined {
-  for (const group of groups) {
-    for (const section of group.sections) {
-      for (const picker of section.models) {
-        if (picker.unavailableReason === undefined) {
-          return { providerInstanceId: group.instance.id, modelId: picker.model.id };
-        }
-      }
-    }
-  }
-  return undefined;
 }
