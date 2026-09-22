@@ -163,7 +163,13 @@
 }
 
 .usage-dashboard__unavailable-note,
-.usage-dashboard__error,
+.usage-dashboard__error {
+  padding: 10px 12px;
+  background: var(--oct-warn-soft);
+  border: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
+  border-radius: var(--oct-radius-md);
+}
+
 .usage-dashboard__unavailable-note,
 .usage-dashboard__error,
 .usage-dashboard__action-message,
