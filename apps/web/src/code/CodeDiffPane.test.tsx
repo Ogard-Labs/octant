@@ -192,11 +192,23 @@ describe("CodeDiffPane", () => {
     );
 
     await chooseSideBySide();
-    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+    const opener = await screen.findByRole("button", { name: "Discard changes" });
+    await user.click(opener);
     // Nothing happens on the first click: the change is gone for good, so the
     // pane asks before it asks the host.
     expect(executeOperation).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Discard permanently" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Keep changes" })).toHaveFocus());
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Keep changes" }));
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
 
     const command = {
       kind: "discard-git-changes",
@@ -229,7 +241,7 @@ describe("CodeDiffPane", () => {
 
     await chooseSideBySide();
     await user.click(await screen.findByRole("button", { name: "Discard changes" }));
-    await user.click(screen.getByRole("button", { name: "Discard permanently" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
 
     expect(executeOperation).not.toHaveBeenCalled();
     expect(
