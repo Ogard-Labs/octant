@@ -155,6 +155,12 @@ stays quiet and separate, without a second provider pill or repeated project lab
 
 ### Welcome and composer
 
+Work follow-up composers use the same attached context strip as Code, showing
+the project and working folder instead of Git controls. Full paths require a
+matching project binding revision; missing metadata never borrows another root.
+The strip stays mounted while metadata loads, and full paths are available in
+tooltips. Code retains its checkout, branch, diff, and pull-request controls.
+
 Chat, Work, and Code open on the same screen: the hero question and one
 raised composer. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach and image on the
@@ -164,12 +170,6 @@ row immediately above the card, so the composer stays a single object.
 The row wraps rather than grows: a control that needs a list ("Create
 from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
-
-Work follow-up composers use the same attached context strip as Code, showing
-the project and working folder instead of Git controls. Full paths require a
-matching project binding revision; missing metadata never borrows another root.
-The strip stays mounted while metadata loads, and full paths are available in
-tooltips. Code retains its checkout, branch, diff, and pull-request controls.
 
 The screen sits on the application ground (0091, 0129): an ordered-dither cloud
 drawn from the theme's bounded pattern palette at one cell per three pixels, one of the
