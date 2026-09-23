@@ -346,6 +346,8 @@ window, or approves an action class the host policy reserves for the local user.
   launch sets it, and the severity table's "reading Keychain material" still describes reading the
   store rather than this lookup. Which service name a given runtime takes was not measured on the
   authoring host, so both the modern and legacy entry points are opened.
+- Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
+  Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares
   its launch through `prepareConfinedVersionProbe`
   (`apps/server/src/process/confinedVersionProbe.ts`), recorded in
