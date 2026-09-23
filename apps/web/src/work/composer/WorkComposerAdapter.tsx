@@ -185,6 +185,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    // A Work thread belongs to a Project (decision 0037), so the first turn
+    // cannot start until one is chosen. Refusing here, with a visible reason,
+    // is what makes the Project control a requirement rather than a suggestion.
     if (!hasFolder) {
       setProjectRequired(true);
       return;
