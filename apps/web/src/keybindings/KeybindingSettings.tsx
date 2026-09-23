@@ -13,6 +13,9 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { SettingsDisclosure } from "../settings/primitives";
 import { useKeybindings, type KeybindingController } from "./useKeybindings";
 
+type KeybindingAction = (typeof OCTANT_KEYBINDING_ACTIONS)[number];
+type KeybindingArea = KeybindingAction["area"];
+
 export interface KeybindingSettingsProps {
   /** Injected in tests; otherwise the app's own store. */
   readonly controller?: KeybindingController;
@@ -39,6 +42,17 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
   const shadowed = new Set(
     controller.keybindings.conflicts.flatMap((conflict) => conflict.actionIds.slice(1)),
   );
+  const groups = OCTANT_KEYBINDING_ACTIONS.reduce<
+    Array<{ readonly area: KeybindingArea; readonly actions: Array<KeybindingAction> }>
+  >((result, action) => {
+    const group = result.find((candidate) => candidate.area === action.area);
+    if (group === undefined) {
+      result.push({ area: action.area, actions: [action] });
+    } else {
+      group.actions.push(action);
+    }
+    return result;
+  }, []);
 
   function record(actionId: OctantKeybindingActionId, event: KeyboardEvent<HTMLButtonElement>) {
     // Modifier keys arrive on their own while the chord is still being held;
@@ -67,50 +81,63 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
 
   return (
     <div className="keybinding-settings">
-      <ul className="keybinding-settings__list">
-        {OCTANT_KEYBINDING_ACTIONS.map((action) => {
-          const chord = controller.keybindings.bindings.get(action.id);
-          const bound = chord === undefined ? "Unbound" : describeChord(chord, apple);
-          const custom = chord !== undefined && formatChord(chord) !== action.defaultChord;
-          return (
-            <li key={action.id}>
-              <span className="keybinding-settings__action">
-                <span>{action.label}</span>
-                <span className="keybinding-settings__area">{action.area}</span>
-              </span>
-              <OctantButton
-                aria-label={`Change the chord for ${action.label}`}
-                onClick={() => {
-                  setRecordError(undefined);
-                  setRecording(recording === action.id ? undefined : action.id);
-                }}
-                onKeyDown={(event) => {
-                  if (recording === action.id) record(action.id, event);
-                }}
-                size="sm"
-                variant={recording === action.id ? "secondary" : "ghost"}
-              >
-                {recording === action.id ? "Press a chord…" : bound}
-              </OctantButton>
-              {custom ? (
-                <OctantButton
-                  aria-label={`Reset ${action.label} to its default chord`}
-                  onClick={() => controller.reset(action.id)}
-                  size="sm"
-                  variant="ghost"
-                >
-                  Reset
-                </OctantButton>
-              ) : null}
-              {shadowed.has(action.id) ? (
-                <span className="keybinding-settings__warning" role="note">
-                  Shares {bound} with another action and will not run.
-                </span>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+      {groups.map((group) => {
+        const headingId = `keybinding-settings-${group.area.toLowerCase()}`;
+        return (
+          <section
+            aria-labelledby={headingId}
+            className="keybinding-settings__group"
+            key={group.area}
+          >
+            <h3 className="keybinding-settings__group-title" id={headingId}>
+              {group.area}
+            </h3>
+            <ul className="keybinding-settings__list">
+              {group.actions.map((action) => {
+                const chord = controller.keybindings.bindings.get(action.id);
+                const bound = chord === undefined ? "Unbound" : describeChord(chord, apple);
+                const custom = chord !== undefined && formatChord(chord) !== action.defaultChord;
+                return (
+                  <li key={action.id}>
+                    <span className="keybinding-settings__action">
+                      <span>{action.label}</span>
+                    </span>
+                    <OctantButton
+                      aria-label={`Change the chord for ${action.label}`}
+                      onClick={() => {
+                        setRecordError(undefined);
+                        setRecording(recording === action.id ? undefined : action.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (recording === action.id) record(action.id, event);
+                      }}
+                      size="sm"
+                      variant={recording === action.id ? "secondary" : "ghost"}
+                    >
+                      {recording === action.id ? "Press a chord…" : bound}
+                    </OctantButton>
+                    {custom ? (
+                      <OctantButton
+                        aria-label={`Reset ${action.label} to its default chord`}
+                        onClick={() => controller.reset(action.id)}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        Reset
+                      </OctantButton>
+                    ) : null}
+                    {shadowed.has(action.id) ? (
+                      <span className="keybinding-settings__warning" role="note">
+                        Shares {bound} with another action and will not run.
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
       {recordError === undefined ? null : <p role="alert">{recordError}</p>}
       {controller.keybindings.rejected.map((rejection) => (
         <p key={`${rejection.actionId}-${rejection.chord}`} role="alert">

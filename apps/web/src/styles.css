@@ -7774,6 +7774,18 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   list-style: none;
 }
 
+.keybinding-settings__group + .keybinding-settings__group {
+  margin-top: var(--oct-space-5);
+}
+
+.keybinding-settings__group-title {
+  margin: 0 0 var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  color: var(--oct-muted);
+  text-transform: none;
+}
+
 .keybinding-settings__list li {
   display: flex;
   align-items: center;
@@ -7791,7 +7803,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   gap: 2px;
 }
 
-.keybinding-settings__area,
 .keybinding-settings__warning {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
