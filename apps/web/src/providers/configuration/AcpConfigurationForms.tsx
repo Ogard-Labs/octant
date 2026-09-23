@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
+import { SettingRow } from "../../settings/primitives";
 import {
   emptyTransientCredential,
   transientCredential,
@@ -40,8 +41,11 @@ export function KiloConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>Binary path</span>
+      <SettingRow
+        label="Binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`Binary path for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -49,16 +53,18 @@ export function KiloConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Kilo settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Kilo settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -81,8 +87,11 @@ export function GooseConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>goose binary path</span>
+      <SettingRow
+        label="goose binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`goose binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -90,16 +99,18 @@ export function GooseConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Goose settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Goose settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -133,8 +144,11 @@ export function GlmConfigurationForm(props: {
         );
       }}
     >
-      <label>
-        <span>glm-acp-agent binary path</span>
+      <SettingRow
+        label="glm-acp-agent binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`glm-acp-agent binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -142,9 +156,17 @@ export function GlmConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <label>
-        <span>Authentication</span>
+      </SettingRow>
+      <SettingRow
+        description={
+          authentication === "api-key"
+            ? undefined
+            : "Run the provider-owned GLM Agent CLI login in your terminal. Octant reuses its native profile and binary."
+        }
+        label="Authentication"
+        scope="host"
+        settingId={`provider-${props.instance.id}-authentication`}
+      >
         <OctantSelectField
           aria-label={`GLM authentication for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -155,10 +177,13 @@ export function GlmConfigurationForm(props: {
           ]}
           value={authentication}
         />
-      </label>
+      </SettingRow>
       {authentication === "api-key" ? (
-        <label>
-          <span>Z.AI API key (leave blank to preserve)</span>
+        <SettingRow
+          label="Z.AI API key (leave blank to preserve)"
+          scope="host"
+          settingId={`provider-${props.instance.id}-api-key`}
+        >
           <OctantInput
             aria-label={`Z.AI API key for ${props.instance.displayName}`}
             autoComplete="off"
@@ -169,22 +194,19 @@ export function GlmConfigurationForm(props: {
             spellCheck={false}
             type="password"
           />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Run the provider-owned GLM Agent CLI login in your terminal. Octant reuses its native
-          profile and binary.
-        </p>
-      )}
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save GLM settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+        </SettingRow>
+      ) : null}
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save GLM settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -207,8 +229,11 @@ export function CopilotConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>copilot binary path</span>
+      <SettingRow
+        label="copilot binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`copilot binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -216,16 +241,18 @@ export function CopilotConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save GitHub Copilot settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save GitHub Copilot settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -280,8 +307,11 @@ export function ApiKeyAcpConfigurationForm<
         );
       }}
     >
-      <label>
-        <span>{props.binaryLabel}</span>
+      <SettingRow
+        label={props.binaryLabel}
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`${props.binaryLabel} for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -289,10 +319,18 @@ export function ApiKeyAcpConfigurationForm<
           name="binaryPath"
           required
         />
-      </label>
+      </SettingRow>
       {props.fixedAuthentication === undefined ? (
-        <label>
-          <span>Authentication</span>
+        <SettingRow
+          description={
+            authentication === "api-key"
+              ? undefined
+              : "Authenticate with the provider-owned CLI in your terminal. Octant launches this same binary and reuses its native profile; it does not create a second login."
+          }
+          label="Authentication"
+          scope="host"
+          settingId={`provider-${props.instance.id}-authentication`}
+        >
           <OctantSelectField
             aria-label={`Authentication for ${props.instance.displayName}`}
             className="settings-view__select"
@@ -303,11 +341,14 @@ export function ApiKeyAcpConfigurationForm<
             ]}
             value={authentication}
           />
-        </label>
+        </SettingRow>
       ) : null}
       {authentication === "api-key" ? (
-        <label>
-          <span>{props.apiKeyLabel} (leave blank to preserve)</span>
+        <SettingRow
+          label={`${props.apiKeyLabel} (leave blank to preserve)`}
+          scope="host"
+          settingId={`provider-${props.instance.id}-api-key`}
+        >
           <OctantInput
             aria-label={`${props.apiKeyLabel} for ${props.instance.displayName}`}
             autoComplete="off"
@@ -318,22 +359,19 @@ export function ApiKeyAcpConfigurationForm<
             spellCheck={false}
             type="password"
           />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Authenticate with the provider-owned CLI in your terminal. Octant launches this same
-          binary and reuses its native profile; it does not create a second login.
-        </p>
-      )}
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save ${props.driverLabel} settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+        </SettingRow>
+      ) : null}
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save ${props.driverLabel} settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -436,8 +474,12 @@ export function OllamaConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>Ollama API base URL</span>
+      <SettingRow
+        description="Literal loopback native API only. Octant never manages the shared Ollama service or its models."
+        label="Ollama API base URL"
+        scope="host"
+        settingId={`provider-${props.instance.id}-base-url`}
+      >
         <OctantInput
           aria-label={`Ollama API base for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -446,20 +488,18 @@ export function OllamaConfigurationForm(props: {
           required
           type="url"
         />
-      </label>
-      <p className="provider-settings__field-guidance">
-        Literal loopback native API only. Octant never manages the shared Ollama service or its
-        models.
-      </p>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Ollama settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Ollama settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -496,8 +536,11 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
         void props.onChange(props.instance.id, configuration, key);
       }}
     >
-      <label>
-        <span>vibe-acp binary path</span>
+      <SettingRow
+        label="vibe-acp binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`vibe-acp binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -505,9 +548,17 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
           name="binaryPath"
           required
         />
-      </label>
-      <label>
-        <span>Authentication</span>
+      </SettingRow>
+      <SettingRow
+        description={
+          authentication === "api-key"
+            ? undefined
+            : "Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe profile and binary."
+        }
+        label="Authentication"
+        scope="host"
+        settingId={`provider-${props.instance.id}-authentication`}
+      >
         <OctantSelectField
           aria-label={`Mistral Vibe authentication for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -524,10 +575,13 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
           ]}
           value={authentication}
         />
-      </label>
+      </SettingRow>
       {authentication === "api-key" ? (
-        <label>
-          <span>Mistral API key (leave blank to preserve)</span>
+        <SettingRow
+          label="Mistral API key (leave blank to preserve)"
+          scope="host"
+          settingId={`provider-${props.instance.id}-api-key`}
+        >
           <OctantInput
             aria-label={`Mistral API key for ${props.instance.displayName}`}
             autoComplete="new-password"
@@ -537,22 +591,19 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
             spellCheck={false}
             type="password"
           />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe
-          profile and binary.
-        </p>
-      )}
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Mistral Vibe settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+        </SettingRow>
+      ) : null}
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Mistral Vibe settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -589,8 +640,11 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
         void props.onChange(props.instance.id, configuration, key);
       }}
     >
-      <label>
-        <span>grok binary path</span>
+      <SettingRow
+        label="grok binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`grok binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -598,9 +652,17 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
           name="binaryPath"
           required
         />
-      </label>
-      <label>
-        <span>Authentication</span>
+      </SettingRow>
+      <SettingRow
+        description={
+          authentication === "api-key"
+            ? undefined
+            : "Run grok login in your terminal, or grok login --device-auth on a headless host. Octant reuses the same Grok profile and binary."
+        }
+        label="Authentication"
+        scope="host"
+        settingId={`provider-${props.instance.id}-authentication`}
+      >
         <OctantSelectField
           aria-label={`Grok Build authentication for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -617,10 +679,13 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
           ]}
           value={authentication}
         />
-      </label>
+      </SettingRow>
       {authentication === "api-key" ? (
-        <label>
-          <span>xAI API key (leave blank to preserve)</span>
+        <SettingRow
+          label="xAI API key (leave blank to preserve)"
+          scope="host"
+          settingId={`provider-${props.instance.id}-api-key`}
+        >
           <OctantInput
             aria-label={`xAI API key for ${props.instance.displayName}`}
             autoComplete="new-password"
@@ -630,22 +695,19 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
             spellCheck={false}
             type="password"
           />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Run <code>grok login</code> in your terminal, or <code>grok login --device-auth</code> on
-          a headless host. Octant reuses the same Grok profile and binary.
-        </p>
-      )}
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Grok Build settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+        </SettingRow>
+      ) : null}
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Grok Build settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { decodeProviderInstanceId, type ProviderInstance } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DevinConfigurationForm,
   FxConfigurationForm,
   ProviderCreateForm,
   type ProviderCreateFormProps,
@@ -207,5 +208,35 @@ describe("FxConfigurationForm", () => {
       },
       expect.anything(),
     );
+  });
+});
+
+describe("DevinConfigurationForm", () => {
+  it("renders the binary path inside a setting row without changing its accessible name", () => {
+    const instance: Extract<ProviderInstance, { driverKind: "devin" }> = {
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000d1"),
+      displayName: "Devin local",
+      driverKind: "devin",
+      configuration: {
+        kind: "devin-acp",
+        binaryPath: "/Users/example/.local/bin/devin",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as never,
+      createdAt: "2026-07-14T10:00:00.000Z" as never,
+      updatedAt: "2026-07-14T10:00:00.000Z" as never,
+    };
+    const onChange = vi.fn(async () => true);
+
+    render(<DevinConfigurationForm disabled={false} instance={instance} onChange={onChange} />);
+
+    const row = document.querySelector(
+      `[data-setting-id="provider-${String(instance.id)}-binary-path"]`,
+    );
+    expect(row).not.toBeNull();
+    if (row === null) throw new Error("expected the Devin binary-path setting row");
+    expect(row).toContainElement(screen.getByLabelText("Binary path for Devin local"));
   });
 });

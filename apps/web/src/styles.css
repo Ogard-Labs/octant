@@ -2819,9 +2819,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-card__edit {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 10px;
+  gap: 0;
 }
 
 .provider-card__configuration {
@@ -2843,16 +2841,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-card__edit--http,
 .provider-card__edit--claude {
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
   padding-top: 4px;
   border-top: 1px solid var(--octant-border);
 }
 
-.provider-card__credential-actions {
+.provider-card__edit-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-3);
 }
 
 .provider-card__discovery {
@@ -6260,8 +6257,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   .provider-settings__create--openai-compatible .settings-view__action,
   .provider-settings__create--claude .settings-view__action,
   .provider-settings__models-field,
-  .provider-settings__field-guidance,
-  .provider-card__credential-actions {
+  .provider-settings__field-guidance {
     grid-column: 1;
   }
 
