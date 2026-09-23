@@ -272,6 +272,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ onRename: vi.fn(async () => true) });
     renderExpanded(<ProviderSettingsView {...props} />);
 
+    expect(screen.getByLabelText("Display name")).toHaveAttribute("name", "displayName");
     const input = screen.getByLabelText("Display name for Existing CLI");
     await user.clear(input);
     await user.type(input, "Renamed CLI");
