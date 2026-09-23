@@ -9,7 +9,6 @@ import type {
   CodeNavigation,
   CodeCommand,
   CodeCommandResult,
-  CodeEventFrame,
   CodeFailure,
   CodeCheckoutId,
   CodeExternalEditor,
@@ -25,11 +24,8 @@ import {
   decodeProviderSessionId,
   type CodeApprovalId,
   type CodeCheckpoint,
-  type CodeTurnChangedFiles,
   type CodeConversationTurn,
-  MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeProviderLimit,
-  type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
@@ -57,7 +53,44 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { markInteraction } from "../polling/interactionTrace";
-import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
+import {
+  acceptFrame,
+  applyEvent,
+  applyResult,
+  commandTargets,
+  codeFailure,
+  createCodeReadCursorStore,
+  isActive,
+  projectConversationTurns,
+  providerRequestFromEvent,
+  readConversationEvidence,
+  readForkConversation,
+  readOperationText,
+  refreshActiveThreadView,
+  replaceById,
+  totalTurnUsage,
+  worthAskingAgain,
+} from "./codeControllerState";
+import type {
+  CodeCacheCoverage,
+  CodeConversationMessage,
+  CodeProviderRequest,
+  CodeReadCursorStore,
+  CodeTurnUsage,
+} from "./codeControllerState";
+import {
+  archiveCodeThread,
+  completeCodeThread,
+  findCodeThread,
+  pinCodeThread,
+  renameCodeThread,
+  reopenCodeThread,
+  snoozeCodeThread,
+  wakeCodeThread,
+} from "./codeThreadCommands";
+
+export type { CodeConversationMessage, CodeProviderRequest, CodeReadCursorStore };
+export { createCodeReadCursorStore };
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "waiting" | "failed";
@@ -73,19 +106,6 @@ export type CodeThreadRestOutcome =
  * The host mints these from the provider stream; the renderer only relays
  * the user's answer back through `answer-provider-*` operations.
  */
-export type CodeProviderRequest =
-  | {
-      readonly kind: "approval";
-      readonly approvalId: CodeApprovalId;
-      readonly summary: string;
-    }
-  | {
-      readonly kind: "input";
-      readonly requestId: string;
-      readonly prompt: string;
-      readonly options: ReadonlyArray<string>;
-    };
-
 export type CodeProviderAnswer =
   | {
       readonly kind: "approval";
@@ -93,57 +113,6 @@ export type CodeProviderAnswer =
       readonly decision: "approved" | "denied";
     }
   | { readonly kind: "input"; readonly requestId: string; readonly response: string };
-
-function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderRequest | undefined {
-  if (event.kind === "approval-requested") {
-    return { kind: "approval", approvalId: event.approvalId, summary: event.summary };
-  }
-  if (event.kind === "input-requested") {
-    return {
-      kind: "input",
-      requestId: event.requestId,
-      prompt: event.prompt,
-      options: event.options,
-    };
-  }
-  return undefined;
-}
-
-export interface CodeConversationMessage {
-  readonly id: string;
-  readonly role: "user" | "assistant";
-  readonly text: string;
-  readonly operationId?: CodeOperationId;
-  readonly sourceThreadId?: CodeThreadId;
-  readonly providerInstanceId?: CodeThread["providerInstanceId"];
-  readonly modelId?: CodeThread["modelId"];
-  readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
-  /**
-   * When this message happened, as the journal recorded its turn: the turn's
-   * start for the prompt, its last update for the reply. Absent on a message
-   * still being composed locally, which has not been journaled yet.
-   */
-  readonly at?: string;
-  /** Images this message carried, as the turn's start event recorded them. */
-  readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
-  /**
-   * The checkout as it stood before this turn ran. Present on a user message
-   * whose turn the host managed to checkpoint, and what the transcript's
-   * restore control acts on.
-   */
-  readonly checkpoint?: CodeCheckpoint;
-  /**
-   * The posture this turn ran under, as the host recorded it. Absent on a
-   * message whose turn was journaled before the host started recording it.
-   */
-  readonly executionPolicy?: ProviderExecutionPolicy;
-  /**
-   * What changed in the checkout while this turn ran. Present on an assistant
-   * message whose turn the host observed; absent means "not observed", which is
-   * not the same as "nothing changed".
-   */
-  readonly changedFiles?: CodeTurnChangedFiles;
-}
 
 export interface CodeThreadNavigationItem {
   readonly checkoutChip?: {
@@ -187,56 +156,6 @@ export interface CodeThreadNavigationItem {
   readonly lineageParentThreadId?: string;
 }
 
-function refreshActiveThreadView(
-  current: CodeThreadView | undefined,
-  next: CodeBootstrap,
-): CodeThreadView | undefined {
-  if (current === undefined) return current;
-  const checkout = next.checkouts.find(
-    (candidate) => String(candidate.id) === String(current.checkout.id),
-  );
-  const refreshedThread = next.threads.find(
-    (candidate) => String(candidate.id) === String(current.thread.id),
-  );
-  if (checkout === undefined && refreshedThread === undefined) return current;
-  if (
-    (checkout === undefined || samePollingData(checkout, current.checkout)) &&
-    (refreshedThread === undefined || samePollingData(refreshedThread, current.thread))
-  ) {
-    return current;
-  }
-  return {
-    ...current,
-    ...(checkout === undefined ? {} : { checkout }),
-    ...(refreshedThread === undefined ? {} : { thread: refreshedThread }),
-  };
-}
-
-/** Code keeps its own record, so Chat's cursors never read as Code's. */
-const CODE_READ_CURSOR_STORAGE_KEY = "octant.code.readCursors.v1";
-
-/**
- * Code's read cursors.
- *
- * The sequence is the host's, from the bootstrap: a thread's own version cannot
- * stand in for it, because a provider turn is journaled on a different
- * aggregate and moves neither the version nor `updatedAt`.
- *
- * The store itself is shared with Chat — unread is the same idea in both modes
- * — and survives a relaunch, so a thread the user read yesterday does not come
- * back unread today.
- */
-export type CodeReadCursorStore = ReadCursorStore<CodeThreadId>;
-
-export function createCodeReadCursorStore(
-  storage?: Pick<Storage, "getItem" | "setItem"> | undefined,
-): CodeReadCursorStore {
-  return createReadCursorStore<CodeThreadId>({
-    storageKey: CODE_READ_CURSOR_STORAGE_KEY,
-    ...(storage === undefined ? {} : { storage }),
-  });
-}
-
 /**
  * The longest a dropped stream waits before trying the host again. Long enough
  * that a machine asleep for hours is not asking every quarter second, short
@@ -261,13 +180,6 @@ const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
  * heard about. Every figure comes from the provider: a provider that reports
  * no cost leaves `costUsd` absent rather than showing a derived number.
  */
-interface CodeCacheCoverage {
-  /** Coverage is over turns with usage reports, not all conversation turns. */
-  readonly reportedTurns: number;
-  readonly read: { readonly measuredTurns: number; readonly measuredTokens: number };
-  readonly write: { readonly measuredTurns: number; readonly measuredTokens: number };
-}
-
 export interface CodeThreadUsage {
   readonly cacheCoverage?: CodeCacheCoverage;
   readonly inputTokens?: number;
@@ -284,17 +196,6 @@ export interface CodeThreadUsage {
 
 const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
 
-interface CodeTurnUsage {
-  readonly inputTokens: number;
-  readonly cacheReadInputTokens?: number | undefined;
-  readonly cacheWriteInputTokens?: number | undefined;
-
-  readonly outputTokens: number;
-  readonly costUsd?: number | undefined;
-  readonly contextWindow?: number | undefined;
-  readonly contextTokens?: number | undefined;
-}
-
 /**
  * Add up what each turn reported.
  *
@@ -304,69 +205,6 @@ interface CodeTurnUsage {
  * a figure per turn is what makes the live number agree with the one the
  * journal projects when the thread is reopened.
  */
-function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
-  readonly cacheCoverage?: CodeCacheCoverage;
-  readonly inputTokens?: number;
-  readonly cacheReadInputTokens?: number;
-  readonly cacheWriteInputTokens?: number;
-
-  readonly outputTokens?: number;
-  readonly costUsd?: number;
-  readonly contextWindow?: number;
-  readonly contextTokens?: number;
-} {
-  if (byOperation.size === 0) return {};
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadInputTokens: number | undefined;
-  let cacheReadTurns = 0;
-  let cacheWriteTurns = 0;
-  let cacheWriteInputTokens: number | undefined;
-
-  let costUsd: number | undefined;
-  // Tokens and cost add up across turns; the window figures are a state, so
-  // the latest turn that reported each speaks for the thread. The occupancy
-  // report stands alone — a provider can name what the last request held
-  // without knowing the model's window.
-  let contextWindow: number | undefined;
-  let contextTokens: number | undefined;
-  for (const usage of byOperation.values()) {
-    inputTokens += usage.inputTokens;
-    outputTokens += usage.outputTokens;
-    if (usage.cacheReadInputTokens !== undefined) {
-      cacheReadTurns += 1;
-      cacheReadInputTokens = (cacheReadInputTokens ?? 0) + usage.cacheReadInputTokens;
-    }
-    if (usage.cacheWriteInputTokens !== undefined) {
-      cacheWriteTurns += 1;
-      cacheWriteInputTokens = (cacheWriteInputTokens ?? 0) + usage.cacheWriteInputTokens;
-    }
-
-    if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
-    if (usage.contextWindow !== undefined) contextWindow = usage.contextWindow;
-    if (usage.contextTokens !== undefined) contextTokens = usage.contextTokens;
-  }
-  return {
-    inputTokens,
-    outputTokens,
-    ...(costUsd === undefined ? {} : { costUsd }),
-    ...(cacheReadTurns !== byOperation.size || cacheReadInputTokens === undefined
-      ? {}
-      : { cacheReadInputTokens }),
-    ...(cacheWriteTurns !== byOperation.size || cacheWriteInputTokens === undefined
-      ? {}
-      : { cacheWriteInputTokens }),
-    cacheCoverage: {
-      reportedTurns: byOperation.size,
-      read: { measuredTurns: cacheReadTurns, measuredTokens: cacheReadInputTokens ?? 0 },
-      write: { measuredTurns: cacheWriteTurns, measuredTokens: cacheWriteInputTokens ?? 0 },
-    },
-
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(contextTokens === undefined ? {} : { contextTokens }),
-  };
-}
-
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
   readonly client?: CodeClient;
@@ -1793,16 +1631,9 @@ export function useCodeController(options: CodeControllerOptions) {
    */
   const renameThread = useCallback(
     async (threadId: CodeThreadId, title: string): Promise<boolean> => {
-      const thread = bootstrapRef.current?.threads.find(
-        (candidate) => String(candidate.id) === String(threadId),
-      );
+      const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
       if (thread === undefined) return false;
-      const result = await execute({
-        kind: "rename-code-thread",
-        threadId,
-        expectedVersion: thread.version,
-        title: title as never,
-      });
+      const result = await execute(renameCodeThread(thread, title));
       return result !== undefined;
     },
     [execute],
@@ -1915,16 +1746,9 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const pinThread = useCallback(
     async (threadId: CodeThreadId, pinned: boolean): Promise<boolean> => {
-      const thread = bootstrapRef.current?.threads.find(
-        (candidate) => String(candidate.id) === String(threadId),
-      );
+      const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
       if (thread === undefined) return false;
-      const result = await execute({
-        kind: "pin-code-thread",
-        threadId,
-        expectedVersion: thread.version,
-        pinned,
-      });
+      const result = await execute(pinCodeThread(thread, pinned));
       return result !== undefined;
     },
     [execute],
@@ -1937,16 +1761,9 @@ export function useCodeController(options: CodeControllerOptions) {
    */
   const archiveThread = useCallback(
     async (threadId: CodeThreadId): Promise<boolean> => {
-      const thread = bootstrapRef.current?.threads.find(
-        (candidate) => String(candidate.id) === String(threadId),
-      );
+      const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
       if (thread === undefined) return false;
-      const result = await execute({
-        kind: "change-code-thread-lifecycle",
-        threadId,
-        expectedVersion: thread.version,
-        lifecycle: "archived",
-      });
+      const result = await execute(archiveCodeThread(thread));
       return result !== undefined;
     },
     [execute],
@@ -1965,15 +1782,13 @@ export function useCodeController(options: CodeControllerOptions) {
   const restCommand = useCallback(
     async (
       threadId: CodeThreadId,
-      command: (expectedVersion: CodeThread["version"]) => CodeCommand,
+      command: (thread: CodeThread) => CodeCommand,
     ): Promise<CodeThreadRestOutcome> => {
-      const thread = bootstrapRef.current?.threads.find(
-        (candidate) => String(candidate.id) === String(threadId),
-      );
+      const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
       if (thread === undefined) {
         return { status: "refused", message: "This thread is no longer in the list." };
       }
-      const result = await execute(command(thread.version));
+      const result = await execute(command(thread));
       if (result !== undefined) return { status: "ok" };
       return {
         status: "refused",
@@ -1983,40 +1798,20 @@ export function useCodeController(options: CodeControllerOptions) {
     [execute],
   );
   const completeThread = useCallback(
-    (threadId: CodeThreadId) =>
-      restCommand(threadId, (expectedVersion) => ({
-        kind: "complete-code-thread",
-        threadId,
-        expectedVersion,
-      })),
+    (threadId: CodeThreadId) => restCommand(threadId, completeCodeThread),
     [restCommand],
   );
   const reopenThread = useCallback(
-    (threadId: CodeThreadId) =>
-      restCommand(threadId, (expectedVersion) => ({
-        kind: "reopen-code-thread",
-        threadId,
-        expectedVersion,
-      })),
+    (threadId: CodeThreadId) => restCommand(threadId, reopenCodeThread),
     [restCommand],
   );
   const snoozeThread = useCallback(
     (threadId: CodeThreadId, until: string) =>
-      restCommand(threadId, (expectedVersion) => ({
-        kind: "snooze-code-thread",
-        threadId,
-        expectedVersion,
-        until: decodeUtcTimestamp(until),
-      })),
+      restCommand(threadId, (thread) => snoozeCodeThread(thread, decodeUtcTimestamp(until))),
     [restCommand],
   );
   const wakeThread = useCallback(
-    (threadId: CodeThreadId) =>
-      restCommand(threadId, (expectedVersion) => ({
-        kind: "wake-code-thread",
-        threadId,
-        expectedVersion,
-      })),
+    (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
 
@@ -2508,23 +2303,6 @@ export function useCodeController(options: CodeControllerOptions) {
   };
 }
 
-function conversationFallback(
-  status: "waiting" | "completed" | "interrupted" | "failed" | "incomplete",
-): string {
-  switch (status) {
-    case "waiting":
-      return "The provider turn is waiting for input or recovery.";
-    case "interrupted":
-      return "The provider turn was interrupted.";
-    case "failed":
-      return "The provider turn failed.";
-    case "incomplete":
-      return "Working…";
-    case "completed":
-      return "The provider turn finished without a visible reply.";
-  }
-}
-
 type CodeControllerResult = ReturnType<typeof useCodeController>;
 export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> & {
   /** Optional for injected fixtures and hosts that do not persist drafts by thread. */
@@ -2534,328 +2312,4 @@ export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");
   return value;
-}
-
-/** Whether a refused bootstrap describes a host that may simply not be up yet. */
-function worthAskingAgain(error: unknown): boolean {
-  const category = codeFailure(error).category;
-  return category === "disconnected" || category === "unavailable";
-}
-
-function codeFailure(error: unknown): Pick<CodeFailure, "category" | "message"> {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "category" in error &&
-    typeof error.category === "string" &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return { category: error.category as CodeFailure["category"], message: error.message };
-  }
-  return { category: "disconnected", message: "The local Octant Code service is unavailable." };
-}
-
-function replaceById<T extends { readonly id: unknown }>(items: ReadonlyArray<T>, value: T): T[] {
-  const index = items.findIndex((candidate) => candidate.id === value.id);
-  if (index === -1) return [...items, value];
-  return items.map((candidate, candidateIndex) => (candidateIndex === index ? value : candidate));
-}
-
-function applyEvent(current: CodeBootstrap | undefined, frame: CodeEventFrame) {
-  return current === undefined ? current : applyResult(current, frame.event);
-}
-
-function applyResult(current: CodeBootstrap | undefined, result: CodeCommandResult) {
-  if (current === undefined) return current;
-  switch (result.kind) {
-    case "checkout-prepared":
-      return { ...current, checkouts: replaceById(current.checkouts, result.checkout) };
-    case "settings-updated":
-      return { ...current, settings: result.settings };
-    case "thread-created":
-    case "thread-updated":
-      return { ...current, threads: replaceById(current.threads, result.thread) };
-    case "thread-lifecycle-changed":
-      return {
-        ...current,
-        threads: current.threads.map((thread) =>
-          thread.id === result.threadId
-            ? { ...thread, lifecycle: result.lifecycle, version: result.version }
-            : thread,
-        ),
-      };
-    case "worktree-source-previewed":
-    case "worktree-remote-facts-retrieved":
-    case "worktree-refs-listed":
-      return current;
-    case "thread-checkout-rebind":
-      return result.outcome.status === "refused"
-        ? current
-        : {
-            ...current,
-            threads: replaceById(current.threads, result.outcome.thread),
-            checkouts: replaceById(current.checkouts, result.outcome.checkout),
-          };
-    case "managed-thread-created":
-      return {
-        ...current,
-        threads: replaceById(current.threads, result.thread),
-        checkouts: replaceById(current.checkouts, result.checkout),
-      };
-    default:
-      // A result this reducer does not name says nothing about bootstrap
-      // state, so it leaves it alone. Falling out of the switch returned
-      // `undefined` instead, which erased everything Code had loaded — while
-      // `status` stayed "ready", so the renderer reported a healthy Code
-      // surface that then refused every thread. A host one version ahead can
-      // answer with a kind this renderer has never heard of, so the safe
-      // answer has to be the runtime one, not an exhaustiveness assertion.
-      return current;
-  }
-}
-
-function commandTargets(command: CodeCommand, threadId: CodeThreadId): boolean {
-  return "threadId" in command && command.threadId === threadId;
-}
-
-function acceptFrame(frame: CodeEventFrame, threadId: CodeThreadId, cursor: number): boolean {
-  return frame.threadId === threadId && Number(frame.sequence) === cursor + 1;
-}
-
-function isActive(
-  request: number,
-  generation: { readonly current: number },
-  mounted: { readonly current: boolean },
-): boolean {
-  return mounted.current && request === generation.current;
-}
-
-async function readOperationText(
-  client: CodeClient,
-  threadId: CodeThreadId,
-  operationId: CodeOperationId,
-  contentId: CodeEvidenceContentId,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  try {
-    const bytes = await client.operationContent(threadId, operationId, contentId, signal);
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return undefined;
-  }
-}
-
-async function readForkConversation(
-  client: CodeClient,
-  origin: NonNullable<CodeThread["forkedFrom"]>,
-  signal: AbortSignal,
-  visited: ReadonlySet<string> = new Set(),
-): Promise<{
-  readonly messages: ReadonlyArray<CodeConversationMessage>;
-  readonly activity: ReadonlyMap<string, CodeTurnActivity>;
-}> {
-  const sourceId = String(origin.threadId);
-  if (visited.has(sourceId) || visited.size >= 32)
-    throw new Error("Fork history contains an invalid lineage.");
-  const source = await client.thread(origin.threadId, signal);
-  const inherited =
-    source.thread.forkedFrom === undefined
-      ? { messages: [], activity: new Map<string, CodeTurnActivity>() }
-      : await readForkConversation(
-          client,
-          source.thread.forkedFrom,
-          signal,
-          new Set([...visited, sourceId]),
-        );
-  const messages: CodeConversationMessage[] = [...inherited.messages];
-  const activity = new Map(inherited.activity);
-  let cursor = 0;
-  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
-    const page = await client.conversation(origin.threadId, cursor, 50, signal);
-    const boundary = page.turns.findIndex(
-      (turn) => String(turn.operationId) === String(origin.throughOperationId),
-    );
-    const turns = boundary < 0 ? page.turns : page.turns.slice(0, boundary + 1);
-    const evidence = await readConversationEvidence(client, origin.threadId, turns, signal);
-    const projected = await projectConversationTurns(
-      client,
-      origin.threadId,
-      turns,
-      evidence,
-      signal,
-    );
-    messages.push(
-      ...projected.messages.map((message) => ({ ...message, sourceThreadId: origin.threadId })),
-    );
-    for (const [key, value] of projected.activity) activity.set(key, value);
-    if (boundary >= 0) return { messages, activity };
-    if (!page.hasMore || page.nextCursor <= cursor) break;
-    cursor = page.nextCursor;
-  }
-  throw new Error("The source response for this fork is unavailable.");
-}
-
-async function projectConversationTurns(
-  client: CodeClient,
-  threadId: CodeThreadId,
-  turns: ReadonlyArray<CodeConversationTurn>,
-  evidence: ReadonlyMap<string, string> | undefined,
-  signal: AbortSignal,
-): Promise<{
-  readonly messages: ReadonlyArray<CodeConversationMessage>;
-  readonly activity: ReadonlyMap<string, CodeTurnActivity>;
-}> {
-  const messages: CodeConversationMessage[] = [];
-  const activity = new Map<string, CodeTurnActivity>();
-  for (const turn of turns) {
-    if (signal.aborted) throw new DOMException("The request was aborted.", "AbortError");
-    const prompt = await readConversationText(
-      client,
-      threadId,
-      turn.operationId,
-      turn.prompt.contentId,
-      evidence,
-      signal,
-    );
-    messages.push({
-      id: `${turn.operationId}:user`,
-      role: "user",
-      text: prompt ?? "Conversation prompt evidence is unavailable.",
-      operationId: turn.operationId,
-      providerInstanceId: turn.providerInstanceId,
-      modelId: turn.modelId,
-      status: turn.status,
-      at: String(turn.startedAt),
-      ...(turn.attachments === undefined || turn.attachments.length === 0
-        ? {}
-        : { attachments: turn.attachments }),
-      ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
-      ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
-    });
-    const parts: string[] = [];
-    for (const reference of turn.assistant) {
-      const part = await readConversationText(
-        client,
-        threadId,
-        turn.operationId,
-        reference.contentId,
-        evidence,
-        signal,
-      );
-      if (part !== undefined) parts.push(part);
-    }
-    messages.push({
-      id: `${turn.operationId}:assistant`,
-      role: "assistant",
-      text: parts.join("") || turn.failure?.message || conversationFallback(turn.status),
-      operationId: turn.operationId,
-      providerInstanceId: turn.providerInstanceId,
-      modelId: turn.modelId,
-      status: turn.status,
-      at: String(turn.updatedAt),
-      ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
-    });
-    const steps = turn.steps ?? [];
-    if (steps.length === 0 && turn.stepsTruncated !== true) continue;
-    let replayed = EMPTY_TURN_ACTIVITY;
-    for (const step of steps) {
-      if (step.kind === "tool") {
-        replayed = applyActivityEvent(replayed, {
-          kind: "tool-activity",
-          toolCallId: step.toolCallId,
-          toolName: step.toolName,
-          state: step.state,
-          ...(step.summary === undefined ? {} : { summary: step.summary }),
-        });
-        continue;
-      }
-      const text = await readConversationText(
-        client,
-        threadId,
-        turn.operationId,
-        step.content.contentId,
-        evidence,
-        signal,
-      );
-      if (text !== undefined) replayed = appendReasoning(replayed, text);
-    }
-    activity.set(String(turn.operationId), {
-      ...replayed,
-      ...(turn.stepsTruncated === true ? { truncated: true } : {}),
-    });
-  }
-  return { messages, activity };
-}
-
-async function readConversationEvidence(
-  client: CodeClient,
-  threadId: CodeThreadId,
-  turns: ReadonlyArray<CodeConversationTurn>,
-  signal: AbortSignal,
-): Promise<ReadonlyMap<string, string> | undefined> {
-  const read = client.operationContents;
-  if (read === undefined) return undefined;
-  const unique = new Map<
-    string,
-    { readonly operationId: CodeOperationId; readonly contentId: CodeEvidenceContentId }
-  >();
-  for (const turn of turns) {
-    const references = [
-      turn.prompt,
-      ...turn.assistant,
-      ...(turn.steps ?? []).flatMap((step) => (step.kind === "reasoning" ? [step.content] : [])),
-    ];
-    for (const reference of references) {
-      const key = `${String(turn.operationId)}:${String(reference.contentId)}`;
-      unique.set(key, { operationId: turn.operationId, contentId: reference.contentId });
-    }
-  }
-  const items = [...unique.values()];
-  let responses: ReadonlyArray<Awaited<ReturnType<NonNullable<CodeClient["operationContents"]>>>>;
-  try {
-    responses = await Promise.all(
-      Array.from({ length: Math.ceil(items.length / MAX_CODE_EVIDENCE_BATCH_ITEMS) }, (_, index) =>
-        read(
-          {
-            threadId,
-            items: items.slice(
-              index * MAX_CODE_EVIDENCE_BATCH_ITEMS,
-              (index + 1) * MAX_CODE_EVIDENCE_BATCH_ITEMS,
-            ),
-          },
-          signal,
-        ),
-      ),
-    );
-  } catch (error) {
-    if (signal.aborted) throw error;
-    // A renderer may reconnect to a host from before the batch endpoint was
-    // introduced. Preserve transcript recovery through the existing bounded
-    // per-reference reads instead of treating that host as corrupt.
-    return undefined;
-  }
-  const text = new Map<string, string>();
-  for (const response of responses) {
-    if (String(response.threadId) !== String(threadId)) continue;
-    for (const item of response.items) {
-      text.set(`${String(item.operationId)}:${String(item.contentId)}`, item.text);
-    }
-  }
-  return text;
-}
-
-async function readConversationText(
-  client: CodeClient,
-  threadId: CodeThreadId,
-  operationId: CodeOperationId,
-  contentId: CodeEvidenceContentId,
-  evidence: ReadonlyMap<string, string> | undefined,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  if (evidence !== undefined) {
-    const text = evidence.get(`${String(operationId)}:${String(contentId)}`);
-    if (text !== undefined) return text;
-  }
-  return readOperationText(client, threadId, operationId, contentId, signal);
 }
