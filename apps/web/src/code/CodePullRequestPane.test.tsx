@@ -112,6 +112,36 @@ describe("CodePullRequestPane", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/pull request command failed/i);
   });
 
+  it("explains when the checkout has no GitHub remote", async () => {
+    const client = codeClient();
+    client.executeOperation = vi.fn(
+      async () =>
+        ({
+          kind: "pull-request-state",
+          operationId: ids.operation,
+          state: "unavailable",
+          failureCode: "no-remote",
+        }) as never,
+    );
+    render(
+      <CodePullRequestPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        idempotencyKey="thread-delivery-v1"
+        scope={scope}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Pull request title"), {
+      target: { value: "Deliver Code panes" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This checkout has no GitHub remote, so there is nowhere to open a pull request. Add a GitHub remote to the repository, then retry.",
+    );
+  });
+
   it("renders the linked PR review window read-only with every observed section", async () => {
     const client = codeClient({ evidence: "Delivers the review window." });
     const onNavigateWorktree = vi.fn();

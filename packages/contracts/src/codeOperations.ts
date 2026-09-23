@@ -910,6 +910,7 @@ const PullRequestResult = Schema.Union(
         "sha-mismatch",
         "dirty",
         "not-mergeable",
+        "no-remote",
       ),
     ),
   }).annotations(strict),

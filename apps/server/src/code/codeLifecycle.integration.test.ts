@@ -431,10 +431,29 @@ function makeRuntime(
           ...seatbelt,
           networkEgress: "none",
         }),
-        gitObservationPort: new GitObservationPort({
-          ...seatbelt,
-          networkEgress: "allow",
-        }),
+        gitObservationPort: (() => {
+          const port = new GitObservationPort({
+            ...seatbelt,
+            networkEgress: "allow",
+          });
+          return {
+            observe: async (root: string, signal?: AbortSignal) => {
+              const observation = await port.observe(root, signal);
+              return observation.status === "ready"
+                ? {
+                    ...observation,
+                    remotes: [
+                      {
+                        name: "origin",
+                        fetchUrl: "https://github.com/octant/octant.git",
+                        pushUrl: "https://github.com/octant/octant.git",
+                      },
+                    ],
+                  }
+                : observation;
+            },
+          };
+        })(),
         gitMutationPort: new GitMutationPort(undefined, {
           ...seatbelt,
           networkEgress: "allow",
