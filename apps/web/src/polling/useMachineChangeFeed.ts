@@ -1,6 +1,7 @@
 import type { MachineChangeClient } from "@octant/client-runtime/machine-change-client";
 import type { MachineChangeTopic } from "@octant/contracts/machine-changes";
 import { useEffect, useState } from "react";
+import { waitForReconnect } from "../lib/waitForReconnect";
 
 export interface MachineChangeRevisions {
   readonly computerUse: number;
@@ -82,18 +83,4 @@ function advanceRevisions(
     projects: current.projects + Number(changed.has("projects")),
     extensions: current.extensions + Number(changed.has("extensions")),
   };
-}
-
-async function waitForReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(done, delayMs);
-    const abort = () => done();
-    function done() {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-      resolve();
-    }
-    signal.addEventListener("abort", abort, { once: true });
-  });
 }

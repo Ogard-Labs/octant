@@ -19,6 +19,7 @@ import type {
 } from "@octant/contracts/code";
 import { decodeCodeThread } from "@octant/contracts/code";
 import { decodeUtcTimestamp } from "@octant/contracts";
+import { waitForReconnect } from "../lib/waitForReconnect";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -2857,17 +2858,4 @@ async function readConversationText(
     if (text !== undefined) return text;
   }
   return readOperationText(client, threadId, operationId, contentId, signal);
-}
-
-async function waitForReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(done, delayMs);
-    signal.addEventListener("abort", done, { once: true });
-    function done() {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-  });
 }

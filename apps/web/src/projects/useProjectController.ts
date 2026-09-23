@@ -20,6 +20,9 @@ import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import type { OctantMode } from "@octant/contracts/modes";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
+
+const PROJECT_UNAVAILABLE = "Octant Project service is unavailable.";
 
 export type ProjectControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type ProjectSearchStatus = "idle" | "searching" | "success" | "error";
@@ -103,11 +106,11 @@ export function useProjectController(options: ProjectControllerOptions) {
       } catch (error) {
         if (!mounted.current || request !== generation.current) return;
         if (reason === "revision") {
-          setErrorMessage(failureMessage(error));
+          setErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
           return;
         }
         setStatus("disconnected");
-        setErrorMessage(failureMessage(error));
+        setErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
       }
     },
     [fallbackClient],
@@ -148,7 +151,7 @@ export function useProjectController(options: ProjectControllerOptions) {
         if (!mounted.current || request !== memoryRequestGeneration.current) return;
         setMemory(undefined);
         setMemoryStatus("error");
-        setMemoryErrorMessage(failureMessage(error));
+        setMemoryErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
       }
     },
     [fallbackClient],
@@ -183,7 +186,7 @@ export function useProjectController(options: ProjectControllerOptions) {
         await load("conflict");
         return false;
       }
-      const message = failureMessage(error);
+      const message = failureMessage(error, PROJECT_UNAVAILABLE);
       setErrorMessage(message);
       announce(message);
       return false;
@@ -345,7 +348,7 @@ export function useProjectController(options: ProjectControllerOptions) {
       return { projectId: result.project.id, name: result.project.name };
     } catch (error) {
       if (!mounted.current) return undefined;
-      const message = failureMessage(error);
+      const message = failureMessage(error, PROJECT_UNAVAILABLE);
       setErrorMessage(message);
       announce(message);
       return undefined;
@@ -461,7 +464,7 @@ export function useProjectController(options: ProjectControllerOptions) {
         await loadMemory(visibleProjectId, "conflict");
         return false;
       }
-      const message = failureMessage(error);
+      const message = failureMessage(error, PROJECT_UNAVAILABLE);
       setMemoryErrorMessage(message);
       announce(message);
       return false;
@@ -533,7 +536,7 @@ export function useProjectController(options: ProjectControllerOptions) {
       destinationMemory = await fallbackClient.memory(destinationProjectId);
     } catch (error) {
       if (mounted.current && disclosureGeneration === memoryDisclosureGeneration.current) {
-        const message = failureMessage(error);
+        const message = failureMessage(error, PROJECT_UNAVAILABLE);
         setMemoryErrorMessage(message);
         announce(message);
       }
@@ -636,15 +639,6 @@ function failureCategory(error: unknown): string {
   return typeof error === "object" && error !== null && "category" in error
     ? String(error.category)
     : "unavailable";
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Project service is unavailable.";
 }
 
 function modeLabel(type: ProjectType): string {
