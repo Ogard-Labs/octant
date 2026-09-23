@@ -63,6 +63,16 @@ function frame(sequence: number) {
 }
 
 describe("code client", () => {
+  it("classifies a fetch rejection as a disconnected transport", async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error("socket closed"));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.bootstrap()).rejects.toMatchObject({
+      category: "disconnected",
+      message: "Octant Code service is unavailable.",
+    });
+  });
+
   it("authenticates strict bootstrap and command requests, rejecting invalid commands before send", async () => {
     const fetch = vi
       .fn()

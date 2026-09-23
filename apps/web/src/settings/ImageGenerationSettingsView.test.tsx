@@ -4,11 +4,27 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ProviderController } from "../providers/useProviderController";
 import { ImageGenerationSettingsView } from "./ImageGenerationSettingsView";
 
 const now = "2026-09-05T10:00:00.000Z";
 const compatibleId = "00000000-0000-4000-8000-00000000c001";
 const imageId = "00000000-0000-4000-8000-00000000c003";
+
+function providerController(): ProviderController {
+  return {
+    status: "ready",
+    snapshot: undefined,
+    instances: [],
+    defaults: { permissionPersistence: "current-session", version: 0 as never },
+    observedByInstance: new Map(),
+    busy: false,
+    probingIds: new Set(),
+    updatingIds: new Set(),
+    credentialManagementAvailable: false,
+    retry: vi.fn(async () => true),
+  } as unknown as ProviderController;
+}
 
 function providerSnapshot(options: { readonly enabled?: boolean } = {}): ProviderRegistrySnapshot {
   return {
@@ -52,18 +68,36 @@ function providerSnapshot(options: { readonly enabled?: boolean } = {}): Provide
 }
 
 describe("ImageGenerationSettingsView", () => {
-  it("explains what is needed when no eligible provider is configured", () => {
+  it("explains how to add a provider when no image endpoint is configured", async () => {
+    const onOpenProviders = vi.fn();
     render(
-      <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
+      <ImageGenerationSettingsView
+        onOpenProviders={onOpenProviders}
+        onSettingsChange={vi.fn()}
+        providerController={providerController()}
+        settings={{ customSources: [] }}
+      />,
     );
-    expect(screen.getByText(/No image providers are enabled/)).toBeVisible();
-    expect(screen.getByText(/Add an OpenAI-compatible custom endpoint above/)).toBeVisible();
+    expect(screen.getByText("No eligible provider yet")).toBeVisible();
+    expect(
+      screen.getByText(
+        "No image providers are enabled. Add a dedicated provider or custom endpoint below.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add image provider" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open Providers & Models" }));
+    expect(onOpenProviders).toHaveBeenCalledOnce();
   });
 
-  it("explains the difference between image sources and saved profiles", () => {
+  it("keeps the image source guidance when a provider is available", () => {
     render(
-      <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerSnapshot={providerSnapshot()}
+        settings={{ customSources: [] }}
+      />,
     );
     expect(
       screen.getByText(/Connect an OpenAI-compatible image API's provider and model/),

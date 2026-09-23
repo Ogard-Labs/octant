@@ -12,6 +12,7 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
 const NODE_ID_PATTERN = /^[A-Za-z0-9+/=_-]{1,128}$/;
+// oxlint-disable-next-line no-control-regex -- rejects control bytes in Git refs.
 const BRANCH_PATTERN = /^(?!.*\.\.)[^\s\0~^:?*[\\]{1,255}$/;
 
 /**

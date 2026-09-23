@@ -43,7 +43,16 @@ import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
-import { Component, lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
@@ -366,10 +375,15 @@ export interface WorkspaceViewProps {
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
   readonly draftDefaultExecutionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy;
+  readonly draftDefaultPermissionPersistence?: import("@octant/contracts/providers").PermissionPersistence;
   readonly onDraftSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }) => void;
+  readonly onDraftExecutionPolicyChange?: (
+    policy: import("@octant/contracts/providers").ProviderExecutionPolicy,
+    persistence: import("@octant/contracts/providers").PermissionPersistence,
+  ) => void;
   readonly onDraftCreateThread?: (
     mode: string,
     prompt: string,
@@ -1228,6 +1242,12 @@ function renderNonCodeTab(
           {...(props.draftDefaultExecutionPolicy === undefined
             ? {}
             : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
+          {...(props.draftDefaultPermissionPersistence === undefined
+            ? {}
+            : { defaultPermissionPersistence: props.draftDefaultPermissionPersistence })}
+          {...(props.onDraftExecutionPolicyChange === undefined
+            ? {}
+            : { onExecutionPolicyChange: props.onDraftExecutionPolicyChange })}
           onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
           {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
           {...(props.onDraftCreateCodeThread === undefined
@@ -2220,6 +2240,24 @@ function WorkProjectOverviewSlot(props: {
       : buildWorkOverviewModel(
           props.availability === undefined ? {} : { availability: props.availability },
         ));
+  useEffect(() => {
+    if (
+      props.overviewModel !== undefined ||
+      props.client === undefined ||
+      controller.status !== "ready"
+    ) {
+      return;
+    }
+    // Provider turns can create artifacts after this Project was selected;
+    // sync promotion only after the overview has read the authoritative projection.
+    void props.onReloadPromotion();
+  }, [
+    controller.status,
+    props.client,
+    props.onReloadPromotion,
+    props.overviewModel,
+    props.projectId,
+  ]);
   const createStarterArtifactAvailable =
     props.createStarterArtifactAvailable && props.mutationClient !== undefined;
   const handleCreateStarterArtifact = useCallback(
@@ -2240,19 +2278,12 @@ function WorkProjectOverviewSlot(props: {
         });
         if (reply.outcome.kind !== "created") return false;
         controller.retry();
-        await props.onReloadPromotion();
         return true;
       } catch {
         return false;
       }
     },
-    [
-      controller,
-      createStarterArtifactAvailable,
-      props.mutationClient,
-      props.onReloadPromotion,
-      props.projectId,
-    ],
+    [controller, createStarterArtifactAvailable, props.mutationClient, props.projectId],
   );
   return (
     <WorkOverview

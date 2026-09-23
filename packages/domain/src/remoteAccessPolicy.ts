@@ -273,6 +273,7 @@ export function normalizeDeviceLabel(
     !DEVICE_LABEL_PATTERN.test(deviceLabel) ||
     deviceLabel.includes("/") ||
     deviceLabel.includes("\\") ||
+    // oxlint-disable-next-line no-control-regex -- rejects ASCII control bytes in device labels.
     /[\u0000-\u001f\u007f]/.test(deviceLabel)
   ) {
     return { kind: "rejected", reason: "invalid-label" };

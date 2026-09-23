@@ -847,7 +847,7 @@ describe("CanvasService", () => {
     } as unknown as import("@octant/contracts").CanvasDefinition;
     const { service, projection } = createService(
       openConnection(),
-      (resolved, request) => {
+      (resolved) => {
         resolvedOpaqueRef = resolved.opaqueRef;
         return {
           sourceId: resolved.sourceId,

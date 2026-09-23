@@ -154,9 +154,9 @@ describe("RemoteAccessSettingsSection", () => {
     render(<RemoteAccessSettingsSection bridge={host} />);
 
     expect(await screen.findByText("Off")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Listener hostname"), "192.168.1.20");
-    await user.type(screen.getByLabelText("Certificate PEM"), "-----BEGIN CERTIFICATE-----");
-    await user.type(screen.getByLabelText("Private key PEM"), "-----BEGIN PRIVATE KEY-----");
+    await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "-----BEGIN CERTIFICATE-----");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "-----BEGIN PRIVATE KEY-----");
     await user.click(screen.getByRole("button", { name: "Enable listener…" }));
 
     const confirm = screen.getByRole("group", { name: "Confirm remote listener" });
@@ -183,7 +183,7 @@ describe("RemoteAccessSettingsSection", () => {
       localConfirmation: true,
     });
     expect(await screen.findByText("Listening")).toBeInTheDocument();
-    expect(screen.getByLabelText("Private key PEM")).toHaveValue("");
+    expect(screen.getByLabelText("Private key (PEM)")).toHaveValue("");
   });
 
   it("refuses a loopback or public address before it reaches the host", async () => {
@@ -191,14 +191,14 @@ describe("RemoteAccessSettingsSection", () => {
     render(<RemoteAccessSettingsSection bridge={bridge(off)} />);
 
     await screen.findByText("Off");
-    await user.type(screen.getByLabelText("Listener hostname"), "127.0.0.1");
-    await user.type(screen.getByLabelText("Certificate PEM"), "c");
-    await user.type(screen.getByLabelText("Private key PEM"), "k");
+    await user.type(screen.getByLabelText("Hostname"), "127.0.0.1");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "c");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "k");
     expect(screen.getByRole("alert")).toHaveTextContent(/loopback address/i);
     expect(screen.getByRole("button", { name: "Enable listener…" })).toBeDisabled();
 
-    await user.clear(screen.getByLabelText("Listener hostname"));
-    await user.type(screen.getByLabelText("Listener hostname"), "example.com");
+    await user.clear(screen.getByLabelText("Hostname"));
+    await user.type(screen.getByLabelText("Hostname"), "example.com");
     expect(screen.getByRole("alert")).toHaveTextContent(/public addresses/i);
     expect(screen.getByRole("button", { name: "Enable listener…" })).toBeDisabled();
   });
@@ -236,7 +236,8 @@ describe("RemoteAccessSettingsSection", () => {
   it("does not offer pairing while the listener is off", async () => {
     render(<RemoteAccessSettingsSection bridge={bridge(off)} />);
     expect(await screen.findByText("Off")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create pairing link" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Create pairing link" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disable listener" })).not.toBeInTheDocument();
     expect(screen.getByText(/Enable the remote listener before pairing/i)).toBeInTheDocument();
   });
 });

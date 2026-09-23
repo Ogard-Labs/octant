@@ -135,7 +135,7 @@ describe("WorkRequestRuntime", () => {
   it("taps an acquired Work connection without consuming its turn event stream", async () => {
     const record = vi.fn(() => ({ status: "ok" as const, request: {} as never }));
     const runtime = new WorkRequestRuntime({
-      requests: { record } as never,
+      requests: { record, interruptSession: vi.fn(() => []) } as never,
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const event: ProviderRuntimeEvent = {
@@ -374,6 +374,31 @@ describe("WorkRequestRuntime", () => {
     await Effect.runPromise(
       runtime.subscribe({ connection, projectId, threadId, providerInstanceId, sessionId }),
     );
+    expect(interruptSession).toHaveBeenCalledWith(sessionId);
+  });
+
+  it("interrupts pending requests when the provider connection detaches", () => {
+    const interruptSession = vi.fn(() => []);
+    const runtime = new WorkRequestRuntime({
+      requests: { record: vi.fn(), interruptSession } as never,
+      uuid: () => "00000000-0000-4000-8000-000000000905",
+    });
+    const connection = {
+      subscribe: Effect.succeed(Stream.empty),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      interrupt: () => Effect.void,
+    };
+
+    const detach = runtime.register({
+      connection,
+      projectId,
+      threadId,
+      providerInstanceId,
+      sessionId,
+    });
+    detach();
+
     expect(interruptSession).toHaveBeenCalledWith(sessionId);
   });
 

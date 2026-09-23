@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { Schema } from "effect";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type {
   HostControlStatus,
@@ -13,7 +14,9 @@ import type {
   SetThreadRetentionOutcome,
   ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
+import { ProviderDriverKind } from "@octant/contracts/providers";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { driverLabel } from "../providers/providerSettingsPresentation";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -82,6 +85,15 @@ const OWNER_MODE_LABELS: Readonly<Record<HostControlStatus["identity"]["serviceM
 };
 
 const BACKUP_LABEL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const isDriverKind = Schema.is(ProviderDriverKind);
+
+function capabilityLabel(capability: string): string {
+  if (capability === "local-loopback") return "Local loopback";
+  if (capability === "private-listener") return "Private remote listener";
+  if (!capability.startsWith("provider:")) return capability;
+  const kind = capability.slice("provider:".length);
+  return `Provider: ${isDriverKind(kind) ? driverLabel(kind) : kind}`;
+}
 
 const policyUpdatedFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -343,8 +355,8 @@ export function HostSettingsSection({
         ) : (
           <ul className="host-settings__capabilities">
             {status.capabilities.map((capability) => (
-              <li className="oct-meta--mono" key={capability}>
-                {capability}
+              <li className="oct-row-detail" key={capability}>
+                {capabilityLabel(capability)}
               </li>
             ))}
           </ul>

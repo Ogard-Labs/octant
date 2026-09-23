@@ -288,12 +288,20 @@ describe("CodeComposerAdapter", () => {
   it("remembers the access posture for the Project from the access menu", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
-    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    const onExecutionPolicyChange = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        onCreateThread={onCreateThread}
+        onExecutionPolicyChange={onExecutionPolicyChange}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Access policy" }));
     await user.click(
       await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
     );
+    expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated", "project-default");
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -490,6 +498,28 @@ describe("CodeComposerAdapter interactions", () => {
       prompt: "Plan this change",
       executionPolicy: "plan",
     });
+  });
+
+  it("keeps the chosen approval mode when the draft switches Project", async () => {
+    const user = userEvent.setup();
+    const onExecutionPolicyChange = vi.fn();
+    const rendered = render(
+      <CodeComposerAdapter {...defaultProps} onExecutionPolicyChange={onExecutionPolicyChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan", "current-session");
+
+    rendered.unmount();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        defaultExecutionPolicy="plan"
+        onExecutionPolicyChange={onExecutionPolicyChange}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
   });
 
   it("submits on Enter and cancels on Escape", async () => {

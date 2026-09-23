@@ -104,7 +104,25 @@ function statefulClient(initial = codeBootstrap()) {
       };
     }
     const reconciled = reconcileWorkspaceWithSettings(state.workspace, state.settings);
-    const workspace = applyWorkspaceOperation(reconciled, command.operation);
+    let workspace = applyWorkspaceOperation(reconciled, command.operation);
+    if (command.operation.kind === "switch-project-surface" && command.operation.mode === "chat") {
+      const context = state.workspace.contextByMode.chat;
+      workspace = {
+        ...workspace,
+        contextByMode: {
+          ...workspace.contextByMode,
+          chat: { ...context, projectId: null },
+        },
+        stowedLayouts: [
+          {
+            context,
+            layout: state.workspace.layouts.chat,
+            activePaneId: state.workspace.activePaneIds.chat,
+          },
+          ...workspace.stowedLayouts,
+        ],
+      };
+    }
     state = {
       ...state,
       workspace,
@@ -225,6 +243,57 @@ describe("useShellController", () => {
     expect(opened).toBe(false);
     expect(result.current.workspace?.activeMode).toBe("chat");
     expect(result.current.errorMessage).toBe("Workspace persistence failed.");
+  });
+
+  it("switches to the no-Project Chat context for an unfiled thread", async () => {
+    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
+    const initial = initialBootstrap();
+    const server = statefulClient({
+      ...initial,
+      workspace: {
+        ...initial.workspace,
+        contextByMode: {
+          ...initial.workspace.contextByMode,
+          chat: {
+            ...initial.workspace.contextByMode.chat,
+            projectId,
+          },
+        },
+      },
+    });
+    const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000897");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openChatThread(threadId, "Unfiled notes"));
+
+    expect(server.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "apply-workspace-operation",
+        operation: expect.objectContaining({
+          kind: "switch-project-surface",
+          mode: "chat",
+          surface: expect.objectContaining({ kind: "chat-thread", threadId }),
+        }),
+      }),
+    );
+
+    const projectThreadId = decodeChatThreadId("00000000-0000-4000-8000-000000000898");
+    await act(async () =>
+      result.current.openChatThread(projectThreadId, "Project notes", projectId),
+    );
+    expect(server.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "apply-workspace-operation",
+        operation: expect.objectContaining({
+          kind: "switch-project-surface",
+          mode: "chat",
+          surface: expect.objectContaining({ kind: "chat-thread", threadId: projectThreadId }),
+        }),
+      }),
+    );
   });
 
   it("opens one mode-matched Project surface and reuses its pane on repeat selection", async () => {

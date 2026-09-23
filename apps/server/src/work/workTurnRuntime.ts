@@ -17,9 +17,10 @@ import {
   type ThreadTaskProgressList,
 } from "@octant/contracts";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
-import { Effect, Fiber, Scope, Stream } from "effect";
+import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
+import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
   makeIdleTimeout,
@@ -56,6 +57,10 @@ export interface WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    readonly onRequestSettled?: (
+      input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
+      release: () => void,
+    ) => () => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
 
@@ -92,6 +97,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    readonly onRequestSettled?: (
+      input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
+      release: () => void,
+    ) => () => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
@@ -142,6 +151,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly onDelta?: (response: string) => void;
       /** The provider's restated task list, whole, whenever it moves. */
       readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+      readonly onRequestSettled?: (
+        input: {
+          readonly providerSessionId: ProviderSessionId;
+          readonly providerCallbackId: string;
+        },
+        release: () => void,
+      ) => () => void;
     },
     idle: IdleTimeout,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
@@ -202,6 +218,16 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let response = "";
       let tasks: ThreadTaskProgressList | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
+      const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
+      const pendingRequestCleanups = new Map<string, () => void>();
+      const releaseRequestHold = (key: string) => {
+        const hold = pendingRequestHolds.get(key);
+        if (hold === undefined) return;
+        pendingRequestHolds.delete(key);
+        pendingRequestCleanups.get(key)?.();
+        pendingRequestCleanups.delete(key);
+        void Effect.runPromise(Deferred.succeed(hold, undefined));
+      };
       const answeredToolRequestIds = new Set<string>();
       const events = yield* subscribeThenSend({
         connection,
@@ -285,6 +311,25 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     .pipe(Effect.catchAll(() => Effect.void));
                   return;
                 }
+                if (event.kind === "approval-request" || event.kind === "user-input-request") {
+                  const providerCallbackId = normalizedProviderCallbackId(event.requestId);
+                  if (providerCallbackId === undefined) return;
+                  const requestKey = `${String(event.sessionId)}:${providerCallbackId}`;
+                  const hold = yield* Deferred.make<void>();
+                  pendingRequestHolds.set(requestKey, hold);
+                  const cleanup = input.onRequestSettled?.(
+                    {
+                      providerSessionId: event.sessionId,
+                      providerCallbackId,
+                    },
+                    () => releaseRequestHold(requestKey),
+                  );
+                  if (cleanup !== undefined) {
+                    pendingRequestCleanups.set(requestKey, cleanup);
+                  }
+                  yield* Effect.forkScoped(idle.during(Deferred.await(hold)));
+                  return;
+                }
                 if (isTerminalEvent(event)) terminal = event;
               }),
             ),
@@ -298,6 +343,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }),
       });
       yield* Fiber.join(events);
+      for (const requestId of pendingRequestHolds.keys()) {
+        releaseRequestHold(requestId);
+      }
 
       if (handledEvents > MAX_EVENTS) {
         return {

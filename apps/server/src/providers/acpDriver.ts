@@ -252,7 +252,7 @@ function providerFailure(
     return decodeProviderFailure(error);
   } catch {
     if (error instanceof AcpFailure) {
-      if (error.message.toLowerCase().includes("authentication")) {
+      if (/authenticat|api key/i.test(error.message)) {
         return failure(
           "unauthenticated",
           profile.unauthenticatedMessage,
@@ -736,7 +736,7 @@ function makeConnection(
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         connectionClosing = true;
-        await Promise.allSettled([...pendingStarts]);
+        await Promise.allSettled(pendingStarts);
         await Promise.all([...sessions.values()].map(closeState));
         sessions.clear();
         await Effect.runPromise(PubSub.shutdown(queue));

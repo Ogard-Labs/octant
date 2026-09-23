@@ -1928,6 +1928,13 @@ describe("CodeOperationRuntime", () => {
   it("leaves a pull request GitHub never confirmed waiting rather than ready", async () => {
     const fixture = runtimeFixture({
       pullRequestTarget: true,
+      gitObservation: readyGitObservation([
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ]),
       pullRequestPort: {
         ensure: async () => ({ status: "unavailable" }),
         observeReview: async () => ({ status: "unavailable" }),
@@ -1955,6 +1962,94 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("reports a checkout with no GitHub remote instead of blaming GitHub authentication", async () => {
+    const ensure = vi.fn(async () => {
+      throw new Error("pull request ensure should not run");
+    });
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitObservation: readyGitObservation([]),
+      pullRequestPort: {
+        ensure,
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+    const delivery = operationId(110);
+
+    const created = await fixture.runtime.execute(windowId, {
+      kind: "create-pull-request",
+      operationId: delivery,
+      threadId,
+      checkoutId,
+      title: "Add the board's runtime work",
+      body: "Body",
+      idempotencyKey: "runtime-work-delivery-no-remote",
+      authorization: { kind: "approved", approvalId: operationId(111) },
+    });
+
+    expect(created).toMatchObject({
+      kind: "pull-request-state",
+      state: "unavailable",
+      failureCode: "no-remote",
+    });
+    expect(ensure).not.toHaveBeenCalled();
+    fixture.close();
+  });
+
+  it.each([
+    {
+      label: "fetch-only",
+      fetchUrl: "https://github.com/octant/octant.git",
+      pushUrl: "https://git.example.com/octant/octant.git",
+    },
+    {
+      label: "push-only",
+      fetchUrl: "https://git.example.com/octant/octant.git",
+      pushUrl: "https://github.com/octant/octant.git",
+    },
+  ])("accepts a GitHub $label remote for pull request delivery", async (remote) => {
+    const ensure = vi.fn(async () => ({
+      status: "created" as const,
+      pullRequest: {
+        number: 11,
+        url: "https://github.com/octant/octant/pull/11",
+        baseRepository: "octant/octant",
+        baseBranch: "development",
+        headOwner: "octant",
+        headBranch: "feature/runtime",
+      },
+    }));
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitRemotes: [
+        {
+          name: "origin",
+          fetchUrl: remote.fetchUrl,
+          pushUrl: remote.pushUrl,
+        },
+      ],
+      pullRequestPort: {
+        ensure,
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+
+    const created = await fixture.runtime.execute(windowId, {
+      kind: "create-pull-request",
+      operationId: operationId(115),
+      threadId,
+      checkoutId,
+      title: "Add the board's runtime work",
+      body: "Body",
+      idempotencyKey: `runtime-work-delivery-${remote.label}`,
+      authorization: { kind: "approved", approvalId: operationId(116) },
+    });
+
+    expect(created).toMatchObject({ kind: "pull-request-state", state: "created" });
+    expect(ensure).toHaveBeenCalledOnce();
+    fixture.close();
+  });
+
   // The Waiting column exists for exactly this: an effect the host refuses
   // until someone decides. The approved retry carries the same operation, so it
   // continues that record rather than leaving a second one owed forever.
@@ -1962,6 +2057,13 @@ describe("CodeOperationRuntime", () => {
     let approved = false;
     const fixture = runtimeFixture({
       pullRequestTarget: true,
+      gitRemotes: [
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ],
       approvalValidator: () => approved,
       pullRequestPort: {
         ensure: async () => ({
@@ -2176,6 +2278,11 @@ function runtimeFixture(options: {
   credential?: string | undefined;
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
+  gitRemotes?: ReadonlyArray<{
+    readonly name: string;
+    readonly fetchUrl: string;
+    readonly pushUrl: string;
+  }>;
   gitReadDiff?: (
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
@@ -2361,6 +2468,7 @@ function runtimeFixture(options: {
     ...(options.pullRequestPort === undefined ? {} : { pullRequestPort: options.pullRequestPort }),
     gitObservationPort: {
       observe: async () => options.gitObservation ?? { status: "unavailable" as const },
+      observeRemotes: async () => options.gitRemotes ?? [],
       ...(options.gitReadDiff === undefined ? {} : { readDiff: options.gitReadDiff }),
       ...(options.gitTreeChanges === undefined
         ? {}
@@ -2492,6 +2600,30 @@ function storedEvidence(id: number, content: string, truncated?: boolean) {
     byteLength: bytes.byteLength,
     ...(truncated === undefined ? {} : { truncated }),
   });
+}
+
+function readyGitObservation(
+  remotes: ReadonlyArray<{
+    readonly name: string;
+    readonly fetchUrl: string;
+    readonly pushUrl: string;
+  }>,
+): GitObservationResult {
+  return {
+    status: "ready",
+    checkoutRoot: "/private/exact",
+    head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+    statusEntries: [],
+    changedPaths: [],
+    insertions: 0,
+    deletions: 0,
+    stagedSummary: [],
+    diff: { text: "", byteLength: 0, truncated: false },
+    remotes,
+    upstream: null,
+    worktrees: [],
+    stateToken: "b".repeat(64),
+  };
 }
 
 function operationId(id: number) {

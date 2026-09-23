@@ -1126,6 +1126,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-block: 8px 16px;
 }
 
+.settings-disclosure--inline > .settings-disclosure__body {
+  padding-block: 4px 8px;
+}
+
 .settings-collection-scroll {
   max-height: 360px;
   overflow-y: auto;
@@ -2190,10 +2194,6 @@ textarea.settings-view__text-input {
   padding: 0 0 10px;
 }
 
-.marketplace-fetch-settings__details[open] summary {
-  margin-bottom: 8px;
-}
-
 .marketplace-fetch-settings__disclosure,
 .marketplace-fetch-settings__list {
   margin: 0;
@@ -2598,6 +2598,19 @@ textarea.settings-view__text-input {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
+}
+
+.provider-card__rename-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.provider-card__saved {
+  align-self: center;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  min-width: 5ch;
 }
 
 .provider-card__configuration {

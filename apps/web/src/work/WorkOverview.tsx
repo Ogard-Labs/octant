@@ -17,9 +17,9 @@ import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
 
 export type OverviewSectionStatus =
   | "loading"
@@ -181,7 +181,10 @@ export function WorkOverview(props: WorkOverviewProps) {
   return (
     <section aria-label="Work overview" className="project-overview work-overview">
       {props.model.status === undefined ? null : <WorkStatusCard status={props.model.status} />}
-      <section aria-label="Work quick start" className="work-overview__composer">
+      <section
+        aria-label="Work quick start"
+        className="work-overview__composer work-overview__quick-start"
+      >
         <div aria-label="Thread context" className="work-overview__context-strip">
           <HostSelector
             {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
@@ -305,38 +308,34 @@ export function WorkOverview(props: WorkOverviewProps) {
       {props.research}
 
       {createStarterArtifactAvailable ? (
-        <section aria-label="Create starter artifact" className="work-overview__composer">
+        <SurfaceSection
+          className="work-overview__composer work-overview__starter"
+          label="Starter note"
+          note="A first Markdown file this Project's threads and the Code handover can build on."
+        >
           <form noValidate onSubmit={(event) => void submitStarterArtifact(event)}>
-            <label>
-              <span>Artifact kind</span>
-              <OctantSelectField
-                aria-label="Artifact kind"
-                disabled={starterArtifactSubmitting}
-                onValueChange={() => {}}
-                options={[{ id: "markdown", label: "markdown" }]}
-                value="markdown"
-              />
-            </label>
-            <label>
-              <span>Artifact path</span>
-              <OctantInput
-                aria-label="Artifact path"
-                disabled={starterArtifactSubmitting}
-                onChange={(event) => setStarterArtifactPath(event.target.value)}
-                type="text"
-                value={starterArtifactPath}
-              />
-            </label>
-            <label>
-              <span>Starter artifact content</span>
-              <OctantTextarea
-                aria-label="Starter artifact content"
-                disabled={starterArtifactSubmitting}
-                onChange={(event) => setStarterArtifactContent(event.target.value)}
-                rows={6}
-                value={starterArtifactContent}
-              />
-            </label>
+            <div className="work-overview__starter-fields">
+              <label>
+                <span>Artifact path</span>
+                <OctantInput
+                  aria-label="Artifact path"
+                  disabled={starterArtifactSubmitting}
+                  onChange={(event) => setStarterArtifactPath(event.target.value)}
+                  type="text"
+                  value={starterArtifactPath}
+                />
+              </label>
+              <label>
+                <span>Starter artifact content</span>
+                <OctantTextarea
+                  aria-label="Starter artifact content"
+                  disabled={starterArtifactSubmitting}
+                  onChange={(event) => setStarterArtifactContent(event.target.value)}
+                  rows={3}
+                  value={starterArtifactContent}
+                />
+              </label>
+            </div>
             <OctantButton
               className="project-button"
               disabled={
@@ -350,7 +349,7 @@ export function WorkOverview(props: WorkOverviewProps) {
               Create starter artifact
             </OctantButton>
           </form>
-        </section>
+        </SurfaceSection>
       ) : null}
     </section>
   );
@@ -370,9 +369,8 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
     .sort((left, right) => left.date.localeCompare(right.date))
     .slice(0, 5);
   return (
-    <section aria-label="Status" className="work-overview__section work-status">
-      <div className="work-status__head">
-        <h2>Status</h2>
+    <SurfaceSection
+      actions={
         <span className="work-status__updated">
           {!status.hasStatusFile
             ? "No STATUS.md yet — the first task creates it"
@@ -380,7 +378,10 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
               ? "Undated"
               : `Last updated ${status.lastUpdatedOn}${status.stale ? " · stale" : ""}`}
         </span>
-      </div>
+      }
+      className="work-overview__section work-status"
+      label="Status"
+    >
       {status.currentStatus === undefined ? null : (
         <p className="work-status__current">{status.currentStatus}</p>
       )}
@@ -390,7 +391,7 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
             <CalendarClock aria-hidden="true" size={14} strokeWidth={1.8} />
             Follow-ups due
           </h3>
-          <ul className="work-overview__items">
+          <ul className="surface-list work-overview__items">
             {due.map((item) => (
               <DatedItem item={item} key={`${item.date}:${item.text}`} />
             ))}
@@ -400,25 +401,27 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
       {upcoming.length === 0 ? null : (
         <div className="work-status__upcoming">
           <h3>Coming up</h3>
-          <ul className="work-overview__items">
+          <ul className="surface-list work-overview__items">
             {upcoming.map((item) => (
               <DatedItem item={item} key={`${item.date}:${item.text}`} />
             ))}
           </ul>
         </div>
       )}
-    </section>
+    </SurfaceSection>
   );
 }
 
 function DatedItem({ item }: { readonly item: WorkStatusDatedItem }) {
   return (
-    <li className={`work-status__item work-status__item--${item.state}`}>
-      <span>{item.text}</span>
-      <span>
-        {item.date}
-        {item.state === "overdue" ? " · overdue" : item.state === "due-soon" ? " · due soon" : ""}
-      </span>
+    <li className={`surface-row work-status__item work-status__item--${item.state}`}>
+      <div className="surface-row__copy">
+        <span className="oct-row-label">{item.text}</span>
+        <span className="oct-row-detail">
+          {item.date}
+          {item.state === "overdue" ? " · overdue" : item.state === "due-soon" ? " · due soon" : ""}
+        </span>
+      </div>
     </li>
   );
 }
@@ -429,13 +432,12 @@ function OverviewSection(props: {
   readonly title: string;
 }) {
   return (
-    <section aria-label={props.title} className="work-overview__section">
-      <h2>{props.title}</h2>
+    <SurfaceSection className="work-overview__section" label={props.title}>
       <SectionBody
         {...(props.onOpenItem === undefined ? {} : { onOpenItem: props.onOpenItem })}
         section={props.section}
       />
-    </section>
+    </SurfaceSection>
   );
 }
 
@@ -447,28 +449,34 @@ function SectionBody(props: {
   if (section.status === "ready") {
     const items = section.items ?? [];
     if (items.length === 0) {
-      return <p role="status">{section.message ?? "Nothing to show."}</p>;
+      return <SurfaceEmpty title={section.message ?? "Nothing to show."} />;
     }
     return (
-      <ul className="work-overview__items">
+      <ul className="surface-list work-overview__items">
         {items.map((item) => (
-          <li key={item.id}>
-            {props.onOpenItem !== undefined ? (
-              <OctantButton
-                className="project-button project-button--quiet"
-                onClick={() => props.onOpenItem?.(item.id)}
-                type="button"
-                variant="ghost"
-              >
-                <span>{item.label}</span>
-                {item.detail !== undefined ? <span>{item.detail}</span> : null}
-              </OctantButton>
-            ) : (
-              <>
-                <span>{item.label}</span>
-                {item.detail !== undefined ? <span>{item.detail}</span> : null}
-              </>
-            )}
+          <li className="surface-row" key={item.id}>
+            <div className="surface-row__copy">
+              {props.onOpenItem !== undefined ? (
+                <OctantButton
+                  className="project-button project-button--quiet"
+                  onClick={() => props.onOpenItem?.(item.id)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <span className="oct-row-label">{item.label}</span>
+                  {item.detail !== undefined ? (
+                    <span className="oct-row-detail">{item.detail}</span>
+                  ) : null}
+                </OctantButton>
+              ) : (
+                <>
+                  <span className="oct-row-label">{item.label}</span>
+                  {item.detail !== undefined ? (
+                    <span className="oct-row-detail">{item.detail}</span>
+                  ) : null}
+                </>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -480,7 +488,8 @@ function SectionBody(props: {
     section.status === "loading" || section.status === "empty" || section.status === "stale"
       ? "status"
       : "alert";
-  return <p role={role}>{message}</p>;
+  const empty = <SurfaceEmpty title={message} />;
+  return role === "alert" ? <div role="alert">{empty}</div> : empty;
 }
 
 function defaultMessage(status: OverviewSectionStatus): string {

@@ -12,6 +12,7 @@ import type {
   RemotePendingPairingRequest,
 } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -319,41 +320,49 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
             settingId="remote-listener"
           >
             <div className="settings-panel__stack">
-              <OctantInput
-                aria-label="Listener hostname"
-                autoComplete="off"
-                id={hostnameId}
-                onChange={(event) => setDraft({ ...draft, hostname: event.target.value })}
-                placeholder="mac.tailnet.ts.net or 192.168.1.20"
-                value={draft.hostname}
-              />
-              <OctantInput
-                aria-label="Listener port"
-                id={portId}
-                inputMode="numeric"
-                onChange={(event) => setDraft({ ...draft, port: event.target.value })}
-                value={draft.port}
-              />
-              <OctantTextarea
-                aria-label="Certificate PEM"
-                autoComplete="off"
-                id={certificateId}
-                onChange={(event) => setDraft({ ...draft, certificatePem: event.target.value })}
-                placeholder="-----BEGIN CERTIFICATE-----"
-                rows={3}
-                spellCheck={false}
-                value={draft.certificatePem}
-              />
-              <OctantTextarea
-                aria-label="Private key PEM"
-                autoComplete="off"
-                id={keyId}
-                onChange={(event) => setDraft({ ...draft, privateKeyPem: event.target.value })}
-                placeholder="-----BEGIN PRIVATE KEY-----"
-                rows={3}
-                spellCheck={false}
-                value={draft.privateKeyPem}
-              />
+              <OctantField>
+                <OctantFieldLabel htmlFor={hostnameId}>Hostname</OctantFieldLabel>
+                <OctantInput
+                  autoComplete="off"
+                  id={hostnameId}
+                  onChange={(event) => setDraft({ ...draft, hostname: event.target.value })}
+                  placeholder="mac.tailnet.ts.net or 192.168.1.20"
+                  value={draft.hostname}
+                />
+              </OctantField>
+              <OctantField>
+                <OctantFieldLabel htmlFor={portId}>Port</OctantFieldLabel>
+                <OctantInput
+                  id={portId}
+                  inputMode="numeric"
+                  onChange={(event) => setDraft({ ...draft, port: event.target.value })}
+                  value={draft.port}
+                />
+              </OctantField>
+              <OctantField>
+                <OctantFieldLabel htmlFor={certificateId}>Certificate (PEM)</OctantFieldLabel>
+                <OctantTextarea
+                  autoComplete="off"
+                  id={certificateId}
+                  onChange={(event) => setDraft({ ...draft, certificatePem: event.target.value })}
+                  placeholder="-----BEGIN CERTIFICATE-----"
+                  rows={3}
+                  spellCheck={false}
+                  value={draft.certificatePem}
+                />
+              </OctantField>
+              <OctantField>
+                <OctantFieldLabel htmlFor={keyId}>Private key (PEM)</OctantFieldLabel>
+                <OctantTextarea
+                  autoComplete="off"
+                  id={keyId}
+                  onChange={(event) => setDraft({ ...draft, privateKeyPem: event.target.value })}
+                  placeholder="-----BEGIN PRIVATE KEY-----"
+                  rows={3}
+                  spellCheck={false}
+                  value={draft.privateKeyPem}
+                />
+              </OctantField>
               {draft.hostname.trim() !== "" &&
               draftExposure !== "lan-private" &&
               draftExposure !== "tailscale" ? (
@@ -375,15 +384,17 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
                 >
                   {status?.enabled === true ? "Move listener…" : "Enable listener…"}
                 </OctantButton>
-                <OctantButton
-                  disabled={listenerBusy || status?.enabled !== true}
-                  onClick={() => void disableListener()}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Disable listener
-                </OctantButton>
+                {status?.enabled === true ? (
+                  <OctantButton
+                    disabled={listenerBusy}
+                    onClick={() => void disableListener()}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Disable listener
+                  </OctantButton>
+                ) : null}
               </div>
             </div>
           </SettingRow>
@@ -467,15 +478,16 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
                 value={ticketSource}
               />
               <div className="host-settings__controls">
-                <OctantButton
-                  disabled={status?.state !== "ready"}
-                  onClick={() => void mintTicket()}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Create pairing link
-                </OctantButton>
+                {status?.state === "ready" ? (
+                  <OctantButton
+                    onClick={() => void mintTicket()}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Create pairing link
+                  </OctantButton>
+                ) : null}
               </div>
               {status?.state !== "ready" ? (
                 <p className="settings-section-line">

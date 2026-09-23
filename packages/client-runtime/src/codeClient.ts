@@ -1098,7 +1098,10 @@ async function requestRaw(
   try {
     return await fetch(url, init);
   } catch {
-    throw unavailable("Octant Code service is unavailable.");
+    throw new CodeClientFailure({
+      category: "disconnected",
+      message: "Octant Code service is unavailable.",
+    });
   }
 }
 
@@ -1292,10 +1295,6 @@ function decodeThreadView(value: unknown): CodeThreadView {
     checkout: decodeCodeCheckoutIdentity(value.checkout),
     lastSequence: value.lastSequence as CodeThreadView["lastSequence"],
   };
-}
-
-function unavailable(message: string): CodeClientFailure {
-  return new CodeClientFailure({ category: "unavailable", message });
 }
 
 function invalidCommand(): CodeClientFailure {

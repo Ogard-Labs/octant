@@ -3933,8 +3933,10 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    const reopenedAppend = completed.persistence.journal.append.mock.calls.at(-1)?.[0];
+    if (reopenedAppend === undefined) throw new Error("expected a reopen journal append");
     const reopened = (
-      completed.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      reopenedAppend as {
         events: Array<{ payload: { thread: Record<string, unknown> } }>;
       }
     ).events[0]?.payload.thread;
@@ -3950,8 +3952,10 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    const wokenAppend = snoozed.persistence.journal.append.mock.calls.at(-1)?.[0];
+    if (wokenAppend === undefined) throw new Error("expected a wake journal append");
     const woken = (
-      snoozed.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      wokenAppend as {
         events: Array<{ payload: { thread: Record<string, unknown> } }>;
       }
     ).events[0]?.payload.thread;
@@ -3982,8 +3986,10 @@ describe("completing and snoozing a Code thread", () => {
         until: later,
       }),
     ).resolves.toMatchObject({ thread: { snooze: { until: later, at: now } } });
+    const recordedAppend = idle.persistence.journal.append.mock.calls.at(-1)?.[0];
+    if (recordedAppend === undefined) throw new Error("expected a snooze journal append");
     const recorded = (
-      idle.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      recordedAppend as {
         events: Array<{ payload: { thread: { snooze: Record<string, unknown> } } }>;
       }
     ).events[0]?.payload.thread.snooze;

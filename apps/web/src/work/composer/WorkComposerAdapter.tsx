@@ -28,6 +28,7 @@ import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
 import { FolderOpen, AlertTriangle } from "lucide-react";
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -168,21 +169,29 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   });
   const trimmed = prompt.trim();
   const hasFolder = props.projectId !== undefined;
+  const [projectRequired, setProjectRequired] = useState(false);
   const imageSupport = selectedModelReadsImages(props.providerGroups, {
     ...(props.selectedProviderInstanceId === undefined
       ? {}
       : { providerInstanceId: props.selectedProviderInstanceId }),
     ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
   });
-  // A Work thread belongs to a Project (decision 0037), so the first turn
-  // cannot start until one is chosen. Blocking here is what makes the
-  // Project control a requirement rather than a suggestion.
   const [submitting, setSubmitting] = useState(false);
-  const canSubmit =
-    trimmed.length > 0 && !props.creating && !submitting && !slash.resolving && hasFolder;
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
+
+  useEffect(() => {
+    if (props.projectId !== undefined) setProjectRequired(false);
+  }, [props.projectId]);
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    // A Work thread belongs to a Project (decision 0037), so the first turn
+    // cannot start until one is chosen. Refusing here, with a visible reason,
+    // is what makes the Project control a requirement rather than a suggestion.
+    if (!hasFolder) {
+      setProjectRequired(true);
+      return;
+    }
     setSubmitting(true);
     const staged = images.filesForSend();
     const computerUseSelection = computer.selection;
@@ -220,6 +229,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     canSubmit,
     computer,
     extensionDraft,
+    hasFolder,
     images,
     modelOptionValues,
     props,
@@ -490,6 +500,10 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         {props.errorMessage !== undefined ? (
           <p className="work-composer-adapter__error" role="alert">
             {props.errorMessage}
+          </p>
+        ) : projectRequired && !hasFolder ? (
+          <p className="work-composer-adapter__error" role="alert">
+            Choose a Project to work in before sending. Work needs a confined folder.
           </p>
         ) : null}
         {props.creating ? (

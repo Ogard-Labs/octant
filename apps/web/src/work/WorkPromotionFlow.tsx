@@ -3,6 +3,7 @@ import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { useState } from "react";
 import type { WorkPromotionController } from "./useWorkPromotionController";
+import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -51,181 +52,120 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
   const noUsableCodeModel = props.providerChoices.length === 0;
 
   return (
-    <section className="work-promotion" aria-label="Continue in Code">
-      <header className="work-promotion__header">
-        <h2>Continue this in Code</h2>
-        <p>
-          Work never turns into Code on its own. Propose a linked Code thread, then approve or
-          dismiss it yourself. The new thread starts approval-gated and inherits none of this
-          Project&rsquo;s file authority.
-        </p>
-      </header>
+    <div className="work-promotion">
       {errorMessage !== undefined ? (
-        <p className="work-promotion__error" role="alert">
+        <p className="oct-meta work-promotion__error" role="alert">
           {errorMessage}
         </p>
       ) : null}
-      <form
+      <SurfaceSection
         className="work-promotion__propose"
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (
-            selectedTarget === undefined ||
-            selectedArtifact === undefined ||
-            selectedArtifact.trim() === "" ||
-            props.controller.proposing
-          )
-            return;
-          setLocalError(undefined);
-          void props.controller
-            .propose({
-              targetCodeProjectId: selectedTarget.id,
-              summary,
-              artifactRefs: [selectedArtifact],
-            })
-            .then((proposal) => {
-              if (proposal !== undefined) setSummary("");
-            });
-        }}
+        label="Continue in Code"
+        note="Work never turns into Code on its own: propose a linked Code thread, then approve or dismiss it. The new thread starts approval-gated with none of this Project's file authority."
       >
-        <label className="work-promotion__field">
-          <span>Selected context summary</span>
-          <OctantTextarea
-            value={summary}
-            onChange={(event) => setSummary(event.currentTarget.value)}
-          />
-        </label>
-        <label className="work-promotion__field">
-          <span>Selected Work artifact</span>
-          <OctantSelectField
-            aria-label="Selected Work artifact"
-            disabled={noArtifacts}
-            onValueChange={setArtifactIndex}
-            options={
-              props.controller.availableArtifactRefs.length === 0
-                ? [{ id: "", label: "No Work artifacts available" }]
-                : props.controller.availableArtifactRefs.map((ref, index) => ({
+        <form
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (
+              selectedTarget === undefined ||
+              selectedArtifact === undefined ||
+              selectedArtifact.trim() === "" ||
+              props.controller.proposing
+            )
+              return;
+            setLocalError(undefined);
+            void props.controller
+              .propose({
+                targetCodeProjectId: selectedTarget.id,
+                summary,
+                artifactRefs: [selectedArtifact],
+              })
+              .then((proposal) => {
+                if (proposal !== undefined) setSummary("");
+              });
+          }}
+        >
+          <label className="work-promotion__field">
+            <span className="oct-row-detail">Selected context summary</span>
+            <OctantTextarea
+              rows={2}
+              value={summary}
+              onChange={(event) => setSummary(event.currentTarget.value)}
+            />
+          </label>
+          <div className="work-promotion__selection-fields">
+            <label className="work-promotion__field">
+              <span className="oct-row-detail">Selected Work artifact</span>
+              {noArtifacts ? (
+                <SurfaceEmpty
+                  detail="Create a starter note below, then propose."
+                  title="No Work artifact to hand over yet"
+                  tone="lane"
+                />
+              ) : (
+                <OctantSelectField
+                  aria-label="Selected Work artifact"
+                  onValueChange={setArtifactIndex}
+                  options={props.controller.availableArtifactRefs.map((ref, index) => ({
                     id: String(index),
                     label: ref,
-                  }))
-            }
-            value={noArtifacts ? "" : artifactIndex}
-          />
-        </label>
-        <label className="work-promotion__field">
-          <span>Target Code Project</span>
-          <OctantSelectField
-            aria-label="Target Code Project"
-            disabled={noTargets}
-            onValueChange={setTargetIndex}
-            options={
-              noTargets
-                ? [{ id: "", label: "No Code Projects available" }]
-                : props.targetCodeProjectLabels.map((project, index) => ({
+                  }))}
+                  value={artifactIndex}
+                />
+              )}
+            </label>
+            <label className="work-promotion__field">
+              <span className="oct-row-detail">Target Code Project</span>
+              {noTargets ? (
+                <SurfaceEmpty title="No active Code Project to target" tone="lane" />
+              ) : (
+                <OctantSelectField
+                  aria-label="Target Code Project"
+                  onValueChange={setTargetIndex}
+                  options={props.targetCodeProjectLabels.map((project, index) => ({
                     id: String(index),
                     label: project.name,
-                  }))
-            }
-            value={noTargets ? "" : targetIndex}
-          />
-        </label>
-        <OctantButton
-          className="project-button"
-          disabled={
-            props.controller.proposing ||
-            selectedTarget === undefined ||
-            (selectedArtifact ?? "").trim() === ""
-          }
-          type="submit"
-          variant="secondary"
-        >
-          Propose a Code thread
-        </OctantButton>
-      </form>
-      <section className="work-promotion__pending" aria-label="Waiting for your decision">
-        <h3>Waiting for your decision</h3>
+                  }))}
+                  value={targetIndex}
+                />
+              )}
+            </label>
+          </div>
+          {noArtifacts || noTargets ? null : (
+            <OctantButton
+              className="project-button"
+              disabled={props.controller.proposing || (selectedArtifact ?? "").trim() === ""}
+              type="submit"
+              variant="secondary"
+            >
+              Propose a Code thread
+            </OctantButton>
+          )}
+        </form>
+      </SurfaceSection>
+      <SurfaceSection className="work-promotion__pending" label="Waiting for your decision">
         {props.controller.pendingProposals.length === 0 ? (
-          <p>Nothing is waiting for your decision in {props.originProjectName}.</p>
+          <SurfaceEmpty title={`Nothing waiting in ${props.originProjectName}`} />
         ) : (
-          <ul>
+          <ul className="surface-list">
             {props.controller.pendingProposals.map((proposal) => (
-              <li key={String(proposal.proposalId)}>
-                <article>
-                  <p>{proposal.selectedContext.summary}</p>
-                  <p>
+              <li className="surface-row" key={String(proposal.proposalId)}>
+                <div className="surface-row__copy">
+                  <span className="oct-row-label">{proposal.selectedContext.summary}</span>
+                  <span className="oct-row-detail">
                     Target Code Project:{" "}
                     {props.targetCodeProjectLabels.find(
                       (project) => String(project.id) === String(proposal.targetCodeProjectId),
                     )?.name ?? "Unknown"}
-                  </p>
-                  <div className="work-promotion__actions">
-                    <OctantButton
-                      className="project-button"
-                      disabled={noUsableCodeModel}
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        const choice = props.providerChoices[Number(providerIndex)];
-                        if (choice === undefined) return;
-                        const deliveryTarget = props.controller.deliveryTargetsByProject.get(
-                          String(proposal.targetCodeProjectId),
-                        );
-                        if (deliveryTarget === undefined) {
-                          setLocalError(
-                            "Approving needs a confirmed delivery on the Code Project you chose.",
-                          );
-                          return;
-                        }
-                        setLocalError(undefined);
-                        void props.controller
-                          .approve({
-                            proposal,
-                            providerInstanceId: choice.instanceId,
-                            modelId: choice.modelId,
-                            deliveryTarget,
-                          })
-                          .then((approved) => {
-                            if (
-                              approved?.linkedCodeThreadId !== undefined &&
-                              props.onOpenLinkedCodeThread !== undefined
-                            ) {
-                              setApprovedLinks((current) => [
-                                ...current,
-                                {
-                                  proposalId: String(approved.proposalId),
-                                  threadId: approved.linkedCodeThreadId!,
-                                  title: approved.selectedContext.summary,
-                                  projectId: approved.targetCodeProjectId,
-                                },
-                              ]);
-                            }
-                          });
-                      }}
-                    >
-                      Approve
-                    </OctantButton>
-                    <OctantButton
-                      className="project-button project-button--quiet"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        setLocalError(undefined);
-                        void props.controller.dismiss(proposal);
-                      }}
-                    >
-                      Dismiss
-                    </OctantButton>
-                  </div>
-                  <label className="work-promotion__field">
-                    <span>Provider for approval</span>
-                    {noUsableCodeModel ? (
-                      <p className="work-promotion__unavailable">
-                        No usable Code model is available. Configure a provider that reports a
-                        tool-capable model before approving this.
-                      </p>
-                    ) : (
+                  </span>
+                </div>
+                <div className="work-promotion__actions surface-row__control">
+                  {noUsableCodeModel ? null : (
+                    <label className="work-promotion__provider">
+                      <span className="sr-only">Provider for approval</span>
                       <OctantSelectField
+                        aria-label="Provider for approval"
                         onValueChange={setProviderIndex}
                         options={props.providerChoices.map((choice, index) => ({
                           id: String(index),
@@ -233,21 +173,84 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
                         }))}
                         value={providerIndex}
                       />
-                    )}
-                  </label>
-                </article>
+                    </label>
+                  )}
+                  {noUsableCodeModel ? (
+                    <p className="work-promotion__unavailable">
+                      No usable Code model is available. Configure a provider that reports a
+                      tool-capable model before approving this.
+                    </p>
+                  ) : null}
+                  <OctantButton
+                    className="project-button"
+                    disabled={noUsableCodeModel}
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      const choice = props.providerChoices[Number(providerIndex)];
+                      if (choice === undefined) return;
+                      const deliveryTarget = props.controller.deliveryTargetsByProject.get(
+                        String(proposal.targetCodeProjectId),
+                      );
+                      if (deliveryTarget === undefined) {
+                        setLocalError(
+                          "Approving needs a confirmed delivery on the Code Project you chose.",
+                        );
+                        return;
+                      }
+                      setLocalError(undefined);
+                      void props.controller
+                        .approve({
+                          proposal,
+                          providerInstanceId: choice.instanceId,
+                          modelId: choice.modelId,
+                          deliveryTarget,
+                        })
+                        .then((approved) => {
+                          const linkedCodeThreadId = approved?.linkedCodeThreadId;
+                          if (
+                            approved !== undefined &&
+                            linkedCodeThreadId !== undefined &&
+                            props.onOpenLinkedCodeThread !== undefined
+                          ) {
+                            setApprovedLinks((current) => [
+                              ...current,
+                              {
+                                proposalId: String(approved.proposalId),
+                                threadId: linkedCodeThreadId,
+                                title: approved.selectedContext.summary,
+                                projectId: approved.targetCodeProjectId,
+                              },
+                            ]);
+                          }
+                        });
+                    }}
+                  >
+                    Approve
+                  </OctantButton>
+                  <OctantButton
+                    className="project-button project-button--quiet"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setLocalError(undefined);
+                      void props.controller.dismiss(proposal);
+                    }}
+                  >
+                    Dismiss
+                  </OctantButton>
+                </div>
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </SurfaceSection>
       {approvedLinks.length > 0 ? (
-        <section className="work-promotion__approved" aria-label="Approved Code threads">
-          <h3>Approved Code threads</h3>
-          <ul>
+        <SurfaceSection className="work-promotion__approved" label="Approved Code threads">
+          <ul className="surface-list">
             {approvedLinks.map((entry) => (
-              <li key={entry.proposalId}>
-                <span>{entry.title}</span>
+              <li className="surface-row" key={entry.proposalId}>
+                <span className="oct-row-label">{entry.title}</span>
                 {props.onOpenLinkedCodeThread !== undefined ? (
                   <OctantButton
                     className="project-button"
@@ -263,9 +266,9 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
               </li>
             ))}
           </ul>
-        </section>
+        </SurfaceSection>
       ) : null}
-    </section>
+    </div>
   );
 }
 

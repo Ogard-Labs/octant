@@ -27,7 +27,7 @@ import {
   PRIVATE_LISTENER_TEST_CERT,
   PRIVATE_LISTENER_TEST_KEY,
 } from "../privateListener.test-certs";
-import type { OctantServer, RequestTransportFacts, Serve } from "../server";
+import type { RequestTransportFacts, Serve } from "../server";
 import {
   createRemoteGateway,
   RemoteGatewayError,

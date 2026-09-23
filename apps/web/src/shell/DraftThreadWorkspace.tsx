@@ -155,6 +155,10 @@ export interface DraftThreadWorkspaceProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly defaultExecutionPolicy?: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence?: PermissionPersistence;
+  readonly onExecutionPolicyChange?: (
+    policy: ProviderExecutionPolicy,
+    persistence: PermissionPersistence,
+  ) => void;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
   /**
@@ -644,6 +648,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
           defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
           defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
+          {...(props.onExecutionPolicyChange === undefined
+            ? {}
+            : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
           projectSetup={
             selectedProjectId === undefined && compatibleProjects.length === 0 ? (
               <div aria-label="Set up a Code project" className="code-home__project-setup">

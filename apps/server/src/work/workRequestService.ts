@@ -130,6 +130,8 @@ export class WorkRequestService {
   readonly #clock: () => string;
   /** One process owns a pending external callback delivery at a time. */
   readonly #activeDeliveries = new Set<string>();
+  readonly #interruptedSessions = new Set<string>();
+  readonly #settlementListeners = new Map<string, Set<() => void>>();
 
   constructor(options: WorkRequestServiceOptions) {
     this.#projects = options.projects;
@@ -418,6 +420,33 @@ export class WorkRequestService {
     return this.#systemSettle(requestId, "expired");
   }
 
+  onSettled(
+    input: {
+      readonly providerSessionId: ProviderSessionId;
+      readonly providerCallbackId: string;
+    },
+    callback: () => void,
+  ): () => void {
+    const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
+    const entry = this.#findByProviderSessionCallbackId(
+      input.providerSessionId,
+      input.providerCallbackId,
+    );
+    if (entry !== undefined && entry.request.status !== "pending") {
+      callback();
+      return () => undefined;
+    }
+    const listeners = this.#settlementListeners.get(key) ?? new Set<() => void>();
+    listeners.add(callback);
+    this.#settlementListeners.set(key, listeners);
+    return () => {
+      const current = this.#settlementListeners.get(key);
+      if (current === undefined) return;
+      current.delete(callback);
+      if (current.size === 0) this.#settlementListeners.delete(key);
+    };
+  }
+
   /**
    * Settles every pending request owned by a provider session after that
    * session reaches a terminal runtime state. The session is a UUID minted by
@@ -430,10 +459,16 @@ export class WorkRequestService {
       .filter(
         (entry) =>
           entry.request.status === "pending" &&
-          !this.#activeDeliveries.has(String(entry.request.requestId)) &&
           String(entry.request.providerSessionId) === String(sessionId),
       )
-      .map((entry) => this.#reconcileTerminalSessionRequest(entry.request));
+      .flatMap((entry) => {
+        const requestId = String(entry.request.requestId);
+        if (this.#activeDeliveries.has(requestId)) {
+          this.#interruptedSessions.add(String(sessionId));
+          return [];
+        }
+        return [this.#reconcileTerminalSessionRequest(entry.request)];
+      });
   }
 
   /**
@@ -448,6 +483,18 @@ export class WorkRequestService {
           entry.request.status === "pending" &&
           String(entry.request.projectId) === String(projectId) &&
           !this.#activeDeliveries.has(String(entry.request.requestId)),
+      )
+      .map((entry) => this.#systemSettle(entry.request.requestId, "interrupted"));
+  }
+
+  /** Interrupts every pending request because no provider session survives a restart. */
+  interruptOnRestart(): ReadonlyArray<WorkRequestServiceResult> {
+    return [...this.#projection.snapshot().values()]
+      .filter(
+        (entry) =>
+          entry.request.status === "pending" &&
+          !this.#activeDeliveries.has(String(entry.request.requestId)) &&
+          entry.request.delivery?.confirmed !== true,
       )
       .map((entry) => this.#systemSettle(entry.request.requestId, "interrupted"));
   }
@@ -553,6 +600,17 @@ export class WorkRequestService {
       );
     }
     this.#projection.apply(frame);
+    const currentEntry = this.#projection.lookup(current.requestId);
+    const listenerKey =
+      currentEntry === undefined
+        ? settlementListenerKey(current.providerSessionId, current.providerRequestId)
+        : settlementListenerKey(
+            currentEntry.request.providerSessionId,
+            providerCallbackIdForEntry(currentEntry),
+          );
+    const listeners = this.#settlementListeners.get(listenerKey);
+    this.#settlementListeners.delete(listenerKey);
+    for (const callback of listeners ?? []) callback();
     return ok(nextRequest);
   }
 
@@ -687,6 +745,12 @@ export class WorkRequestService {
 
   #releaseActiveDelivery(request: WorkRequest): void {
     this.#activeDeliveries.delete(String(request.requestId));
+    if (
+      this.#interruptedSessions.has(String(request.providerSessionId)) &&
+      this.#projection.lookup(request.requestId)?.request.status === "pending"
+    ) {
+      this.#systemSettle(request.requestId, "interrupted");
+    }
   }
 
   #findByProviderCallbackId(
@@ -703,6 +767,21 @@ export class WorkRequestService {
         String(entry.request.providerSessionId) === String(providerSessionId) &&
         providerCallbackIdForEntry(entry) === providerCallbackId &&
         entry.request.detail.kind === detailKind
+      ) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
+
+  #findByProviderSessionCallbackId(
+    providerSessionId: ProviderSessionId,
+    providerCallbackId: string,
+  ) {
+    for (const entry of this.#projection.snapshot().values()) {
+      if (
+        String(entry.request.providerSessionId) === String(providerSessionId) &&
+        providerCallbackIdForEntry(entry) === providerCallbackId
       ) {
         return entry;
       }
@@ -742,6 +821,10 @@ function providerCallbackId(entry: WorkRequestEntry): string {
 
 function providerCallbackIdForEntry(entry: WorkRequestEntry): string {
   return entry.providerCallbackId ?? entry.request.providerRequestId;
+}
+
+function settlementListenerKey(providerSessionId: ProviderSessionId, providerCallbackId: string) {
+  return `${String(providerSessionId)}:${providerCallbackId}`;
 }
 
 // Re-export the id decoder for callers that only import from this module.

@@ -13,7 +13,7 @@ const hostId = "local" as HostId;
 const openAiInstanceId = "80000000-0000-4000-8000-000000000010" as ProviderInstanceId;
 const anthropicInstanceId = "80000000-0000-4000-8000-000000000020" as ProviderInstanceId;
 
-function instance(patch: Partial<ProviderInstance> = {}): ProviderInstance {
+function instance(): ProviderInstance {
   return {
     id: openAiInstanceId,
     displayName: "OpenAI gateway",

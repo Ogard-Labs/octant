@@ -804,6 +804,10 @@ function LaunchedShell(
   function resetNewTaskDraft(mode: OctantMode): void {
     const paneId = controller.workspace?.activePaneIds[mode];
     if (paneId !== undefined) newTaskDrafts.write(`${mode}:${String(paneId)}`, "");
+    if (mode === "code") {
+      setDraftExecutionPolicy(undefined);
+      setDraftPermissionPersistence(undefined);
+    }
     setDraftResetRevision((revision) => revision + 1);
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
@@ -859,6 +863,12 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] = useState<
     import("@octant/contracts/providers").ProviderModelId | undefined
   >(() => readLastModelChoice()?.modelId);
+  const [draftExecutionPolicy, setDraftExecutionPolicy] = useState<
+    import("@octant/contracts/providers").ProviderExecutionPolicy | undefined
+  >();
+  const [draftPermissionPersistence, setDraftPermissionPersistence] = useState<
+    import("@octant/contracts/providers").PermissionPersistence | undefined
+  >();
   useEffect(() => {
     const restore = () => {
       const choice = readLastModelChoice();
@@ -5850,11 +5860,13 @@ function LaunchedShell(
                       const binding = controller
                         .openDraftThread(mode, projectId)
                         .then((accepted) => {
-                          if (accepted)
+                          if (accepted) {
+                            if (mode === "code") setDraftPermissionPersistence(undefined);
                             setDraftProjectSelection((current) => ({
                               ...current,
                               [mode]: projectId,
                             }));
+                          }
                         });
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);
@@ -6112,11 +6124,22 @@ function LaunchedShell(
                       ? {}
                       : { draftSelectedModelId: effectiveDraftModelId })}
                     {...(activeMode === "code"
-                      ? { draftDefaultExecutionPolicy: codeDefaultExecutionPolicy }
+                      ? {
+                          draftDefaultExecutionPolicy:
+                            draftExecutionPolicy ?? codeDefaultExecutionPolicy,
+                          draftDefaultPermissionPersistence:
+                            draftPermissionPersistence ??
+                            codeController.bootstrap?.settings.defaultPermissionPersistence ??
+                            "current-session",
+                        }
                       : {})}
                     onDraftSelectProvider={(selection) => {
                       setDraftProviderInstanceId(selection.providerInstanceId);
                       setDraftModelId(selection.modelId);
+                    }}
+                    onDraftExecutionPolicyChange={(policy, persistence) => {
+                      setDraftExecutionPolicy(policy);
+                      setDraftPermissionPersistence(persistence);
                     }}
                     onDraftCreateThread={handleDraftCreateThread}
                     githubPluginEnabled={

@@ -12,6 +12,10 @@ import type {
 
 interface ObservationPort {
   observe(root: string, signal?: AbortSignal): Promise<GitObservationResult>;
+  observeRemotes?(
+    root: string,
+    signal?: AbortSignal,
+  ): Promise<GitObservation["remotes"] | undefined>;
   /**
    * Optional: an observation fake that only answers `observe` reports no
    * scoped diff rather than being unusable.
@@ -119,6 +123,13 @@ export class GitService {
 
   observe(root: string, signal?: AbortSignal): Promise<GitObservationResult> {
     return this.#observation.observe(root, signal);
+  }
+
+  observeRemotes(
+    root: string,
+    signal?: AbortSignal,
+  ): Promise<GitObservation["remotes"] | undefined> {
+    return this.#observation.observeRemotes?.(root, signal) ?? Promise.resolve(undefined);
   }
 
   /** Read one named slice of the checkout's changes. Read-only, so unqueued. */

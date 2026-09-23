@@ -89,6 +89,27 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("surfaces Work attention while it waits for a decision or input", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [
+          { threadId: "work-attention", title: "Approval", activity: "attention" },
+          { threadId: "work-working", title: "Working", activity: "working" },
+        ],
+        codeThreads: [],
+      }),
+    ).toEqual([
+      {
+        threadId: "work-attention",
+        reason: "approval-required",
+        title: "Approval",
+        detail: "Waiting for your decision or input.",
+        source: "work",
+      },
+    ]);
+  });
+
   it("raises a live Code approval with the summary the workspace shows", () => {
     const threadId = "code-a" as CodeThreadId;
     expect(

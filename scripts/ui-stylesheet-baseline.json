@@ -24,8 +24,7 @@
     "apps/web/src/styles/project-threads.css": 1,
     "apps/web/src/styles/remote-pairing.css": 1,
     "apps/web/src/styles/remote-shell.css": 1,
-    "apps/web/src/styles/surface.css": 1,
-    "apps/web/src/usage/usageWorkspace.css": 1
+    "apps/web/src/styles/surface.css": 1
   },
   "control-repaint": {
     "apps/web/src/agents/agent-hierarchy.css": 1,
@@ -56,7 +55,7 @@
     "apps/web/src/code/project-pull-request-review.css": 7,
     "apps/web/src/context/context.css": 17,
     "apps/web/src/gitHistory/git-history.css": 4,
-    "apps/web/src/styles.css": 163,
+    "apps/web/src/styles.css": 160,
     "apps/web/src/styles/chat.css": 30,
     "apps/web/src/styles/code.css": 59,
     "apps/web/src/styles/components.css": 29,
@@ -74,6 +73,6 @@
     "apps/web/src/styles/shell.css": 58,
     "apps/web/src/styles/surface.css": 7,
     "apps/web/src/styles/usage.css": 12,
-    "apps/web/src/usage/usageWorkspace.css": 16
+    "apps/web/src/usage/usageWorkspace.css": 14
   }
 }

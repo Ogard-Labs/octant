@@ -2659,26 +2659,21 @@ form > .work-composer-adapter__attachments {
 
 /* Full examples remain visible; their quiet layout keeps the composer primary. */
 .code-home__suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--oct-space-2);
   width: min(100%, 704px);
   margin: var(--oct-space-4) auto 0;
 }
 
 .code-home__suggestions > button {
-  white-space: normal;
-}
-
-.code-home__suggestions > button {
   display: grid;
-  flex: 1 1 200px;
   height: auto;
   gap: var(--oct-space-1);
   justify-items: start;
   padding: var(--oct-space-3);
   text-align: left;
+  white-space: normal;
 }
 
 .draft-thread__intent-cards > button {

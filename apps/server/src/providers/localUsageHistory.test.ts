@@ -684,7 +684,7 @@ describe("local provider usage history", () => {
     };
     await writeFile(file, JSON.stringify({ marker: "first" }));
     const options = { sourceKind: "fixture" as never, providerKey: "fixture", root };
-    const first = await readLocalUsageHistory(options, request, parser as never);
+    await readLocalUsageHistory(options, request, parser as never);
     appendFileSync(file, `\n{"marker":"second`);
     const partial = await readLocalUsageHistory(options, request, parser as never);
     expect(partial.records.map((record) => record.sourceEventId)).toEqual(["first"]);

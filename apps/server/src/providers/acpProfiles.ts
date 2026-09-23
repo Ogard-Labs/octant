@@ -465,7 +465,7 @@ const vibeProfile: AcpProviderProfile = {
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Mistral Vibe is not authenticated. Run the provider-owned Vibe CLI login, then retry.",
+    "Mistral Vibe is not authenticated. Octant cannot read the key Vibe keeps in the macOS Keychain; switch this provider to API key authentication in Settings → Providers and enter a Mistral API key.",
   process: {
     agentName: "@mistralai/mistral-vibe",
     versionPattern:
@@ -488,6 +488,12 @@ const vibeProfile: AcpProviderProfile = {
       VIBE_AGENT_PATHS: "[]",
       VIBE_SKILL_PATHS: "[]",
       VIBE_INSTALLED_AGENTS: "[]",
+      // Vibe's Keychain lookup spawns /usr/bin/security, but the confined
+      // launch forbids exec; disable it so Vibe reports a missing key instead
+      // of dying during model discovery with an unclassified PermissionError.
+      // API-key authentication brokers MISTRAL_API_KEY into the environment,
+      // which Vibe reads before attempting its keyring.
+      VIBE_TEST_DISABLE_KEYRING: "1",
       // An allowlist, not `disabled_agents: ["*"]`: Vibe resolves `default_agent`
       // against the disable list before a session exists, so disabling every
       // agent makes `session/new` fail outright (-31002). `enabled_agents` takes
@@ -509,7 +515,8 @@ const vibeProfile: AcpProviderProfile = {
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".vibe"),
-      loginHint: "Run the provider-owned Vibe CLI login, then retry.",
+      loginHint:
+        "Mistral Vibe is not authenticated. Octant cannot read the key Vibe keeps in the macOS Keychain; switch this provider to API key authentication in Settings → Providers and enter a Mistral API key.",
       environment: (path) => ({ VIBE_HOME: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },

@@ -343,6 +343,14 @@ export interface CodeOperationGitPort {
       readonly state: "active" | "locked" | "prunable" | "unavailable";
     }[];
   }>;
+  readonly observeRemotes?: (input: { readonly checkoutRoot: string }) => Promise<
+    | readonly {
+        readonly name: string;
+        readonly fetch: { readonly kind: "network" | "local"; readonly url?: string };
+        readonly push: { readonly kind: "network" | "local"; readonly url?: string };
+      }[]
+    | undefined
+  >;
   readonly stage: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
@@ -1821,7 +1829,7 @@ export class CodeOperationService {
         );
       }
       case "create-pull-request":
-        return this.#pullRequest(command);
+        return this.#pullRequest(command, root.checkoutRoot);
       case "observe-pull-request":
         return this.#pullRequestReview(command);
       case "create-review-finding": {
@@ -2380,7 +2388,23 @@ export class CodeOperationService {
 
   async #pullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
+    checkoutRoot: string,
   ): Promise<CodeOperationResult> {
+    const remotes = await this.#options.git.observeRemotes?.({ checkoutRoot });
+    if (
+      remotes !== undefined &&
+      !remotes.some(
+        (remote) =>
+          (remote.fetch.kind === "network" && isGitHubRemote(remote.fetch.url)) ||
+          (remote.push.kind === "network" && isGitHubRemote(remote.push.url)),
+      )
+    )
+      return decodeCodeOperationResult({
+        kind: "pull-request-state",
+        operationId: command.operationId,
+        state: "unavailable",
+        failureCode: "no-remote",
+      });
     const result = await this.#options.pullRequests.ensure(
       { threadId: command.threadId, title: command.title, body: command.body },
       new AbortController().signal,
@@ -2778,6 +2802,16 @@ export class CodeOperationService {
       operationId,
       failure: { category, message },
     });
+  }
+}
+
+function isGitHubRemote(url: string | undefined): boolean {
+  if (url === undefined) return false;
+  if (url.startsWith("git@github.com:")) return true;
+  try {
+    return new URL(url).hostname === "github.com";
+  } catch {
+    return false;
   }
 }
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { WorkResearchBriefView } from "@octant/client-runtime/work-research-client";
 import { AlertTriangle, BookOpen, FileText, Quote } from "lucide-react";
 import type { WorkResearchMutationOutcome, WorkResearchStatus } from "./useWorkResearchController";
+import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -68,35 +69,33 @@ const STATUS_COPY: Record<Exclude<WorkResearchStatus, "ready">, string> = {
 export function WorkResearchPanel(props: WorkResearchPanelProps) {
   if (props.status !== "ready") {
     return (
-      <section aria-label="Work research" className="work-research">
-        <h3 className="work-research__title">Research</h3>
-        <p className="work-research__empty" role="note">
-          {STATUS_COPY[props.status]}
-        </p>
-        {props.onRetry !== undefined && props.status !== "loading" ? (
-          <OctantButton
-            className="work-research__retry"
-            onClick={props.onRetry}
-            type="button"
-            variant="outline"
-          >
-            Retry
-          </OctantButton>
-        ) : null}
-      </section>
+      <SurfaceSection className="work-research" label="Research">
+        <SurfaceEmpty
+          action={
+            props.onRetry !== undefined && props.status !== "loading" ? (
+              <OctantButton
+                className="work-research__retry"
+                onClick={props.onRetry}
+                type="button"
+                variant="outline"
+              >
+                Retry
+              </OctantButton>
+            ) : undefined
+          }
+          title={STATUS_COPY[props.status]}
+        />
+      </SurfaceSection>
     );
   }
 
   return (
-    <section aria-label="Work research" className="work-research">
-      <h3 className="work-research__title">Research</h3>
+    <SurfaceSection className="work-research" label="Research">
       {props.onCreateBrief === undefined ? null : (
         <NewBriefForm onCreateBrief={props.onCreateBrief} />
       )}
       {props.briefs.length === 0 ? (
-        <p className="work-research__empty" role="note">
-          This Project has no research briefs.
-        </p>
+        <SurfaceEmpty title="This Project has no research briefs." />
       ) : (
         <ul className="work-research__briefs">
           {props.briefs.map((view) => (
@@ -121,7 +120,7 @@ export function WorkResearchPanel(props: WorkResearchPanelProps) {
           ))}
         </ul>
       )}
-    </section>
+    </SurfaceSection>
   );
 }
 

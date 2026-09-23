@@ -15,6 +15,7 @@ import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
+import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import type { RemoteProductClients } from "./remoteProductClients";
 
 export interface RemoteWorkspaceProps {
@@ -266,15 +267,19 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
           {props.action}
         </div>
         {props.status === "disconnected" ? (
-          <p className="remote-shell__hint" role="alert">
-            {props.errorMessage ?? `${label} could not be read from the host.`}
-          </p>
+          <div role="alert">
+            <SurfaceEmpty
+              detail={props.errorMessage ?? `${label} could not be read from the host.`}
+              title={`${label} could not be read`}
+            />
+          </div>
         ) : props.status === "loading" ? (
-          <p className="remote-shell__hint" role="status">
-            Reading {label} threads from the host…
-          </p>
+          <SurfaceEmpty title={`Reading ${label} threads…`} />
         ) : props.threads.length === 0 ? (
-          <p className="remote-shell__hint">{props.emptyMessage ?? `No ${label} threads yet.`}</p>
+          <SurfaceEmpty
+            {...(props.emptyMessage === undefined ? {} : { detail: props.emptyMessage })}
+            title={`No ${label} threads yet`}
+          />
         ) : (
           <ul className="remote-workspace__thread-list">
             {props.threads.map((thread) => (

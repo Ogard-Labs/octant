@@ -108,19 +108,6 @@ const codeParent: AgentRunWorkspaceParentFacts = {
   checkoutRoot: "/repo",
 };
 
-function chatGrant(
-  overrides: Partial<AgentRunIssuedWorkspaceGrant> = {},
-): AgentRunIssuedWorkspaceGrant {
-  return {
-    receiptId: ids.receipt,
-    parentThreadId: ids.thread,
-    mode: "chat",
-    confirmed: true,
-    expiresAt: later,
-    ...overrides,
-  };
-}
-
 function workGrant(
   overrides: Partial<AgentRunIssuedWorkspaceGrant> = {},
 ): AgentRunIssuedWorkspaceGrant {

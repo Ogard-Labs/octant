@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, normalize } from "node:path";
+import { join } from "node:path";
 import { decodeWindowId } from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
