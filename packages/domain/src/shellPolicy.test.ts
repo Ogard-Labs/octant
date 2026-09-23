@@ -1217,6 +1217,97 @@ describe("workspace context resolution", () => {
     expect(codePane(switched).surface).toEqual(projectSurface);
   });
 
+  it("opens a Chat thread outside any Project by switching back to the no-Project context", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const chat = onlyPane(base.layouts.chat);
+    const outgoingSurface = decodeWorkspaceTab({
+      kind: "chat-thread",
+      id: ids.tabB,
+      threadId: ids.thread,
+      mode: "chat",
+      title: "Bound Project thread",
+    });
+    const targetSurface = decodeWorkspaceTab({
+      kind: "chat-thread",
+      id: ids.tabC,
+      threadId: ids.thread,
+      mode: "chat",
+      title: "Unfiled thread",
+    });
+    const anchored: WindowWorkspace = {
+      ...base,
+      layouts: { ...base.layouts, chat: { ...chat, surface: outgoingSurface } },
+      contextByMode: {
+        ...base.contextByMode,
+        chat: { host, mode: "chat", projectId: ids.project, boundRoot: null },
+      },
+    };
+    const operation = decodeWorkspaceOperation({
+      kind: "switch-project-surface",
+      mode: "chat",
+      surface: targetSurface,
+    });
+
+    const resolved = resolveWorkspaceContext(anchored, operation, {
+      tabContext: (candidate) =>
+        candidate.kind === "chat-thread"
+          ? { host, mode: "chat", projectId: null, boundRoot: null }
+          : undefined,
+    });
+    const switched = applyWorkspaceOperation(resolved, operation);
+
+    expect(switched.contextByMode.chat).toEqual({
+      host,
+      mode: "chat",
+      projectId: null,
+      boundRoot: null,
+    });
+    expect(switched.stowedLayouts[0]?.context.projectId).toBe(ids.project);
+    expect(onlyPane(switched.layouts.chat).surface).toEqual(targetSurface);
+  });
+
+  it("still refuses Work and Code switches to a surface with no Project", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    for (const mode of ["work", "code"] as const) {
+      const surface = decodeWorkspaceTab({
+        kind: mode === "work" ? "work-thread" : "code-overview",
+        id: mode === "work" ? ids.tabB : ids.tabC,
+        ...(mode === "work"
+          ? { threadId: decodeWorkThreadId("00000000-0000-4000-8000-000000000603") }
+          : { threadId: ids.codeThread }),
+        mode,
+        title: `${mode} thread`,
+      });
+      const operation = decodeWorkspaceOperation({
+        kind: "switch-project-surface",
+        mode,
+        surface,
+      });
+
+      expect(() =>
+        resolveWorkspaceContext(
+          {
+            ...base,
+            contextByMode: {
+              ...base.contextByMode,
+              [mode]:
+                mode === "work"
+                  ? { host, mode, projectId: ids.project, boundRoot: "/home/folder" }
+                  : { host, mode, projectId: ids.project, boundRoot: "/home/repo" },
+            },
+          },
+          operation,
+          {
+            tabContext: (candidate) =>
+              candidate.kind === "work-thread" || candidate.kind === "code-overview"
+                ? { host, mode, projectId: null, boundRoot: null }
+                : undefined,
+          },
+        ),
+      ).toThrow(WorkspaceContextRejected);
+    }
+  });
+
   it("stows the outgoing Project layout and restores it when switching back", () => {
     const base = defaultWindowWorkspace(ids.window);
     const code = codePane(base);

@@ -946,7 +946,7 @@ export function resolveWorkspaceContext(
     const candidate = resolves.tabContext(operation.surface);
     if (
       candidate === undefined ||
-      candidate.projectId === null ||
+      (candidate.projectId === null && operation.mode !== "chat") ||
       candidate.mode !== operation.mode ||
       ("mode" in operation.surface && operation.surface.mode !== operation.mode)
     ) {

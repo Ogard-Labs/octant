@@ -227,6 +227,42 @@ describe("useShellController", () => {
     expect(result.current.errorMessage).toBe("Workspace persistence failed.");
   });
 
+  it("switches to the no-Project Chat context for an unfiled thread", async () => {
+    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
+    const initial = initialBootstrap();
+    const server = statefulClient({
+      ...initial,
+      workspace: {
+        ...initial.workspace,
+        contextByMode: {
+          ...initial.workspace.contextByMode,
+          chat: {
+            ...initial.workspace.contextByMode.chat,
+            projectId,
+          },
+        },
+      },
+    });
+    const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000897");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openChatThread(threadId, "Unfiled notes"));
+
+    expect(server.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "apply-workspace-operation",
+        operation: expect.objectContaining({
+          kind: "switch-project-surface",
+          mode: "chat",
+          surface: expect.objectContaining({ kind: "chat-thread", threadId }),
+        }),
+      }),
+    );
+  });
+
   it("opens one mode-matched Project surface and reuses its pane on repeat selection", async () => {
     const server = statefulClient();
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");

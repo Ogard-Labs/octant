@@ -1303,7 +1303,10 @@ function createWorkspaceMutation(
         mode: "chat",
         title: intent.title,
       };
-      if (isDifferentProject(latest.workspace, "chat", intent.projectId)) {
+      if (
+        isDifferentProject(latest.workspace, "chat", intent.projectId) ||
+        (intent.projectId === undefined && latest.workspace.contextByMode.chat.projectId !== null)
+      ) {
         return {
           operation: { kind: "switch-project-surface", mode: "chat", surface },
           message: `${intent.title} opened in this window.`,
