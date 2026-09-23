@@ -40,6 +40,7 @@ export function ScopeIndicator({ scope, id }: ScopeIndicatorProps) {
 export interface SettingRowProps {
   readonly settingId: string;
   readonly label: ReactNode;
+  readonly htmlFor?: string;
   readonly description?: ReactNode;
   readonly scope: SettingsScope;
   readonly focused?: boolean;
@@ -63,6 +64,7 @@ export interface SettingRowProps {
 export function SettingRow({
   settingId,
   label,
+  htmlFor,
   description,
   scope,
   focused = false,
@@ -107,12 +109,22 @@ export function SettingRow({
           against it, and a screen reader still needs it to say which setting
           the control belongs to. When the section heading is the same phrase,
           only the printing of it is dropped. */}
-      <span
-        className="setrow-label"
-        data-labelled-by-section={labelledBySection ? "true" : "false"}
-      >
-        {label}
-      </span>
+      {htmlFor === undefined ? (
+        <span
+          className="setrow-label"
+          data-labelled-by-section={labelledBySection ? "true" : "false"}
+        >
+          {label}
+        </span>
+      ) : (
+        <label
+          className="setrow-label"
+          data-labelled-by-section={labelledBySection ? "true" : "false"}
+          htmlFor={htmlFor}
+        >
+          {label}
+        </label>
+      )}
       {/* The scope rides inside the hint line because .setrow declares exactly
           two rows; a third child in column 1 would land in an implicit track
           the control's `grid-row: 1 / -1` span does not cover. */}

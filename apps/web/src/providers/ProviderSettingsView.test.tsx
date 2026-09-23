@@ -540,6 +540,16 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
   });
 
+  it("associates Mistral Vibe SettingRow labels with their controls", () => {
+    renderExpanded(<ProviderSettingsView {...fixture({ instance: vibeProvider() })} />);
+
+    const card = screen.getByRole("article", { name: "Mistral Vibe local" });
+    expect(within(card).getByLabelText("vibe-acp binary path")).toBeInTheDocument();
+    expect(
+      within(card).getByLabelText("Mistral API key (leave blank to preserve)"),
+    ).toBeInTheDocument();
+  });
+
   it.each([
     {
       label: "GLM Agent",
