@@ -381,7 +381,11 @@ import { useAgentProfiles } from "./agentProfile/useAgentProfiles";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
 import type { ThreadRowActions } from "./projects/ThreadRowMenu";
 import { exportThreadBundle, resolveThreadExportClient } from "./thread/threadExport";
-import type { ChatThreadNavigationItem, ThreadProviderIdentity } from "./shell/navigationModel";
+import type {
+  ChatThreadNavigationItem,
+  SidebarNavigationDescriptorId,
+  ThreadProviderIdentity,
+} from "./shell/navigationModel";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
@@ -3983,6 +3987,28 @@ function LaunchedShell(
     imageLibraryOpen;
   const projectsDestinationActive =
     projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
+  const activeSidebarDestination: SidebarNavigationDescriptorId | undefined =
+    projectsDestinationActive
+      ? "projects"
+      : inboxOpen
+        ? "inbox"
+        : workBoardOpen || codeBoardOpen
+          ? "thread-board"
+          : codePullRequestsOpen
+            ? "pull-requests"
+            : githubIssuesOpen
+              ? "github-issues"
+              : linearIssuesOpen
+                ? "linear-issues"
+                : automationCenterOpen
+                  ? "automations"
+                  : agentsCenterOpen
+                    ? "agents"
+                    : artifactLibraryOpen
+                      ? "artifact-library"
+                      : imageLibraryOpen
+                        ? "image-library"
+                        : undefined;
   // Readers hide unrelated thread tools. Selecting a pull request explicitly
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
@@ -5350,7 +5376,9 @@ function LaunchedShell(
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
-            {...(!projectsDestinationActive ? {} : { activeDestination: "projects" as const })}
+            {...(activeSidebarDestination === undefined
+              ? {}
+              : { activeDestination: activeSidebarDestination })}
             imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
@@ -5509,7 +5537,7 @@ function LaunchedShell(
                     contextHealthByProject={contextHealthByProject}
                     onOpenContextHealth={(projectId) => void openProjectContextHealth(projectId)}
                     {...(activeMode === "chat"
-                      ? (chatController.navigation?.length ?? 0) > 0
+                      ? chatController.status === "ready"
                         ? {
                             addProjectLabel: "chat-project" as const,
                             onAddProject: () => openProjectCreate(),
