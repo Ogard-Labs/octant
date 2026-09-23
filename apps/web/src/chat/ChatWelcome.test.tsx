@@ -181,6 +181,21 @@ describe("ChatWelcome", () => {
     expect(onCreateChat).not.toHaveBeenCalled();
   });
 
+  it("keeps the attach control reachable and explains that attachments come after the chat starts", async () => {
+    const user = userEvent.setup();
+    const onCreateChat = vi.fn();
+    render(<ChatWelcome onCreateChat={onCreateChat} />);
+
+    await user.click(screen.getByRole("button", { name: "Add attachment" }));
+
+    expect(
+      await screen.findByText("Attachments can be added once the chat starts.", {
+        selector: 'p[role="status"]',
+      }),
+    ).toBeVisible();
+    expect(onCreateChat).not.toHaveBeenCalled();
+  });
+
   it("disables creation and surfaces a retry path while Chat is disconnected", async () => {
     const user = userEvent.setup();
     const onCreateChat = vi.fn();
