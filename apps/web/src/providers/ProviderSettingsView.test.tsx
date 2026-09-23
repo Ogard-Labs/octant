@@ -465,7 +465,7 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("private-value");
   });
 
-  it("creates Mistral Vibe with provider-owned CLI authentication", async () => {
+  it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
@@ -481,20 +481,19 @@ describe("ProviderSettingsView", () => {
       "placeholder",
       "/absolute/path/to/vibe-acp",
     );
-    expect(within(create).getByLabelText("Mistral Vibe authentication")).toHaveTextContent(
-      "Provider CLI login (recommended)",
-    );
+    expect(within(create).queryByLabelText("Mistral Vibe authentication")).not.toBeInTheDocument();
+    expect(within(create).getByLabelText("Mistral API key")).toBeInTheDocument();
     await user.click(within(create).getByRole("button", { name: "Add Mistral Vibe" }));
     expect(props.onCreateMistralVibe).toHaveBeenCalledWith(
       "Mistral Vibe local",
       {
         kind: "mistral-vibe-acp",
         binaryPath: "/Users/example/.local/bin/vibe-acp",
-        authentication: "subscription",
+        authentication: "api-key",
       },
       expect.objectContaining({ value: "" }),
     );
-    expect(screen.getAllByText(/Run the provider-owned Vibe CLI login/)).not.toHaveLength(0);
+    expect(screen.getAllByText(/uses a Mistral API key/i)).not.toHaveLength(0);
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
   });
 

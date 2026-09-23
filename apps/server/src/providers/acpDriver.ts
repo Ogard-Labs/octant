@@ -252,7 +252,7 @@ function providerFailure(
     return decodeProviderFailure(error);
   } catch {
     if (error instanceof AcpFailure) {
-      if (error.message.toLowerCase().includes("authentication")) {
+      if (/authenticat|api key/i.test(error.message)) {
         return failure(
           "unauthenticated",
           profile.unauthenticatedMessage,
