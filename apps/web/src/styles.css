@@ -8252,10 +8252,6 @@ ul.board-col-body {
   gap: var(--oct-space-3);
 }
 
-.code-project-pull-requests-surface > .surface__inner {
-  max-width: 1120px;
-}
-
 .code-project-pull-requests__status {
   width: 100%;
   margin: -2px 0 0;
@@ -8268,24 +8264,9 @@ ul.board-col-body {
   color: var(--oct-warning-text, var(--oct-muted));
 }
 
-.code-project-pull-requests__search {
-  position: relative;
-  display: flex;
-  align-items: center;
-  color: var(--oct-muted);
-}
-
-.code-project-pull-requests__search > svg {
-  position: absolute;
-  z-index: 1;
-  left: 9px;
-  pointer-events: none;
-}
-
 .code-project-pull-requests__search input {
-  width: 100%;
   height: 30px;
-  padding: 0 32px 0 30px;
+  padding-right: 32px;
   border-color: var(--oct-border);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);

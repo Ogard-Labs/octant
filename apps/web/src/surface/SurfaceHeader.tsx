@@ -3,9 +3,10 @@ import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface SurfaceProps {
-  /** Names the landmark; every surface is a `<section>` with a label. */
+  /** Names the landmark; surfaces use a labelled `<section>` by default. */
   readonly ariaLabel: string;
   readonly className?: string;
+  readonly landmark?: "section" | "nav";
   /** Boards and canvases use the full width; lists keep the reading measure. */
   readonly measure?: "reading" | "wide";
   readonly children: ReactNode;
@@ -20,10 +21,11 @@ export function Surface(props: SurfaceProps) {
   const classes = ["surface"];
   if (props.measure === "wide") classes.push("surface--wide");
   if (props.className !== undefined) classes.push(props.className);
+  const Landmark = props.landmark ?? "section";
   return (
-    <section aria-label={props.ariaLabel} className={classes.join(" ")}>
+    <Landmark aria-label={props.ariaLabel} className={classes.join(" ")}>
       <div className="surface__inner">{props.children}</div>
-    </section>
+    </Landmark>
   );
 }
 

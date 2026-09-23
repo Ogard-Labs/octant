@@ -430,19 +430,27 @@ function WorkBoardBody(props: {
   // it has nothing, and one quiet line says why the board is empty.
   const emptyNote =
     cards.length === 0 ? (
-      <div className="code-board__note" role="status">
-        <span className="oct-row-label">
-          {hasActiveFilters ? "No tasks match these filters" : "No tasks yet"}
-        </span>
-        <span>
-          {hasActiveFilters ? activeFilterSummary(props.filters) : "Create a task to see it here."}
-        </span>
-        {hasActiveFilters ? (
-          <OctantButton onClick={props.onResetFilters} size="sm" type="button" variant="ghost">
-            Clear filters
-          </OctantButton>
-        ) : null}
-      </div>
+      <SurfaceEmpty
+        {...(hasActiveFilters
+          ? {
+              action: (
+                <OctantButton
+                  onClick={props.onResetFilters}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear filters
+                </OctantButton>
+              ),
+              detail: activeFilterSummary(props.filters),
+              title: "No tasks match these filters",
+            }
+          : {
+              detail: "Create a task to see it here.",
+              title: "No tasks yet",
+            })}
+      />
     ) : null;
   const columns = groupWorkBoardCards(cards, props.grouping, { projects: props.projects });
   const visibleColumns =
