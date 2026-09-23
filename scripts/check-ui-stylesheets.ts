@@ -7,7 +7,7 @@ import { relative, resolve, sep } from "node:path";
  * component boundary check covers .tsx; this one covers every .css file the
  * renderer ships.
  *
- * Colour literals fail closed. The three other rules ratchet against
+ * Colour literals and undefined tokens fail closed. The six other rules ratchet against
  * `scripts/ui-stylesheet-baseline.json`: a file may not add a finding, and a
  * fix must lower the recorded count so the baseline never overstates.
  */
@@ -27,6 +27,7 @@ export type StylesheetRule =
   | "important"
   | "heavy-weight"
   | "control-repaint"
+  | "spacing-scale"
   | "undefined-token";
 
 export interface StylesheetFinding {
@@ -61,6 +62,10 @@ const MOTION_PROPERTY =
 // `0s`, `0ms`, and `0.01ms` are the reduced-motion idiom, not a chosen duration.
 const MOTION_LITERAL = /(?<![\w.-])(?!0(?:\.01)?m?s\b)\d*\.?\d+m?s\b/;
 const MOTION_TOKEN = /var\(--oct-motion-[a-z-]+\)/;
+
+const SPACING_PROPERTY =
+  /^(?:gap|row-gap|column-gap|padding(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?|margin(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?)$/;
+const SPACING_LITERAL = /(?<![\w.-])(\d*\.?\d+)px\b/g;
 
 const ACCESSIBILITY_MEDIA =
   /prefers-reduced-motion|prefers-reduced-transparency|prefers-contrast|forced-colors/;
@@ -309,6 +314,15 @@ function fontSizeOnScale(value: string): boolean {
   return calc !== null && SCALE_STEPS.has(Number(calc[1]));
 }
 
+function spacingOnScale(value: string): boolean {
+  const withoutVarFallbacks = value.replace(/var\([^)]*\)/g, "");
+  for (const match of withoutVarFallbacks.matchAll(SPACING_LITERAL)) {
+    const number = Number(match[1]);
+    if (number > 2 && (!Number.isInteger(number) || number % 4 !== 0)) return false;
+  }
+  return true;
+}
+
 /** A `var()` with no fallback: the only kind that fails silently when its name is wrong. */
 const BARE_VAR = /var\(\s*(--[\w-]+)\s*\)/g;
 const TOKEN_DEFINITION = /(--[\w-]+)\s*:/g;
@@ -371,6 +385,9 @@ export function findStylesheetFindings(
       }
       if (name === "font-size" && !fontSizeOnScale(value)) {
         push("font-size-scale", `font-size ${value} is not a type-scale token`);
+      }
+      if (!isToken && !exempt && SPACING_PROPERTY.test(name) && !spacingOnScale(value)) {
+        push("spacing-scale", `${property} ${value} is off the 4px spacing scale`);
       }
       if (!isToken && MOTION_PROPERTY.test(name) && !MOTION_TOKEN.test(value)) {
         const literal = MOTION_LITERAL.exec(value);
@@ -449,6 +466,7 @@ export function countFindings(
     important: {},
     "heavy-weight": {},
     "control-repaint": {},
+    "spacing-scale": {},
     "undefined-token": {},
   };
   for (const finding of findings) {
@@ -473,6 +491,7 @@ const RATCHETED_RULES: ReadonlyArray<StylesheetRule> = [
   "important",
   "heavy-weight",
   "control-repaint",
+  "spacing-scale",
 ];
 
 export function compareWithBaseline(
@@ -572,7 +591,7 @@ async function main(): Promise<void> {
   const baseline = JSON.parse(await readFile(baselineFile, "utf8")) as StylesheetBaseline;
   const problems = compareWithBaseline(findings, baseline);
   if (problems.length === 0) {
-    console.log("Stylesheets match the type scale, motion, and colour contract.");
+    console.log("Stylesheets match the type, motion, spacing, and colour contract.");
     return;
   }
 

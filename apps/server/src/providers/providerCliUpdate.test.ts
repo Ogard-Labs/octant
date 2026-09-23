@@ -1,8 +1,13 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { decodeProviderFailure } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { providerCliUpdateArgs, runProviderCliUpdate } from "./providerCliUpdate";
+import {
+  isProviderCliUpdateTerminationUnconfirmed,
+  providerCliUpdateArgs,
+  runProviderCliUpdate,
+} from "./providerCliUpdate";
 
 function processExists(pid: number): boolean {
   try {
@@ -68,6 +73,7 @@ setInterval(() => {}, 1000);`,
       ).rejects.toMatchObject({
         category: "unavailable",
         message: "Provider CLI update timed out.",
+        diagnostic: { stage: "update", kind: "timed-out" },
       });
 
       const recorded = JSON.parse(await readFile(pidFile, "utf8")) as {
@@ -105,7 +111,30 @@ setInterval(() => {}, 1000);`,
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
-  it("fails closed when the updater process tree cannot be confirmed gone", async () => {
+  it("advises a restart when a clean-exiting updater leaves a process tree that cannot be confirmed gone", async () => {
+    await expect(
+      runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: ["-e", "process.exit(0)"],
+        timeoutMs: 5_000,
+        terminationGraceMs: 20,
+        processGroupExists: () => true,
+        killProcessGroup: (pid, signal) => {
+          try {
+            process.kill(process.platform === "win32" ? pid : -pid, signal);
+          } catch {
+            // The real tree is still reaped so the fixture does not leak.
+          }
+        },
+      }),
+    ).rejects.toMatchObject({
+      category: "unavailable",
+      message:
+        "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
+    });
+  });
+
+  it("reports a timeout as a timeout even when the killed tree's exit cannot be confirmed in time", async () => {
     await expect(
       runProviderCliUpdate({
         binaryPath: process.execPath,
@@ -123,9 +152,46 @@ setInterval(() => {}, 1000);`,
       }),
     ).rejects.toMatchObject({
       category: "unavailable",
-      message:
-        "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
+      message: "Provider CLI update timed out.",
+      diagnostic: { stage: "update", kind: "timed-out" },
     });
+  });
+
+  it("holds the executable claim when a timed-out update cannot signal its process group", async () => {
+    let pid = 0;
+    let caught: unknown;
+    try {
+      await runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: ["-e", "setTimeout(() => {}, 30_000)"],
+        timeoutMs: 200,
+        terminationGraceMs: 20,
+        processGroupExists: (seen) => {
+          pid = seen;
+          throw Object.assign(new Error("denied"), { code: "EPERM" });
+        },
+        killProcessGroup: () => {
+          throw Object.assign(new Error("denied"), { code: "EPERM" });
+        },
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      if (pid !== 0) {
+        try {
+          process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+        } catch {
+          // The child may already have exited.
+        }
+      }
+    }
+
+    expect(decodeProviderFailure(caught)).toMatchObject({
+      category: "unavailable",
+      message: "Provider CLI update timed out.",
+      diagnostic: { stage: "update", kind: "cleanup-unconfirmed" },
+    });
+    expect(isProviderCliUpdateTerminationUnconfirmed(caught)).toBe(true);
   });
 
   it("reports unconfirmed cleanup when signaling the updater is denied", async () => {
