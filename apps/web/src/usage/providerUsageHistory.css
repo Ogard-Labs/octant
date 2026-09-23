@@ -59,8 +59,7 @@
 }
 .provider-history__summary p,
 .provider-history__cost-note p,
-.provider-history__coverage p,
-.provider-history__empty {
+.provider-history__coverage p {
   margin: 0;
   font-size: var(--oct-text-detail);
   color: var(--oct-muted);

@@ -10,6 +10,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ProviderUsageHistoryChart } from "./ProviderUsageHistoryChart";
+import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import "./providerUsageHistory.css";
 
 type Range = "24h" | "7d" | "30d" | "90d";
@@ -426,9 +427,10 @@ export function ProviderUsageHistoryWorkspace(props: {
             </table>
           </div>
           {data !== undefined && data.totals.requestCount === 0 ? (
-            <p className="provider-history__empty">
-              No provider history was found in this period. Check the source coverage below.
-            </p>
+            <SurfaceEmpty
+              detail="Check the source coverage below."
+              title="No provider history was found in this period."
+            />
           ) : null}
         </section>
         {data === undefined ? null : (

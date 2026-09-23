@@ -206,7 +206,7 @@ describe("UsageWorkspace", () => {
     const { client } = clientReturning(dashboard());
     render(<UsageWorkspace client={client} onBack={onBack} />);
 
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
 
     expect(onBack).toHaveBeenCalledOnce();
   });
@@ -215,7 +215,7 @@ describe("UsageWorkspace", () => {
     const { client } = clientReturning(dashboard());
     render(<UsageWorkspace client={client} />);
 
-    expect(screen.queryByRole("button", { name: "Back to app" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to workspace" })).toBeNull();
   });
 
   it("renders host latency measurements and the renderer round trip", async () => {
@@ -414,9 +414,11 @@ describe("UsageWorkspace", () => {
     render(<UsageWorkspace client={client} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Attribution sources" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("region", { name: "What this host can attribute" }),
+      ).toBeInTheDocument(),
     );
-    const sources = screen.getByRole("region", { name: "Attribution sources" });
+    const sources = screen.getByRole("region", { name: "What this host can attribute" });
     expect(within(sources).getByText("Not recorded")).toBeInTheDocument();
     expect(within(sources).getByText("Partly recorded")).toBeInTheDocument();
     expect(
