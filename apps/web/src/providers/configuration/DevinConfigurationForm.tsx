@@ -1,6 +1,7 @@
 import { type ProviderInstance } from "@octant/contracts";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
+import { SettingRow } from "../../settings/primitives";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 
 export function DevinConfigurationForm(props: {
@@ -22,8 +23,11 @@ export function DevinConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>Binary path</span>
+      <SettingRow
+        label="Binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`Binary path for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -31,16 +35,18 @@ export function DevinConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Devin settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Devin settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }

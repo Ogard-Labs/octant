@@ -4,6 +4,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
+import { SettingRow } from "../../settings/primitives";
 import {
   emptyTransientCredential,
   HttpCredentialFields,
@@ -56,8 +57,11 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         );
       }}
     >
-      <label>
-        <span>API base URL</span>
+      <SettingRow
+        label="API base URL"
+        scope="host"
+        settingId={`provider-${props.instance.id}-base-url`}
+      >
         <OctantInput
           aria-describedby={`endpoint-guidance-${props.instance.id}`}
           aria-label={`API base URL for ${props.instance.displayName}`}
@@ -67,7 +71,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
           required
           type="url"
         />
-      </label>
+      </SettingRow>
       <HttpCredentialFields
         authentication={props.instance.configuration.authentication}
         authenticationLabel={`Authentication for ${props.instance.displayName}`}
@@ -75,8 +79,11 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         credentialLabel={`API key for ${props.instance.displayName}`}
         credentialManagementAvailable={props.credentialManagementAvailable}
       />
-      <label>
-        <span>Protocol preference</span>
+      <SettingRow
+        label="Protocol preference"
+        scope="host"
+        settingId={`provider-${props.instance.id}-protocol`}
+      >
         <OctantSelectField
           aria-label={`Protocol preference for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -88,9 +95,12 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
             { id: "chat-completions", label: "Chat Completions" },
           ]}
         />
-      </label>
-      <label className="provider-settings__models-field">
-        <span>Manual model IDs</span>
+      </SettingRow>
+      <SettingRow
+        label="Manual model IDs"
+        scope="host"
+        settingId={`provider-${props.instance.id}-manual-model-ids`}
+      >
         <OctantTextarea
           aria-label={`Manual model IDs for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -98,14 +108,14 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
           name="manualModelIds"
           rows={2}
         />
-      </label>
+      </SettingRow>
       <p
         className="provider-settings__field-guidance"
         id={`endpoint-guidance-${props.instance.id}`}
       >
         Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.
       </p>
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"
@@ -177,8 +187,11 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         );
       }}
     >
-      <label>
-        <span>API base URL</span>
+      <SettingRow
+        label="API base URL"
+        scope="host"
+        settingId={`provider-${props.instance.id}-base-url`}
+      >
         <OctantInput
           aria-describedby={`endpoint-guidance-${props.instance.id}`}
           aria-label={`API base URL for ${props.instance.displayName}`}
@@ -188,7 +201,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
           required
           type="url"
         />
-      </label>
+      </SettingRow>
       <HttpCredentialFields
         authentication={props.instance.configuration.authentication}
         authenticationLabel={`Authentication for ${props.instance.displayName}`}
@@ -197,8 +210,11 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         credentialManagementAvailable={props.credentialManagementAvailable}
         supportsApiKey
       />
-      <label>
-        <span>Anthropic protocol version</span>
+      <SettingRow
+        label="Anthropic protocol version"
+        scope="host"
+        settingId={`provider-${props.instance.id}-protocol-version`}
+      >
         <OctantInput
           aria-label={`Anthropic protocol version for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -206,9 +222,12 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
           name="protocolVersion"
           required
         />
-      </label>
-      <label>
-        <span>Protocol preference</span>
+      </SettingRow>
+      <SettingRow
+        label="Protocol preference"
+        scope="host"
+        settingId={`provider-${props.instance.id}-protocol`}
+      >
         <OctantSelectField
           aria-label={`Protocol preference for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -219,9 +238,12 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
             { id: "messages", label: "Messages" },
           ]}
         />
-      </label>
-      <label className="provider-settings__models-field">
-        <span>Manual model IDs</span>
+      </SettingRow>
+      <SettingRow
+        label="Manual model IDs"
+        scope="host"
+        settingId={`provider-${props.instance.id}-manual-model-ids`}
+      >
         <OctantTextarea
           aria-label={`Manual model IDs for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -229,14 +251,14 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
           name="manualModelIds"
           rows={2}
         />
-      </label>
+      </SettingRow>
       <p
         className="provider-settings__field-guidance"
         id={`endpoint-guidance-${props.instance.id}`}
       >
         Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.
       </p>
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"
@@ -302,8 +324,11 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         );
       }}
     >
-      <label>
-        <span>Foundry OpenAI v1 base URL</span>
+      <SettingRow
+        label="Foundry OpenAI v1 base URL"
+        scope="host"
+        settingId={`provider-${props.instance.id}-base-url`}
+      >
         <OctantInput
           aria-describedby={`endpoint-guidance-${props.instance.id}`}
           aria-label={`Foundry OpenAI v1 base URL for ${props.instance.displayName}`}
@@ -313,7 +338,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
           required
           type="url"
         />
-      </label>
+      </SettingRow>
       <HttpCredentialFields
         authentication="api-key"
         authenticationLabel={`Authentication for ${props.instance.displayName}`}
@@ -323,8 +348,11 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         fixedAuthentication
         supportsApiKey
       />
-      <label>
-        <span>Protocol preference</span>
+      <SettingRow
+        label="Protocol preference"
+        scope="host"
+        settingId={`provider-${props.instance.id}-protocol`}
+      >
         <OctantSelectField
           aria-label={`Protocol preference for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -336,9 +364,12 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
             { id: "chat-completions", label: "Chat Completions" },
           ]}
         />
-      </label>
-      <label className="provider-settings__models-field">
-        <span>Deployment IDs</span>
+      </SettingRow>
+      <SettingRow
+        label="Deployment IDs"
+        scope="host"
+        settingId={`provider-${props.instance.id}-deployment-ids`}
+      >
         <OctantTextarea
           aria-label={`Deployment IDs for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -346,7 +377,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
           name="manualModelIds"
           rows={2}
         />
-      </label>
+      </SettingRow>
       <p
         className="provider-settings__field-guidance"
         id={`endpoint-guidance-${props.instance.id}`}
@@ -354,7 +385,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         The base URL must end with /openai/v1/. API keys are stored write-only in Keychain and sent
         as the api-key header. List deployments in the order you want them to appear.
       </p>
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"

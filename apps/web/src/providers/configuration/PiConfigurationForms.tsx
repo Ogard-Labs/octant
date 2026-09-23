@@ -1,6 +1,7 @@
 import { type ProviderInstance } from "@octant/contracts";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
+import { SettingRow } from "../../settings/primitives";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 
 export function PiConfigurationForm(props: {
@@ -21,8 +22,11 @@ export function PiConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>Binary path</span>
+      <SettingRow
+        label="Binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`Binary path for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -30,16 +34,18 @@ export function PiConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Pi settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Pi settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }
@@ -63,8 +69,11 @@ export function OhMyPiConfigurationForm(props: {
         });
       }}
     >
-      <label>
-        <span>Binary path</span>
+      <SettingRow
+        label="Binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`Binary path for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -72,16 +81,18 @@ export function OhMyPiConfigurationForm(props: {
           name="binaryPath"
           required
         />
-      </label>
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Oh My Pi settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+      </SettingRow>
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Oh My Pi settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }

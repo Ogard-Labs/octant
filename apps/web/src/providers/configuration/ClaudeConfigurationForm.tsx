@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
+import { SettingRow } from "../../settings/primitives";
 import {
   emptyTransientCredential,
   transientCredential,
@@ -59,8 +60,11 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
         );
       }}
     >
-      <label>
-        <span>Claude binary path</span>
+      <SettingRow
+        label="Claude binary path"
+        scope="host"
+        settingId={`provider-${props.instance.id}-binary-path`}
+      >
         <OctantInput
           aria-label={`Claude binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
@@ -68,9 +72,17 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
           name="binaryPath"
           required
         />
-      </label>
-      <label>
-        <span>Authentication</span>
+      </SettingRow>
+      <SettingRow
+        description={
+          authentication === "subscription"
+            ? "Authenticate with the official Claude Code app or CLI, then check the connection."
+            : undefined
+        }
+        label="Authentication"
+        scope="host"
+        settingId={`provider-${props.instance.id}-authentication`}
+      >
         <OctantSelectField
           aria-label={`Claude authentication for ${props.instance.displayName}`}
           className="settings-view__select"
@@ -88,10 +100,13 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
           ]}
           value={authentication}
         />
-      </label>
+      </SettingRow>
       {authentication === "api-key" ? (
-        <label>
-          <span>Anthropic API key (leave blank to preserve)</span>
+        <SettingRow
+          label="Anthropic API key (leave blank to preserve)"
+          scope="host"
+          settingId={`provider-${props.instance.id}-api-key`}
+        >
           <OctantInput
             aria-label={`Anthropic API key for ${props.instance.displayName}`}
             autoComplete="new-password"
@@ -102,21 +117,19 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
             spellCheck={false}
             type="password"
           />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Authenticate with the official Claude Code app or CLI, then check the connection.
-        </p>
-      )}
-      <OctantButton
-        disabled={props.disabled}
-        type="submit"
-        variant="outline"
-        size="sm"
-        aria-label={`Save Claude settings for ${props.instance.displayName}`}
-      >
-        Save
-      </OctantButton>
+        </SettingRow>
+      ) : null}
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Claude settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+      </div>
     </form>
   );
 }

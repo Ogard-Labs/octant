@@ -57,6 +57,21 @@ describe("SettingRow", () => {
     expect(screen.getByText("This app")).toBeInTheDocument();
   });
 
+  it("associates an explicit label with its control", () => {
+    render(
+      <SettingRow
+        htmlFor="sidebar-width-control"
+        settingId="sidebar-width"
+        label="Sidebar width"
+        scope="app"
+      >
+        <input id="sidebar-width-control" type="range" />
+      </SettingRow>,
+    );
+
+    expect(screen.getByLabelText("Sidebar width")).toHaveAttribute("id", "sidebar-width-control");
+  });
+
   it("anchors the row by setting id so deep links can target it", () => {
     render(
       <SettingRow settingId="sidebar-width" label="Sidebar width" scope="app">

@@ -16,6 +16,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { SettingRow } from "../settings/primitives";
 import { ProviderGlyph } from "./ProviderGlyph";
 import {
   AnthropicConfigurationForm,
@@ -902,36 +903,43 @@ function ProviderRow(props: ProviderRowProps) {
                     });
                 }}
               >
-                <label>
-                  <span>Display name</span>
+                <SettingRow
+                  htmlFor={`provider-${props.instance.id}-display-name-control`}
+                  label="Display name"
+                  scope="host"
+                  settingId={`provider-${props.instance.id}-display-name`}
+                >
                   <OctantInput
                     aria-label={`Display name for ${props.instance.displayName}`}
                     className="settings-view__text-input"
                     defaultValue={props.instance.displayName}
+                    id={`provider-${props.instance.id}-display-name-control`}
                     name="displayName"
                     onChange={() => setRenameSaved(false)}
                     required
                   />
-                </label>
-                <span className="provider-card__rename-actions">
-                  <OctantButton
-                    disabled={disabled}
-                    type="submit"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Save name for ${props.instance.displayName}`}
-                  >
-                    Save
-                  </OctantButton>
-                  <span
-                    aria-label="Rename status"
-                    aria-live="polite"
-                    className="oct-meta provider-card__saved"
-                    role="status"
-                  >
-                    {renameSaved ? "Saved" : ""}
+                </SettingRow>
+                <div className="provider-card__edit-actions">
+                  <span className="provider-card__rename-actions">
+                    <OctantButton
+                      disabled={disabled}
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Save name for ${props.instance.displayName}`}
+                    >
+                      Save
+                    </OctantButton>
+                    <span
+                      aria-label="Rename status"
+                      aria-live="polite"
+                      className="oct-meta provider-card__saved"
+                      role="status"
+                    >
+                      {renameSaved ? "Saved" : ""}
+                    </span>
                   </span>
-                </span>
+                </div>
               </form>
               {isCli ? (
                 <form
@@ -947,25 +955,32 @@ function ProviderRow(props: ProviderRowProps) {
                     );
                   }}
                 >
-                  <label>
-                    <span>Binary path</span>
+                  <SettingRow
+                    htmlFor={`provider-${props.instance.id}-binary-path-control`}
+                    label="Binary path"
+                    scope="host"
+                    settingId={`provider-${props.instance.id}-binary-path`}
+                  >
                     <OctantInput
                       aria-label={`Binary path for ${props.instance.displayName}`}
                       className="settings-view__text-input"
                       defaultValue={props.instance.configuration.binaryPath}
+                      id={`provider-${props.instance.id}-binary-path-control`}
                       name="binaryPath"
                       required
                     />
-                  </label>
-                  <OctantButton
-                    disabled={disabled}
-                    type="submit"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Save binary path for ${props.instance.displayName}`}
-                  >
-                    Save
-                  </OctantButton>
+                  </SettingRow>
+                  <div className="provider-card__edit-actions">
+                    <OctantButton
+                      disabled={disabled}
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Save binary path for ${props.instance.displayName}`}
+                    >
+                      Save
+                    </OctantButton>
+                  </div>
                 </form>
               ) : isClaude ? (
                 <ClaudeConfigurationForm

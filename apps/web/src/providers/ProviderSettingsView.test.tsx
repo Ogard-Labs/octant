@@ -272,6 +272,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ onRename: vi.fn(async () => true) });
     renderExpanded(<ProviderSettingsView {...props} />);
 
+    expect(screen.getByLabelText("Display name")).toHaveAttribute("name", "displayName");
     const input = screen.getByLabelText("Display name for Existing CLI");
     await user.clear(input);
     await user.type(input, "Renamed CLI");
@@ -538,6 +539,16 @@ describe("ProviderSettingsView", () => {
     );
     expect(screen.getAllByText(/uses a Mistral API key/i)).not.toHaveLength(0);
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
+  });
+
+  it("associates Mistral Vibe SettingRow labels with their controls", () => {
+    renderExpanded(<ProviderSettingsView {...fixture({ instance: vibeProvider() })} />);
+
+    const card = screen.getByRole("article", { name: "Mistral Vibe local" });
+    expect(within(card).getByLabelText("vibe-acp binary path")).toBeInTheDocument();
+    expect(
+      within(card).getByLabelText("Mistral API key (leave blank to preserve)"),
+    ).toBeInTheDocument();
   });
 
   it.each([

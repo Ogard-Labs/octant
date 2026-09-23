@@ -5,11 +5,12 @@ import {
   OPENAI_IMAGE_MODEL_PRESETS,
   type ProviderInstance,
 } from "@octant/contracts";
-import { useRef, type RefObject } from "react";
+import { useRef, type ReactNode, type RefObject } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
+import { SettingRow } from "../../settings/primitives";
 import {
   transientCredential,
   type CredentialStatusController,
@@ -22,16 +23,42 @@ import {
   ideogramImageConfigurationFrom,
 } from "./configurationValues";
 
+function ProviderField(props: {
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly label: string;
+  readonly settingId?: string | undefined;
+}) {
+  if (props.settingId === undefined) {
+    return (
+      <label className={props.className}>
+        <span>{props.label}</span>
+        {props.children}
+      </label>
+    );
+  }
+  return (
+    <SettingRow label={props.label} scope="host" settingId={props.settingId}>
+      {props.children}
+    </SettingRow>
+  );
+}
+
 export function OpenAiImageFields(props: {
   readonly credentialInput: RefObject<HTMLInputElement | null>;
   readonly credentialManagementAvailable: boolean;
   readonly instance?: Extract<ProviderInstance, { driverKind: "openai-image" }>;
 }) {
   const configuration = props.instance?.configuration;
+  const settingId = (field: string) =>
+    props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
   return (
     <>
-      <label className="provider-settings__models-field">
-        <span>Model allowlist</span>
+      <ProviderField
+        className="provider-settings__models-field"
+        label="Model allowlist"
+        settingId={settingId("model-allowlist")}
+      >
         <OctantTextarea
           aria-label={
             props.instance === undefined
@@ -45,9 +72,8 @@ export function OpenAiImageFields(props: {
           required
           rows={2}
         />
-      </label>
-      <label>
-        <span>Default model</span>
+      </ProviderField>
+      <ProviderField label="Default model" settingId={settingId("default-model")}>
         <OctantInput
           aria-label={
             props.instance === undefined
@@ -60,9 +86,8 @@ export function OpenAiImageFields(props: {
           placeholder="gpt-image-2"
           required
         />
-      </label>
-      <label>
-        <span>Quality</span>
+      </ProviderField>
+      <ProviderField label="Quality" settingId={settingId("quality")}>
         <OctantSelectField
           aria-label={
             props.instance === undefined ? "Quality" : `Quality for ${props.instance.displayName}`
@@ -78,9 +103,8 @@ export function OpenAiImageFields(props: {
             { id: "high", label: "high" },
           ]}
         />
-      </label>
-      <label>
-        <span>Size</span>
+      </ProviderField>
+      <ProviderField label="Size" settingId={settingId("size")}>
         <OctantSelectField
           aria-label={
             props.instance === undefined ? "Size" : `Size for ${props.instance.displayName}`
@@ -96,11 +120,11 @@ export function OpenAiImageFields(props: {
             { id: "1024x1536", label: "1024x1536" },
           ]}
         />
-      </label>
-      <label>
-        <span>
-          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
-        </span>
+      </ProviderField>
+      <ProviderField
+        label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        settingId={settingId("api-key")}
+      >
         <OctantInput
           aria-label={
             props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
@@ -113,7 +137,7 @@ export function OpenAiImageFields(props: {
           spellCheck={false}
           type="password"
         />
-      </label>
+      </ProviderField>
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {OPENAI_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. GPT Image models require
@@ -136,10 +160,15 @@ export function GeminiImageFields(props: {
   readonly instance?: Extract<ProviderInstance, { driverKind: "gemini-native-image" }>;
 }) {
   const configuration = props.instance?.configuration;
+  const settingId = (field: string) =>
+    props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
   return (
     <>
-      <label className="provider-settings__models-field">
-        <span>Model allowlist</span>
+      <ProviderField
+        className="provider-settings__models-field"
+        label="Model allowlist"
+        settingId={settingId("model-allowlist")}
+      >
         <OctantTextarea
           aria-label={
             props.instance === undefined
@@ -153,9 +182,8 @@ export function GeminiImageFields(props: {
           required
           rows={2}
         />
-      </label>
-      <label>
-        <span>Default model</span>
+      </ProviderField>
+      <ProviderField label="Default model" settingId={settingId("default-model")}>
         <OctantInput
           aria-label={
             props.instance === undefined
@@ -168,9 +196,8 @@ export function GeminiImageFields(props: {
           placeholder="gemini-3.1-flash-image"
           required
         />
-      </label>
-      <label>
-        <span>Aspect ratio</span>
+      </ProviderField>
+      <ProviderField label="Aspect ratio" settingId={settingId("aspect-ratio")}>
         <OctantSelectField
           aria-label={
             props.instance === undefined
@@ -194,9 +221,8 @@ export function GeminiImageFields(props: {
             { id: "21:9", label: "21:9" },
           ]}
         />
-      </label>
-      <label>
-        <span>Resolution</span>
+      </ProviderField>
+      <ProviderField label="Resolution" settingId={settingId("resolution")}>
         <OctantSelectField
           aria-label={
             props.instance === undefined
@@ -213,11 +239,11 @@ export function GeminiImageFields(props: {
             { id: "4K", label: "4K" },
           ]}
         />
-      </label>
-      <label>
-        <span>
-          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
-        </span>
+      </ProviderField>
+      <ProviderField
+        label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        settingId={settingId("api-key")}
+      >
         <OctantInput
           aria-label={
             props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
@@ -230,7 +256,7 @@ export function GeminiImageFields(props: {
           spellCheck={false}
           type="password"
         />
-      </label>
+      </ProviderField>
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {GEMINI_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. gemini-2.5-flash-image is a
@@ -253,10 +279,15 @@ export function BflImageFields(props: {
   readonly instance?: Extract<ProviderInstance, { driverKind: "bfl-image" }>;
 }) {
   const configuration = props.instance?.configuration;
+  const settingId = (field: string) =>
+    props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
   return (
     <>
-      <label className="provider-settings__models-field">
-        <span>Model allowlist</span>
+      <ProviderField
+        className="provider-settings__models-field"
+        label="Model allowlist"
+        settingId={settingId("model-allowlist")}
+      >
         <OctantTextarea
           aria-label={
             props.instance === undefined
@@ -270,9 +301,8 @@ export function BflImageFields(props: {
           required
           rows={2}
         />
-      </label>
-      <label>
-        <span>Default model</span>
+      </ProviderField>
+      <ProviderField label="Default model" settingId={settingId("default-model")}>
         <OctantInput
           aria-label={
             props.instance === undefined
@@ -285,11 +315,11 @@ export function BflImageFields(props: {
           placeholder="flux-pro-1.1"
           required
         />
-      </label>
-      <label>
-        <span>
-          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
-        </span>
+      </ProviderField>
+      <ProviderField
+        label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        settingId={settingId("api-key")}
+      >
         <OctantInput
           aria-label={
             props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
@@ -302,7 +332,7 @@ export function BflImageFields(props: {
           spellCheck={false}
           type="password"
         />
-      </label>
+      </ProviderField>
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {BFL_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored write-only
@@ -325,10 +355,15 @@ export function IdeogramImageFields(props: {
   readonly instance?: Extract<ProviderInstance, { driverKind: "ideogram-image" }>;
 }) {
   const configuration = props.instance?.configuration;
+  const settingId = (field: string) =>
+    props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
   return (
     <>
-      <label className="provider-settings__models-field">
-        <span>Model allowlist</span>
+      <ProviderField
+        className="provider-settings__models-field"
+        label="Model allowlist"
+        settingId={settingId("model-allowlist")}
+      >
         <OctantTextarea
           aria-label={
             props.instance === undefined
@@ -342,9 +377,8 @@ export function IdeogramImageFields(props: {
           required
           rows={2}
         />
-      </label>
-      <label>
-        <span>Default model</span>
+      </ProviderField>
+      <ProviderField label="Default model" settingId={settingId("default-model")}>
         <OctantInput
           aria-label={
             props.instance === undefined
@@ -357,11 +391,11 @@ export function IdeogramImageFields(props: {
           placeholder="ideogram-v3"
           required
         />
-      </label>
-      <label>
-        <span>
-          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
-        </span>
+      </ProviderField>
+      <ProviderField
+        label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        settingId={settingId("api-key")}
+      >
         <OctantInput
           aria-label={
             props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
@@ -374,7 +408,7 @@ export function IdeogramImageFields(props: {
           spellCheck={false}
           type="password"
         />
-      </label>
+      </ProviderField>
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {IDEOGRAM_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored
@@ -429,7 +463,7 @@ export function OpenAiImageConfigurationForm(props: OpenAiImageConfigurationForm
         credentialManagementAvailable={props.credentialManagementAvailable}
         instance={props.instance}
       />
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"
@@ -500,7 +534,7 @@ export function GeminiImageConfigurationForm(props: GeminiImageConfigurationForm
         credentialManagementAvailable={props.credentialManagementAvailable}
         instance={props.instance}
       />
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"
@@ -571,7 +605,7 @@ export function BflImageConfigurationForm(props: BflImageConfigurationFormProps)
         credentialManagementAvailable={props.credentialManagementAvailable}
         instance={props.instance}
       />
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"
@@ -642,7 +676,7 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
         credentialManagementAvailable={props.credentialManagementAvailable}
         instance={props.instance}
       />
-      <div className="provider-card__credential-actions">
+      <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
           type="submit"
