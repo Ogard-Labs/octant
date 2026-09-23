@@ -42,7 +42,7 @@ describe("WorkResearchPanel", () => {
   it("announces an unauthorized surface instead of showing an empty brief list", () => {
     render(<WorkResearchPanel briefs={[]} status="unauthorized" />);
 
-    expect(screen.getByRole("note")).toHaveTextContent(
+    expect(screen.getByRole("status")).toHaveTextContent(
       "Research is not authorized in this window.",
     );
   });
@@ -61,7 +61,7 @@ describe("WorkResearchPanel", () => {
   it("reports an empty Project honestly when ready", () => {
     render(<WorkResearchPanel briefs={[]} status="ready" />);
 
-    expect(screen.getByRole("note")).toHaveTextContent("This Project has no research briefs.");
+    expect(screen.getByRole("status")).toHaveTextContent("This Project has no research briefs.");
   });
 
   it("shows each brief question and its provenance counts", () => {
