@@ -204,7 +204,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly repositoryTestDiscovery?: Pick<RepositoryTestDiscoveryService, "discover">;
   readonly gitObservationPort?: Pick<GitObservationPort, "observe"> &
-    Partial<Pick<GitObservationPort, "readDiff">>;
+    Partial<Pick<GitObservationPort, "observeRemotes" | "readDiff">>;
   readonly gitMutationPort?: Pick<
     GitMutationPort,
     | "stage"
