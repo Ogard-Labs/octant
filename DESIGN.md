@@ -456,7 +456,7 @@ reading-width preference. Canvas documents use a 62ch measure.
 
 ## Spacing, shapes, and depth
 
-Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
+Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Off-scale pixel spacing in a stylesheet is ratcheted by `bun run ui:check` against the recorded baseline; a change may lower a file's count but never raise it. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
 welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
