@@ -14,6 +14,7 @@ import type {
   ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { driverLabel } from "../providers/providerSettingsPresentation";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -82,6 +83,71 @@ const OWNER_MODE_LABELS: Readonly<Record<HostControlStatus["identity"]["serviceM
 };
 
 const BACKUP_LABEL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+function capabilityLabel(capability: string): string {
+  if (capability === "local-loopback") return "Local loopback";
+  if (capability === "private-listener") return "Private remote listener";
+  if (!capability.startsWith("provider:")) return capability;
+  const kind = capability.slice("provider:".length);
+  return `Provider: ${knownDriverLabel(kind) ?? kind}`;
+}
+
+function knownDriverLabel(kind: string): string | undefined {
+  switch (kind) {
+    case "opencode":
+      return driverLabel("opencode");
+    case "codex":
+      return driverLabel("codex");
+    case "claude":
+      return driverLabel("claude");
+    case "kimi-code":
+      return driverLabel("kimi-code");
+    case "devin":
+      return driverLabel("devin");
+    case "kilo":
+      return driverLabel("kilo");
+    case "pi":
+      return driverLabel("pi");
+    case "oh-my-pi":
+      return driverLabel("oh-my-pi");
+    case "ollama":
+      return driverLabel("ollama");
+    case "mistral-vibe":
+      return driverLabel("mistral-vibe");
+    case "grok":
+      return driverLabel("grok");
+    case "goose":
+      return driverLabel("goose");
+    case "glm":
+      return driverLabel("glm");
+    case "gemini":
+      return driverLabel("gemini");
+    case "copilot":
+      return driverLabel("copilot");
+    case "cline":
+      return driverLabel("cline");
+    case "qwen":
+      return driverLabel("qwen");
+    case "fx":
+      return driverLabel("fx");
+    case "anthropic-compatible":
+      return driverLabel("anthropic-compatible");
+    case "azure-foundry":
+      return driverLabel("azure-foundry");
+    case "openai-compatible":
+      return driverLabel("openai-compatible");
+    case "openai-image":
+      return driverLabel("openai-image");
+    case "gemini-native-image":
+      return driverLabel("gemini-native-image");
+    case "bfl-image":
+      return driverLabel("bfl-image");
+    case "ideogram-image":
+      return driverLabel("ideogram-image");
+    default:
+      return undefined;
+  }
+}
 
 const policyUpdatedFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -343,8 +409,8 @@ export function HostSettingsSection({
         ) : (
           <ul className="host-settings__capabilities">
             {status.capabilities.map((capability) => (
-              <li className="oct-meta--mono" key={capability}>
-                {capability}
+              <li className="oct-row-detail" key={capability}>
+                {capabilityLabel(capability)}
               </li>
             ))}
           </ul>

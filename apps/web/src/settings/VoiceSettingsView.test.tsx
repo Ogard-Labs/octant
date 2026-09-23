@@ -51,12 +51,22 @@ function providerSnapshot(options: { readonly enabled?: boolean } = {}): Provide
 }
 
 describe("VoiceSettingsView", () => {
-  it("offers only OpenAI-compatible providers and explains when none is enabled", () => {
-    render(<VoiceSettingsView onSettingsChange={vi.fn()} settings={{}} />);
+  it("explains how to add a provider when no voice endpoint is configured", async () => {
+    const onOpenProviders = vi.fn();
+    render(
+      <VoiceSettingsView
+        onOpenProviders={onOpenProviders}
+        onSettingsChange={vi.fn()}
+        settings={{}}
+      />,
+    );
+    expect(screen.getByText("No eligible provider yet")).toBeVisible();
     expect(
-      screen.getByText(/Voice needs an enabled OpenAI-compatible HTTP provider/),
+      screen.getByText("Voice needs an enabled OpenAI-compatible HTTP provider."),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Save transcription endpoint" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save transcription endpoint" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open Providers & Models" }));
+    expect(onOpenProviders).toHaveBeenCalledOnce();
   });
 
   it("persists a transcription endpoint through one shell settings patch", async () => {
