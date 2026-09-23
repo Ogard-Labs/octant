@@ -104,7 +104,25 @@ function statefulClient(initial = codeBootstrap()) {
       };
     }
     const reconciled = reconcileWorkspaceWithSettings(state.workspace, state.settings);
-    const workspace = applyWorkspaceOperation(reconciled, command.operation);
+    let workspace = applyWorkspaceOperation(reconciled, command.operation);
+    if (command.operation.kind === "switch-project-surface" && command.operation.mode === "chat") {
+      const context = state.workspace.contextByMode.chat;
+      workspace = {
+        ...workspace,
+        contextByMode: {
+          ...workspace.contextByMode,
+          chat: { ...context, projectId: null },
+        },
+        stowedLayouts: [
+          {
+            context,
+            layout: state.workspace.layouts.chat,
+            activePaneId: state.workspace.activePaneIds.chat,
+          },
+          ...workspace.stowedLayouts,
+        ],
+      };
+    }
     state = {
       ...state,
       workspace,

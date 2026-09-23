@@ -1305,6 +1305,13 @@ function createWorkspaceMutation(
       };
       if (
         isDifferentProject(latest.workspace, "chat", intent.projectId) ||
+        (intent.projectId !== undefined &&
+          latest.workspace.stowedLayouts.some(
+            (stowed) =>
+              stowed.context.mode === "chat" &&
+              stowed.context.projectId !== null &&
+              String(stowed.context.projectId) === String(intent.projectId),
+          )) ||
         (intent.projectId === undefined && latest.workspace.contextByMode.chat.projectId !== null)
       ) {
         return {
@@ -2042,7 +2049,7 @@ function isDifferentProject(
     workspace.stowedLayouts.find(
       (stowed) => stowed.context.mode === mode && stowed.context.projectId !== null,
     )?.context.projectId;
-  return currentProjectId === undefined || String(currentProjectId) !== String(projectId);
+  return currentProjectId !== undefined && String(currentProjectId) !== String(projectId);
 }
 
 function refuseCrossAuthority(
