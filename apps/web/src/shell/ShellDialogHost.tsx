@@ -19,7 +19,6 @@ import {
 } from "../projects/ProjectCreateDialog";
 import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
-import { visuallyHiddenStyle } from "./shellCommandWiring";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 import type {
   ThreadSearchContentHit,
@@ -161,24 +160,10 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
         aria-live="polite"
         className="sr-only"
         data-announcement-sequence={props.announcementSequence}
-        style={visuallyHiddenStyle}
       >
         {props.announcement}
         {props.announcementSequence > 0 ? (
-          <span
-            style={{
-              clip: "rect(0 0 0 0)",
-              clipPath: "inset(50%)",
-              height: 1,
-              overflow: "hidden",
-              position: "absolute",
-              whiteSpace: "nowrap",
-              width: 1,
-            }}
-          >
-            {" "}
-            Event {props.announcementSequence}.
-          </span>
+          <span className="sr-only"> Event {props.announcementSequence}.</span>
         ) : null}
       </p>
       <p

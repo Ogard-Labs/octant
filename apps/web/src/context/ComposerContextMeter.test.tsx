@@ -324,7 +324,6 @@ describe("ComposerContextMeter", () => {
   });
 
   it("fills the ring from the fullest account limit when no window is known at all", async () => {
-    const user = userEvent.setup();
     render(
       <ComposerContextMeterProvider
         fallback={{

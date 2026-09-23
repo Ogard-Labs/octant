@@ -1780,7 +1780,6 @@ function ProjectViewStatusMenu(props: {
   readonly statuses: ReadonlyArray<SidebarThreadStatus> | undefined;
 }) {
   const selected = props.statuses ?? [];
-  const constrained = selected.length > 0;
   return (
     <OctantMenuSub>
       <OctantMenuSubTrigger>Status</OctantMenuSubTrigger>
