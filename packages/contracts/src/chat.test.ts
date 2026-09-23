@@ -520,6 +520,55 @@ describe("chat contracts", () => {
     ).toThrow();
   });
 
+  it("decodes a ChatAttempt failure as a bounded code, never free-form text", () => {
+    const withFailure = decodeChatAttempt({
+      ...attemptFixture,
+      outcome: "failed",
+      failure: { code: "timed-out" },
+    });
+    expect(withFailure.failure).toEqual({ code: "timed-out" });
+
+    const withDiagnostic = decodeChatAttempt({
+      ...attemptFixture,
+      outcome: "failed",
+      failure: {
+        code: "unavailable",
+        diagnostic: { stage: "launch", kind: "timed-out" },
+      },
+    });
+    expect(withDiagnostic.failure).toEqual({
+      code: "unavailable",
+      diagnostic: { stage: "launch", kind: "timed-out" },
+    });
+
+    expect(decodeChatAttempt(attemptFixture).failure).toBeUndefined();
+    // A provider's free-form message is not a valid failure code.
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        outcome: "failed",
+        failure: { code: "The model said no because the quota hit 429" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        outcome: "failed",
+        failure: {
+          code: "timed-out",
+          diagnostic: { stage: "launch", kind: "timed-out", stderr: "raw output" },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        outcome: "completed",
+        failure: { code: "timed-out" },
+      }),
+    ).toThrow();
+  });
+
   it("decodes ChatAttempt with a pending provider question and rejects an oversized one", () => {
     const withQuestion = decodeChatAttempt({
       ...attemptFixture,
