@@ -162,104 +162,100 @@ function RecordedUsageWorkspace(
   const dashboard = controller.dashboard;
 
   return (
-    <Surface ariaLabel="Usage" className="usage-workspace">
-      <SurfaceHeader
-        actions={
-          <>
-            {props.sourceControl}
-            <OctantButton
-              aria-label="Refresh usage"
-              onClick={controller.reload}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCw aria-hidden="true" size={14} />
-            </OctantButton>
-          </>
-        }
-        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
-        subtitle={`Operational token attribution for this host, in ${VIEWING_TIME_ZONE}.`}
-        title="Usage"
-      />
-
-      {props.providerLimitsClient === undefined ? null : (
-        <ProviderUsageLimitsPanel
-          client={props.providerLimitsClient}
-          instances={props.providers ?? []}
-        />
-      )}
-
-      <UsageWorkspaceFilters
-        filter={filter}
-        onFilterChange={setFilter}
-        onPresetChange={setPreset}
-        preset={preset}
-      />
-
-      <p aria-live="polite" className="usage-workspace__status" role="status">
-        {statusMessage(controller.status, controller.stale)}
-      </p>
-
-      {controller.status === "unauthorized" ||
-      controller.status === "unavailable" ||
-      controller.status === "failure" ? (
-        <div role="alert">
-          <SurfaceEmpty
-            action={
-              <OctantButton onClick={controller.reload} type="button">
-                Retry
-              </OctantButton>
-            }
-            detail={controller.errorMessage ?? "The usage dashboard could not be loaded."}
-            title="Usage could not be loaded"
-          />
-        </div>
-      ) : null}
-
-      {dashboard === undefined ? null : (
-        <>
-          {controller.stale ? (
-            <p aria-label="Stale usage" className="usage-workspace__stale" role="note">
-              These figures are this host's last successful read of the same query, at{" "}
-              {new Date(dashboard.queryAt).toLocaleString()}. The latest read failed, so newer usage
-              may be missing.
-            </p>
-          ) : null}
-          <SummarySection dashboard={dashboard} />
-          <UsageActivityHeatmap
-            cells={dashboard.activity}
-            timeZone={dashboard.timeZone}
-            truncated={dashboard.activityTruncated}
-          />
-          {dashboard.summary.totals.totalRequests === 0 ? (
-            <EmptySection scanTruncated={dashboard.scanTruncated} />
-          ) : (
+    <Surface ariaLabel="Usage">
+      <div className="usage-workspace">
+        <SurfaceHeader
+          actions={
             <>
-              <BreakdownSection groups={dashboard.breakdown} isNarrow={props.isNarrow ?? false} />
-              <DetailSection
-                rows={dashboard.detail}
-                truncated={dashboard.detailTruncated}
-                {...(props.onOpenSubject === undefined
-                  ? {}
-                  : { onOpenSubject: props.onOpenSubject })}
-              />
+              {props.sourceControl}
+              <OctantButton
+                aria-label="Refresh usage"
+                onClick={controller.reload}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <RefreshCw aria-hidden="true" size={14} />
+              </OctantButton>
             </>
-          )}
-          <CacheSection stats={dashboard.cacheStats} />
-          <HostSection hosts={dashboard.hosts} />
-          <AttributionSourceSection sources={dashboard.dimensionSources} />
-          <LatencyStatsSection
-            className="usage-workspace__section"
-            connectionLatencyMs={controller.connectionLatencyMs}
-            latencyStats={dashboard.latencyStats}
+          }
+          {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+          subtitle={`Operational token attribution for this host, in ${VIEWING_TIME_ZONE}.`}
+          title="Usage"
+        />
+
+        {props.providerLimitsClient === undefined ? null : (
+          <ProviderUsageLimitsPanel
+            client={props.providerLimitsClient}
+            instances={props.providers ?? []}
           />
-          <p className="usage-workspace__footer">
-            Read from this host at {new Date(dashboard.queryAt).toLocaleString()}. Retention,
-            export, and reset live in Settings under Usage and data.
-          </p>
-        </>
-      )}
+        )}
+
+        <UsageWorkspaceFilters
+          filter={filter}
+          onFilterChange={setFilter}
+          onPresetChange={setPreset}
+          preset={preset}
+        />
+
+        <p aria-live="polite" className="usage-workspace__status" role="status">
+          {statusMessage(controller.status, controller.stale)}
+        </p>
+
+        {controller.status === "unauthorized" ||
+        controller.status === "unavailable" ||
+        controller.status === "failure" ? (
+          <div role="alert">
+            <p>{controller.errorMessage ?? "The usage dashboard could not be loaded."}</p>
+            <OctantButton onClick={controller.reload} type="button">
+              Retry
+            </OctantButton>
+          </div>
+        ) : null}
+
+        {dashboard === undefined ? null : (
+          <>
+            {controller.stale ? (
+              <p aria-label="Stale usage" className="usage-workspace__stale" role="note">
+                These figures are this host's last successful read of the same query, at{" "}
+                {new Date(dashboard.queryAt).toLocaleString()}. The latest read failed, so newer
+                usage may be missing.
+              </p>
+            ) : null}
+            <SummarySection dashboard={dashboard} />
+            <UsageActivityHeatmap
+              cells={dashboard.activity}
+              timeZone={dashboard.timeZone}
+              truncated={dashboard.activityTruncated}
+            />
+            {dashboard.summary.totals.totalRequests === 0 ? (
+              <EmptySection scanTruncated={dashboard.scanTruncated} />
+            ) : (
+              <>
+                <BreakdownSection groups={dashboard.breakdown} isNarrow={props.isNarrow ?? false} />
+                <DetailSection
+                  rows={dashboard.detail}
+                  truncated={dashboard.detailTruncated}
+                  {...(props.onOpenSubject === undefined
+                    ? {}
+                    : { onOpenSubject: props.onOpenSubject })}
+                />
+              </>
+            )}
+            <CacheSection stats={dashboard.cacheStats} />
+            <HostSection hosts={dashboard.hosts} />
+            <AttributionSourceSection sources={dashboard.dimensionSources} />
+            <LatencyStatsSection
+              connectionLatencyMs={controller.connectionLatencyMs}
+              latencyStats={dashboard.latencyStats}
+            />
+            <p className="usage-workspace__footer">
+              Read from this host at {new Date(dashboard.queryAt).toLocaleString()}. Retention,
+              export, and reset live in Settings under Usage and data.
+            </p>
+          </>
+        )}
+      </div>
     </Surface>
   );
 }
@@ -369,7 +365,7 @@ function UsageWorkspaceFilters(props: UsageWorkspaceFiltersProps) {
 function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardResponse }) {
   const { summary } = dashboard;
   return (
-    <SurfaceSection className="usage-workspace__section" label="Summary">
+    <SurfaceSection label="Summary">
       {dashboard.scanTruncated ? (
         <p className="usage-workspace__truncated" role="note">
           This range holds more records than one read returns. Every total below is a floor, not a
@@ -394,7 +390,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
         />
       </dl>
 
-      <h4 className="usage-workspace__subheading">Measurement coverage</h4>
+      <h3 className="usage-workspace__subheading">Measurement coverage</h3>
       <ul className="usage-workspace__coverage">
         {summary.coverage.map((slice) => (
           <li data-quality={slice.quality} key={slice.quality}>
@@ -456,7 +452,7 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
   if (stats.caches.length === 0 && stats.providerTokenCaches.length === 0) return null;
   const now = Date.now();
   return (
-    <SurfaceSection className="usage-workspace__section" label="Cache efficiency">
+    <SurfaceSection label="Cache efficiency">
       {stats.caches.length === 0 ? null : (
         <div className="usage-table-scroll">
           <table aria-label="Host cache hit and miss rates" className="usage-table">
@@ -494,7 +490,7 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
           </table>
         </div>
       )}
-      <h4 className="usage-workspace__subheading">Provider prompt cache</h4>
+      <h3 className="usage-workspace__subheading">Provider prompt cache</h3>
       {stats.providerTokenCaches.length === 0 ? (
         <p className="usage-workspace__note">
           No provider reported prompt-cache tokens in this range, so reuse is unavailable rather
@@ -602,7 +598,7 @@ function EmptySection({ scanTruncated }: { readonly scanTruncated: boolean }) {
   // records.
   if (scanTruncated) {
     return (
-      <SurfaceSection className="usage-workspace__section" label="Usage unread">
+      <SurfaceSection label="Usage unread">
         <SurfaceEmpty
           detail="This range holds more records than one read returns, and none of the records read carried usage that could be shown. Narrow the range or the filters to read the rest — this is not a report that the range is empty."
           title="Range not fully read"
@@ -611,7 +607,7 @@ function EmptySection({ scanTruncated }: { readonly scanTruncated: boolean }) {
     );
   }
   return (
-    <SurfaceSection className="usage-workspace__section" label="No usage">
+    <SurfaceSection label="No usage">
       <SurfaceEmpty
         detail="No usage has been recorded for this range. Providers that report token facts populate this view after their first reconciled request; a runtime that reports no token details still appears here as request activity with usage marked unavailable."
         title="No usage in this range"
@@ -626,10 +622,10 @@ function BreakdownSection(props: {
 }) {
   if (props.groups.length === 0) return null;
   return (
-    <SurfaceSection className="usage-workspace__section" label="Breakdown">
+    <SurfaceSection label="Breakdown">
       {props.groups.map((group) => (
         <div className="usage-workspace__breakdown" key={group.dimension}>
-          <h4 className="usage-workspace__subheading">{DIMENSION_WORDS[group.dimension]}</h4>
+          <h3 className="usage-workspace__subheading">{DIMENSION_WORDS[group.dimension]}</h3>
           <div className="usage-table-scroll">
             <table
               className={`usage-table${props.isNarrow ? " usage-table--narrow" : ""}`}
@@ -692,7 +688,7 @@ function DetailSection(props: {
 }) {
   if (props.rows.length === 0) return null;
   return (
-    <SurfaceSection className="usage-workspace__section" label="Request detail">
+    <SurfaceSection label="Request detail">
       <div className="usage-table-scroll">
         <table aria-label="Usage request detail" className="usage-table">
           <thead>
@@ -769,7 +765,7 @@ function DetailSection(props: {
 
 function HostSection({ hosts }: { readonly hosts: ReadonlyArray<UsageHostCoverage> }) {
   return (
-    <SurfaceSection className="usage-workspace__section" label="Contributing hosts">
+    <SurfaceSection label="Contributing hosts">
       {hosts.length === 0 ? (
         <p className="usage-workspace__note" role="note">
           No host contributed usage in this range.
@@ -806,7 +802,7 @@ function AttributionSourceSection({
   readonly sources: ReadonlyArray<UsageDimensionSource>;
 }) {
   return (
-    <SurfaceSection className="usage-workspace__section" label="What this host can attribute">
+    <SurfaceSection label="What this host can attribute">
       <dl className="usage-workspace__sources">
         {sources.map((source) => (
           <div data-status={source.status} key={source.dimension}>

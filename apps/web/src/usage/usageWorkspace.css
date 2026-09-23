@@ -46,24 +46,6 @@
   font-size: var(--oct-text-xs);
 }
 
-.usage-workspace__section {
-  display: grid;
-  min-width: 0;
-  gap: 10px;
-  padding-top: var(--oct-space-4);
-  border-top: 1px solid var(--oct-border);
-}
-
-.usage-workspace__section h3 {
-  margin: 0;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
 .usage-workspace__subheading {
   margin: 0;
   color: var(--oct-fg-2);
