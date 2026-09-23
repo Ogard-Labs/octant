@@ -492,6 +492,28 @@ describe("CodeComposerAdapter interactions", () => {
     });
   });
 
+  it("keeps the chosen approval mode when the draft switches Project", async () => {
+    const user = userEvent.setup();
+    const onExecutionPolicyChange = vi.fn();
+    const rendered = render(
+      <CodeComposerAdapter {...defaultProps} onExecutionPolicyChange={onExecutionPolicyChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan", "current-session");
+
+    rendered.unmount();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        defaultExecutionPolicy="plan"
+        onExecutionPolicyChange={onExecutionPolicyChange}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+  });
+
   it("submits on Enter and cancels on Escape", async () => {
     const onCreateThread = vi.fn();
     const onCancel = vi.fn();
