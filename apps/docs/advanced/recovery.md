@@ -40,6 +40,10 @@ tombstone rather than leaving a hole with no explanation.
 
 ## User-level recovery
 
+- **Chat**: a failed or interrupted turn states why in the transcript. The
+  sentence is Octant's, taken from a bounded code on the attempt, and the
+  support correlation stays beside it. A call the app itself is running does
+  not hang the turn past the turn's own deadline.
 - **Local clients**: reopening Electron or the canonical browser URL after
   sleep or a host restart renews process-local client context automatically.
   It does not create another store or require a recovery workflow.
