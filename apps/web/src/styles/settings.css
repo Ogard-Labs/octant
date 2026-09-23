@@ -179,7 +179,7 @@
   margin: 0;
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-tight);
+  letter-spacing: -0.03em;
   line-height: 1.2;
 }
 
@@ -226,12 +226,17 @@
 }
 
 .settings-view__field--search .settings-view__text-input {
-  min-height: 32px;
+  min-height: 34px;
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   padding-right: 34px;
   padding-left: 27px;
+}
+
+.settings-view__field--search input {
+  min-height: 34px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .settings-view__field--search input[type="search"]::-webkit-search-cancel-button {
@@ -2495,6 +2500,25 @@ textarea.settings-view__text-input {
 }
 
 /* Provider card details moved from styles.css. */
+.provider-card {
+  border-radius: var(--oct-radius-sm);
+  transition:
+    border-color var(--oct-motion-fast) ease,
+    background-color var(--oct-motion-fast) ease;
+}
+
+.provider-card:hover {
+  border-color: var(--octant-border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-pane__grip,
+  .provider-card {
+    animation: none;
+    transition: none;
+  }
+}
+
 .provider-card__edit label {
   display: grid;
   gap: 6px;

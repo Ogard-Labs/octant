@@ -675,6 +675,7 @@ function ProviderRow(props: ProviderRowProps) {
     }
   };
   const name = props.instance.displayName;
+  const meta = `${label} ${runtimeLabel}`.trim();
   return (
     <article
       aria-label={name}
@@ -724,9 +725,7 @@ function ProviderRow(props: ProviderRowProps) {
             </span>
           ) : null}
         </span>
-        <span className="prov-meta oct-meta">
-          {label} {runtimeLabel}
-        </span>
+        {meta === name ? null : <span className="prov-meta oct-meta">{meta}</span>}
         {scanSilence === undefined ? null : (
           <span className="prov-meta provider-settings__scan-note">{scanSilence}</span>
         )}

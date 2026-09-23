@@ -9,7 +9,10 @@ import {
   type ProjectMemoryView,
 } from "@octant/contracts/projects";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
 import type { ProjectMemoryStatus } from "./useProjectController";
+
+const PROJECT_UNAVAILABLE = "Octant Project service is unavailable.";
 
 export interface ProjectMemoryController {
   readonly busy: boolean;
@@ -85,7 +88,7 @@ export function useProjectMemory(
         setMemory(undefined);
         ownerProjectId.current = undefined;
         setStatus("error");
-        setErrorMessage(failureMessage(error));
+        setErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
       }
     },
     [client],
@@ -117,7 +120,7 @@ export function useProjectMemory(
           await load(visibleProjectId, "conflict");
           return false;
         }
-        const message = failureMessage(error);
+        const message = failureMessage(error, PROJECT_UNAVAILABLE);
         setErrorMessage(message);
         return false;
       } finally {
@@ -194,7 +197,7 @@ export function useProjectMemory(
         destinationMemory = await client.memory(destinationProjectId);
       } catch (error) {
         if (mounted.current && disclosure === disclosureGeneration.current) {
-          setErrorMessage(failureMessage(error));
+          setErrorMessage(failureMessage(error, PROJECT_UNAVAILABLE));
         }
         operation.current = false;
         if (mounted.current) setBusy(false);
@@ -260,13 +263,4 @@ function failureCategory(error: unknown): string {
   return typeof error === "object" && error !== null && "category" in error
     ? String(error.category)
     : "unavailable";
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Project service is unavailable.";
 }
