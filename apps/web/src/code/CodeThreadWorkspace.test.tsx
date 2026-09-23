@@ -999,7 +999,6 @@ describe("CodeThreadWorkspace", () => {
   });
 
   it("says a text-only model cannot take the image instead of uploading it", async () => {
-    const user = userEvent.setup();
     const putAttachment = vi.fn();
     render(
       <CodeThreadWorkspace

@@ -84,6 +84,22 @@
   backdrop-filter: none;
 }
 
+.project-dialog {
+  animation: octant-dialog-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes octant-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* The native activity overlay may keep translucency because it floats above
    the workspace instead of behaving like an application menu or form. */
 .thread-activity-pip__card,
@@ -138,6 +154,13 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
   .project-dialog,
   .folder-picker {
     border-color: var(--octant-border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-dialog {
+    animation: none;
+    transition: none;
   }
 }
 

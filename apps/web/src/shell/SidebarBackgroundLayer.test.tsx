@@ -46,7 +46,7 @@ describe("SidebarBackgroundLayer", () => {
 
   it("fetches custom background via authenticated fetcher and renders a blob url", async () => {
     const blob = new Blob([new Uint8Array([0x89, 0x50])], { type: "image/png" });
-    const fetcher = vi.fn(async (id: string) => blob);
+    const fetcher = vi.fn(async (_id: string) => blob);
     const { container } = render(
       <SidebarBackgroundLayer
         resolved={{

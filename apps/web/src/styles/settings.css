@@ -179,7 +179,7 @@
   margin: 0;
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-tight);
+  letter-spacing: -0.03em;
   line-height: 1.2;
 }
 
@@ -226,12 +226,17 @@
 }
 
 .settings-view__field--search .settings-view__text-input {
-  min-height: 32px;
+  min-height: 34px;
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   padding-right: 34px;
   padding-left: 27px;
+}
+
+.settings-view__field--search input {
+  min-height: 34px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .settings-view__field--search input[type="search"]::-webkit-search-cancel-button {
@@ -2492,4 +2497,156 @@ textarea.settings-view__text-input {
 .settings-view .composer-model-picker__trigger {
   width: 100%;
   justify-content: space-between;
+}
+
+/* Provider card details moved from styles.css. */
+.provider-card {
+  border-radius: var(--oct-radius-sm);
+  transition:
+    border-color var(--oct-motion-fast) ease,
+    background-color var(--oct-motion-fast) ease;
+}
+
+.provider-card:hover {
+  border-color: var(--octant-border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-pane__grip,
+  .provider-card {
+    animation: none;
+    transition: none;
+  }
+}
+
+.provider-card__edit label {
+  display: grid;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+.provider-card__edit textarea {
+  min-height: 58px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.provider-card__guidance,
+.provider-card__authority-note {
+  margin: 0;
+  padding: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+}
+
+.provider-card__authority-note {
+  color: var(--octant-text-muted);
+}
+.provider-card__disclosure-icon {
+  flex: 0 0 auto;
+  transition: transform var(--oct-motion-fast) ease;
+}
+.provider-card__actions [aria-expanded="true"] .provider-card__disclosure-icon {
+  transform: rotate(180deg);
+}
+
+.provider-card__actions,
+.provider-card__facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.provider-card__facts {
+  margin-top: 3px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.provider-details__connection-body > .provider-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2) var(--oct-space-4);
+  margin-top: 0;
+}
+
+.provider-details__connection-body > .provider-card__facts span {
+  min-width: 0;
+}
+
+.provider-details__section--connection > .provider-card__guidance,
+.provider-details__section--connection > .provider-card__authority-note {
+  max-width: 68ch;
+}
+
+.provider-card__credential-status {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.provider-card__credential-status strong {
+  color: var(--octant-text-primary);
+  font-weight: 500;
+}
+
+.provider-card__edit {
+  display: grid;
+  gap: 0;
+}
+
+.provider-card__configuration {
+  display: grid;
+  gap: var(--oct-space-4);
+  padding-top: var(--oct-space-3);
+}
+
+.provider-card__configuration[data-expanded="false"] {
+  display: none;
+}
+
+.provider-card__edit--http,
+.provider-card__edit--claude {
+  padding-top: 4px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.provider-card__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-3);
+}
+
+.provider-card__discovery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-4);
+}
+.provider-card__discovery h4 {
+  margin: 0 0 var(--oct-space-2);
+}
+
+.provider-card__discovery ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+@container provider-settings (max-width: 640px) {
+  .provider-card__edit,
+  .provider-card__discovery {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .provider-card__edit,
+  .provider-card__discovery {
+    grid-template-columns: 1fr;
+  }
 }
