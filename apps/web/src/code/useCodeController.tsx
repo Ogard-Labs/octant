@@ -700,6 +700,13 @@ export function useCodeController(options: CodeControllerOptions) {
       setStatus("ready");
     }
   }, []);
+  // A refused command must not leave the sidebar reading "Threads are unavailable"
+  // until manual retry; it answers one action rather than disconnecting Code.
+  const failCommand = useCallback((error: unknown) => {
+    const failure = codeFailure(error);
+    setErrorCategory(failure.category);
+    setErrorMessage(failure.message);
+  }, []);
 
   const refreshFollowUp = useCallback(
     async (threadId: CodeThreadId): Promise<CodeThreadFollowUpView | undefined> => {
@@ -1637,11 +1644,11 @@ export function useCodeController(options: CodeControllerOptions) {
           if (loaded && currentThreadId !== undefined) void activateThread(currentThreadId);
           return undefined;
         }
-        fail(error);
+        failCommand(error);
         return undefined;
       }
     },
-    [activateThread, clearFailure, client, fail, loadBootstrap],
+    [activateThread, clearFailure, client, failCommand, loadBootstrap],
   );
 
   const beginProviderTurn = useCallback(
@@ -1770,11 +1777,11 @@ export function useCodeController(options: CodeControllerOptions) {
       } catch (error) {
         const failure = codeFailure(error);
         failFirstTurn(failure.message);
-        fail(error);
+        failCommand(error);
         return false;
       }
     },
-    [activateThread, beginProviderTurn, clearFailure, fail, setPendingDraft],
+    [activateThread, beginProviderTurn, clearFailure, failCommand, setPendingDraft],
   );
 
   const refreshConversation = useCallback((): boolean => {
@@ -2044,11 +2051,11 @@ export function useCodeController(options: CodeControllerOptions) {
         return true;
       } catch (error) {
         if (!mounted.current) return false;
-        fail(error);
+        failCommand(error);
         return false;
       }
     },
-    [client, fail, followUps, refreshFollowUp],
+    [client, failCommand, followUps, refreshFollowUp],
   );
 
   const completeFollowUp = useCallback(
@@ -2066,11 +2073,11 @@ export function useCodeController(options: CodeControllerOptions) {
         return true;
       } catch (error) {
         if (!mounted.current) return false;
-        fail(error);
+        failCommand(error);
         return false;
       }
     },
-    [client, fail, followUps, refreshFollowUp],
+    [client, failCommand, followUps, refreshFollowUp],
   );
 
   async function updateSettings(input: {
@@ -2387,11 +2394,11 @@ export function useCodeController(options: CodeControllerOptions) {
         setTurnStatus("failed");
         setTurnError(failure.message);
         restoreFailedPrompt();
-        fail(error);
+        failCommand(error);
         return false;
       }
     },
-    [activeView, beginProviderTurn, clearFailure, client, fail, turnStatus],
+    [activeView, beginProviderTurn, clearFailure, client, failCommand, turnStatus],
   );
 
   const answerProviderRequest = useCallback(

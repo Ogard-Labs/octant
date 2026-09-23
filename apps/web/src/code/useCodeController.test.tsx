@@ -146,6 +146,28 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap?.settings.defaultExecutionPolicy).toBe("plan");
   });
 
+  it("keeps the thread list available after the host refuses one command", async () => {
+    const client = fakeClient({
+      execute: vi.fn().mockRejectedValue({
+        category: "unavailable",
+        message: "This folder is not a Git repository.",
+      }),
+    });
+    const { result, unmount } = renderHook(() => useCodeController({ client }));
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await result.current.execute({
+        kind: "list-code-worktree-refs",
+        projectId: ids.project,
+      });
+    });
+
+    expect(result.current.status).toBe("ready");
+    expect(result.current.errorMessage).toBe("This folder is not a Git repository.");
+    unmount();
+  });
+
   it("returns the server-resolved worktree source preview without projecting it and forwards the signal", async () => {
     const previewed = {
       kind: "worktree-source-previewed",
