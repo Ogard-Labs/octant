@@ -4,11 +4,27 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ProviderController } from "../providers/useProviderController";
 import { ImageGenerationSettingsView } from "./ImageGenerationSettingsView";
 
 const now = "2026-09-05T10:00:00.000Z";
 const compatibleId = "00000000-0000-4000-8000-00000000c001";
 const imageId = "00000000-0000-4000-8000-00000000c003";
+
+function providerController(): ProviderController {
+  return {
+    status: "ready",
+    snapshot: undefined,
+    instances: [],
+    defaults: { permissionPersistence: "current-session", version: 0 as never },
+    observedByInstance: new Map(),
+    busy: false,
+    probingIds: new Set(),
+    updatingIds: new Set(),
+    credentialManagementAvailable: false,
+    retry: vi.fn(async () => true),
+  } as unknown as ProviderController;
+}
 
 function providerSnapshot(options: { readonly enabled?: boolean } = {}): ProviderRegistrySnapshot {
   return {
@@ -58,6 +74,7 @@ describe("ImageGenerationSettingsView", () => {
       <ImageGenerationSettingsView
         onOpenProviders={onOpenProviders}
         onSettingsChange={vi.fn()}
+        providerController={providerController()}
         settings={{ customSources: [] }}
       />,
     );
@@ -67,6 +84,7 @@ describe("ImageGenerationSettingsView", () => {
         "No image providers are enabled. Add a dedicated provider or custom endpoint below.",
       ),
     ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add image provider" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Open Providers & Models" }));

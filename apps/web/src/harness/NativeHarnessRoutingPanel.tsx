@@ -137,12 +137,14 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       ],
     });
   const firstProvider = props.providers[0];
+  const hasSavedRouting =
+    draft.slots.some((slot) => slot.candidates.length > 0) || draft.jobSlots.length > 0;
 
   return (
     <section aria-label="Model slots" className="native-harness-panel">
       <div className="settings-card-section settings-card-section--open">
         <h2>Model slots</h2>
-        {props.providers.length === 0 ? (
+        {props.providers.length === 0 && !hasSavedRouting ? (
           <SurfaceEmpty
             action={
               props.onOpenProviders === undefined ? null : (

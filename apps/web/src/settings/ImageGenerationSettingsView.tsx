@@ -77,18 +77,21 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
       id="settings-image-generation"
     >
       {!hasImageProvider && props.settings.customSources.length === 0 ? (
-        <SurfaceEmpty
-          action={
-            props.onOpenProviders === undefined ? null : (
-              <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
-                Open Providers &amp; Models
-              </OctantButton>
-            )
-          }
-          detail="No image providers are enabled. Add a dedicated provider or custom endpoint below."
-          title="No eligible provider yet"
-          tone="page"
-        />
+        <>
+          <SurfaceEmpty
+            action={
+              props.onOpenProviders === undefined ? null : (
+                <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
+                  Open Providers &amp; Models
+                </OctantButton>
+              )
+            }
+            detail="No image providers are enabled. Add a dedicated provider or custom endpoint below."
+            title="No eligible provider yet"
+            tone="page"
+          />
+          {imageProviderSettings}
+        </>
       ) : (
         <>
           {hasImageProvider ? null : (

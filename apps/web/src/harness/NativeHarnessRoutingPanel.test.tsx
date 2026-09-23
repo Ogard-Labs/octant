@@ -31,4 +31,39 @@ describe("NativeHarnessRoutingPanel", () => {
     await screen.getByRole("button", { name: "Open Providers & Models" }).click();
     expect(onOpenProviders).toHaveBeenCalledOnce();
   });
+
+  it("keeps saved routing visible when its providers are unavailable", async () => {
+    render(
+      <NativeHarnessRoutingPanel
+        client={{
+          routing: vi.fn(async () => ({
+            ...settings,
+            configuration: {
+              slots: [
+                {
+                  id: "default" as never,
+                  candidates: [
+                    {
+                      hostId: "00000000-0000-0000-0000-000000000001" as never,
+                      providerInstanceId: "missing-provider" as never,
+                      modelId: "missing-model" as never,
+                    },
+                  ],
+                },
+              ],
+              jobSlots: [],
+            },
+          })),
+          updateRouting: vi.fn(),
+        }}
+        hostId="00000000-0000-0000-0000-000000000001"
+        providers={[]}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Jobs")).toBeVisible());
+    expect(screen.queryByText("No direct-endpoint provider yet")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "default model 1 provider" })).toBeVisible();
+    expect(screen.getByText("missing-model")).toBeVisible();
+  });
 });
