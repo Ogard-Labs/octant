@@ -294,36 +294,28 @@ describe("WorkComposerAdapter interactions", () => {
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
 
-  it("refuses to start the first turn until a Project is chosen", async () => {
+  it("explains that a Project is required before starting the first turn", async () => {
+    const user = userEvent.setup();
     const onCreateThread = vi.fn();
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <WorkComposerAdapter
-          providerGroups={[]}
-          onSelectProvider={() => {}}
-          onCreateThread={onCreateThread}
-          onCancel={() => {}}
-        />,
-      );
-    });
-    const textarea = container.querySelector("textarea");
-    await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Draft the brief");
-      textarea!.dispatchEvent(new Event("input", { bubbles: true }));
-      textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    });
+    const { rerender } = render(
+      <WorkComposerAdapter {...baseProps} onCreateThread={onCreateThread} />,
+    );
+    await user.type(screen.getByLabelText("First message"), "Draft the brief");
+    await user.keyboard("{Enter}");
 
     expect(onCreateThread).not.toHaveBeenCalled();
-    expect(container.querySelector('[aria-label="Create thread"]')).toBeDisabled();
-    root.unmount();
-    container.remove();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Choose a Project to work in before sending. Work needs a confined folder.",
+    );
+
+    rerender(
+      <WorkComposerAdapter
+        {...baseProps}
+        onCreateThread={onCreateThread}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+      />,
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("opens a typeahead of openable threads when # is typed", async () => {
