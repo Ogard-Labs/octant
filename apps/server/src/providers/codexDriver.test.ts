@@ -248,6 +248,9 @@ function fixture(
       toolCallId: () => "tool-1",
       jitter: () => 0,
       sleep: async () => undefined,
+      // A CODEX_HOME that names nothing: the provider credential probe must
+      // never read the developer's real config.toml inside a test.
+      environment: { CODEX_HOME: "/nonexistent-octant-test-home" },
       ...overrides,
     }),
   };
@@ -679,6 +682,113 @@ describe("Codex driver probe and runtime lifecycle", () => {
       Effect.scoped(makeCodexDriver(optional.options()).probe({ instanceId })),
     );
     expect(optionalProbe.readiness).toBe("ready");
+
+    // A provider that authenticates outside the OpenAI login answers
+    // requiresOpenaiAuth: false whether or not it holds a credential, so the
+    // probe names the variable the config's env_key needs and refuses ready
+    // while the runtime's allowlist does not carry it.
+    const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      'model_provider = "vendor"\n\n[model_providers.vendor]\nname = "Vendor"\nbase_url = "http://127.0.0.1:9/v1"\nenv_key = "VENDOR_API_KEY"\n',
+    );
+    try {
+      const missing = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const missingProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(missing.options({ environment: { CODEX_HOME: codexHome } })).probe({
+            instanceId,
+          }),
+        ),
+      );
+      expect(missingProbe.readiness).toBe("unauthenticated");
+      expect(missingProbe.message).toContain("VENDOR_API_KEY");
+
+      // A custom env_key is never allowlisted, so it stays unauthenticated
+      // even exported: admitting it would let a config exfiltrate a host
+      // secret to its own base_url.
+      const exported = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const exportedProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            exported.options({
+              environment: { CODEX_HOME: codexHome, VENDOR_API_KEY: "sk-test" },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(exportedProbe.readiness).toBe("unauthenticated");
+
+      // The built-in Bedrock provider's own credential is on the allowlist,
+      // so a host that exports it reports ready.
+      writeFileSync(join(codexHome, "config.toml"), 'model_provider = "amazon-bedrock"\n');
+      const present = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const presentProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            present.options({
+              environment: {
+                CODEX_HOME: codexHome,
+                AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
+              },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(presentProbe.readiness).toBe("ready");
+
+      const profile = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const profileProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            profile.options({
+              environment: { CODEX_HOME: codexHome, AWS_PROFILE: "work" },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(profileProbe.readiness).toBe("ready");
+
+      const emptyBearer = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const emptyBearerProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            emptyBearer.options({
+              environment: { CODEX_HOME: codexHome, AWS_BEARER_TOKEN_BEDROCK: "" },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(emptyBearerProbe.readiness).toBe("unauthenticated");
+      expect(emptyBearerProbe.message).toContain("AWS profile");
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
 
     const pages = Array.from({ length: 11 }, (_, index) => ({
       data: [model(`model-${index}`)],
