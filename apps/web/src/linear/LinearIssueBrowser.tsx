@@ -12,6 +12,7 @@ import { decodeLinearIssueListInput } from "@octant/contracts/linear-issues";
 import { CircleDot, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { failureMessage } from "../lib/failureMessage";
 import { ShellState } from "../shell/ShellState";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -106,7 +107,10 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       },
       (error: unknown) => {
         if (!active || generation !== listGenerationRef.current) return;
-        setList({ status: "error", message: failureMessage(error) });
+        setList({
+          status: "error",
+          message: failureMessage(error, "Linear issue browse is unavailable."),
+        });
       },
     );
     return () => {
@@ -132,7 +136,11 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       });
     } catch (error: unknown) {
       if (generation !== listGenerationRef.current) return;
-      setList({ status: "error", message: failureMessage(error), page });
+      setList({
+        status: "error",
+        message: failureMessage(error, "Linear issue browse is unavailable."),
+        page,
+      });
     }
   }
 
@@ -145,7 +153,10 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       setDetail({ status: "ready", detail: loaded });
     } catch (error: unknown) {
       if (generation !== detailGenerationRef.current) return;
-      setDetail({ status: "error", message: failureMessage(error) });
+      setDetail({
+        status: "error",
+        message: failureMessage(error, "Linear issue browse is unavailable."),
+      });
     }
   }
 
@@ -263,7 +274,10 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
                 },
                 (error: unknown) => {
                   if (generation !== listGenerationRef.current) return;
-                  setList({ status: "error", message: failureMessage(error) });
+                  setList({
+                    status: "error",
+                    message: failureMessage(error, "Linear issue browse is unavailable."),
+                  });
                 },
               );
             },
@@ -464,8 +478,4 @@ function isEmptyFilter(
       filter.assigneeId === undefined &&
       filter.projectId === undefined)
   );
-}
-
-function failureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Linear issue browse is unavailable.";
 }

@@ -8,6 +8,7 @@ import type {
   CodeThreadId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
 import type { CodeFileExplorerEntry } from "./CodeFileExplorer";
 import { useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 
@@ -124,7 +125,7 @@ export function useCodeFileListingController(
       if (!mounted.current || request !== generation.current) return;
       setEntries([]);
       setTruncated(false);
-      setErrorMessage(failureMessage(error));
+      setErrorMessage(failureMessage(error, "Octant Code file listing is unavailable."));
       setStatus("error");
     } finally {
       if (active.current === controller) active.current = undefined;
@@ -186,13 +187,4 @@ export function toExplorerEntries(listing: CodeFileListing): ReadonlyArray<CodeF
                 : { status: "unavailable", reason: entry.availability.reason },
         },
   );
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Code file listing is unavailable.";
 }
