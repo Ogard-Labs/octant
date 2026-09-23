@@ -8,7 +8,7 @@ import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { SettingsDisclosure } from "../settings/primitives";
+import { SettingRow, SettingsDisclosure } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
@@ -95,8 +95,7 @@ export function ThemeAppearanceEditor(props: {
               </OctantButton>
             ))}
           </div>
-          <label className="settings-view__field">
-            <span>Light preset</span>
+          <SettingRow label="Light preset" scope="app" settingId="appearance.scheme.light-preset">
             <OctantSelectField
               aria-label="Light preset"
               className="settings-view__select"
@@ -106,9 +105,8 @@ export function ThemeAppearanceEditor(props: {
                 .map((preset) => ({ id: preset.id, label: preset.displayName }))}
               value={draft.lightPresetId ?? "system"}
             />
-          </label>
-          <label className="settings-view__field">
-            <span>Dark preset</span>
+          </SettingRow>
+          <SettingRow label="Dark preset" scope="app" settingId="appearance.scheme.dark-preset">
             <OctantSelectField
               aria-label="Dark preset"
               className="settings-view__select"
@@ -118,9 +116,8 @@ export function ThemeAppearanceEditor(props: {
                 .map((preset) => ({ id: preset.id, label: preset.displayName }))}
               value={draft.darkPresetId ?? "system"}
             />
-          </label>
-          <label className="settings-view__field">
-            <span>Density</span>
+          </SettingRow>
+          <SettingRow label="Density" scope="app" settingId="appearance.density">
             <OctantSelectField
               aria-label="Theme density"
               className="settings-view__select"
@@ -135,7 +132,7 @@ export function ThemeAppearanceEditor(props: {
               ]}
               value={draft.density}
             />
-          </label>
+          </SettingRow>
         </div>
       </section>
       {/* The interface font and its size are among the most-changed settings
@@ -183,21 +180,39 @@ export function ThemeAppearanceEditor(props: {
       <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
         <legend>Accessibility</legend>
         <div className="setgroup">
-          <SettingSwitch
+          <SettingRow
             label="Increased contrast"
-            checked={draft.increasedContrast}
-            onChange={(value) => void theme.applyPatch({ increasedContrast: value })}
-          />
-          <SettingSwitch
+            scope="app"
+            settingId="appearance.accessibility.increased-contrast"
+          >
+            <OctantSwitch
+              checked={draft.increasedContrast}
+              label="Increased contrast"
+              onCheckedChange={(value) => void theme.applyPatch({ increasedContrast: value })}
+            />
+          </SettingRow>
+          <SettingRow
             label="Reduced motion"
-            checked={draft.reducedMotion}
-            onChange={(value) => void theme.applyPatch({ reducedMotion: value })}
-          />
-          <SettingSwitch
+            scope="app"
+            settingId="appearance.accessibility.reduced-motion"
+          >
+            <OctantSwitch
+              checked={draft.reducedMotion}
+              label="Reduced motion"
+              onCheckedChange={(value) => void theme.applyPatch({ reducedMotion: value })}
+            />
+          </SettingRow>
+          <SettingRow
             label="Reduced transparency"
-            checked={draft.reducedTransparency}
-            onChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
-          />
+            scope="app"
+            settingId="appearance.accessibility.reduced-transparency"
+          >
+            <OctantSwitch
+              checked={draft.reducedTransparency}
+              label="Reduced transparency"
+              onCheckedChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
+            />
+          </SettingRow>
         </div>
       </fieldset>
       <details className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
@@ -235,15 +250,18 @@ function TypographyControl(props: {
   return (
     <fieldset className="settings-view__theme-group">
       <legend className={props.hideLegend ? "sr-only" : undefined}>{props.label}</legend>
-      <label className="settings-view__field">
-        <span>{props.familyLabel}</span>
+      <SettingRow
+        label={props.familyLabel}
+        scope="app"
+        settingId={`appearance.typography.${props.surface}.family`}
+      >
         <FontFamilyPicker
           label={props.familyLabel}
           onChange={(family) => props.onChange({ family })}
           surface={props.surface}
           value={props.value.family}
         />
-      </label>
+      </SettingRow>
       <SettingsDisclosure
         className="settings-font-picker__custom"
         title="Custom font stack"
@@ -255,8 +273,11 @@ function TypographyControl(props: {
           value={props.value.family}
         />
       </SettingsDisclosure>
-      <label className="settings-view__field">
-        <span>Font size</span>
+      <SettingRow
+        label="Font size"
+        scope="app"
+        settingId={`appearance.typography.${props.surface}.size`}
+      >
         <OctantNumberStepper
           label={`${props.label} font size`}
           max={32}
@@ -265,11 +286,14 @@ function TypographyControl(props: {
           suffix="px"
           value={props.value.size}
         />
-      </label>
+      </SettingRow>
       {props.extended ? (
         <>
-          <label className="settings-view__field">
-            <span>Line height</span>
+          <SettingRow
+            label="Line height"
+            scope="app"
+            settingId={`appearance.typography.${props.surface}.line-height`}
+          >
             <OctantNumberStepper
               label={`${props.label} line height`}
               max={2.5}
@@ -278,28 +302,21 @@ function TypographyControl(props: {
               step={0.1}
               value={props.value.lineHeight ?? 1.4}
             />
-          </label>
-          <SettingSwitch
+          </SettingRow>
+          <SettingRow
             label={`${props.label} ligatures`}
-            checked={props.value.ligatures ?? false}
-            onChange={(value) => props.onChange({ ligatures: value })}
-          />
+            scope="app"
+            settingId={`appearance.typography.${props.surface}.ligatures`}
+          >
+            <OctantSwitch
+              checked={props.value.ligatures ?? false}
+              label={`${props.label} ligatures`}
+              onCheckedChange={(value) => props.onChange({ ligatures: value })}
+            />
+          </SettingRow>
         </>
       ) : null}
     </fieldset>
-  );
-}
-
-function SettingSwitch(props: {
-  readonly label: string;
-  readonly checked: boolean;
-  readonly onChange: (value: boolean) => void;
-}) {
-  return (
-    <div className="settings-view__field">
-      <span>{props.label}</span>
-      <OctantSwitch checked={props.checked} label={props.label} onCheckedChange={props.onChange} />
-    </div>
   );
 }
 
@@ -313,15 +330,14 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
           {`The export left out ${String(dropped.length)} override this theme does not accept: ${[...new Set(dropped)].join(", ")}.`}
         </p>
       )}
-      <label className="settings-view__field settings-view__field--block">
-        <span>Theme JSON</span>
+      <SettingRow label="Theme JSON" scope="app" settingId="appearance.theme-import-export">
         <OctantTextarea
           aria-label="Theme JSON"
           className="textarea settings-view__textarea"
           onChange={(event) => setValue(event.currentTarget.value)}
           value={value}
         />
-      </label>
+      </SettingRow>
       <div className="settings-view__actions">
         <OctantButton
           onClick={() => props.controller.importJson(value)}
