@@ -1,6 +1,6 @@
 import type { ThemeSettings } from "@octant/contracts/theme";
 import { THEME_PRESETS } from "@octant/theme";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -244,17 +244,17 @@ function TypographyControl(props: {
           value={props.value.family}
         />
       </label>
-      <details className="settings-disclosure settings-font-picker__custom">
-        <summary>
-          <ChevronRight aria-hidden="true" size={12} />
-          Custom font stack
-        </summary>
+      <SettingsDisclosure
+        className="settings-font-picker__custom"
+        title="Custom font stack"
+        variant="inline"
+      >
         <OctantInput
           aria-label={`${props.familyLabel} custom stack`}
           onChange={(event) => props.onChange({ family: event.currentTarget.value })}
           value={props.value.family}
         />
-      </details>
+      </SettingsDisclosure>
       <label className="settings-view__field">
         <span>Font size</span>
         <OctantNumberStepper

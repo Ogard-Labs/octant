@@ -1121,6 +1121,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-block: 8px 16px;
 }
 
+.settings-disclosure--inline > .settings-disclosure__body {
+  padding-block: 4px 8px;
+}
+
 .settings-collection-scroll {
   max-height: 360px;
   overflow-y: auto;
@@ -2183,10 +2187,6 @@ textarea.settings-view__text-input {
 
 .marketplace-fetch-settings__details {
   padding: 0 0 10px;
-}
-
-.marketplace-fetch-settings__details[open] summary {
-  margin-bottom: 8px;
 }
 
 .marketplace-fetch-settings__disclosure,

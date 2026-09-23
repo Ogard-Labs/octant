@@ -235,17 +235,29 @@ export function SettingsDisclosure(props: {
   readonly title: string;
   readonly description?: ReactNode;
   readonly children: ReactNode;
+  readonly variant?: "section" | "inline";
+  readonly className?: string;
 }) {
+  const variant = props.variant ?? "section";
   return (
-    <details className="settings-disclosure settings-disclosure--section">
+    <details
+      className={[
+        "settings-disclosure",
+        variant === "section" ? "settings-disclosure--section" : "settings-disclosure--inline",
+        props.className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <summary>
+        {variant === "inline" ? <ChevronRight aria-hidden="true" size={12} /> : null}
         <span className="settings-disclosure__label">
           <span>{props.title}</span>
           {props.description === undefined ? null : (
             <span className="settings-disclosure__description">{props.description}</span>
           )}
         </span>
-        <ChevronRight aria-hidden="true" size={14} />
+        {variant === "section" ? <ChevronRight aria-hidden="true" size={14} /> : null}
       </summary>
       <div className="settings-disclosure__body">{props.children}</div>
     </details>

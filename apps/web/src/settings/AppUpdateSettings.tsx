@@ -3,7 +3,6 @@ import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
-import { ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -13,7 +12,7 @@ import type {
   BundledWhatsNewView,
   OctantHostBridge,
 } from "../shell/hostBridge";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsDisclosure } from "./primitives";
 import { WhatsNewDialog } from "./WhatsNewDialog";
 
 export interface AppUpdateSettingsProps {
@@ -239,11 +238,11 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         />
       </SettingRow>
 
-      <details className="settings-disclosure app-update__disclosure">
-        <summary>
-          <ChevronRight aria-hidden="true" size={12} />
-          What a check sends
-        </summary>
+      <SettingsDisclosure
+        className="app-update__disclosure"
+        title="What a check sends"
+        variant="inline"
+      >
         <div className="app-update__disclosure-body">
           <p>
             A check is a plain request for a file listing the latest version, and Octant compares it
@@ -266,7 +265,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
             contact the update service.
           </p>
         </div>
-      </details>
+      </SettingsDisclosure>
 
       <WhatsNewDialog
         document={whatsNew}
