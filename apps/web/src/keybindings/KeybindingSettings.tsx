@@ -89,7 +89,7 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
             className="keybinding-settings__group"
             key={group.area}
           >
-            <h3 className="keybinding-settings__group-title" id={headingId}>
+            <h3 className="oct-section-label" id={headingId}>
               {group.area}
             </h3>
             <ul className="keybinding-settings__list">

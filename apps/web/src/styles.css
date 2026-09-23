@@ -7778,14 +7778,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   margin-top: var(--oct-space-5);
 }
 
-.keybinding-settings__group-title {
-  margin: 0 0 var(--oct-space-2);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  color: var(--oct-muted);
-  text-transform: none;
-}
-
 .keybinding-settings__list li {
   display: flex;
   align-items: center;
