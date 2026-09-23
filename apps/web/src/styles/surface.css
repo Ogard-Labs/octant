@@ -173,7 +173,7 @@
 
 .surface-toolbar__search input {
   width: 100%;
-  padding-left: 30px;
+  padding-left: calc(var(--oct-space-8) - 2px);
 }
 
 .surface-toolbar__search input::-webkit-search-cancel-button {
