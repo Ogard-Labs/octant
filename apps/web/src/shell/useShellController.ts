@@ -2036,12 +2036,13 @@ function isDifferentProject(
   mode: OctantMode,
   projectId: ProjectId | undefined,
 ): boolean {
-  const currentProjectId = workspace.contextByMode[mode].projectId;
-  return (
-    projectId !== undefined &&
-    currentProjectId !== null &&
-    String(currentProjectId) !== String(projectId)
-  );
+  if (projectId === undefined) return false;
+  const currentProjectId =
+    workspace.contextByMode[mode].projectId ??
+    workspace.stowedLayouts.find(
+      (stowed) => stowed.context.mode === mode && stowed.context.projectId !== null,
+    )?.context.projectId;
+  return currentProjectId === undefined || String(currentProjectId) !== String(projectId);
 }
 
 function refuseCrossAuthority(

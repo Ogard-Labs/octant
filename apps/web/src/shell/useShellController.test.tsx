@@ -261,6 +261,21 @@ describe("useShellController", () => {
         }),
       }),
     );
+
+    const projectThreadId = decodeChatThreadId("00000000-0000-4000-8000-000000000898");
+    await act(async () =>
+      result.current.openChatThread(projectThreadId, "Project notes", projectId),
+    );
+    expect(server.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "apply-workspace-operation",
+        operation: expect.objectContaining({
+          kind: "switch-project-surface",
+          mode: "chat",
+          surface: expect.objectContaining({ kind: "chat-thread", threadId: projectThreadId }),
+        }),
+      }),
+    );
   });
 
   it("opens one mode-matched Project surface and reuses its pane on repeat selection", async () => {
