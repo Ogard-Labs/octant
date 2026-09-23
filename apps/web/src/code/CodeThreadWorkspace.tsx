@@ -92,8 +92,8 @@ import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
-import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
-import { Schema } from "effect";
+import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
+import { providerFamilyForThread } from "../providers/providerFamily";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import {
   ComposerSlashTypeahead,
@@ -273,7 +273,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       draftRevisionRef.current += 1;
     },
   });
-  const providerFamily = providerGroupsForThread(
+  const providerFamily: ExtensionProviderFamily | undefined = providerFamilyForThread(
     props.providerGroups,
     view?.thread.providerInstanceId,
   );
@@ -1953,18 +1953,6 @@ function ProviderApprovalPrompt(props: {
       </div>
     </div>
   );
-}
-
-function providerGroupsForThread(
-  groups: ReadonlyArray<PickerGroup> | undefined,
-  providerInstanceId: CodeThread["providerInstanceId"] | undefined,
-): import("@octant/contracts/extensions").ExtensionProviderFamily | undefined {
-  const group = groups?.find(
-    (candidate) => String(candidate.instance.id) === String(providerInstanceId),
-  );
-  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
-    ? group.instance.driverKind
-    : undefined;
 }
 
 function useObservedChangedFiles(options: {

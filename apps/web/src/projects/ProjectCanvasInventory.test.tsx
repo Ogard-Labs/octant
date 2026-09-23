@@ -7,7 +7,6 @@ import {
   canvasInventoryEntries,
   canvasInventoryProjectId,
   quarterlyInventoryEntry,
-  roadmapInventoryEntry,
 } from "./canvasInventoryFixtures";
 
 function createInventoryClient(
