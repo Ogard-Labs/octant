@@ -444,6 +444,72 @@ describe("DraftThreadWorkspace", () => {
     expect(forwarded?.[10]).toBe("current-session");
   });
 
+  it("keeps Plan while a remembered access choice resets for a new Project", async () => {
+    const user = userEvent.setup();
+    const onExecutionPolicyChange = vi.fn();
+    const secondCodeProjectId = "00000000-0000-4000-8000-000000000113" as ProjectId;
+    const projectsWithSecondCode = [
+      ...projects,
+      {
+        id: secondCodeProjectId,
+        type: "code",
+        name: "Second Code Project",
+        lifecycle: "active",
+        pinned: false,
+        rank: "2/2",
+        version: 1,
+        createdAt: "2026-07-28T12:00:00.000Z",
+        updatedAt: "2026-07-28T12:00:00.000Z",
+        binding: { canonicalRoot: "/Users/example/Dev/Repos/second" },
+        codeAccessPersistence: "current-session",
+      },
+    ] as unknown as ReadonlyArray<ProjectSummary>;
+    let persistence: "current-session" | "project-default" = "current-session";
+    const { unmount } = render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projectId={codeProjectId}
+        projects={projectsWithSecondCode}
+        defaultExecutionPolicy="approval-gated"
+        defaultPermissionPersistence={persistence}
+        onExecutionPolicyChange={(policy, nextPersistence) => {
+          onExecutionPolicyChange(policy, nextPersistence);
+          persistence = nextPersistence;
+        }}
+        onSelectProject={() => {
+          persistence = "current-session";
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
+    );
+    expect(onExecutionPolicyChange).toHaveBeenLastCalledWith("plan", "project-default");
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Project: Octant" }));
+    await user.click(screen.getByRole("option", { name: /Second Code Project/ }));
+    expect(persistence).toBe("current-session");
+    unmount();
+
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projectId={secondCodeProjectId}
+        projects={projectsWithSecondCode}
+        defaultExecutionPolicy="plan"
+        defaultPermissionPersistence={persistence}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+  });
+
   it("shows the authoritative Environment health in the context strip", () => {
     render(
       <DraftThreadWorkspace

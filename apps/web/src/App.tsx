@@ -5860,11 +5860,13 @@ function LaunchedShell(
                       const binding = controller
                         .openDraftThread(mode, projectId)
                         .then((accepted) => {
-                          if (accepted)
+                          if (accepted) {
+                            if (mode === "code") setDraftPermissionPersistence(undefined);
                             setDraftProjectSelection((current) => ({
                               ...current,
                               [mode]: projectId,
                             }));
+                          }
                         });
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);

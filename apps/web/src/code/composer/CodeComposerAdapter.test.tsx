@@ -288,12 +288,20 @@ describe("CodeComposerAdapter", () => {
   it("remembers the access posture for the Project from the access menu", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
-    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    const onExecutionPolicyChange = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        onCreateThread={onCreateThread}
+        onExecutionPolicyChange={onExecutionPolicyChange}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Access policy" }));
     await user.click(
       await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
     );
+    expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated", "project-default");
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
