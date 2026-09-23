@@ -2,7 +2,17 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import type { Stats } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { chmod, lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -50,6 +60,8 @@ export interface AcquireHostRuntimeOwnerOptions {
   readonly afterSocketBound?: () => void | Promise<void>;
   readonly afterStaleArtifactsQuarantined?: () => void | Promise<void>;
   readonly beforePersistence?: () => void | Promise<void>;
+  /** Test seam: runs after a socket-less secret is seen and before it is moved. */
+  readonly beforeSocketlessSecretQuarantine?: () => void | Promise<void>;
   readonly onStopRequested?: () => void | Promise<void>;
   readonly onControlRequest?: (
     request: HostRuntimeLocalControlRequest,
@@ -154,7 +166,12 @@ export async function acquireHostRuntimeOwner(
       options.afterStaleArtifactsQuarantined,
     );
   } else {
-    await recoverSocketlessStaleOwner(options.paths, expectedOwner, processAlive);
+    await recoverSocketlessStaleOwner(
+      options.paths,
+      expectedOwner,
+      processAlive,
+      options.beforeSocketlessSecretQuarantine,
+    );
   }
 
   const controlSecret = randomBytes(32).toString("base64url");
@@ -698,12 +715,21 @@ async function recoverSocketlessStaleOwner(
   paths: HostRuntimePaths,
   expected: ExpectedOwnerFacts,
   processAlive: ProcessAlive,
+  beforeSocketlessSecretQuarantine?: () => void | Promise<void>,
 ): Promise<void> {
   const [receiptNode, secretNode] = await Promise.all([
     safeLstat(paths.ownerReceiptPath),
     safeLstat(paths.controlSecretPath),
   ]);
   if (receiptNode === undefined && secretNode === undefined) return;
+  if (receiptNode === undefined && secretNode !== undefined) {
+    // A secret with no receipt and no socket names no live owner: only the
+    // receipt can verify authority, and a live owner would hold the socket.
+    // Whoever wrote it died mid-startup or mid-quarantine, so it is moved
+    // aside rather than left to refuse every later start.
+    await quarantineSocketlessSecret(paths, secretNode, beforeSocketlessSecretQuarantine);
+    return;
+  }
   if (receiptNode !== undefined && secretNode === undefined) {
     const staleReceipt = await readVerifiedReceipt(paths, expected);
     if (staleReceipt === undefined) {
@@ -752,6 +778,58 @@ async function quarantineStaleAuthority(
     stale.secretIdentity,
   );
   return { quarantine, suffix };
+}
+
+async function quarantineSocketlessSecret(
+  paths: HostRuntimePaths,
+  secretNode: Stats,
+  beforeMove?: () => void | Promise<void>,
+): Promise<void> {
+  const quarantine = join(paths.runtimeDirectory, "quarantine");
+  await mkdir(quarantine, { recursive: true, mode: 0o700 });
+  // No receipt survives to name the instance, so the suffix carries a random
+  // tag instead; orphans from several killed starts can coexist.
+  const suffix = `${Date.now()}-orphan-${randomBytes(4).toString("hex")}`;
+  const quarantined = join(quarantine, `owner-${suffix}.secret`);
+  await beforeMove?.();
+  // A peer may have bound the socket and written this secret since the
+  // caller's first look. Moving it then would leave that owner unable to
+  // authenticate status, stop, and attachment.
+  if ((await safeLstat(paths.socketPath)) !== undefined) return;
+  try {
+    await renameIfSame(paths.controlSecretPath, quarantined, fileIdentity(secretNode));
+  } catch (error) {
+    if (error instanceof HostRuntimeOwnershipError) throw error;
+    throw new HostRuntimeOwnershipError(
+      "ambiguous-owner-node",
+      `Octant could not quarantine a stale control secret: ${safeMessage(error)}`,
+      paths.controlSecretPath,
+    );
+  }
+  if ((await safeLstat(paths.socketPath)) === undefined) return;
+  if ((await safeLstat(paths.controlSecretPath)) !== undefined) return;
+  try {
+    // link fails if the peer already replaced the secret, so this cannot
+    // overwrite a newer file the way rename would.
+    await link(quarantined, paths.controlSecretPath);
+    await safeUnlink(quarantined);
+  } catch (error) {
+    if (isFileExists(error) || isMissing(error)) return;
+    throw new HostRuntimeOwnershipError(
+      "ambiguous-owner-node",
+      `Octant could not restore a control secret a peer still owns: ${safeMessage(error)}`,
+      paths.controlSecretPath,
+    );
+  }
+}
+
+function isFileExists(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { readonly code?: unknown }).code === "EEXIST"
+  );
 }
 
 async function quarantineStaleReceipt(

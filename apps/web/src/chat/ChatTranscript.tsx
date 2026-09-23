@@ -18,6 +18,7 @@ import {
   memo,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -111,6 +112,63 @@ const attemptLabels: Record<ChatAttemptOutcome, string> = {
   cancelled: "Cancelled",
   completed: "Completed",
 };
+
+/**
+ * The transcript's own words for a failed turn, keyed by the bounded failure
+ * code the attempt carries. Provider categories and the runner's own slugs
+ * share the one table; a code nobody wrote copy for still gets a sentence
+ * rather than silence.
+ */
+const attemptFailureSentences: Record<string, string> = {
+  "capacity-unavailable": "The provider could not take this turn right now.",
+  "event-budget-exceeded": "The turn exceeded its event limit and was stopped.",
+  exhausted: "The spend ceiling for this scope is exhausted.",
+  incomplete: "The provider ended the turn without a result.",
+  incompatible: "The provider is incompatible with this Octant version.",
+  interrupted: "The provider interrupted this turn.",
+  "invalid-configuration": "The provider refused its configured arguments.",
+  "missing-turn-bound": "The spend ceiling refused this turn's cost estimate.",
+  "no-visible-reply": "The provider finished without producing a reply.",
+  overrun: "The turn exceeded its spend ceiling.",
+  "provider-failed": "The provider reported a failure.",
+  protocol: "The provider did not answer the turn protocol correctly.",
+  "rate-limited": "The provider is rate-limited; retry shortly.",
+  "research-failed": "Research failed during this turn.",
+  "research-timed-out": "Research did not return before the turn deadline.",
+  "stale-resume": "The provider could not resume its earlier session.",
+  "timed-out": "The provider stopped responding and the turn timed out.",
+  "tool-failed": "An app-managed tool call failed during this turn.",
+  "tool-timed-out": "An app-managed tool call did not return before the turn deadline.",
+  unauthenticated: "The provider requires authentication.",
+  unauthorized: "The provider refused this turn's authorization.",
+  unavailable: "The provider is unavailable.",
+  "unknown-spend": "The spend ceiling could not account for this turn's cost.",
+  unsupported: "The provider does not support this turn.",
+};
+
+function attemptFailureSentence(attempt: ChatAttempt): string {
+  return (
+    attempt.failure?.diagnostic?.stderrContext ??
+    attemptFailureSentences[String(attempt.failure?.code ?? "")] ??
+    "The turn failed."
+  );
+}
+
+function AttemptFailureNotice(props: { readonly attempt: ChatAttempt }) {
+  const code = props.attempt.failure?.code;
+  const seen = useRef(code);
+  const [announce, setAnnounce] = useState(false);
+  useEffect(() => {
+    if (code !== undefined && seen.current === undefined) setAnnounce(true);
+    seen.current = code;
+  }, [code]);
+  if (props.attempt.failure === undefined) return null;
+  return (
+    <p className="chat-transcript__failure" {...(announce ? { role: "alert" as const } : {})}>
+      {attemptFailureSentence(props.attempt)}
+    </p>
+  );
+}
 
 export function ChatTranscript(props: ChatTranscriptProps) {
   const [editingTurnId, setEditingTurnId] = useState<string | undefined>(undefined);
@@ -587,7 +645,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             responseBody={responseBody}
           />
         )}
-        {props.attempt.outcome === "failed" ? (
+        <AttemptFailureNotice attempt={props.attempt} />
+        {props.attempt.outcome === "failed" || props.attempt.failure !== undefined ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}

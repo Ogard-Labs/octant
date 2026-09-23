@@ -4457,6 +4457,7 @@ export class ChatService {
           transitionChatAttempt(currentAttempt, {
             outcome: "interrupted",
             updatedAt: decodeTimestamp(this.#clock()),
+            failure: { code: decodeDiagnosticFailureCode("incomplete") },
           }),
         );
       }
