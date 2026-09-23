@@ -50,7 +50,8 @@ export function SidebarBackgroundLayer({ resolved, fetcher }: SidebarBackgroundL
     <>
       <div
         data-octant-sidebar-background
-        style={background !== null ? { background } : { display: "none" }}
+        data-background-state={background === null ? "hidden" : "visible"}
+        {...(background === null ? {} : { style: { background } })}
         aria-hidden="true"
       />
       <div

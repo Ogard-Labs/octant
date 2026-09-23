@@ -10,6 +10,7 @@ import { CornerDownLeft, FileText, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
 import { isApplePlatform } from "../platform";
+import { failureMessage } from "../lib/failureMessage";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -153,7 +154,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
           if (controller.signal.aborted) return;
           setMatches([]);
           setTruncated(false);
-          setErrorMessage(failureMessage(error));
+          setErrorMessage(failureMessage(error, "Octant Code search is unavailable."));
         })
         .finally(() => {
           if (!controller.signal.aborted) setSearching(false);
@@ -301,13 +302,4 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
       </div>
     </OctantDialog>
   );
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Code search is unavailable.";
 }

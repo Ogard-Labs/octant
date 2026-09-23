@@ -31,11 +31,11 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
 
   return (
     <section
-      aria-label="Detected on this Mac"
+      aria-label="Find providers"
       className="settings-card-section settings-card-section--open provider-discovery"
     >
       <div className="settings-section-head">
-        <h2>Detected on this Mac</h2>
+        <h2>Find providers</h2>
         <OctantButton
           className="provider-discovery__scan-action"
           size="sm"
