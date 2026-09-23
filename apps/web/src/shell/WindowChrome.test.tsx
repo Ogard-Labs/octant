@@ -47,6 +47,10 @@ const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const surfaceStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
 const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
+const projectStyles = readFileSync(
+  resolve(process.cwd(), "src/styles/project-threads.css"),
+  "utf8",
+);
 /*
  * Comments are stripped before matching. `cssRule` reads a rule's prelude as
  * "everything since the last brace", so a comment written above a rule became
@@ -54,7 +58,7 @@ const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "
  * the assertion then silently moved on to the next rule sharing that selector,
  * usually one inside a media query.
  */
-const styles = [rootStyles, shellStyles, dockStyles, surfaceStyles]
+const styles = [rootStyles, shellStyles, dockStyles, surfaceStyles, projectStyles]
   .join("\n")
   .replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -76,17 +80,17 @@ function cssRule(selector: string, occurrence = 0): string {
   return matches[occurrence]?.[2] ?? "";
 }
 
-function atRuleBlock(atRule: string): string {
-  const start = styles.indexOf(atRule);
+function atRuleBlock(atRule: string, source = styles): string {
+  const start = source.indexOf(atRule);
   expect(start, `missing CSS at-rule ${atRule}`).toBeGreaterThanOrEqual(0);
-  const openingBrace = styles.indexOf("{", start);
+  const openingBrace = source.indexOf("{", start);
   expect(openingBrace, `missing opening brace for ${atRule}`).toBeGreaterThan(start);
 
   let depth = 1;
-  for (let index = openingBrace + 1; index < styles.length; index += 1) {
-    if (styles[index] === "{") depth += 1;
-    if (styles[index] === "}") depth -= 1;
-    if (depth === 0) return styles.slice(openingBrace + 1, index);
+  for (let index = openingBrace + 1; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(openingBrace + 1, index);
   }
 
   throw new Error(`missing closing brace for ${atRule}`);
@@ -395,7 +399,10 @@ describe("WindowChrome", () => {
     expect(closedProjectSelect).toContain(
       "min-height: calc(var(--oct-nav-row-h) - var(--oct-space-1));",
     );
-    const touchFolderRules = atRuleBlock("@media (pointer: coarse), (max-width: 560px)");
+    const touchFolderRules = atRuleBlock(
+      "@media (pointer: coarse), (max-width: 560px)",
+      projectStyles,
+    );
     expect(touchFolderRules).toContain('.project-row[data-folder-state="closed"]');
     expect(touchFolderRules).toContain("min-height: 44px;");
 

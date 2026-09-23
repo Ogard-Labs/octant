@@ -12,13 +12,15 @@
     "apps/web/src/styles/shell.css": 2
   },
   "important": {
-    "apps/web/src/styles.css": 4,
-    "apps/web/src/styles/octant.css": 1
+    "apps/web/src/styles.css": 1,
+    "apps/web/src/styles/octant.css": 1,
+    "apps/web/src/styles/project-threads.css": 3
   },
   "heavy-weight": {
-    "apps/web/src/styles.css": 6,
+    "apps/web/src/styles.css": 5,
     "apps/web/src/styles/canvas.css": 1,
     "apps/web/src/styles/octant.css": 1,
+    "apps/web/src/styles/project-threads.css": 1,
     "apps/web/src/styles/remote-pairing.css": 1,
     "apps/web/src/styles/remote-shell.css": 1,
     "apps/web/src/styles/surface.css": 1,
@@ -29,7 +31,7 @@
     "apps/web/src/context/context.css": 6,
     "apps/web/src/onboarding/first-run.css": 3,
     "apps/web/src/profile/profile.css": 8,
-    "apps/web/src/styles.css": 139,
+    "apps/web/src/styles.css": 105,
     "apps/web/src/styles/artifacts.css": 10,
     "apps/web/src/styles/automation.css": 23,
     "apps/web/src/styles/board.css": 6,
@@ -42,6 +44,7 @@
     "apps/web/src/styles/inbox.css": 3,
     "apps/web/src/styles/octant.css": 45,
     "apps/web/src/styles/palette.css": 1,
+    "apps/web/src/styles/project-threads.css": 34,
     "apps/web/src/styles/remote-shell.css": 1,
     "apps/web/src/styles/settings.css": 11,
     "apps/web/src/styles/shell.css": 48,
@@ -52,7 +55,7 @@
     "apps/web/src/code/project-pull-request-review.css": 7,
     "apps/web/src/context/context.css": 17,
     "apps/web/src/gitHistory/git-history.css": 4,
-    "apps/web/src/styles.css": 236,
+    "apps/web/src/styles.css": 204,
     "apps/web/src/styles/chat.css": 30,
     "apps/web/src/styles/code.css": 15,
     "apps/web/src/styles/components.css": 29,
@@ -62,7 +65,7 @@
     "apps/web/src/styles/octant.css": 44,
     "apps/web/src/styles/palette.css": 8,
     "apps/web/src/styles/preview.css": 3,
-    "apps/web/src/styles/project-threads.css": 1,
+    "apps/web/src/styles/project-threads.css": 33,
     "apps/web/src/styles/remote-pairing.css": 3,
     "apps/web/src/styles/remote-shell.css": 3,
     "apps/web/src/styles/settings-specialty.css": 8,
