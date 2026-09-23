@@ -8,21 +8,23 @@ const threadId = "c5b0e039-ee21-40cb-a8b7-7c8d6da68354" as CodeThreadId;
 const checkoutId = "c86ab8b6-7cd4-4ecf-8ea8-bbcd78bfabce" as CodeCheckoutId;
 
 function listingClient() {
-  const list = vi.fn(async () => ({
-    status: "listed" as const,
-    listing: {
-      kind: "code-file-listing" as const,
-      threadId,
-      checkoutId,
-      entries: [
-        { kind: "directory" as const, path: "SimulatorFixture" },
-        { kind: "directory" as const, path: "SimulatorFixture.xcodeproj" },
-        { kind: "directory" as const, path: "SimulatorFixture.xcodeproj/project.xcworkspace" },
-        { kind: "directory" as const, path: "SimulatorFixtureTests" },
-      ],
-      truncated: false,
-    },
-  }));
+  const list = vi.fn(
+    async (): Promise<unknown> => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId,
+        entries: [
+          { kind: "directory" as const, path: "SimulatorFixture" },
+          { kind: "directory" as const, path: "SimulatorFixture.xcodeproj" },
+          { kind: "directory" as const, path: "SimulatorFixture.xcodeproj/project.xcworkspace" },
+          { kind: "directory" as const, path: "SimulatorFixtureTests" },
+        ],
+        truncated: false,
+      },
+    }),
+  );
   const client = {
     list,
     watch: vi.fn(),
@@ -32,12 +34,40 @@ function listingClient() {
 }
 
 describe("useAppleProjects", () => {
-  it("waits for the checkout to be available before listing, then names the Xcode project at the root", async () => {
-    // Observed 2026-09-19: the first listing after a thread opens answered
-    // 503 "Code checkout is unavailable" (waiting) and, being a one-shot read,
-    // was never repeated — so the Simulator tool and the workbench palette
-    // entry stayed hidden although Files listed the .xcodeproj seconds later.
+  it("lists while the view still reports the checkout waiting, and names the Xcode project at the root", async () => {
+    // Observed 2026-09-19: after a relaunch the thread view kept reporting
+    // the checkout waiting although the listing endpoint resolved it fine —
+    // gating on that answer hid the Simulator tool and the workbench palette
+    // entry for the life of the view.
     const { client, list } = listingClient();
+    const { result } = renderHook(
+      (props: { readonly availability: "waiting" | "available" }) =>
+        useAppleProjects({
+          client,
+          threadId,
+          checkoutId,
+          checkoutAvailability: props.availability,
+        }),
+      { initialProps: { availability: "waiting" } },
+    );
+
+    await waitFor(() =>
+      expect(result.current).toEqual([
+        { projectPath: "SimulatorFixture.xcodeproj", name: "SimulatorFixture.xcodeproj" },
+      ]),
+    );
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a listing refused while the checkout was waiting once the view reports it available", async () => {
+    // The failure the original availability gate was added for: a one-shot
+    // read taken while the host resolves the checkout keeps its refusal for
+    // the life of the view. The retry is what replaces the gate.
+    const { client, list } = listingClient();
+    list.mockResolvedValueOnce({
+      status: "failed",
+      failure: { category: "unavailable", message: "Code checkout is unavailable." },
+    });
     const { result, rerender } = renderHook(
       (props: { readonly availability: "waiting" | "available" }) =>
         useAppleProjects({
@@ -48,8 +78,8 @@ describe("useAppleProjects", () => {
         }),
       { initialProps: { availability: "waiting" } },
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(list).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
     expect(result.current).toEqual([]);
 
     rerender({ availability: "available" });
@@ -59,6 +89,43 @@ describe("useAppleProjects", () => {
         { projectPath: "SimulatorFixture.xcodeproj", name: "SimulatorFixture.xcodeproj" },
       ]),
     );
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a listing that fails after availability changes while the request is in flight", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    const { client, list } = listingClient();
+    list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      (props: { readonly availability: "waiting" | "available" }) =>
+        useAppleProjects({
+          client,
+          threadId,
+          checkoutId,
+          checkoutAvailability: props.availability,
+        }),
+      { initialProps: { availability: "waiting" } },
+    );
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    rerender({ availability: "available" });
     expect(list).toHaveBeenCalledTimes(1);
+
+    resolveFirst?.({
+      status: "failed",
+      failure: { category: "unavailable", message: "Code checkout is unavailable." },
+    });
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(result.current).toEqual([
+        { projectPath: "SimulatorFixture.xcodeproj", name: "SimulatorFixture.xcodeproj" },
+      ]),
+    );
   });
 });

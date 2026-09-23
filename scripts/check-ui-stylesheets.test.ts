@@ -144,6 +144,44 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("flags declarations with off-scale spacing literals", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [".a { padding: 6px 10px; }", ".b { gap: 14px; }"].join("\n"),
+      }).map((finding) => `${finding.rule} ${finding.line} ${finding.detail}`),
+    ).toEqual([
+      "spacing-scale 1 padding 6px 10px is off the 4px spacing scale",
+      "spacing-scale 2 gap 14px is off the 4px spacing scale",
+    ]);
+  });
+
+  it("accepts on-scale spacing, small nudges, automatic margins, and spacing tokens", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".a { gap: 8px; }",
+          ".b { padding: 0 12px 2px; }",
+          ".c { margin: 0 auto; }",
+          ".d { padding: var(--oct-space-2); }",
+          ".e { padding: 1px 0; }",
+        ].join("\n"),
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not flag off-scale spacing inside a fixed-scheme exception block", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          "/* ui-style-exception: fixed-scheme */",
+          ".scheme-preview {",
+          "  gap: 6px;",
+          "}",
+        ].join("\n"),
+      }),
+    ).toEqual([]);
+  });
+
   it("flags raw durations but not motion tokens or the reduced-motion idiom", () => {
     expect(
       findStylesheetFindings({
@@ -387,6 +425,16 @@ describe("UI stylesheet check", () => {
         recorded: 2,
         current: 1,
       },
+    ]);
+  });
+
+  it("ratchets off-scale spacing when its count rises or falls", () => {
+    const findings = findStylesheetFindings({ [CSS]: ".a { gap: 6px; }" });
+    expect(compareWithBaseline(findings, { "spacing-scale": { [CSS]: 0 } })).toEqual([
+      { kind: "exceeded", rule: "spacing-scale", file: CSS, recorded: 0, current: 1 },
+    ]);
+    expect(compareWithBaseline(findings, { "spacing-scale": { [CSS]: 2 } })).toEqual([
+      { kind: "stale", rule: "spacing-scale", file: CSS, recorded: 2, current: 1 },
     ]);
   });
 
