@@ -18,10 +18,11 @@ import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-us
 import { ProviderUsageHistoryWorkspace } from "./ProviderUsageHistoryWorkspace";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderUsageLimitsPanel } from "./ProviderUsageLimitsPanel";
-import { AlertTriangle, ArrowLeft, BarChart3, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
 import { LatencyStatsSection } from "./LatencyStatsSection";
 import { useUsageDashboardController } from "./useUsageDashboardController";
@@ -161,37 +162,26 @@ function RecordedUsageWorkspace(
   const dashboard = controller.dashboard;
 
   return (
-    <section aria-label="Usage" className="usage-workspace">
-      <header className="usage-workspace__header">
-        {props.onBack === undefined ? null : (
-          <OctantButton
-            className="usage-workspace__back"
-            onClick={props.onBack}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <ArrowLeft aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Back to app</span>
-          </OctantButton>
-        )}
-        <h2 className="usage-workspace__title">
-          <BarChart3 aria-hidden="true" size={16} /> Usage
-        </h2>
-        {props.sourceControl}
-        <p className="usage-workspace__subtitle">
-          Operational token attribution for this host, in {VIEWING_TIME_ZONE}.
-        </p>
-        <OctantButton
-          aria-label="Refresh usage"
-          onClick={controller.reload}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshCw aria-hidden="true" size={14} />
-        </OctantButton>
-      </header>
+    <Surface ariaLabel="Usage" className="usage-workspace">
+      <SurfaceHeader
+        actions={
+          <>
+            {props.sourceControl}
+            <OctantButton
+              aria-label="Refresh usage"
+              onClick={controller.reload}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCw aria-hidden="true" size={14} />
+            </OctantButton>
+          </>
+        }
+        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+        subtitle={`Operational token attribution for this host, in ${VIEWING_TIME_ZONE}.`}
+        title="Usage"
+      />
 
       {props.providerLimitsClient === undefined ? null : (
         <ProviderUsageLimitsPanel
@@ -214,12 +204,16 @@ function RecordedUsageWorkspace(
       {controller.status === "unauthorized" ||
       controller.status === "unavailable" ||
       controller.status === "failure" ? (
-        <div className="usage-workspace__error" role="alert">
-          <AlertTriangle aria-hidden="true" size={16} />
-          <p>{controller.errorMessage ?? "The usage dashboard could not be loaded."}</p>
-          <OctantButton onClick={controller.reload} type="button">
-            Retry
-          </OctantButton>
+        <div role="alert">
+          <SurfaceEmpty
+            action={
+              <OctantButton onClick={controller.reload} type="button">
+                Retry
+              </OctantButton>
+            }
+            detail={controller.errorMessage ?? "The usage dashboard could not be loaded."}
+            title="Usage could not be loaded"
+          />
         </div>
       ) : null}
 
@@ -266,7 +260,7 @@ function RecordedUsageWorkspace(
           </p>
         </>
       )}
-    </section>
+    </Surface>
   );
 }
 
@@ -375,8 +369,7 @@ function UsageWorkspaceFilters(props: UsageWorkspaceFiltersProps) {
 function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardResponse }) {
   const { summary } = dashboard;
   return (
-    <section aria-label="Summary" className="usage-workspace__section">
-      <h3>Summary</h3>
+    <SurfaceSection className="usage-workspace__section" label="Summary">
       {dashboard.scanTruncated ? (
         <p className="usage-workspace__truncated" role="note">
           This range holds more records than one read returns. Every total below is a floor, not a
@@ -447,7 +440,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
           the host could not read them as consistent measurements.
         </p>
       ) : null}
-    </section>
+    </SurfaceSection>
   );
 }
 
@@ -463,8 +456,7 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
   if (stats.caches.length === 0 && stats.providerTokenCaches.length === 0) return null;
   const now = Date.now();
   return (
-    <section aria-label="Cache efficiency" className="usage-workspace__section">
-      <h3>Cache efficiency</h3>
+    <SurfaceSection className="usage-workspace__section" label="Cache efficiency">
       {stats.caches.length === 0 ? null : (
         <div className="usage-table-scroll">
           <table aria-label="Host cache hit and miss rates" className="usage-table">
@@ -555,7 +547,7 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
         Hit and miss counts are what this host has observed since it started, so they begin again
         after a restart. Prompt-cache tokens come from the requests in the selected range.
       </p>
-    </section>
+    </SurfaceSection>
   );
 }
 
@@ -610,23 +602,21 @@ function EmptySection({ scanTruncated }: { readonly scanTruncated: boolean }) {
   // records.
   if (scanTruncated) {
     return (
-      <section aria-label="Usage unread" className="usage-workspace__section">
-        <p className="usage-workspace__empty" role="note">
-          This range holds more records than one read returns, and none of the records read carried
-          usage that could be shown. Narrow the range or the filters to read the rest — this is not
-          a report that the range is empty.
-        </p>
-      </section>
+      <SurfaceSection className="usage-workspace__section" label="Usage unread">
+        <SurfaceEmpty
+          detail="This range holds more records than one read returns, and none of the records read carried usage that could be shown. Narrow the range or the filters to read the rest — this is not a report that the range is empty."
+          title="Range not fully read"
+        />
+      </SurfaceSection>
     );
   }
   return (
-    <section aria-label="No usage" className="usage-workspace__section">
-      <p className="usage-workspace__empty" role="note">
-        No usage has been recorded for this range. Providers that report token facts populate this
-        view after their first reconciled request; a runtime that reports no token details still
-        appears here as request activity with usage marked unavailable.
-      </p>
-    </section>
+    <SurfaceSection className="usage-workspace__section" label="No usage">
+      <SurfaceEmpty
+        detail="No usage has been recorded for this range. Providers that report token facts populate this view after their first reconciled request; a runtime that reports no token details still appears here as request activity with usage marked unavailable."
+        title="No usage in this range"
+      />
+    </SurfaceSection>
   );
 }
 
@@ -636,8 +626,7 @@ function BreakdownSection(props: {
 }) {
   if (props.groups.length === 0) return null;
   return (
-    <section aria-label="Breakdown" className="usage-workspace__section">
-      <h3>Breakdown</h3>
+    <SurfaceSection className="usage-workspace__section" label="Breakdown">
       {props.groups.map((group) => (
         <div className="usage-workspace__breakdown" key={group.dimension}>
           <h4 className="usage-workspace__subheading">{DIMENSION_WORDS[group.dimension]}</h4>
@@ -692,7 +681,7 @@ function BreakdownSection(props: {
         Context category totals describe the planned composition of each request, not
         provider-reported per-category actuals.
       </p>
-    </section>
+    </SurfaceSection>
   );
 }
 
@@ -703,8 +692,7 @@ function DetailSection(props: {
 }) {
   if (props.rows.length === 0) return null;
   return (
-    <section aria-label="Request detail" className="usage-workspace__section">
-      <h3>Request detail</h3>
+    <SurfaceSection className="usage-workspace__section" label="Request detail">
       <div className="usage-table-scroll">
         <table aria-label="Usage request detail" className="usage-table">
           <thead>
@@ -775,14 +763,13 @@ function DetailSection(props: {
           ones.
         </p>
       ) : null}
-    </section>
+    </SurfaceSection>
   );
 }
 
 function HostSection({ hosts }: { readonly hosts: ReadonlyArray<UsageHostCoverage> }) {
   return (
-    <section aria-label="Contributing hosts" className="usage-workspace__section">
-      <h3>Contributing hosts</h3>
+    <SurfaceSection className="usage-workspace__section" label="Contributing hosts">
       {hosts.length === 0 ? (
         <p className="usage-workspace__note" role="note">
           No host contributed usage in this range.
@@ -809,7 +796,7 @@ function HostSection({ hosts }: { readonly hosts: ReadonlyArray<UsageHostCoverag
         This host reports only its own recorded usage. Another host's usage is excluded until
         multi-host composition is authorized, so an absent host is not a host with zero usage.
       </p>
-    </section>
+    </SurfaceSection>
   );
 }
 
@@ -819,8 +806,7 @@ function AttributionSourceSection({
   readonly sources: ReadonlyArray<UsageDimensionSource>;
 }) {
   return (
-    <section aria-label="Attribution sources" className="usage-workspace__section">
-      <h3>What this host can attribute</h3>
+    <SurfaceSection className="usage-workspace__section" label="What this host can attribute">
       <dl className="usage-workspace__sources">
         {sources.map((source) => (
           <div data-status={source.status} key={source.dimension}>
@@ -834,7 +820,7 @@ function AttributionSourceSection({
           </div>
         ))}
       </dl>
-    </section>
+    </SurfaceSection>
   );
 }
 
