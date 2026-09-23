@@ -207,6 +207,7 @@ export interface WorkTurnServiceDependencies {
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
+  readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
   /**
    * The app-managed tools a Work turn may offer its provider. Absent on a host
    * that composes none, which sends the turn with no tools rather than
@@ -304,6 +305,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
@@ -344,6 +346,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
     this.#spendCeiling = dependencies.spendCeiling;
@@ -1024,6 +1027,7 @@ export class WorkTurnService {
         const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
         this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
       },
+      ...(this.#onRequestSettled === undefined ? {} : { onRequestSettled: this.#onRequestSettled }),
       onUsage: (usage) => {
         const projected = this.#projection.lookup(input.command.requestId);
         if (

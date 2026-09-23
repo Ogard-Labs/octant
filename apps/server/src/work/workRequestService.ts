@@ -130,6 +130,8 @@ export class WorkRequestService {
   readonly #clock: () => string;
   /** One process owns a pending external callback delivery at a time. */
   readonly #activeDeliveries = new Set<string>();
+  readonly #interruptedSessions = new Set<string>();
+  readonly #settlementListeners = new Map<string, Set<() => void>>();
 
   constructor(options: WorkRequestServiceOptions) {
     this.#projects = options.projects;
@@ -418,6 +420,25 @@ export class WorkRequestService {
     return this.#systemSettle(requestId, "expired");
   }
 
+  onSettled(requestId: string, callback: () => void): () => void {
+    const key = String(requestId);
+    const decodedRequestId = decodeWorkRequestId(key);
+    const entry = this.#projection.lookup(decodedRequestId);
+    if (entry !== undefined && entry.request.status !== "pending") {
+      callback();
+      return () => undefined;
+    }
+    const listeners = this.#settlementListeners.get(key) ?? new Set<() => void>();
+    listeners.add(callback);
+    this.#settlementListeners.set(key, listeners);
+    return () => {
+      const current = this.#settlementListeners.get(key);
+      if (current === undefined) return;
+      current.delete(callback);
+      if (current.size === 0) this.#settlementListeners.delete(key);
+    };
+  }
+
   /**
    * Settles every pending request owned by a provider session after that
    * session reaches a terminal runtime state. The session is a UUID minted by
@@ -430,10 +451,16 @@ export class WorkRequestService {
       .filter(
         (entry) =>
           entry.request.status === "pending" &&
-          !this.#activeDeliveries.has(String(entry.request.requestId)) &&
           String(entry.request.providerSessionId) === String(sessionId),
       )
-      .map((entry) => this.#reconcileTerminalSessionRequest(entry.request));
+      .flatMap((entry) => {
+        const requestId = String(entry.request.requestId);
+        if (this.#activeDeliveries.has(requestId)) {
+          this.#interruptedSessions.add(String(sessionId));
+          return [];
+        }
+        return [this.#reconcileTerminalSessionRequest(entry.request)];
+      });
   }
 
   /**
@@ -565,6 +592,9 @@ export class WorkRequestService {
       );
     }
     this.#projection.apply(frame);
+    const listeners = this.#settlementListeners.get(String(current.requestId));
+    this.#settlementListeners.delete(String(current.requestId));
+    for (const callback of listeners ?? []) callback();
     return ok(nextRequest);
   }
 
@@ -699,6 +729,12 @@ export class WorkRequestService {
 
   #releaseActiveDelivery(request: WorkRequest): void {
     this.#activeDeliveries.delete(String(request.requestId));
+    if (
+      this.#interruptedSessions.has(String(request.providerSessionId)) &&
+      this.#projection.lookup(request.requestId)?.request.status === "pending"
+    ) {
+      this.#systemSettle(request.requestId, "interrupted");
+    }
   }
 
   #findByProviderCallbackId(

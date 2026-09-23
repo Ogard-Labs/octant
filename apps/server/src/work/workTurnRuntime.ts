@@ -56,7 +56,7 @@ export interface WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
-    readonly onRequestSettled?: (requestId: WorkTurnRequestId, release: () => void) => void;
+    readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
 
@@ -93,6 +93,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
@@ -143,6 +144,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly onDelta?: (response: string) => void;
       /** The provider's restated task list, whole, whenever it moves. */
       readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+      readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
     },
     idle: IdleTimeout,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
@@ -204,10 +206,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let tasks: ThreadTaskProgressList | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
       const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
+      const pendingRequestCleanups = new Map<string, () => void>();
       const releaseRequestHold = (requestId: string) => {
         const hold = pendingRequestHolds.get(requestId);
         if (hold === undefined) return;
         pendingRequestHolds.delete(requestId);
+        pendingRequestCleanups.get(requestId)?.();
+        pendingRequestCleanups.delete(requestId);
         void Effect.runPromise(Deferred.succeed(hold, undefined));
       };
       const answeredToolRequestIds = new Set<string>();
@@ -296,9 +301,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "approval-request" || event.kind === "user-input-request") {
                   const hold = yield* Deferred.make<void>();
                   pendingRequestHolds.set(String(event.requestId), hold);
-                  input.onRequestSettled?.(event.requestId, () =>
-                    releaseRequestHold(event.requestId),
+                  const cleanup = input.onRequestSettled?.(event.requestId, () =>
+                    releaseRequestHold(String(event.requestId)),
                   );
+                  if (cleanup !== undefined) {
+                    pendingRequestCleanups.set(String(event.requestId), cleanup);
+                  }
                   yield* Effect.forkScoped(idle.during(Deferred.await(hold)));
                   return;
                 }
