@@ -2525,7 +2525,7 @@ describe("true partial stream/cancellation — executable gate", () => {
                   responseBytesReceived += chunk.byteLength;
                   // After receiving some response bytes (partial stream
                   // delivered), abort the client mid-stream.
-                  if (responseBytesReceived > 0 && responseBytesReceived >= 1) {
+                  if (responseBytesReceived >= 1) {
                     req.destroy();
                   }
                 }

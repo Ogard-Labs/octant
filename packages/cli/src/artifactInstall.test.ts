@@ -19,7 +19,6 @@ import {
 } from "@octant/host-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  HeadlessInstallError,
   installHeadlessArtifact,
   removeHeadlessUserData,
   stageHeadlessArtifact,

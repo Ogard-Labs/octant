@@ -1,7 +1,6 @@
 import {
   decodeBindingRevisionId,
   decodeCodeCheckoutHead,
-  decodeCodeEvidenceContentId,
   decodeCodeThread,
   decodeCodeOperationId,
   decodeCodeThreadId,

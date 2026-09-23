@@ -91,7 +91,7 @@ export class NativeSessionRuntimePool {
       clearTimeout(entry.timer);
       void this.#close(entry.resource).catch(() => undefined);
     }
-    await Promise.all([...this.#closing]);
+    await Promise.all(this.#closing);
   }
 
   #close(resource: RetainedNativeRuntime<unknown>): Promise<void> {

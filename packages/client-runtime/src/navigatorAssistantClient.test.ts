@@ -48,11 +48,11 @@ describe("navigatorAssistantClient", () => {
   it("carries the window capability and decodes the host snapshot", async () => {
     const { client: navigatorAssistant, calls } = client(() => json(snapshot));
     const result = await navigatorAssistant.snapshot();
+    const call = calls[0];
+    if (call === undefined) throw new Error("expected a navigator snapshot request");
 
-    expect(calls[0]?.url).toBe("http://127.0.0.1:4000/api/navigator-assistant/snapshot");
-    expect((calls[0]?.init.headers as Record<string, string>)["x-octant-window-capability"]).toBe(
-      windowCapability,
-    );
+    expect(call.url).toBe("http://127.0.0.1:4000/api/navigator-assistant/snapshot");
+    expect(new Headers(call.init.headers).get("x-octant-window-capability")).toBe(windowCapability);
     expect(result.status).toBe("ready");
     expect(result.defaultProvider?.modelId).toBe("model-a");
   });

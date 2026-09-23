@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  AgentProfile,
-  AgentProfileScope,
-  ExecutionResolutionReceipt,
-} from "@octant/contracts/agent-profile";
+import type { AgentProfile, AgentProfileScope } from "@octant/contracts/agent-profile";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import type {
   ProviderCatalogSnapshot,

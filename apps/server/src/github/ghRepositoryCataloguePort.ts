@@ -1036,7 +1036,7 @@ function validatedRepositoryPath(owner: string, name: string): string | undefine
  * reach contracts, events, or providers.
  */
 function redactText(value: string): string {
-  // oxlint-disable-next-line no-control-regex
+  // oxlint-disable-next-line no-control-regex -- replaces ASCII control bytes in GitHub text.
   let normalized = value.replaceAll(/[\u0000-\u001f\u007f]/g, " ");
   for (let pass = 0; pass < 5 && SECRETISH.test(normalized); pass += 1) {
     normalized = normalized.replaceAll(SECRETISH, "[redacted]");

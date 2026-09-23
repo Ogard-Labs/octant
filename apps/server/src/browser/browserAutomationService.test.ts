@@ -883,7 +883,7 @@ describe("BrowserAutomationService", () => {
     // Absent is not the same claim as empty: an empty array asserts the page
     // logged nothing, which the runtime never said. Ordinary actions must keep
     // the payload shape they already had.
-    const { runtime, service } = harness();
+    const { service } = harness();
     await service.create({ windowId, threadId: threadOne, action: action(), policy });
     const result = await service.act({ windowId, request: request() });
 

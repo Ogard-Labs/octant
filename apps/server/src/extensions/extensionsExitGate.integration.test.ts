@@ -658,8 +658,7 @@ async function sendSelectedSkillToGenericProvider(
 describe("extensions marketplace integrated exit gate", () => {
   it("exercises the provider-neutral plugin lifecycle: install disabled → trust → enable → effective use → disable/drain → remove → restart recovery", async () => {
     const context = await setupIntegrated();
-    const { entry, snapshot, effective, disabledEffective } =
-      await installAndEnableCuratedPlugin(context);
+    const { entry, effective, disabledEffective } = await installAndEnableCuratedPlugin(context);
 
     // Install is disabled and untrusted by default: zero context.
     const disabledComponent = disabledEffective.packages[0]?.components[0];
@@ -756,7 +755,7 @@ describe("extensions marketplace integrated exit gate", () => {
 
   it("records supervisor crash-loop quarantine, reconciles it idempotently on restart, and never auto-clears it", async () => {
     const context = await setupIntegrated();
-    const { entry, snapshot } = await installAndEnableCuratedPlugin(context);
+    const { entry } = await installAndEnableCuratedPlugin(context);
     const cwd = "/tmp/octant-phase10-quarantine";
     await context.supervisor.start(
       startInput(
@@ -1004,7 +1003,7 @@ describe("extensions marketplace integrated exit gate", () => {
 
   it("exercises update → rollback → interrupted-update recovery through the integrated lifecycle", async () => {
     const context = await setupIntegrated();
-    const { entry, snapshot } = await installAndEnableCuratedPlugin(context);
+    const { entry } = await installAndEnableCuratedPlugin(context);
 
     // The installed version is 0.1.2. Create an updated catalog source
     // (0.1.3) with modified skill content and inspect it through the resolver.
@@ -1534,7 +1533,7 @@ describe("extensions marketplace integrated exit gate", () => {
 
   it("cancels an active supervised process, drains it, and leaves no residual process after disable", async () => {
     const context = await setupIntegrated();
-    const { entry, snapshot } = await installAndEnableCuratedPlugin(context);
+    const { entry } = await installAndEnableCuratedPlugin(context);
     const cwd = "/tmp/octant-phase10-cancellation";
 
     // Start a supervised process.
