@@ -2267,19 +2267,12 @@ function WorkProjectOverviewSlot(props: {
         });
         if (reply.outcome.kind !== "created") return false;
         controller.retry();
-        await props.onReloadPromotion();
         return true;
       } catch {
         return false;
       }
     },
-    [
-      controller,
-      createStarterArtifactAvailable,
-      props.mutationClient,
-      props.onReloadPromotion,
-      props.projectId,
-    ],
+    [controller, createStarterArtifactAvailable, props.mutationClient, props.projectId],
   );
   return (
     <WorkOverview

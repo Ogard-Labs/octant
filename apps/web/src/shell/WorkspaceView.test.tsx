@@ -1661,7 +1661,7 @@ describe("WorkspaceView Work overview", () => {
         content: "# Notes",
       });
       expect(load).toHaveBeenCalledTimes(2);
-      expect(promotionReload).toHaveBeenCalledTimes(2);
+      expect(promotionReload).toHaveBeenCalledOnce();
     });
   });
 
