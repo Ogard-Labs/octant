@@ -43,7 +43,16 @@ import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
-import { Component, lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
@@ -2220,6 +2229,24 @@ function WorkProjectOverviewSlot(props: {
       : buildWorkOverviewModel(
           props.availability === undefined ? {} : { availability: props.availability },
         ));
+  useEffect(() => {
+    if (
+      props.overviewModel !== undefined ||
+      props.client === undefined ||
+      controller.status !== "ready"
+    ) {
+      return;
+    }
+    // Provider turns can create artifacts after this Project was selected;
+    // sync promotion only after the overview has read the authoritative projection.
+    void props.onReloadPromotion();
+  }, [
+    controller.status,
+    props.client,
+    props.onReloadPromotion,
+    props.overviewModel,
+    props.projectId,
+  ]);
   const createStarterArtifactAvailable =
     props.createStarterArtifactAvailable && props.mutationClient !== undefined;
   const handleCreateStarterArtifact = useCallback(

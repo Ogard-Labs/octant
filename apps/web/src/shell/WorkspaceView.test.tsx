@@ -1661,7 +1661,54 @@ describe("WorkspaceView Work overview", () => {
         content: "# Notes",
       });
       expect(load).toHaveBeenCalledTimes(2);
-      expect(promotionReload).toHaveBeenCalledTimes(1);
+      expect(promotionReload).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("reloads promotion when the overview finishes loading with an artifact", async () => {
+    const projectId = "00000000-0000-4000-8000-000000000901" as never;
+    const promotionReload = vi.fn(async () => undefined);
+    const load = vi.fn(async () => ({
+      projectId,
+      filesAndArtifacts: [{ id: "artifact-1", label: "notes.md", detail: "markdown" }],
+      workflowsAndThreads: [],
+      approvals: [],
+      versions: [],
+      validation: [],
+      exports: [],
+    }));
+
+    render(
+      <WorkspaceView
+        {...workProjectPropsFor({
+          availability: {
+            projectId,
+            status: "available",
+            observedAt: "2026-07-26T21:00:00.000Z" as ProjectAvailability["observedAt"],
+          },
+          workMutationClient: undefined,
+          workOverviewClient: { load } as never,
+          project: {
+            id: projectId,
+            type: "work",
+            name: "Workspace",
+            lifecycle: "active",
+            pinned: true,
+            rank: "0/1" as ProjectSummary["rank"],
+            version: 1 as ProjectSummary["version"],
+            createdAt: "2026-07-26T21:00:00.000Z" as ProjectSummary["createdAt"],
+            updatedAt: "2026-07-26T21:00:00.000Z" as ProjectSummary["updatedAt"],
+            binding: { canonicalRoot: "/Users/example/Workspace" },
+            bindingRevisionId: "30000000-0000-4000-8000-000000000901" as never,
+          },
+          promotionReload,
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("notes.md")).toBeVisible();
+      expect(promotionReload).toHaveBeenCalledOnce();
     });
   });
 });
