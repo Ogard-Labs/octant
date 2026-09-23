@@ -1,4 +1,5 @@
-import { fireEvent, render, renderHook, screen, act } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, within, act } from "@testing-library/react";
+import { OCTANT_KEYBINDING_ACTIONS } from "@octant/domain";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { KeybindingSettings } from "./KeybindingSettings";
@@ -21,6 +22,21 @@ function renderSettings(store: KeybindingStore) {
 }
 
 describe("KeybindingSettings", () => {
+  it("groups each shortcut under the area it reaches", () => {
+    renderSettings(memoryStore());
+
+    for (const action of OCTANT_KEYBINDING_ACTIONS) {
+      const heading = screen.getByRole("heading", { level: 3, name: action.area });
+      const group = heading.parentElement;
+      if (group === null) throw new Error(`Missing ${action.area} group`);
+      expect(
+        within(group).getByRole("button", {
+          name: `Change the chord for ${action.label}`,
+        }),
+      ).toBeInTheDocument();
+    }
+  });
+
   it("keeps raw JSON behind an advanced disclosure", () => {
     renderSettings(memoryStore());
 

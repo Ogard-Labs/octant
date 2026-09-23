@@ -7796,6 +7796,10 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   list-style: none;
 }
 
+.keybinding-settings__group + .keybinding-settings__group {
+  margin-top: var(--oct-space-5);
+}
+
 .keybinding-settings__list li {
   display: flex;
   align-items: center;
@@ -7813,7 +7817,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   gap: 2px;
 }
 
-.keybinding-settings__area,
 .keybinding-settings__warning {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
