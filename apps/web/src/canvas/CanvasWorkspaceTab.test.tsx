@@ -262,8 +262,8 @@ describe("CanvasWorkspaceTab", () => {
     const node = await screen.findByRole("button", { name: "Report" });
 
     fireEvent.pointerDown(node, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
-    fireEvent.pointerMove(node, { clientX: 60, clientY: 10, pointerId: 1 });
-    fireEvent.pointerUp(node, { clientX: 60, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(node, { clientX: 110, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(node, { clientX: 110, clientY: 10, pointerId: 1 });
 
     await waitFor(() => expect(reviseDiagramLayout).toHaveBeenCalledTimes(1));
     const command = reviseDiagramLayout.mock.calls[0]?.[0];
