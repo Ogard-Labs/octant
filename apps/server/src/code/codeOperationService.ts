@@ -1821,7 +1821,7 @@ export class CodeOperationService {
         );
       }
       case "create-pull-request":
-        return this.#pullRequest(command);
+        return this.#pullRequest(command, root.checkoutRoot);
       case "observe-pull-request":
         return this.#pullRequestReview(command);
       case "create-review-finding": {
@@ -2380,7 +2380,25 @@ export class CodeOperationService {
 
   async #pullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
+    checkoutRoot: string,
   ): Promise<CodeOperationResult> {
+    const observation = await this.#options.git.observe({
+      checkoutRoot,
+      maxDiffBytes: 1,
+    });
+    if (
+      observation.status === "ready" &&
+      observation.remotes !== undefined &&
+      !observation.remotes.some(
+        (remote) => remote.fetch.kind === "network" && isGitHubRemote(remote.fetch.url),
+      )
+    )
+      return decodeCodeOperationResult({
+        kind: "pull-request-state",
+        operationId: command.operationId,
+        state: "unavailable",
+        failureCode: "no-remote",
+      });
     const result = await this.#options.pullRequests.ensure(
       { threadId: command.threadId, title: command.title, body: command.body },
       new AbortController().signal,
@@ -2778,6 +2796,16 @@ export class CodeOperationService {
       operationId,
       failure: { category, message },
     });
+  }
+}
+
+function isGitHubRemote(url: string | undefined): boolean {
+  if (url === undefined) return false;
+  if (url.startsWith("git@github.com:")) return true;
+  try {
+    return new URL(url).hostname === "github.com";
+  } catch {
+    return false;
   }
 }
 

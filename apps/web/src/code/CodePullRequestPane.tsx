@@ -436,7 +436,9 @@ function CreatePullRequest(
       if (next.kind === "pull-request-state") setResult(next);
       if (next.kind === "operation-failed") setFailure(next.failure.message);
     } catch {
-      setFailure("Pull request command failed. Check GitHub authentication and retry.");
+      setFailure(
+        "Pull request command failed. Retry, and confirm the GitHub CLI is installed and signed in.",
+      );
     }
   };
 
@@ -503,7 +505,9 @@ function CreatePullRequest(
       )}
       {result?.state === "unavailable" || result?.state === "failed" ? (
         <p role="alert">
-          Pull request creation is {result.state}. Check GitHub authentication and delivery target.
+          {result.state === "unavailable" && result.failureCode === "no-remote"
+            ? "This checkout has no GitHub remote, so there is nowhere to open a pull request. Add a GitHub remote to the repository, then retry."
+            : `Pull request creation is ${result.state}. Confirm the GitHub CLI is installed and signed in and that the delivery target names a GitHub repository.`}
         </p>
       ) : null}
       {failure === undefined ? null : <p role="alert">{failure}</p>}

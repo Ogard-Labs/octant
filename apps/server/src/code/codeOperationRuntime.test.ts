@@ -1928,6 +1928,13 @@ describe("CodeOperationRuntime", () => {
   it("leaves a pull request GitHub never confirmed waiting rather than ready", async () => {
     const fixture = runtimeFixture({
       pullRequestTarget: true,
+      gitObservation: readyGitObservation([
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ]),
       pullRequestPort: {
         ensure: async () => ({ status: "unavailable" }),
         observeReview: async () => ({ status: "unavailable" }),
@@ -1952,6 +1959,40 @@ describe("CodeOperationRuntime", () => {
       { id: String(delivery), kind: "delivery", state: "ambiguous" },
     ]);
     expect(fixture.boardActivity()).toMatchObject({ executing: false, awaitingInput: true });
+    fixture.close();
+  });
+
+  it("reports a checkout with no GitHub remote instead of blaming GitHub authentication", async () => {
+    const ensure = vi.fn(async () => {
+      throw new Error("pull request ensure should not run");
+    });
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitObservation: readyGitObservation([]),
+      pullRequestPort: {
+        ensure,
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+    const delivery = operationId(110);
+
+    const created = await fixture.runtime.execute(windowId, {
+      kind: "create-pull-request",
+      operationId: delivery,
+      threadId,
+      checkoutId,
+      title: "Add the board's runtime work",
+      body: "Body",
+      idempotencyKey: "runtime-work-delivery-no-remote",
+      authorization: { kind: "approved", approvalId: operationId(111) },
+    });
+
+    expect(created).toMatchObject({
+      kind: "pull-request-state",
+      state: "unavailable",
+      failureCode: "no-remote",
+    });
+    expect(ensure).not.toHaveBeenCalled();
     fixture.close();
   });
 
@@ -2492,6 +2533,30 @@ function storedEvidence(id: number, content: string, truncated?: boolean) {
     byteLength: bytes.byteLength,
     ...(truncated === undefined ? {} : { truncated }),
   });
+}
+
+function readyGitObservation(
+  remotes: ReadonlyArray<{
+    readonly name: string;
+    readonly fetchUrl: string;
+    readonly pushUrl: string;
+  }>,
+): GitObservationResult {
+  return {
+    status: "ready",
+    checkoutRoot: "/private/exact",
+    head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+    statusEntries: [],
+    changedPaths: [],
+    insertions: 0,
+    deletions: 0,
+    stagedSummary: [],
+    diff: { text: "", byteLength: 0, truncated: false },
+    remotes,
+    upstream: null,
+    worktrees: [],
+    stateToken: "b".repeat(64),
+  };
 }
 
 function operationId(id: number) {
