@@ -94,6 +94,8 @@ import {
 } from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import {
   TurnHeader,
   TurnTime,
@@ -428,6 +430,31 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     restore: (message) => message.originRestore(message),
   });
   const turnRunning = workTurnSettlement(turns) === "running";
+  const answerWorkRequest = useCallback(
+    async (
+      request: WorkRequest,
+      resolution:
+        | { readonly kind: "approval"; readonly approved: boolean }
+        | { readonly kind: "user-input"; readonly answer: string },
+    ) => {
+      const requestClient = props.requestClient;
+      if (requestClient === undefined) return;
+      try {
+        await requestClient.execute({
+          kind: "resolve-work-request",
+          requestId: request.requestId,
+          expectedVersion: request.version,
+          resolution,
+        });
+        setPendingRequests((current) =>
+          current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
+        );
+      } catch {
+        setStatus("The answer could not be delivered.");
+      }
+    },
+    [props.requestClient],
+  );
   const images = useWorkComposerImages();
   const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
     ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
@@ -1313,6 +1340,30 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             );
           }
           if (row.kind === "request") {
+            if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+              return (
+                <ProviderApprovalPrompt
+                  onAnswer={(decision) => {
+                    void answerWorkRequest(row.request, {
+                      kind: "approval",
+                      approved: decision === "approved",
+                    });
+                  }}
+                  summary={`${row.request.detail.action}: ${row.request.detail.description}`}
+                />
+              );
+            }
+            if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
+              return (
+                <ProviderQuestionCard
+                  onAnswer={(answer) => {
+                    void answerWorkRequest(row.request, { kind: "user-input", answer });
+                  }}
+                  options={row.request.detail.options.map((label) => ({ label }))}
+                  prompt={row.request.detail.prompt}
+                />
+              );
+            }
             return (
               <div className="approval-row approval-row--request" role="status">
                 <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />

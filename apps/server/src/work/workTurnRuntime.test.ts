@@ -387,6 +387,74 @@ describe("WorkTurnRuntime", () => {
     );
   });
 
+  it("keeps the idle window open while a provider request awaits an answer", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            instanceId: ids.provider,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(ids.project)),
+            occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+            kind: "approval-request",
+            sessionId: ids.session as never,
+            requestId: "work-approval-1",
+            action: "Write a note",
+            description: "Save the provider's draft.",
+          });
+          setTimeout(() => {
+            void Effect.runPromise(
+              Queue.offer(queue, {
+                instanceId: ids.provider,
+                sequence: 2,
+                correlationId: decodeCorrelationId(String(ids.project)),
+                occurredAt: decodeTimestamp("2026-08-11T12:00:40.000Z"),
+                kind: "completed",
+                sessionId: ids.session as never,
+              }),
+            );
+          }, 40);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Wait for approval",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver: {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.succeed(connection),
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "" });
+  });
+
   it("still times out when the provider stays silent", async () => {
     const driver: ProviderDriver = {
       kind: "openai-compatible",

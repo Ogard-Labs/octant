@@ -183,6 +183,7 @@ export class WorkRequestRuntime {
     return () => {
       if (this.#connections.get(String(input.sessionId)) === input.connection) {
         this.#connections.delete(String(input.sessionId));
+        this.#requests.interruptSession(input.sessionId);
       }
     };
   }

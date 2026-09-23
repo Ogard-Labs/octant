@@ -7540,6 +7540,7 @@ export function startOctantServer(
       uuid: randomUUID,
     });
     workRequestService.hydrate();
+    workRequestService.interruptOnRestart();
     workRequestService.reconcileUnavailableRequests();
     observeWorkThreadRuntime = (threadId) => {
       const thread = workThreadProjection.read(threadId);

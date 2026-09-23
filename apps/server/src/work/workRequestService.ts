@@ -452,6 +452,17 @@ export class WorkRequestService {
       .map((entry) => this.#systemSettle(entry.request.requestId, "interrupted"));
   }
 
+  /** Interrupts every pending request because no provider session survives a restart. */
+  interruptOnRestart(): ReadonlyArray<WorkRequestServiceResult> {
+    return [...this.#projection.snapshot().values()]
+      .filter(
+        (entry) =>
+          entry.request.status === "pending" &&
+          !this.#activeDeliveries.has(String(entry.request.requestId)),
+      )
+      .map((entry) => this.#systemSettle(entry.request.requestId, "interrupted"));
+  }
+
   /** Reconciles persisted requests that became invalid while the server was offline. */
   reconcileUnavailableRequests(): ReadonlyArray<WorkRequestServiceResult> {
     return [...this.#projection.snapshot().values()]

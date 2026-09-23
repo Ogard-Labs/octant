@@ -1021,6 +1021,26 @@ describe("WorkRequestService hydration and listing", () => {
     expect(rehydratedProjection.lookup(ids.request)?.request.version).toBe(1);
   });
 
+  it("interrupts pending requests after restart because no provider session survives", () => {
+    const { service, projection } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "provider-req-1",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+    const request = recorded.request;
+
+    expect(service.interruptOnRestart()).toMatchObject([
+      { status: "ok", request: { requestId: request.requestId, status: "interrupted" } },
+    ]);
+    expect(projection.lookup(request.requestId)?.request.status).toBe("interrupted");
+  });
+
   it("lists pending requests for a Project", () => {
     const { service } = createService();
     service.record({

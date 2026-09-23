@@ -17,7 +17,7 @@ import {
   type ThreadTaskProgressList,
 } from "@octant/contracts";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
-import { Effect, Fiber, Scope, Stream } from "effect";
+import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
@@ -202,6 +202,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let response = "";
       let tasks: ThreadTaskProgressList | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
+      const pendingRequestHolds = new Set<Deferred.Deferred<void>>();
       const answeredToolRequestIds = new Set<string>();
       const events = yield* subscribeThenSend({
         connection,
@@ -212,6 +213,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.tap(() => idle.touch),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
+                if (pendingRequestHolds.size > 0) {
+                  const holds = [...pendingRequestHolds];
+                  pendingRequestHolds.clear();
+                  for (const hold of holds) {
+                    yield* Deferred.succeed(hold, undefined);
+                  }
+                }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
                 if (event.kind === "usage") input.onUsage?.(event);
@@ -283,6 +291,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       isError: execution.isError === true,
                     })
                     .pipe(Effect.catchAll(() => Effect.void));
+                  return;
+                }
+                if (event.kind === "approval-request" || event.kind === "user-input-request") {
+                  const hold = yield* Deferred.make<void>();
+                  pendingRequestHolds.add(hold);
+                  yield* Effect.forkScoped(idle.during(Deferred.await(hold)));
                   return;
                 }
                 if (isTerminalEvent(event)) terminal = event;
