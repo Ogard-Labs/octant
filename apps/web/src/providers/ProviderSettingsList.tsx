@@ -912,7 +912,7 @@ function ProviderRow(props: ProviderRowProps) {
                     required
                   />
                 </label>
-                <span className="provider-card__edit-actions">
+                <span className="provider-card__rename-actions">
                   <OctantButton
                     disabled={disabled}
                     type="submit"
