@@ -896,8 +896,6 @@ h6 {
   background: var(--octant-control-pressed);
 }
 
-}
-
 [data-view-color="red"] {
   --octant-project-view-color: var(--octant-palette-red);
 }
@@ -993,10 +991,6 @@ h6 {
   display: grid;
   min-width: 0;
   gap: 2px;
-}
-
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
 }
 
 .sidebar-profile {
@@ -4190,8 +4184,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
   .provider-details__section--capabilities dl {
     grid-template-columns: 1fr;
-  }
-
   }
 }
 
