@@ -115,11 +115,13 @@ without streaming its text. Previously saved responses are not rewritten.
 
 Provider-owned CLI login is the default. Octant launches the configured
 provider executable at its stored absolute path and points it at the provider's
-documented native profile (for example `~/.vibe`, `~/.grok`, `~/.gemini`,
-`~/.cline/data`, or `~/.qwen`). It does not copy the binary, create a second
-login, or read credentials from another desktop app. Run the provider's login
-command in a terminal, then use **Check connection** in Octant. Explicit
-API-key mode remains available for profiles that support it.
+documented native profile (for example `~/.grok`, `~/.gemini`, `~/.cline/data`,
+or `~/.qwen`). It does not copy the binary, create a second login, or read
+credentials from another desktop app. Run the provider's login command in a
+terminal, then use **Check connection** in Octant. Explicit API-key mode remains
+available for profiles that support it. Mistral Vibe from Octant requires a
+Mistral API key entered in **Settings → Providers** because its confined launch
+does not read the macOS Keychain.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,

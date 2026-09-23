@@ -474,9 +474,7 @@ interface VibeConfigurationFormProps {
 
 export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState<MistralVibeAuthentication>(
-    props.instance.configuration.authentication,
-  );
+  const authentication: MistralVibeAuthentication = "api-key";
   return (
     <form
       className="provider-card__edit provider-card__edit--vibe"
@@ -506,44 +504,22 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
           required
         />
       </label>
+      <p className="provider-settings__field-guidance">
+        Mistral Vibe requires a Mistral API key entered in Settings → Providers. The confined launch
+        does not read the macOS Keychain.
+      </p>
       <label>
-        <span>Authentication</span>
-        <OctantSelectField
-          aria-label={`Mistral Vibe authentication for ${props.instance.displayName}`}
-          className="settings-view__select"
-          onValueChange={(value) => {
-            const next = value as MistralVibeAuthentication;
-            if (next === "subscription" && credentialInput.current !== null) {
-              credentialInput.current.value = "";
-            }
-            setAuthentication(next);
-          }}
-          options={[
-            { id: "subscription", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: "Mistral API key" },
-          ]}
-          value={authentication}
+        <span>Mistral API key (leave blank to preserve)</span>
+        <OctantInput
+          aria-label={`Mistral API key for ${props.instance.displayName}`}
+          autoComplete="new-password"
+          className="settings-view__text-input"
+          disabled={!props.credentialManagementAvailable}
+          ref={credentialInput}
+          spellCheck={false}
+          type="password"
         />
       </label>
-      {authentication === "api-key" ? (
-        <label>
-          <span>Mistral API key (leave blank to preserve)</span>
-          <OctantInput
-            aria-label={`Mistral API key for ${props.instance.displayName}`}
-            autoComplete="new-password"
-            className="settings-view__text-input"
-            disabled={!props.credentialManagementAvailable}
-            ref={credentialInput}
-            spellCheck={false}
-            type="password"
-          />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe
-          profile and binary.
-        </p>
-      )}
       <OctantButton
         disabled={props.disabled}
         type="submit"

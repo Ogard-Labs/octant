@@ -31,6 +31,7 @@ export type AcpProviderKind = Extract<
   | "fx"
 >;
 export type AcpSessionMode = "chat" | "work" | "code";
+export type AcpAuthenticationKind = "provider-owned" | "api-key";
 
 export interface AcpManagedFile {
   readonly path: string;
@@ -175,6 +176,8 @@ export interface AcpProviderProfile {
   readonly authentication:
     | { readonly kind: "provider-owned" }
     | { readonly kind: "delegated-browser"; readonly apiKeyVariable: string };
+  /** Authentication modes the Settings surface may offer for this profile. */
+  readonly supportedAuthentication?: ReadonlyArray<AcpAuthenticationKind>;
   readonly unauthenticatedMessage: string;
   readonly process: AcpProcessProfile;
 }
@@ -464,6 +467,7 @@ const vibeProfile: AcpProviderProfile = {
   closesSessions: true,
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
+  supportedAuthentication: ["api-key"],
   unauthenticatedMessage:
     "Mistral Vibe is not authenticated. Octant cannot read the key Vibe keeps in the macOS Keychain; switch this provider to API key authentication in Settings → Providers and enter a Mistral API key.",
   process: {

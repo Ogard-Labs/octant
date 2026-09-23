@@ -121,8 +121,7 @@ export function ProviderCreateForm(
   const [providerType, setProviderType] = useState<ProviderCreateProviderType>(initialProviderType);
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
-  const [vibeAuthentication, setVibeAuthentication] =
-    useState<MistralVibeAuthentication>("subscription");
+  const [vibeAuthentication] = useState<MistralVibeAuthentication>("api-key");
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
   const [geminiAuthentication, setGeminiAuthentication] =
@@ -742,15 +741,8 @@ export function ProviderCreateForm(
             ) : null}
             {providerType === "mistral-vibe" ? (
               <VibeCreateAuthenticationFields
-                authentication={vibeAuthentication}
                 credentialInput={credentialInput}
                 credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={(next) => {
-                  if (next === "subscription" && credentialInput.current !== null) {
-                    credentialInput.current.value = "";
-                  }
-                  setVibeAuthentication(next);
-                }}
               />
             ) : null}
             {providerType === "grok" ? (

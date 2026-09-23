@@ -1,7 +1,6 @@
 import type {
   ClaudeAuthentication,
   GrokAuthentication,
-  MistralVibeAuthentication,
   ProviderCredentialStatus,
   ProviderInstanceId,
   ProviderObservedState,
@@ -63,47 +62,27 @@ export function ClaudeCreateAuthenticationFields(props: {
 }
 
 export function VibeCreateAuthenticationFields(props: {
-  readonly authentication: MistralVibeAuthentication;
   readonly credentialInput: RefObject<HTMLInputElement | null>;
   readonly credentialManagementAvailable: boolean;
-  readonly onAuthenticationChange: (authentication: MistralVibeAuthentication) => void;
 }) {
   return (
     <>
+      <p className="provider-settings__field-guidance">
+        Mistral Vibe requires a Mistral API key entered in Settings → Providers. The confined launch
+        does not read the macOS Keychain.
+      </p>
       <label>
-        <span>Authentication</span>
-        <OctantSelectField
-          aria-label="Mistral Vibe authentication"
-          className="settings-view__select window-no-drag"
-          onValueChange={(value) =>
-            props.onAuthenticationChange(value as MistralVibeAuthentication)
-          }
-          options={[
-            { id: "subscription", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: "Mistral API key" },
-          ]}
-          value={props.authentication}
+        <span>Mistral API key</span>
+        <OctantInput
+          aria-label="Mistral API key"
+          autoComplete="new-password"
+          className="settings-view__text-input window-no-drag"
+          disabled={!props.credentialManagementAvailable}
+          ref={props.credentialInput}
+          spellCheck={false}
+          type="password"
         />
       </label>
-      {props.authentication === "api-key" ? (
-        <label>
-          <span>Mistral API key</span>
-          <OctantInput
-            aria-label="Mistral API key"
-            autoComplete="new-password"
-            className="settings-view__text-input window-no-drag"
-            disabled={!props.credentialManagementAvailable}
-            ref={props.credentialInput}
-            spellCheck={false}
-            type="password"
-          />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe
-          profile and binary.
-        </p>
-      )}
     </>
   );
 }
