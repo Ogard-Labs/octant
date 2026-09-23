@@ -235,6 +235,7 @@ export class WorkThreadService {
             executing: activity.executing,
             // Carried only when true, so an idle row's payload stays as it was.
             ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+            ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
             ...(due === undefined ? {} : { followUpDue: due }),
           });
         }
@@ -294,6 +295,7 @@ export class WorkThreadService {
           executing: activity.executing,
           // Carried only when true, so an idle row's payload stays as it was.
           ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+          ...(activity.awaitingKind === undefined ? {} : { awaitingKind: activity.awaitingKind }),
           ...(due === undefined ? {} : { followUpDue: due }),
         });
       }
@@ -898,6 +900,7 @@ export class WorkThreadService {
 export interface WorkThreadRuntimeActivity {
   readonly executing: boolean;
   readonly awaitingInput?: boolean;
+  readonly awaitingKind?: "approval" | "user-input";
 }
 
 const WORK_COMPLETE_REFUSALS = {

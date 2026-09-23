@@ -297,10 +297,25 @@ describe("buildWorkThreadNavigation rest and attention", () => {
       activity: "attention",
       completedAt: "2026-09-01T10:00:00.000Z",
     });
-    // Working outranks attention while the turn still runs.
+    // Attention outranks working while the held turn waits on the person.
     expect(rows[1]).toMatchObject({
-      activity: "working",
+      activity: "attention",
       snooze: { until: "2026-09-08T09:00:00.000Z" },
     });
+  });
+
+  it("shows a thread whose running turn is waiting on an approval as needing attention", () => {
+    const active = workThread();
+    expect(
+      buildWorkThreadNavigation(
+        [active],
+        [{ threadId, executing: true, awaitingInput: true, awaitingKind: "approval" }],
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        activity: "attention",
+        awaitingKind: "approval",
+      }),
+    ]);
   });
 });
