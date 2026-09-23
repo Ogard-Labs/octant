@@ -27,6 +27,7 @@
 @import "./styles/palette.css";
 @import "./styles/project-threads.css";
 @import "./styles/surface.css";
+@import "./styles/board.css";
 
 :root {
   color-scheme: dark;
@@ -8562,11 +8563,10 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 /* Thread boards.
    The page shell, header, and toolbar come from the surface language;
    columns and cards from the design system (.board, .board-col, .board-card,
-   .st, .fact in octant.css). Everything here is the app-specific frame
-   around them — filter popovers — plus the two grouping layouts and
-   semantic markup (card lists, button titles) the system board vocabulary
-   does not carry. The .code-board__header rules stay for the issue
-   browsers, which still draw their own title band. */
+   .st, .fact in octant.css). The shared board card/list details now live in
+   board.css; this file keeps the app-specific frame around them — filter
+   popovers and code-board interaction details. The .code-board__header rules
+   stay for the issue browsers, which still draw their own title band. */
 .code-board-layer {
   position: absolute;
   inset: 0;
@@ -8915,82 +8915,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   overflow-y: auto;
 }
 
-.code-board .board-col {
-  max-height: min(calc(100vh - 230px), 720px);
-  overflow: hidden;
-}
-
-.code-board .board-col-body {
-  gap: var(--oct-space-2);
-  max-height: 100%;
-  padding: var(--oct-space-2) 0;
-}
-
-.code-board .board-card {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid var(--oct-border-soft);
-  font-family: var(--oct-font-display);
-}
-
-.code-board .board-card:hover {
-  background: var(--oct-fg-soft);
-}
-
-.code-board .board-card-top {
-  align-items: center;
-  gap: var(--oct-space-2);
-  margin-bottom: 0;
-}
-
-.code-board .board-card-title {
-  -webkit-line-clamp: 2;
-  font-family: var(--oct-font-display);
-  font-size: var(--octant-ui-font-size);
-  font-weight: 500;
-  line-height: var(--oct-leading-snug);
-}
-
-.code-board .board-card-facts {
-  flex-wrap: wrap;
-  gap: var(--oct-space-1) var(--oct-space-2);
-  overflow: visible;
-  font-size: var(--oct-text-xs);
-  line-height: 1.3;
-  white-space: normal;
-  color: var(--oct-meta);
-}
-
-.code-board .board-card-facts .fact {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.code-board .board-card-facts .fact__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Waiting remains a server-derived status, but the board no longer turns
-   every blocked card into a brass warning banner. */
-.code-board .st-waiting,
-.code-board .board-card-facts .fact.warn,
-.code-board .board-card-blocked {
-  color: var(--oct-muted);
-}
-
-.code-board .board-card-blocked {
-  margin-top: 0;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border-color: var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
-  font-size: var(--oct-text-xs);
-}
-
 .code-board .code-board__card-details {
   margin-top: var(--oct-space-1);
 }
@@ -8998,96 +8922,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .code-board .code-board__card-details summary,
 .code-board .code-board__card-meta {
   font-family: var(--oct-font-display);
-}
-
-/* Pull-request chips inside a card keep the compact facts grammar and
-   truncate so a long PR title never forces the card wider than its column. */
-.board-card-pr-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.board-card-pr,
-.board-card-pr-more {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  max-width: 100%;
-  padding: 0 var(--oct-space-1);
-  border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  color: var(--oct-meta);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  line-height: 1.3;
-}
-
-.board-card-pr {
-  justify-content: flex-start;
-  text-align: left;
-  cursor: pointer;
-}
-
-.board-card-pr:hover {
-  border-color: var(--oct-border);
-  background: var(--oct-fg-soft);
-}
-
-.board-card-pr .icon {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
-}
-
-.board-card-pr-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.board-card-pr-meta {
-  flex: 0 0 auto;
-  color: var(--oct-muted);
-}
-
-.board-card-pr-more {
-  justify-content: center;
-  color: var(--oct-muted);
-  font-style: italic;
-}
-
-/* cards render in a semantic list; the system class carries the layout,
-   this strips the list chrome the styleguide's plain divs never had */
-ul.board-col-body {
-  margin: 0;
-  list-style: none;
-}
-
-/* the column heading is an h2 for the document outline; a long Project
-   name truncates rather than wrapping the count onto a second line */
-.board-col-head h2 {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Project grouping stacks full-width sections that flow their cards in a
-   grid; the recovery column follows the same shape in either grouping */
-.board[data-grouping="project"] .board-col-body {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
-  gap: var(--oct-space-2);
-  padding-right: 0;
-  overflow: visible;
 }
 
 /* the whole card title is the click target; the system card supplies all
@@ -9107,12 +8941,6 @@ ul.board-col-body {
 
 .code-board__card-open:hover .board-card-title {
   text-decoration: underline;
-}
-
-/* the visible status chip must not compress against a long title */
-.board-card-top .badge {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 .code-board__card-details {
@@ -9251,19 +9079,6 @@ ul.board-col-body {
   .code-board__body {
     overflow-x: hidden;
     overflow-y: auto;
-  }
-}
-
-/* When the user zooms in, the column width may exceed the viewport. Keep
-   the board horizontally scrollable and shrink the minimum column width so a
-   single column is still usable. */
-@media (max-width: 260px) {
-  .board {
-    grid-template-columns: repeat(4, minmax(180px, 1fr));
-  }
-
-  .code-board .board-card-facts .fact {
-    white-space: normal;
   }
 }
 
