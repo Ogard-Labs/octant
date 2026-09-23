@@ -446,6 +446,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           expectedVersion: request.version,
           resolution,
         });
+        setStatus(undefined);
         setPendingRequests((current) =>
           current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
         );
@@ -455,6 +456,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     },
     [props.requestClient],
   );
+
+  useEffect(() => {
+    setPendingRequests([]);
+    setErrorMessage(undefined);
+    setStatus(undefined);
+  }, [props.threadId]);
   const images = useWorkComposerImages();
   const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
     ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),

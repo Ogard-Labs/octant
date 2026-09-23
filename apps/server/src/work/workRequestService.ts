@@ -458,7 +458,8 @@ export class WorkRequestService {
       .filter(
         (entry) =>
           entry.request.status === "pending" &&
-          !this.#activeDeliveries.has(String(entry.request.requestId)),
+          !this.#activeDeliveries.has(String(entry.request.requestId)) &&
+          entry.request.delivery?.confirmed !== true,
       )
       .map((entry) => this.#systemSettle(entry.request.requestId, "interrupted"));
   }
