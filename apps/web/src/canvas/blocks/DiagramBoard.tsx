@@ -215,8 +215,14 @@ export function DiagramBoard(props: DiagramBoardProps) {
     if (drag === undefined) return;
     releasePointer(event);
     if (drag.kind !== "node" || drag.nodeId === undefined || !drag.moved) return;
-    const moved = overrides.get(drag.nodeId) ?? byId.get(drag.nodeId);
-    if (moved !== undefined) void commit(drag.nodeId, moved.x, moved.y);
+    // Compute from the gesture itself. Reading `overrides` here races a sync
+    // pointerMove→pointerUp (common in tests and fast releases): setState may
+    // not have committed yet, so commit would see the pre-drag position and
+    // no-op.
+    const factor = scale();
+    const x = Math.round(drag.startX + (event.clientX - drag.startClientX) * factor);
+    const y = Math.round(drag.startY + (event.clientY - drag.startClientY) * factor);
+    void commit(drag.nodeId, x, y);
   };
 
   const onNodeKeyDown = (event: KeyboardEvent<SVGGElement>, nodeId: string) => {

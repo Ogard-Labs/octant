@@ -44,6 +44,16 @@ describe("Surface", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No threads yet");
   });
 
+  it("can use navigation as the surface landmark", () => {
+    render(
+      <Surface ariaLabel="Projects" landmark="nav">
+        <SurfaceHeader title="Projects" />
+      </Surface>,
+    );
+
+    expect(screen.getByRole("navigation", { name: "Projects" })).toBeInTheDocument();
+  });
+
   it("labels a section with the shared hairline heading", () => {
     render(
       <SurfaceSection label="Needs you" note="Nothing is waiting.">
