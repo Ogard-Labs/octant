@@ -520,21 +520,27 @@ function CodeBoardBody(props: {
   // it has nothing, and one quiet line says why the board is empty.
   const emptyNote =
     cards.length === 0 ? (
-      <div className="code-board__note" role="status">
-        <span className="oct-row-label">
-          {hasActiveFilters ? "No Code threads match these filters" : "No Code threads yet"}
-        </span>
-        <span>
-          {hasActiveFilters
-            ? activeFilterSummary(props.filters)
-            : "Create a Code thread to see it here."}
-        </span>
-        {hasActiveFilters ? (
-          <OctantButton onClick={props.onResetFilters} size="sm" type="button" variant="ghost">
-            Clear filters
-          </OctantButton>
-        ) : null}
-      </div>
+      <SurfaceEmpty
+        {...(hasActiveFilters
+          ? {
+              action: (
+                <OctantButton
+                  onClick={props.onResetFilters}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear filters
+                </OctantButton>
+              ),
+              detail: activeFilterSummary(props.filters),
+              title: "No Code threads match these filters",
+            }
+          : {
+              detail: "Create a Code thread to see it here.",
+              title: "No Code threads yet",
+            })}
+      />
     ) : null;
   const columns = groupCodeBoardCards(cards, props.grouping, { projects: props.projects });
   // Lanes are the workflow on the board; stacked into a list, an empty lane
