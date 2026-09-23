@@ -2455,6 +2455,20 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
     observe: async ({ checkoutRoot, maxDiffBytes }) =>
       mapGitObservation(await git.observe(checkoutRoot), maxDiffBytes),
+    observeRemotes: async ({ checkoutRoot }) => {
+      const remotes = await git.observeRemotes(checkoutRoot);
+      return remotes?.map((remote) => ({
+        name: remote.name,
+        fetch:
+          remote.fetchUrl.length === 0
+            ? { kind: "local" as const }
+            : { kind: "network" as const, url: remote.fetchUrl },
+        push:
+          remote.pushUrl.length === 0
+            ? { kind: "local" as const }
+            : { kind: "network" as const, url: remote.pushUrl },
+      }));
+    },
     stage: (input) => git.stage(input),
     discard: (input) => git.discard(input),
     commit: (input) =>

@@ -343,6 +343,14 @@ export interface CodeOperationGitPort {
       readonly state: "active" | "locked" | "prunable" | "unavailable";
     }[];
   }>;
+  readonly observeRemotes?: (input: { readonly checkoutRoot: string }) => Promise<
+    | readonly {
+        readonly name: string;
+        readonly fetch: { readonly kind: "network" | "local"; readonly url?: string };
+        readonly push: { readonly kind: "network" | "local"; readonly url?: string };
+      }[]
+    | undefined
+  >;
   readonly stage: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
@@ -2382,15 +2390,13 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
     checkoutRoot: string,
   ): Promise<CodeOperationResult> {
-    const observation = await this.#options.git.observe({
-      checkoutRoot,
-      maxDiffBytes: 1,
-    });
+    const remotes = await this.#options.git.observeRemotes?.({ checkoutRoot });
     if (
-      observation.status === "ready" &&
-      observation.remotes !== undefined &&
-      !observation.remotes.some(
-        (remote) => remote.fetch.kind === "network" && isGitHubRemote(remote.fetch.url),
+      remotes !== undefined &&
+      !remotes.some(
+        (remote) =>
+          (remote.fetch.kind === "network" && isGitHubRemote(remote.fetch.url)) ||
+          (remote.push.kind === "network" && isGitHubRemote(remote.push.url)),
       )
     )
       return decodeCodeOperationResult({
