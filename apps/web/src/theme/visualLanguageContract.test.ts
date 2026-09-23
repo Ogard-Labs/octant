@@ -378,7 +378,7 @@ describe("the public-block visual language", () => {
   });
 
   it("gives icon-only controls two sizes: the rail button and the row action", () => {
-    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const styles = readFileSync(join(webRoot, "styles/project-threads.css"), "utf8");
     const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
     // A panel's icon control is the 28px rail button. The terminal's actions
     // button was 26px and both Refresh buttons took a rem size from the recipe,
