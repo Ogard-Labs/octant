@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { WorkspaceSurfaceDragState } from "./useWorkspaceTabDrag";
 import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
 
@@ -36,7 +37,12 @@ export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDrag
       <div
         aria-hidden="true"
         className="workspace-drag-preview"
-        style={{ left: props.drag.point.x + 12, top: props.drag.point.y + 12 }}
+        style={
+          {
+            "--workspace-drag-preview-left": `${props.drag.point.x + 12}px`,
+            "--workspace-drag-preview-top": `${props.drag.point.y + 12}px`,
+          } as CSSProperties
+        }
       >
         {props.drag.source.title}
       </div>

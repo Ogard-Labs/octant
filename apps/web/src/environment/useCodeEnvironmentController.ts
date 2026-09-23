@@ -6,6 +6,7 @@ import type {
   ProjectSummary,
 } from "@octant/contracts";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
 
 export type CodeEnvironmentControllerStatus = "idle" | "loading" | "ready" | "error";
 
@@ -101,7 +102,7 @@ export function useCodeEnvironmentController(
         if (!mounted.current || request !== generation.current) return;
         setStatus("error");
         setObservation(undefined);
-        setErrorMessage(failureMessage(error));
+        setErrorMessage(failureMessage(error, "Octant Project service is unavailable."));
       } finally {
         if (activeRequest.current === controller) activeRequest.current = undefined;
       }
@@ -166,13 +167,4 @@ function required(value: string | undefined): string {
     throw new Error("Octant Project authority is unavailable.");
   }
   return value;
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Project service is unavailable.";
 }

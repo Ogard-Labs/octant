@@ -9,7 +9,10 @@ import type {
   ProjectId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { failureMessage } from "../lib/failureMessage";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
+
+const LOCAL_SERVERS_UNAVAILABLE = "Octant Local servers are unavailable.";
 
 export type LocalServersStatus = "idle" | "loading" | "ready" | "error";
 
@@ -145,7 +148,7 @@ export function useLocalServersController(
         // failure the user should see.
         if (!mounted.current || request !== generation.current || controller.signal.aborted) return;
         if (reason !== "poll") setStatus("error");
-        setErrorMessage(failureMessage(error));
+        setErrorMessage(failureMessage(error, LOCAL_SERVERS_UNAVAILABLE));
       } finally {
         if (active.current === controller) active.current = undefined;
       }
@@ -201,7 +204,10 @@ export function useLocalServersController(
         if (result.kind === "local-server-rejected") setFailure(result.failure);
         return undefined;
       } catch (error) {
-        setFailure({ category: "unavailable", message: failureMessage(error) as never });
+        setFailure({
+          category: "unavailable",
+          message: failureMessage(error, LOCAL_SERVERS_UNAVAILABLE) as never,
+        });
         return undefined;
       } finally {
         if (mounted.current) setBusyListenerId(undefined);
@@ -242,7 +248,10 @@ export function useLocalServersController(
         return false;
       } catch (error) {
         if (mounted.current) {
-          setFailure({ category: "unavailable", message: failureMessage(error) as never });
+          setFailure({
+            category: "unavailable",
+            message: failureMessage(error, LOCAL_SERVERS_UNAVAILABLE) as never,
+          });
         }
         return false;
       } finally {
@@ -263,13 +272,4 @@ export function useLocalServersController(
     stop,
     dismissFailure: () => setFailure(undefined),
   };
-}
-
-function failureMessage(error: unknown): string {
-  return typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-    ? error.message
-    : "Octant Local servers are unavailable.";
 }
