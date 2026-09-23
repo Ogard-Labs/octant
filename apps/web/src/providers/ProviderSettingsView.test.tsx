@@ -267,6 +267,49 @@ describe("ProviderSettingsView", () => {
     expect(props.onRemove).toHaveBeenCalledWith(id);
   });
 
+  it("shows rename feedback only after a successful save", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ onRename: vi.fn(async () => true) });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const input = screen.getByLabelText("Display name for Existing CLI");
+    await user.clear(input);
+    await user.type(input, "Renamed CLI");
+    await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
+
+    expect(props.onRename).toHaveBeenCalledOnce();
+    const status = await screen.findByRole("status", { name: /rename status/i });
+    expect(status).toHaveTextContent("Saved");
+
+    fireEvent.change(input, { target: { value: "Changed again" } });
+    expect(status).toHaveTextContent("");
+  });
+
+  it("leaves rename feedback empty when saving fails", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ onRename: vi.fn(async () => false) });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
+
+    expect(screen.getByRole("status", { name: /rename status/i })).toHaveTextContent("");
+  });
+
+  it("clears Saved when retrying a rename fails", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const props = fixture({ onRename });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const save = screen.getByRole("button", { name: "Save name for Existing CLI" });
+    await user.click(save);
+    const status = await screen.findByRole("status", { name: /rename status/i });
+    expect(status).toHaveTextContent("Saved");
+
+    await user.click(save);
+    await waitFor(() => expect(status).toHaveTextContent(""));
+  });
+
   it("creates Codex from the shared accessible provider form", async () => {
     const user = userEvent.setup();
     const props = fixture();
@@ -2607,6 +2650,7 @@ function fixture(
     credentialManagementAvailable?: boolean;
     discoverySnapshot?: DiscoverySnapshot;
     onOpenExternalUrl?: (url: string) => void;
+    onRename?: ProviderSettingsViewProps["onRename"];
   } = {},
 ): ProviderSettingsViewProps {
   return {
@@ -2687,7 +2731,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onRename: vi.fn(async () => true),
+    onRename: options.onRename ?? vi.fn(async () => true),
     onChangeBinary: vi.fn(async () => true),
     onChangeClaudeConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
