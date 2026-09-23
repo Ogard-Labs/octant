@@ -278,20 +278,36 @@ describe("ProviderSettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
 
     expect(props.onRename).toHaveBeenCalledOnce();
-    expect(await screen.findByRole("status", { name: /saved/i })).toBeVisible();
+    const status = await screen.findByRole("status", { name: /rename status/i });
+    expect(status).toHaveTextContent("Saved");
 
     fireEvent.change(input, { target: { value: "Changed again" } });
-    expect(screen.queryByRole("status", { name: /saved/i })).not.toBeInTheDocument();
+    expect(status).toHaveTextContent("");
   });
 
-  it("does not show rename feedback when saving fails", async () => {
+  it("leaves rename feedback empty when saving fails", async () => {
     const user = userEvent.setup();
     const props = fixture({ onRename: vi.fn(async () => false) });
     renderExpanded(<ProviderSettingsView {...props} />);
 
     await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
 
-    expect(screen.queryByRole("status", { name: /saved/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: /rename status/i })).toHaveTextContent("");
+  });
+
+  it("clears Saved when retrying a rename fails", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const props = fixture({ onRename });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const save = screen.getByRole("button", { name: "Save name for Existing CLI" });
+    await user.click(save);
+    const status = await screen.findByRole("status", { name: /rename status/i });
+    expect(status).toHaveTextContent("Saved");
+
+    await user.click(save);
+    await waitFor(() => expect(status).toHaveTextContent(""));
   });
 
   it("creates Codex from the shared accessible provider form", async () => {

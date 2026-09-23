@@ -893,6 +893,7 @@ function ProviderRow(props: ProviderRowProps) {
                 noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
+                  setRenameSaved(false);
                   const data = new FormData(event.currentTarget);
                   void props
                     .onRename(props.instance.id, String(data.get("displayName") ?? ""))
@@ -922,15 +923,14 @@ function ProviderRow(props: ProviderRowProps) {
                   >
                     Save
                   </OctantButton>
-                  {renameSaved ? (
-                    <span
-                      aria-label="Saved"
-                      className="oct-meta provider-card__saved"
-                      role="status"
-                    >
-                      Saved
-                    </span>
-                  ) : null}
+                  <span
+                    aria-label="Rename status"
+                    aria-live="polite"
+                    className="oct-meta provider-card__saved"
+                    role="status"
+                  >
+                    {renameSaved ? "Saved" : ""}
+                  </span>
                 </span>
               </form>
               {isCli ? (

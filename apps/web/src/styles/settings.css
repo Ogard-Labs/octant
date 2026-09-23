@@ -2610,6 +2610,7 @@ textarea.settings-view__text-input {
   align-self: center;
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
+  min-width: 5ch;
 }
 
 .provider-card__configuration {
