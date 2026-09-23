@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -34,15 +34,14 @@ describe("WorkPromotionFlow", () => {
   it("requires explicit approve or dismiss and never switches mode silently", async () => {
     const user = userEvent.setup();
     const propose = vi.fn(async () => pendingProposal);
-    const approve = vi.fn(
-      async (): Promise<WorkPromotionProposal> =>
-        decodeWorkPromotionProposal({
-          ...pendingProposal,
-          status: "approved",
-          decidedAt: "2026-07-22T08:05:00.000Z",
-          linkedCodeThreadId: "00000000-0000-4000-8000-000000000910",
-          version: 2,
-        }),
+    const approve = vi.fn(async (): Promise<WorkPromotionProposal> =>
+      decodeWorkPromotionProposal({
+        ...pendingProposal,
+        status: "approved",
+        decidedAt: "2026-07-22T08:05:00.000Z",
+        linkedCodeThreadId: "00000000-0000-4000-8000-000000000910",
+        version: 2,
+      }),
     );
     const dismiss = vi.fn(async () => true);
     const onOpenLinkedCodeThread = vi.fn();
@@ -129,18 +128,24 @@ describe("WorkPromotionFlow", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Propose a Code thread" })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Propose a Code thread" })).toBeNull();
       expect(propose).not.toHaveBeenCalled();
-      const selector = screen.getByRole("combobox", {
-        name: missing === "artifact" ? "Selected Work artifact" : "Target Code Project",
-      });
-      expect(selector).toHaveTextContent(
-        missing === "artifact" ? "No Work artifacts available" : "No Code Projects available",
+      const proposal = screen.getByRole("region", { name: "Continue in Code" });
+      expect(within(proposal).getByRole("status")).toHaveTextContent(
+        missing === "artifact"
+          ? "No Work artifact to hand over yet"
+          : "No active Code Project to target",
       );
-      expect(selector).toBeDisabled();
-      const form = selector.closest("form");
-      if (form === null) throw new Error("Expected the proposal form");
-      fireEvent.submit(form);
+      expect(
+        screen.queryByRole("combobox", {
+          name: missing === "artifact" ? "Selected Work artifact" : "Target Code Project",
+        }),
+      ).toBeNull();
+      expect(
+        screen.getByRole("combobox", {
+          name: missing === "artifact" ? "Target Code Project" : "Selected Work artifact",
+        }),
+      ).toBeEnabled();
       expect(propose).not.toHaveBeenCalled();
     },
   );

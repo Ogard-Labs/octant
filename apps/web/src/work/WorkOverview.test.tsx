@@ -365,16 +365,14 @@ describe("WorkOverview", () => {
       />,
     );
 
-    const composer = screen.getByRole("region", { name: "Create starter artifact" });
+    const composer = screen.getByRole("region", { name: "Starter note" });
     const pathInput = within(composer).getByRole("textbox", { name: "Artifact path" });
     const contentInput = within(composer).getByRole("textbox", {
       name: "Starter artifact content",
     });
 
     expect(pathInput).toHaveValue("notes.md");
-    expect(within(composer).getByRole("combobox", { name: "Artifact kind" })).toHaveTextContent(
-      "markdown",
-    );
+    expect(within(composer).queryByRole("combobox", { name: "Artifact kind" })).toBeNull();
 
     await user.type(contentInput, "# Kickoff notes");
     await user.click(within(composer).getByRole("button", { name: "Create starter artifact" }));
@@ -401,7 +399,7 @@ describe("WorkOverview", () => {
       />,
     );
 
-    const composer = screen.getByRole("region", { name: "Create starter artifact" });
+    const composer = screen.getByRole("region", { name: "Starter note" });
     const pathInput = within(composer).getByRole("textbox", { name: "Artifact path" });
     const contentInput = within(composer).getByRole("textbox", {
       name: "Starter artifact content",
@@ -432,9 +430,7 @@ describe("WorkOverview", () => {
       />,
     );
 
-    expect(
-      screen.queryByRole("region", { name: "Create starter artifact" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Starter note" })).not.toBeInTheDocument();
   });
 });
 
