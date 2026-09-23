@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { GitHistoryReader } from "@octant/plugin-api/git-history";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
@@ -235,7 +235,11 @@ function BoundHistory(props: GitHistoryPanelProps) {
           <table className="git-history__table" aria-label="Commits">
             <thead>
               <tr>
-                <th scope="col" style={{ width: graphWidth }}>
+                <th
+                  className="git-history__graph-column"
+                  scope="col"
+                  style={{ "--git-history-graph-width": `${graphWidth}px` } as CSSProperties}
+                >
                   Graph
                 </th>
                 <th scope="col">Commit</th>
@@ -253,7 +257,11 @@ function BoundHistory(props: GitHistoryPanelProps) {
             <tbody>
               {rows[0] && rows[0].start > 0 ? (
                 <tr aria-hidden="true">
-                  <td colSpan={1} style={{ height: rows[0].start, padding: 0 }} />
+                  <td
+                    className="git-history__spacer"
+                    colSpan={1}
+                    style={{ "--git-history-spacer-height": `${rows[0].start}px` } as CSSProperties}
+                  />
                 </tr>
               ) : null}
               {rows.map((row) => {
@@ -324,11 +332,13 @@ function BoundHistory(props: GitHistoryPanelProps) {
               {rows.length > 0 ? (
                 <tr aria-hidden="true">
                   <td
+                    className="git-history__spacer"
                     colSpan={1}
-                    style={{
-                      height: Math.max(0, virtual.getTotalSize() - (rows.at(-1)?.end ?? 0)),
-                      padding: 0,
-                    }}
+                    style={
+                      {
+                        "--git-history-spacer-height": `${Math.max(0, virtual.getTotalSize() - (rows.at(-1)?.end ?? 0))}px`,
+                      } as CSSProperties
+                    }
                   />
                 </tr>
               ) : null}

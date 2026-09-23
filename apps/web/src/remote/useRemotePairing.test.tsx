@@ -6,7 +6,6 @@ import {
   createClientHostRegistry,
   createInMemoryClientHostRegistryStorage,
   createInMemoryDeviceKeyStore,
-  createRemotePairingClient,
   createRemoteSessionBridge,
   type RemotePairingClient,
   type RemoteSessionBridge,
@@ -51,7 +50,6 @@ function createIdleClient(): RemotePairingClient {
 async function seedApprovedDevice(
   server: ReturnType<typeof createFakeRemoteServer>,
   store: ReturnType<typeof createInMemoryDeviceKeyStore>,
-  config: Parameters<typeof createFakeRemoteServer>[0] = {},
 ): Promise<void> {
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",

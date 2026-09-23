@@ -138,6 +138,7 @@
 .context-window-popover__meter > span {
   min-width: 2px;
   height: 100%;
+  width: var(--context-window-meter-size);
   background: var(--context-window-tone);
 }
 

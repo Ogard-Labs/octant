@@ -78,17 +78,14 @@ describe("ProviderSettingsView", () => {
 
   it("adds no pane heading of its own and orders discovery, then providers, then defaults", () => {
     renderProviderSettings(
-      <ProviderSettingsView
-        {...fixture()}
-        discovery={<section aria-label="Detected on this Mac" />}
-      />,
+      <ProviderSettingsView {...fixture()} discovery={<section aria-label="Find providers" />} />,
     );
 
     // The settings shell owns the pane's single visible title; the pane body
     // must not repeat a "Providers" heading of its own.
     expect(screen.queryByRole("heading", { name: "Providers" })).not.toBeInTheDocument();
 
-    const discovery = screen.getByRole("region", { name: "Detected on this Mac" });
+    const discovery = screen.getByRole("region", { name: "Find providers" });
     const providers = screen.getByRole("region", { name: "Providers" });
     const defaults = screen.getByRole("region", { name: "Defaults" });
     expect(within(defaults).getByLabelText("Permission persistence")).toBeVisible();
@@ -175,6 +172,13 @@ describe("ProviderSettingsView", () => {
 
     expect(screen.getByText("1 model")).toBeVisible();
     expect(screen.getByRole("region", { name: "Providers" })).toBeVisible();
+  });
+
+  it("omits provider metadata when the driver label is already the display name", () => {
+    renderProviderSettings(<ProviderSettingsView {...fixture({ instance: cliNamedProvider() })} />);
+
+    const row = screen.getByRole("article", { name: "Codex CLI" });
+    expect(row.querySelector(".prov-main > .prov-meta")).toBeNull();
   });
 
   it("keeps a stable feedback slot while provider status changes", () => {

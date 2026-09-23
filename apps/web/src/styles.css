@@ -19,7 +19,6 @@
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";
-@import "./styles/polish.css";
 @import "./styles/remote-pairing.css";
 @import "./styles/remote-shell.css";
 @import "./styles/artifacts.css";
@@ -1598,6 +1597,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-weight: 500;
   user-select: none;
   -webkit-user-select: none;
+  transition:
+    background-color var(--oct-motion-fast) ease,
+    color var(--oct-motion-fast) ease;
 }
 
 .workspace-pane__grip:hover {
@@ -1679,6 +1681,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .workspace-drag-preview {
   position: fixed;
+  top: var(--workspace-drag-preview-top);
+  left: var(--workspace-drag-preview-left);
   z-index: 100;
   max-width: 220px;
   padding: 5px 9px;
@@ -2089,6 +2093,25 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
+}
+
+.provider-card {
+  border-radius: var(--oct-radius-sm);
+  transition:
+    border-color var(--oct-motion-fast) ease,
+    background-color var(--oct-motion-fast) ease;
+}
+
+.provider-card:hover {
+  border-color: var(--octant-border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-pane__grip,
+  .provider-card {
+    animation: none;
+    transition: none;
+  }
 }
 
 .provider-card__guidance,
@@ -5140,6 +5163,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   position: absolute;
   inset-block: 0;
   left: 0;
+  width: var(--composer-model-picker-level-fill);
   border-radius: inherit;
   background: var(--octant-palette-blue);
 }
@@ -5292,6 +5316,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-glyph {
   flex: 0 0 auto;
   display: inline-block;
+  color: var(--provider-glyph-color, inherit);
   vertical-align: middle;
 }
 
@@ -5312,6 +5337,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-control-hover);
   border: 1px solid var(--octant-border);
   border-radius: 50%;
+  width: var(--provider-glyph-size);
+  height: var(--provider-glyph-size);
   font-weight: var(--oct-weight-display);
   letter-spacing: 0.02em;
   line-height: 1;

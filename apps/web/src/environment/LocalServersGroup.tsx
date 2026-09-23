@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { groupLocalServerListeners, type LocalServerListenerGroup } from "./localServerGroups";
 import type { LocalServersController } from "./useLocalServersController";
@@ -344,23 +344,20 @@ function LocalServerRow(props: {
         )}
       </div>
 
-      <OctantDialog
-        label="Confirm stop"
-        onClose={props.onCancelConfirm}
-        open={props.confirming && needsConfirmation}
-      >
-        <p>
+      {props.confirming && needsConfirmation ? (
+        <OctantConfirmDialog
+          cancelLabel="Keep it running"
+          confirmLabel="Stop this server"
+          destructive
+          onCancel={props.onCancelConfirm}
+          onConfirm={() => void props.onStop()}
+          title="Confirm stop"
+        >
           Stop {listener.processName} on port {listener.port}
           {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
           Octant cannot verify that it still owns this server.
-        </p>
-        <OctantButton onClick={() => void props.onStop()} type="button" variant="ghost">
-          <span>Stop this server</span>
-        </OctantButton>
-        <OctantButton onClick={props.onCancelConfirm} type="button" variant="ghost">
-          <span>Keep it running</span>
-        </OctantButton>
-      </OctantDialog>
+        </OctantConfirmDialog>
+      ) : null}
     </div>
   );
 }

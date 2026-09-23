@@ -788,6 +788,40 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
   });
 
+  it("marks Inbox as the active destination until a new Chat starts", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const inbox = await screen.findByRole("button", { name: /^Inbox/ });
+    await user.click(inbox);
+    expect(inbox).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+    expect(inbox).not.toHaveAttribute("aria-current", "page");
+  });
+
+  it("shows the Chat add-project control while ready before any threads exist", async () => {
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "New Chat Project" })).toBeVisible();
+  });
+
   it("opens the exact thread returned by the authoritative New chat command", async () => {
     const user = userEvent.setup();
     const chatApi = chats();

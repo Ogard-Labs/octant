@@ -55,6 +55,13 @@
   table-layout: fixed;
   font-size: var(--oct-text-detail);
 }
+.git-history__graph-column {
+  width: var(--git-history-graph-width);
+}
+.git-history__spacer {
+  height: var(--git-history-spacer-height);
+  padding: 0;
+}
 .git-history__table th {
   position: sticky;
   top: 0;
