@@ -135,7 +135,9 @@ describe("PreviewClient", () => {
     if (reply.kind === "chunks") {
       expect(reply.chunks).toHaveLength(1);
     }
-    const body = JSON.parse((fetch.mock.calls[0]?.[1] as RequestInit).body as string);
+    const call = fetch.mock.calls[0];
+    if (call === undefined) throw new Error("expected a preview chunk request");
+    const body = JSON.parse((call[1] as RequestInit).body as string);
     expect(body.maxChunks).toBe(4);
   });
 

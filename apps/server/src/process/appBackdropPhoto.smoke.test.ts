@@ -29,7 +29,7 @@ describe("clean photo sampling evidence", () => {
         headless: true,
         ...(existsSync(chrome) ? { executablePath: chrome } : {}),
       });
-    } catch (error) {
+    } catch {
       // Linux CI has no headed Chrome; local macOS evidence is the screenshot files.
       expect(existsSync(chrome)).toBe(false);
       return;

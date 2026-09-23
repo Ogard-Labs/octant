@@ -1,6 +1,6 @@
 import { decodeProviderInstanceId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createDiscoveryRouteHandler, type DiscoveryRouteDependencies } from "./discoveryRoutes";
+import { createDiscoveryRouteHandler } from "./discoveryRoutes";
 import type { DiscoveryService } from "./discoveryService";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
 

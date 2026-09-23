@@ -514,9 +514,7 @@ interface VibeConfigurationFormProps {
 
 export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState<MistralVibeAuthentication>(
-    props.instance.configuration.authentication,
-  );
+  const authentication: MistralVibeAuthentication = "api-key";
   return (
     <form
       className="provider-card__edit provider-card__edit--vibe"
@@ -550,49 +548,21 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
         />
       </SettingRow>
       <SettingRow
-        description={
-          authentication === "api-key"
-            ? undefined
-            : "Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe profile and binary."
-        }
-        label="Authentication"
+        description="Mistral Vibe uses a Mistral API key. Octant&apos;s confined launch cannot read the key Vibe stores in the macOS Keychain."
+        label="Mistral API key (leave blank to preserve)"
         scope="host"
-        settingId={`provider-${props.instance.id}-authentication`}
+        settingId={`provider-${props.instance.id}-api-key`}
       >
-        <OctantSelectField
-          aria-label={`Mistral Vibe authentication for ${props.instance.displayName}`}
-          className="settings-view__select"
-          onValueChange={(value) => {
-            const next = value as MistralVibeAuthentication;
-            if (next === "subscription" && credentialInput.current !== null) {
-              credentialInput.current.value = "";
-            }
-            setAuthentication(next);
-          }}
-          options={[
-            { id: "subscription", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: "Mistral API key" },
-          ]}
-          value={authentication}
+        <OctantInput
+          aria-label={`Mistral API key for ${props.instance.displayName}`}
+          autoComplete="new-password"
+          className="settings-view__text-input"
+          disabled={!props.credentialManagementAvailable}
+          ref={credentialInput}
+          spellCheck={false}
+          type="password"
         />
       </SettingRow>
-      {authentication === "api-key" ? (
-        <SettingRow
-          label="Mistral API key (leave blank to preserve)"
-          scope="host"
-          settingId={`provider-${props.instance.id}-api-key`}
-        >
-          <OctantInput
-            aria-label={`Mistral API key for ${props.instance.displayName}`}
-            autoComplete="new-password"
-            className="settings-view__text-input"
-            disabled={!props.credentialManagementAvailable}
-            ref={credentialInput}
-            spellCheck={false}
-            type="password"
-          />
-        </SettingRow>
-      ) : null}
       <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}

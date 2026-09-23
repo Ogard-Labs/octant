@@ -205,7 +205,7 @@
   gap: 1px;
 }
 
-/* A launcher row: a 16px tool icon, the tool's name, and one line saying
+/* A launcher row: a 16px tool icon, the tool's name, and up to two lines saying
    what it opens. The name and its description need about 42px between them,
    so the row is sized by what it holds; the button recipe's own `height`
    would otherwise clamp it to 44px, spilling the description past the hover
@@ -234,8 +234,7 @@
   gap: 2px;
 }
 
-.dock-work-map__copy strong,
-.dock-work-map__copy small {
+.dock-work-map__copy strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -248,9 +247,14 @@
 }
 
 .dock-work-map__copy small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
   font-weight: 400;
+  white-space: normal;
 }
 
 .right-utility-dock__tool[hidden] {

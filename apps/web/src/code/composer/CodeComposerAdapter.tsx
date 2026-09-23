@@ -111,6 +111,10 @@ export interface CodeComposerAdapterProps {
   readonly baseBranch?: string;
   readonly defaultExecutionPolicy: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence: PermissionPersistence;
+  readonly onExecutionPolicyChange?: (
+    policy: ProviderExecutionPolicy,
+    persistence: PermissionPersistence,
+  ) => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -834,8 +838,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               ),
               trailing: (
                 <CodeComposerAccessMenu
-                  onChange={setExecutionPolicy}
-                  onPersistenceChange={setPermissionPersistence}
+                  onChange={(nextPolicy) => {
+                    setExecutionPolicy(nextPolicy);
+                    props.onExecutionPolicyChange?.(nextPolicy, permissionPersistence);
+                  }}
+                  onPersistenceChange={(nextPersistence) => {
+                    setPermissionPersistence(nextPersistence);
+                    props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
+                  }}
                   persistence={permissionPersistence}
                   value={executionPolicy}
                   {...(props.creating === true ? { disabled: true } : {})}

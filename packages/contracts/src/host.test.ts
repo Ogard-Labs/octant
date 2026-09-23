@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import {
-  decodeEntityId,
   decodeGlobalEntityReference,
   decodeHostHealth,
   decodeHostId,
   decodeHostIdentity,
-  EntityId,
-  GlobalEntityReference,
-  HostHealth,
   HostId,
-  HostIdentity,
   LOCAL_HOST_DISPLAY_NAME,
   LOCAL_HOST_ID,
 } from "./host";

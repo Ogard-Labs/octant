@@ -117,7 +117,8 @@ describe("local provider usage history route", () => {
     const [first, parallel] = await Promise.all([handler(request()), handler(request())]);
     expect(first?.status).toBe(200);
     expect(parallel?.status).toBe(200);
-    expect((await first?.json()).coverage).toEqual(
+    if (first === undefined) throw new Error("expected the first route response");
+    expect((await first.json()).coverage).toEqual(
       expect.arrayContaining([expect.objectContaining({ status: "partial", hasMore: true })]),
     );
     expect(await parallel?.json()).toMatchObject({

@@ -13,7 +13,6 @@ import type { UsageClient } from "@octant/client-runtime/usage-client";
 import {
   AlertTriangle,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
   Download,
   Eraser,
@@ -28,6 +27,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { SettingsDisclosure } from "../settings/primitives";
 import "../styles/usage.css";
 import { LatencyStatsSection } from "./LatencyStatsSection";
 
@@ -412,11 +412,11 @@ export function UsageDashboard(props: UsageDashboardProps) {
         </>
       )}
 
-      <details className="settings-disclosure usage-dashboard__operational-details">
-        <summary>
-          <ChevronRight aria-hidden="true" size={12} />
-          Operational details
-        </summary>
+      <SettingsDisclosure
+        className="usage-dashboard__operational-details"
+        title="Operational details"
+        variant="inline"
+      >
         <div
           aria-label="Operational metrics"
           className="usage-dashboard__operational-metrics"
@@ -442,7 +442,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
           connectionLatencyMs={connectionLatencyMs}
           latencyStats={data.latencyStats}
         />
-      </details>
+      </SettingsDisclosure>
 
       <UsageControls
         onExportCsv={() => setConfirmAction({ kind: "export", format: "csv" })}

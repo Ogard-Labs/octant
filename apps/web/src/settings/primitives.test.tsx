@@ -225,4 +225,26 @@ describe("SettingsDisclosure", () => {
     expect(screen.getByLabelText("Example")).toBeVisible();
     expect(screen.getByLabelText("Example")).toHaveFocus();
   });
+
+  it("renders the compact inline disclosure recipe", () => {
+    render(
+      <SettingsDisclosure title="Inline details" variant="inline">
+        <p>Disclosure body</p>
+      </SettingsDisclosure>,
+    );
+    const title = screen.getByText("Inline details");
+    const details = title.closest("details");
+    expect(details).not.toBeNull();
+    if (details === null) throw new Error("expected an inline disclosure");
+    const summary = details.querySelector("summary");
+    const chevron = summary?.querySelector("svg");
+    expect(summary?.textContent).toContain("Inline details");
+    expect(chevron).toHaveAttribute("width", "12");
+    expect(chevron).toHaveAttribute("height", "12");
+    expect(details).not.toHaveClass("settings-disclosure--section");
+    expect(details).toHaveClass("settings-disclosure--inline");
+    expect(details.querySelector(".settings-disclosure__body")).toContainElement(
+      screen.getByText("Disclosure body"),
+    );
+  });
 });

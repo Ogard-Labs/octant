@@ -267,6 +267,49 @@ describe("ProviderSettingsView", () => {
     expect(props.onRemove).toHaveBeenCalledWith(id);
   });
 
+  it("shows rename feedback only after a successful save", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ onRename: vi.fn(async () => true) });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const input = screen.getByLabelText("Display name for Existing CLI");
+    await user.clear(input);
+    await user.type(input, "Renamed CLI");
+    await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
+
+    expect(props.onRename).toHaveBeenCalledOnce();
+    const status = await screen.findByRole("status", { name: /rename status/i });
+    expect(status).toHaveTextContent("Saved");
+
+    fireEvent.change(input, { target: { value: "Changed again" } });
+    expect(status).toHaveTextContent("");
+  });
+
+  it("leaves rename feedback empty when saving fails", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ onRename: vi.fn(async () => false) });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
+
+    expect(screen.getByRole("status", { name: /rename status/i })).toHaveTextContent("");
+  });
+
+  it("clears Saved when retrying a rename fails", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const props = fixture({ onRename });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const save = screen.getByRole("button", { name: "Save name for Existing CLI" });
+    await user.click(save);
+    const status = await screen.findByRole("status", { name: /rename status/i });
+    expect(status).toHaveTextContent("Saved");
+
+    await user.click(save);
+    await waitFor(() => expect(status).toHaveTextContent(""));
+  });
+
   it("creates Codex from the shared accessible provider form", async () => {
     const user = userEvent.setup();
     const props = fixture();
@@ -465,7 +508,7 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("private-value");
   });
 
-  it("creates Mistral Vibe with provider-owned CLI authentication", async () => {
+  it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
@@ -481,20 +524,19 @@ describe("ProviderSettingsView", () => {
       "placeholder",
       "/absolute/path/to/vibe-acp",
     );
-    expect(within(create).getByLabelText("Mistral Vibe authentication")).toHaveTextContent(
-      "Provider CLI login (recommended)",
-    );
+    expect(within(create).queryByLabelText("Mistral Vibe authentication")).not.toBeInTheDocument();
+    expect(within(create).getByLabelText("Mistral API key")).toBeInTheDocument();
     await user.click(within(create).getByRole("button", { name: "Add Mistral Vibe" }));
     expect(props.onCreateMistralVibe).toHaveBeenCalledWith(
       "Mistral Vibe local",
       {
         kind: "mistral-vibe-acp",
         binaryPath: "/Users/example/.local/bin/vibe-acp",
-        authentication: "subscription",
+        authentication: "api-key",
       },
       expect.objectContaining({ value: "" }),
     );
-    expect(screen.getAllByText(/Run the provider-owned Vibe CLI login/)).not.toHaveLength(0);
+    expect(screen.getAllByText(/uses a Mistral API key/i)).not.toHaveLength(0);
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
   });
 
@@ -2608,6 +2650,7 @@ function fixture(
     credentialManagementAvailable?: boolean;
     discoverySnapshot?: DiscoverySnapshot;
     onOpenExternalUrl?: (url: string) => void;
+    onRename?: ProviderSettingsViewProps["onRename"];
   } = {},
 ): ProviderSettingsViewProps {
   return {
@@ -2688,7 +2731,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onRename: vi.fn(async () => true),
+    onRename: options.onRename ?? vi.fn(async () => true),
     onChangeBinary: vi.fn(async () => true),
     onChangeClaudeConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();

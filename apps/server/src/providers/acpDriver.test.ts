@@ -749,6 +749,23 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   });
 
   if (profile.kind === "mistral-vibe") {
+    it("reports Vibe's missing API key as not authenticated instead of a protocol failure", async () => {
+      const { driver, client } = fixture(profile);
+      client.newSession.mockRejectedValueOnce(
+        new AcpFailure("remote", "Missing API key for mistral provider.", "model"),
+      );
+
+      const failure = await Effect.runPromise(
+        Effect.scoped(Effect.flip(driver.probe({ instanceId }))),
+      );
+
+      expect(failure).toMatchObject({
+        category: "unauthenticated",
+        reason: "authentication-required",
+        message: profile.unauthenticatedMessage,
+      });
+    });
+
     it.each([
       ["2.25.0", undefined, "supported"],
       ["2.25.1", undefined, "unsupported"],
@@ -1581,6 +1598,7 @@ describe("ACP provider driver profile quirks", () => {
     const guards = vibe.process.guards;
     const enabled = JSON.parse(guards.VIBE_ENABLED_AGENTS ?? "[]") as ReadonlyArray<string>;
 
+    expect(guards.VIBE_TEST_DISABLE_KEYRING).toBe("1");
     // Vibe resolves `default_agent` against these guards while creating the
     // session, so a guard that excludes it fails `session/new` before any mode
     // is requested.

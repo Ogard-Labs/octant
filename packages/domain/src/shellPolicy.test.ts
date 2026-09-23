@@ -33,7 +33,6 @@ import {
   deriveWorkEnvironmentProjection,
   filterEnvironmentSections,
   normalizeEnvironmentPresentationState,
-  reconcileWorkspaceWithSettings,
   removeEnvironmentPresentation,
   replaceEnvironmentPresentation,
   replaceShellSettings,

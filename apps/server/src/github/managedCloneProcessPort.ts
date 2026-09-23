@@ -389,8 +389,11 @@ export class ManagedCloneProcessPort {
 
 function sanitizeProgressLine(raw: string): string {
   const withoutAnsi = raw
+    // oxlint-disable-next-line no-control-regex -- strips remaining escape-prefixed control bytes.
     .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    // oxlint-disable-next-line no-control-regex -- strips residual terminal control bytes.
     .replace(/\u001b./g, "")
+    // oxlint-disable-next-line no-control-regex -- strips C0 and DEL control bytes.
     .replace(/[\u0000-\u001f\u007f]/g, "");
   const redacted = withoutAnsi
     .replace(/\b(?:gh[opsru]|github_pat)_[A-Za-z0-9_]+/g, "[redacted]")
