@@ -285,11 +285,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   if (dock) return body;
 
   return (
-    <Surface
-      ariaLabel="Pull requests"
-      className="code-project-pull-requests-surface"
-      measure="wide"
-    >
+    <Surface ariaLabel="Pull requests" measure="wide">
       <SurfaceHeader
         subtitle="Active open and draft pull requests from connected Code Projects."
         title="Pull requests"
