@@ -168,6 +168,28 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("marks Code disconnected after a command transport failure", async () => {
+    const client = fakeClient({
+      execute: vi.fn().mockRejectedValue({
+        category: "disconnected",
+        message: "Octant Code service is unavailable.",
+      }),
+    });
+    const { result, unmount } = renderHook(() => useCodeController({ client }));
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await result.current.execute({
+        kind: "list-code-worktree-refs",
+        projectId: ids.project,
+      });
+    });
+
+    expect(result.current.status).toBe("disconnected");
+    expect(result.current.errorMessage).toBe("Octant Code service is unavailable.");
+    unmount();
+  });
+
   it("returns the server-resolved worktree source preview without projecting it and forwards the signal", async () => {
     const previewed = {
       kind: "worktree-source-previewed",

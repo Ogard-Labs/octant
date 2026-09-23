@@ -706,6 +706,7 @@ export function useCodeController(options: CodeControllerOptions) {
     const failure = codeFailure(error);
     setErrorCategory(failure.category);
     setErrorMessage(failure.message);
+    if (failure.category === "disconnected") setStatus("disconnected");
   }, []);
 
   const refreshFollowUp = useCallback(
