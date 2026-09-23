@@ -1,5 +1,5 @@
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { ChevronRight } from "lucide-react";
+import { SettingsDisclosure } from "./primitives";
 
 export interface MarketplaceFetchSettingsProps {
   readonly enabled: boolean;
@@ -25,11 +25,11 @@ export function MarketplaceFetchSettings(props: MarketplaceFetchSettingsProps) {
 
 export function MarketplaceFetchDisclosure() {
   return (
-    <details className="settings-disclosure marketplace-fetch-settings__details">
-      <summary>
-        <ChevronRight aria-hidden="true" size={12} />
-        Network details
-      </summary>
+    <SettingsDisclosure
+      className="marketplace-fetch-settings__details"
+      title="Network details"
+      variant="inline"
+    >
       <p className="marketplace-fetch-settings__disclosure">
         A catalog search sends your query plus the agent-plugin keywords to npm, then downloads
         candidate metadata and tarballs; skill search contacts skills.sh and the npm registry with
@@ -42,6 +42,6 @@ export function MarketplaceFetchDisclosure() {
           Local skills under .agents/skills/ and local plugin folders never contact a registry.
         </li>
       </ul>
-    </details>
+    </SettingsDisclosure>
   );
 }
