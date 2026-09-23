@@ -36,6 +36,7 @@ export type ComposerProjectEntry =
       readonly displayName: string;
       readonly rootPath: string;
     }
+  | { readonly kind: "unfiled" }
   | { readonly kind: "add-folder" }
   | {
       readonly kind: "default-folder";
@@ -78,6 +79,7 @@ type MenuEntry = ComposerProjectEntry | { readonly kind: "add-github" };
 export const NEW_PROJECT_FROM_FOLDER_LABEL = "New Project from folder…";
 export const NEW_PROJECT_FROM_GITHUB_LABEL = "New Project from GitHub repository…";
 export const START_IN_DEFAULT_FOLDER_LABEL = "No project";
+export const UNFILED_THREAD_LABEL = "No Project";
 
 /**
  * The composer's one Project menu: saved Projects to search, then the two
@@ -108,7 +110,8 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
   }, [props.entries, query]);
   const actionEntries = useMemo((): ReadonlyArray<MenuEntry> => {
     const actions: MenuEntry[] = props.entries.filter(
-      (entry) => entry.kind === "default-folder" || entry.kind === "add-folder",
+      (entry) =>
+        entry.kind === "unfiled" || entry.kind === "default-folder" || entry.kind === "add-folder",
     );
     if (github !== undefined) actions.push({ kind: "add-github" });
     return actions;
@@ -118,7 +121,11 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     [actionEntries, savedEntries],
   );
 
-  const selectionLabel = props.selection?.displayName ?? "Choose a Project";
+  const selectionLabel =
+    props.selection?.displayName ??
+    (props.entries.some((entry) => entry.kind === "unfiled")
+      ? UNFILED_THREAD_LABEL
+      : "Choose a Project");
 
   const close = useCallback(() => {
     setOpen(false);
@@ -327,18 +334,21 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                 )}
                 {actionEntries.map((entry, offset) => {
                   const index = savedEntries.length + offset;
+                  const isSelected = entry.kind === "unfiled" && props.selection === undefined;
                   const label =
                     entry.kind === "add-github"
                       ? NEW_PROJECT_FROM_GITHUB_LABEL
-                      : entry.kind === "default-folder"
-                        ? START_IN_DEFAULT_FOLDER_LABEL
-                        : NEW_PROJECT_FROM_FOLDER_LABEL;
+                      : entry.kind === "unfiled"
+                        ? UNFILED_THREAD_LABEL
+                        : entry.kind === "default-folder"
+                          ? START_IN_DEFAULT_FOLDER_LABEL
+                          : NEW_PROJECT_FROM_FOLDER_LABEL;
                   const refused = entry.kind === "default-folder" && entry.disabled === true;
                   return (
                     <OctantButton
-                      aria-selected={false}
+                      aria-selected={isSelected}
                       {...(refused ? { "aria-disabled": true } : {})}
-                      className={optionClass(index)}
+                      className={optionClass(index, isSelected)}
                       id={`${listboxId}-option-${index}`}
                       key={entry.kind}
                       onClick={() => activate(entry)}
@@ -351,14 +361,18 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                     >
                       {entry.kind === "add-github" ? (
                         <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                      ) : entry.kind === "default-folder" ? (
+                      ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
                         <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
                       ) : (
                         <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />
                       )}
                       <span className="composer-folder-selector__option-copy">
                         <span className="composer-folder-selector__option-name">{label}</span>
-                        {entry.kind === "default-folder" ? (
+                        {entry.kind === "unfiled" ? (
+                          <span className="composer-folder-selector__option-path">
+                            Start an unfiled thread
+                          </span>
+                        ) : entry.kind === "default-folder" ? (
                           <>
                             <span className="composer-folder-selector__option-path">
                               {entry.rootPath}
