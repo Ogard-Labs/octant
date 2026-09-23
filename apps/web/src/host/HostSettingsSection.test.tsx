@@ -25,7 +25,7 @@ const serviceStatus: HostControlStatus = {
     clientsConnected: 2,
     uptimeSeconds: 3_723,
   },
-  capabilities: ["platform:systemd-user-units", "platform:keychain"],
+  capabilities: ["local-loopback", "provider:mistral-vibe"],
   work: { active: 1, attentionRequired: false },
   lifecycle: {
     stop: { kind: "available" },
@@ -162,8 +162,8 @@ describe("HostSettingsSection", () => {
     expect(screen.getByText(/ready/)).toBeInTheDocument();
     expect(screen.getByText(/verified/)).toBeInTheDocument();
     expect(screen.getByText(/42 \/ 42/)).toBeInTheDocument();
-    expect(screen.getByText("platform:systemd-user-units")).toBeInTheDocument();
-    expect(screen.getByText("platform:keychain")).toBeInTheDocument();
+    expect(screen.getByText("Local loopback")).toBeInTheDocument();
+    expect(screen.getByText("Provider: Mistral Vibe")).toBeInTheDocument();
     // Identity and readiness are routine facts, so they read as open
     // sections; only recovery and retention keep the raised panel.
     expect(screen.getByRole("region", { name: "Identity" })).toHaveClass(

@@ -16,6 +16,7 @@ import { useState, type ReactNode } from "react";
 import type { ProviderController } from "../providers/useProviderController";
 import { ProviderCreateForm } from "../providers/ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
+import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -31,6 +32,7 @@ export interface ImageGenerationSettingsViewProps {
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly providerController?: ProviderController;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
+  readonly onOpenProviders?: () => void;
 }
 
 function sourceKey(source: {
@@ -74,82 +76,102 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
       className="image-generation-settings"
       id="settings-image-generation"
     >
-      {!hasImageProvider ? (
-        <p className="settings-state settings-state--empty" role="status">
-          No image providers are enabled. Add a dedicated provider or custom endpoint below.
-        </p>
-      ) : null}
-      {imageProviderSettings}
-      <SettingsSection
-        title="Custom image sources"
-        description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
-      >
-        <div className="setgroup">
-          <SettingRow
-            label="Custom image sources"
-            labelledBySection
-            scope="app"
-            settingId="custom-image-sources"
-          >
-            <p className="provider-settings__field-guidance">
-              Saved profiles in Image generator choose defaults for a generation, such as the model,
-              size, and quality.
+      {!hasImageProvider && props.settings.customSources.length === 0 ? (
+        <>
+          <SurfaceEmpty
+            action={
+              props.onOpenProviders === undefined ? null : (
+                <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
+                  Open Providers &amp; Models
+                </OctantButton>
+              )
+            }
+            detail="No image providers are enabled. Add a dedicated provider or custom endpoint below."
+            title="No eligible provider yet"
+            tone="page"
+          />
+          {imageProviderSettings}
+        </>
+      ) : (
+        <>
+          {hasImageProvider ? null : (
+            <p className="settings-state settings-state--empty" role="status">
+              No image providers are enabled. Add a dedicated provider or custom endpoint below.
             </p>
-            {eligible.length === 0 ? (
-              <p className="provider-settings__field-guidance" role="status">
-                Add an OpenAI-compatible custom endpoint above, then choose its model here.
-              </p>
-            ) : null}
-            {resolved.length === 0 && eligible.length > 0 ? (
-              <p className="provider-settings__field-guidance" role="status">
-                No custom image sources are configured.
-              </p>
-            ) : resolved.length === 0 ? null : (
-              <ul className="image-generation-settings__sources">
-                {resolved.map((resolution, index) => {
-                  const source = props.settings.customSources[index];
-                  if (source === undefined) return null;
-                  return (
-                    <li key={sourceKey(source)}>
-                      <p className="provider-settings__field-guidance" role="status">
-                        {resolution.status === "ready"
-                          ? `"${resolution.label}" runs ${resolution.instance.displayName} with ${String(resolution.modelId)}.`
-                          : `"${resolution.label}" is unavailable: ${resolution.reason}`}
-                      </p>
-                      <OctantButton
-                        onClick={() =>
-                          apply(
-                            props.settings.customSources.filter(
-                              (candidate) => sourceKey(candidate) !== sourceKey(source),
-                            ),
-                          )
-                        }
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Remove
-                      </OctantButton>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {atLimit ? (
-              <p className="provider-settings__field-guidance" role="status">
-                Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported.
-                Remove one to add another.
-              </p>
-            ) : eligible.length === 0 ? null : (
-              <CustomImageSourceForm
-                eligible={eligible}
-                existing={props.settings.customSources}
-                onAdd={(source) => apply([...props.settings.customSources, source])}
-              />
-            )}
-          </SettingRow>
-        </div>
-      </SettingsSection>
+          )}
+          {imageProviderSettings}
+          <SettingsSection
+            title="Custom image sources"
+            description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
+          >
+            <div className="setgroup">
+              <SettingRow
+                label="Custom image sources"
+                labelledBySection
+                scope="app"
+                settingId="custom-image-sources"
+              >
+                <p className="provider-settings__field-guidance">
+                  Saved profiles in Image generator choose defaults for a generation, such as the
+                  model, size, and quality.
+                </p>
+                {eligible.length === 0 ? (
+                  <p className="provider-settings__field-guidance" role="status">
+                    Add an OpenAI-compatible custom endpoint above, then choose its model here.
+                  </p>
+                ) : null}
+                {resolved.length === 0 && eligible.length > 0 ? (
+                  <p className="provider-settings__field-guidance" role="status">
+                    No custom image sources are configured.
+                  </p>
+                ) : resolved.length === 0 ? null : (
+                  <ul className="image-generation-settings__sources">
+                    {resolved.map((resolution, index) => {
+                      const source = props.settings.customSources[index];
+                      if (source === undefined) return null;
+                      return (
+                        <li key={sourceKey(source)}>
+                          <p className="provider-settings__field-guidance" role="status">
+                            {resolution.status === "ready"
+                              ? `"${resolution.label}" runs ${resolution.instance.displayName} with ${String(resolution.modelId)}.`
+                              : `"${resolution.label}" is unavailable: ${resolution.reason}`}
+                          </p>
+                          <OctantButton
+                            onClick={() =>
+                              apply(
+                                props.settings.customSources.filter(
+                                  (candidate) => sourceKey(candidate) !== sourceKey(source),
+                                ),
+                              )
+                            }
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Remove
+                          </OctantButton>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {atLimit ? (
+                  <p className="provider-settings__field-guidance" role="status">
+                    Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported.
+                    Remove one to add another.
+                  </p>
+                ) : eligible.length === 0 ? null : (
+                  <CustomImageSourceForm
+                    eligible={eligible}
+                    existing={props.settings.customSources}
+                    onAdd={(source) => apply([...props.settings.customSources, source])}
+                  />
+                )}
+              </SettingRow>
+            </div>
+          </SettingsSection>
+        </>
+      )}
     </section>
   );
 }

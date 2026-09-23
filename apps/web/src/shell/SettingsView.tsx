@@ -392,6 +392,7 @@ export function SettingsView(props: SettingsViewProps) {
                 activeSection={route.activeSection}
                 capabilities={capabilities}
                 focusedSetting={route.focusedSetting}
+                onOpenSection={route.openSection}
                 pluginSettingsEntryPoints={pluginSettingsEntryPoints}
                 props={props}
               />
@@ -479,6 +480,7 @@ function SettingsSearchField(props: {
 interface ActiveSectionContentProps {
   readonly activeSection: SettingsSectionId;
   readonly focusedSetting: SettingsSettingId | undefined;
+  readonly onOpenSection: (sectionId: SettingsSectionId) => void;
   readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
   readonly props: SettingsViewProps;
   readonly capabilities: SettingsNativeCapabilities;
@@ -487,6 +489,7 @@ interface ActiveSectionContentProps {
 function ActiveSectionContent({
   activeSection,
   focusedSetting,
+  onOpenSection,
   pluginSettingsEntryPoints,
   props,
   capabilities,
@@ -562,6 +565,7 @@ function ActiveSectionContent({
         <VoiceSettingsView
           focusedSetting={focusedSetting}
           onSettingsChange={props.onSettingsChange}
+          onOpenProviders={() => onOpenSection("providers")}
           {...(props.providerController?.snapshot === undefined
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
@@ -572,6 +576,7 @@ function ActiveSectionContent({
       return (
         <ImageGenerationSettingsView
           onSettingsChange={props.onSettingsChange}
+          onOpenProviders={() => onOpenSection("providers")}
           {...(props.providerController?.snapshot === undefined
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
@@ -614,6 +619,7 @@ function ActiveSectionContent({
           <NativeHarnessRoutingPanel
             client={props.nativeHarnessClient}
             hostId={LOCAL_HOST_ID}
+            onOpenProviders={() => onOpenSection("providers")}
             providers={nativeHarnessProviderOptions(props.providerController)}
           />
         </div>

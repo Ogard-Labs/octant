@@ -17,6 +17,7 @@ import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { SettingRow } from "./primitives";
 import { settingId } from "./registry";
 
@@ -25,6 +26,7 @@ export interface VoiceSettingsViewProps {
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
+  readonly onOpenProviders?: () => void;
 }
 
 /**
@@ -39,63 +41,76 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
   const eligible = listSpeechEligibleInstances(instances);
 
   const apply = (next: VoiceSettings) => props.onSettingsChange({ voice: next });
+  const hasConfiguredEndpoint =
+    props.settings.transcription !== undefined || props.settings.synthesis !== undefined;
 
   return (
     <section aria-label="Voice" id="settings-voice">
-      {eligible.length === 0 ? (
-        <p className="provider-settings__hint" role="status">
-          Voice needs an enabled OpenAI-compatible HTTP provider. Add one in Providers &amp; Models,
-          then choose it here.
-        </p>
-      ) : null}
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Speech to text</h2>
-        <div className="setgroup">
-          <SettingRow
-            description="Choose the provider and model that turn recordings into text."
-            focused={props.focusedSetting === settingId("transcription")}
-            label="Transcription"
-            scope="app"
-            settingId="transcription"
-          >
-            <SpeechEndpointForm
-              current={props.settings.transcription}
-              direction="transcription"
-              eligible={eligible}
-              instances={instances}
-              onClear={() => {
-                const { transcription: _cleared, ...rest } = props.settings;
-                apply(rest);
-              }}
-              onSave={(ref) => apply({ ...props.settings, transcription: ref })}
-            />
-          </SettingRow>
-        </div>
-      </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Text to speech</h2>
-        <div className="setgroup">
-          <SettingRow
-            description="Choose a provider voice, or use this computer's voices without a provider call."
-            focused={props.focusedSetting === settingId("synthesis")}
-            label="Speech"
-            scope="app"
-            settingId="synthesis"
-          >
-            <SpeechEndpointForm
-              current={props.settings.synthesis}
-              direction="synthesis"
-              eligible={eligible}
-              instances={instances}
-              onClear={() => {
-                const { synthesis: _cleared, ...rest } = props.settings;
-                apply(rest);
-              }}
-              onSave={(ref) => apply({ ...props.settings, synthesis: ref })}
-            />
-          </SettingRow>
-        </div>
-      </div>
+      {eligible.length === 0 && !hasConfiguredEndpoint ? (
+        <SurfaceEmpty
+          action={
+            props.onOpenProviders === undefined ? null : (
+              <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
+                Open Providers &amp; Models
+              </OctantButton>
+            )
+          }
+          detail="Voice needs an enabled OpenAI-compatible HTTP provider."
+          title="No eligible provider yet"
+          tone="page"
+        />
+      ) : (
+        <>
+          <div className="settings-card-section settings-card-section--open">
+            <h2>Speech to text</h2>
+            <div className="setgroup">
+              <SettingRow
+                description="Choose the provider and model that turn recordings into text."
+                focused={props.focusedSetting === settingId("transcription")}
+                label="Transcription"
+                scope="app"
+                settingId="transcription"
+              >
+                <SpeechEndpointForm
+                  current={props.settings.transcription}
+                  direction="transcription"
+                  eligible={eligible}
+                  instances={instances}
+                  onClear={() => {
+                    const { transcription: _cleared, ...rest } = props.settings;
+                    apply(rest);
+                  }}
+                  onSave={(ref) => apply({ ...props.settings, transcription: ref })}
+                />
+              </SettingRow>
+            </div>
+          </div>
+          <div className="settings-card-section settings-card-section--open">
+            <h2>Text to speech</h2>
+            <div className="setgroup">
+              <SettingRow
+                description="Choose a provider voice, or use this computer's voices without a provider call."
+                focused={props.focusedSetting === settingId("synthesis")}
+                label="Speech"
+                scope="app"
+                settingId="synthesis"
+              >
+                <SpeechEndpointForm
+                  current={props.settings.synthesis}
+                  direction="synthesis"
+                  eligible={eligible}
+                  instances={instances}
+                  onClear={() => {
+                    const { synthesis: _cleared, ...rest } = props.settings;
+                    apply(rest);
+                  }}
+                  onSave={(ref) => apply({ ...props.settings, synthesis: ref })}
+                />
+              </SettingRow>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
