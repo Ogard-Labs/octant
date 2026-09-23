@@ -3107,7 +3107,7 @@ describe("useCodeController", () => {
   });
 
   it("completes, reopens, snoozes, and wakes a thread with the version it last saw", async () => {
-    const execute = vi.fn(async (command: { kind: string }) => {
+    const execute = vi.fn(async (_command: { kind: string }) => {
       const current = bootstrap().threads[0]!;
       return { kind: "thread-updated", thread: { ...current, version: 2 } } as never;
     });
