@@ -246,6 +246,7 @@ function RecordedUsageWorkspace(
             <HostSection hosts={dashboard.hosts} />
             <AttributionSourceSection sources={dashboard.dimensionSources} />
             <LatencyStatsSection
+              className="usage-workspace__section"
               connectionLatencyMs={controller.connectionLatencyMs}
               latencyStats={dashboard.latencyStats}
             />
