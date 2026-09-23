@@ -476,6 +476,7 @@ describe("WorkThreadWorkspace", () => {
   });
 
   it("renders the durable transcript and pending request projection", async () => {
+    const user = userEvent.setup();
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
       execute: vi.fn(),
@@ -533,11 +534,11 @@ describe("WorkThreadWorkspace", () => {
               action: "write-file",
               description: "Save notes.md in the Project root.",
             },
-            createdAt: "2026-08-01T20:01:30.000Z",
-            updatedAt: "2026-08-01T20:01:30.000Z",
+            version: 1,
           },
         ],
       })),
+      execute: vi.fn(async () => ({ kind: "work-request-resolved" })),
     };
 
     render(
@@ -552,9 +553,17 @@ describe("WorkThreadWorkspace", () => {
 
     expect(await screen.findByText("Summarize the brief")).toBeInTheDocument();
     expect(screen.getByText("Here is the confined summary.")).toBeInTheDocument();
-    expect(
-      screen.getByText("Approval required — write-file: Save notes.md in the Project root."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument(),
+    );
+    expect(requestClient.execute).toHaveBeenCalledWith({
+      kind: "resolve-work-request",
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      expectedVersion: 1,
+      resolution: { kind: "approval", approved: true },
+    });
     expect(turnClient.transcript).toHaveBeenCalledWith(threadId, expect.any(AbortSignal));
     expect(requestClient.list).toHaveBeenCalledWith(
       "20000000-0000-4000-8000-000000000101",
@@ -1040,7 +1049,7 @@ describe("WorkThreadWorkspace", () => {
 
     await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1), { timeout: 2_500 });
     expect(
-      await screen.findByText("Approval required — write-file: Save notes.md in the Project root."),
+      await screen.findByText("write-file: Save notes.md in the Project root."),
     ).toBeInTheDocument();
   });
 

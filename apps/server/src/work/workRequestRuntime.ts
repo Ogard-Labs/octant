@@ -183,6 +183,7 @@ export class WorkRequestRuntime {
     return () => {
       if (this.#connections.get(String(input.sessionId)) === input.connection) {
         this.#connections.delete(String(input.sessionId));
+        this.#requests.interruptSession(input.sessionId);
       }
     };
   }
@@ -258,7 +259,7 @@ function isTerminalEvent(event: ProviderRuntimeEvent): boolean {
   return event.kind === "completed" || event.kind === "interrupted" || event.kind === "failed";
 }
 
-function normalizedProviderCallbackId(value: string): string | undefined {
+export function normalizedProviderCallbackId(value: string): string | undefined {
   return value.length > 0 && value.length <= 16_384 ? value : undefined;
 }
 

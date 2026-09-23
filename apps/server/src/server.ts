@@ -5477,12 +5477,15 @@ export function startOctantServer(
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
     });
+    let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
       usageStore: workTurnUsageStore,
       contextHarness,
       resolveSelectedSkillContext,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
+      onRequestSettled: (input, release) =>
+        workRequestService?.onSettled(input, release) ?? (() => undefined),
       persistence: {
         ...persistence,
         readProviderModel: (providerInstanceId, modelId) =>
@@ -7493,7 +7496,7 @@ export function startOctantServer(
       journal: persistence.journal,
       uuid: randomUUID,
     });
-    const workRequestService = new WorkRequestService({
+    workRequestService = new WorkRequestService({
       projects: {
         projectType: (projectId) => persistence.readProject(projectId)?.type ?? "unknown",
         isActiveWorkProject: (projectId) => {
@@ -7540,6 +7543,7 @@ export function startOctantServer(
       uuid: randomUUID,
     });
     workRequestService.hydrate();
+    workRequestService.interruptOnRestart();
     workRequestService.reconcileUnavailableRequests();
     observeWorkThreadRuntime = (threadId) => {
       const thread = workThreadProjection.read(threadId);

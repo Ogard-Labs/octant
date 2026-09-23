@@ -78,6 +78,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -1928,31 +1929,6 @@ function turnStatusLabel(
     case "incomplete":
       return "Working";
   }
-}
-
-function ProviderApprovalPrompt(props: {
-  readonly summary: string;
-  readonly onAnswer: (decision: "approved" | "denied") => void;
-}) {
-  return (
-    <div aria-label="Provider approval" className="approval-row approval-row--request" role="group">
-      <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-      <span className="approval-row__text">{props.summary}</span>
-      <div className="approval-row__actions">
-        <OctantButton onClick={() => props.onAnswer("approved")} size="sm" type="button">
-          Approve
-        </OctantButton>
-        <OctantButton
-          onClick={() => props.onAnswer("denied")}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Deny
-        </OctantButton>
-      </div>
-    </div>
-  );
 }
 
 function useObservedChangedFiles(options: {
