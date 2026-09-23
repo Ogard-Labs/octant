@@ -174,7 +174,11 @@ verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.
 This admission ends on cancellation or dispatch completion. Local windows retain
-their selected-Project restriction (ADR 0148).
+their selected-Project restriction (ADR 0148). A killed start can leave the
+control secret with no receipt and no socket; the next acquire quarantines
+that file and continues, and it checks the socket is still absent before the
+move so a peer that bound in the meantime keeps the secret it just wrote. An
+ownership failure names the code, the artifact path, and the next step.
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
@@ -399,6 +403,13 @@ so `@file` is absent there. Unknown `@` text stays ordinary text; `@plugin` /
 exactly one source thread: ordinary Chat with that thread's bounded context,
 no inherited Work or Code authority, and no path that approves, steers, or
 appends to the source.
+
+A Chat attempt that fails or is interrupted carries a bounded failure code,
+and the client-safe process diagnostic when the provider supplied one. The
+transcript states Octant's sentence for that code. The provider's own message
+stays off the attempt. App-managed tool and research calls use the turn's own
+deadline; a call that never returns ends the attempt instead of leaving it
+running, and a cancellation is not recorded as that call having failed.
 
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in
