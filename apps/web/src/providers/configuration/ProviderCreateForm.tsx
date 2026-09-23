@@ -121,7 +121,7 @@ export function ProviderCreateForm(
   const [providerType, setProviderType] = useState<ProviderCreateProviderType>(initialProviderType);
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
-  const [vibeAuthentication] = useState<MistralVibeAuthentication>("api-key");
+  const vibeAuthentication: MistralVibeAuthentication = "api-key";
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
   const [geminiAuthentication, setGeminiAuthentication] =

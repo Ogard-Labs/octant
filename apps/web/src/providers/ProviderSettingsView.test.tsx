@@ -493,7 +493,7 @@ describe("ProviderSettingsView", () => {
       },
       expect.objectContaining({ value: "" }),
     );
-    expect(screen.getAllByText(/requires a Mistral API key/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/uses a Mistral API key/i)).not.toHaveLength(0);
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
   });
 

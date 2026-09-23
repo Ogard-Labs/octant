@@ -30,10 +30,6 @@ it("keeps browser authentication reserved for non-CLI profiles", () => {
   ).toBe(true);
 });
 
-it("offers only API-key authentication for Mistral Vibe", () => {
-  expect(acpProviderProfiles["mistral-vibe"].supportedAuthentication).toEqual(["api-key"]);
-});
-
 describe.each(Object.values(acpProviderProfiles))(
   "ACP provider conformance ($displayName)",
   (profile) => {

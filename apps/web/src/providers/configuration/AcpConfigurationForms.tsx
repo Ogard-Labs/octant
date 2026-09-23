@@ -505,8 +505,8 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
         />
       </label>
       <p className="provider-settings__field-guidance">
-        Mistral Vibe requires a Mistral API key entered in Settings → Providers. The confined launch
-        does not read the macOS Keychain.
+        Mistral Vibe uses a Mistral API key. Octant&apos;s confined launch cannot read the key Vibe
+        stores in the macOS Keychain.
       </p>
       <label>
         <span>Mistral API key (leave blank to preserve)</span>
