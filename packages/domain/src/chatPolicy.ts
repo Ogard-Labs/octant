@@ -3,6 +3,7 @@ import {
   decodeChatThread,
   decodeChatTurn,
   type ChatAttempt,
+  type ChatAttemptFailure,
   type ChatAttemptOutcome,
   type ChatAttachmentId,
   type ChatContentReference,
@@ -547,6 +548,11 @@ export function answerChatTurnQuestion(
 export interface TransitionChatAttemptInput {
   readonly outcome: ChatAttemptOutcome;
   readonly updatedAt: UtcTimestamp;
+  /**
+   * Why the attempt ended; only meaningful on a terminal outcome, which is
+   * where the runner stamps it.
+   */
+  readonly failure?: ChatAttemptFailure;
 }
 const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
   "completed",
@@ -554,6 +560,7 @@ const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
   "cancelled",
   "interrupted",
 ];
+const failureOutcomes: ReadonlyArray<ChatAttemptOutcome> = ["failed", "interrupted"];
 
 const transitions = new Map<ChatAttemptOutcome, ReadonlyArray<ChatAttemptOutcome>>([
   ["queued", ["streaming", "waiting", "interrupted", "failed", "cancelled"]],
@@ -580,11 +587,21 @@ export function transitionChatAttempt(
       `Cannot transition attempt from ${attempt.outcome} to ${input.outcome}`,
     );
   }
+  if (input.failure !== undefined && !failureOutcomes.includes(input.outcome)) {
+    reject(
+      "invalid-attempt-transition",
+      "A failure reason belongs on a failed or interrupted outcome, not " + input.outcome,
+    );
+  }
+  const { failure: previousFailure, ...attemptWithoutFailure } = attempt;
+  const failure =
+    input.failure ?? (failureOutcomes.includes(input.outcome) ? previousFailure : undefined);
 
   return decodeChatAttempt({
-    ...attempt,
+    ...attemptWithoutFailure,
     outcome: input.outcome,
     updatedAt: input.updatedAt,
+    ...(failure === undefined ? {} : { failure }),
   });
 }
 
