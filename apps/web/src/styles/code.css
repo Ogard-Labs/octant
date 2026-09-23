@@ -1127,3 +1127,1603 @@
 .work-files-panel__row--openable:focus-visible {
   background: var(--oct-fg-soft);
 }
+
+/* Code surfaces moved from styles.css. */
+
+/* The rail filters the Project tree below it, so it sits against that tree
+   rather than floating midway between the navigation and the first heading. */
+.code-project-views {
+  display: grid;
+  min-height: var(--oct-nav-row-h);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.code-project-views__filter {
+  width: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
+  color: var(--octant-text-muted);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-project-views__filter:hover,
+.code-project-views__filter[aria-expanded="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.code-project-views__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: start;
+  gap: 4px;
+}
+
+.code-project-views__trigger-wrap {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.code-project-views__row .octant-menu__trigger {
+  width: 100%;
+  min-height: var(--oct-nav-row-h);
+  justify-content: flex-start;
+  padding: 0;
+  text-align: start;
+}
+
+.code-project-views__trigger {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-nav-inset);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  font-weight: 500;
+  text-align: start;
+}
+
+.code-project-views__trigger > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-project-views__inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.code-project-views__inline-button {
+  width: 28px;
+  min-height: 28px;
+  border-radius: var(--oct-radius-sm);
+  color: var(--octant-text-muted);
+  transition:
+    background var(--oct-motion-fast) ease,
+    color var(--oct-motion-fast) ease;
+}
+
+.code-project-views__inline-button:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+/* The chosen view keeps its own colour: the rail is glyphs only, so colour is
+   the fastest way to read which one is showing. */
+.code-project-views__inline-button[aria-pressed="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-pressed);
+  box-shadow: inset 0 0 0 1px var(--octant-border-subtle);
+}
+
+.code-project-views__glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--octant-project-view-color, currentColor);
+}
+
+.code-project-views__color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--octant-project-view-color, var(--octant-text-muted));
+}
+
+.code-project-views__new {
+  width: 27px;
+  min-height: 27px;
+  color: var(--octant-text-muted);
+}
+
+.code-project-views__fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.code-project-views__fieldset legend {
+  margin-bottom: 4px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-views__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.code-project-views__swatch {
+  width: 28px;
+  min-height: 28px;
+  color: var(--octant-text-muted);
+}
+
+.code-project-views__swatch[aria-pressed="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.project-dialog .code-project-views__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+}
+
+.code-thread-environment {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.code-thread-environment__content {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.thread-environment-dock .code-composer-choice__trigger {
+  display: inline-flex;
+  width: 100%;
+  max-width: none;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+}
+
+.thread-environment-dock .code-composer-choice__trigger > :last-child {
+  margin-left: auto;
+}
+
+.thread-environment-dock .code-composer-choice__trigger:hover:not(:disabled) {
+  background: transparent;
+  color: var(--oct-fg);
+}
+
+/* Size and clip only: the panel already carries the elevation, so the tree
+   inside it draws no border or fill of its own. */
+.environment-group .code-file-explorer {
+  max-height: 46vh;
+  overflow: hidden;
+}
+
+.environment-group .code-file-explorer__search {
+  padding: 8px;
+}
+
+.environment-group .code-file-explorer__tree {
+  overflow-y: auto;
+}
+
+.code-overview__summary {
+  display: grid;
+  width: min(100%, 980px);
+  min-width: 0;
+  align-self: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 30px 28px 18px;
+}
+
+.code-overview__card {
+  min-width: 0;
+  padding: 19px 20px;
+  background: var(--octant-surface-raised);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+.code-overview__card--delivery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.62fr);
+  align-items: center;
+  gap: 24px;
+}
+
+.code-overview__eyebrow,
+.code-overview__signal > div > span,
+.code-overview__target-details dt {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.code-overview__card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: -0.03em;
+}
+
+.code-overview__card p {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
+}
+
+.code-overview__target-details {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.code-overview__target-details div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.code-overview__target-details dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-overview__signals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--octant-border);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-overview__signal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 11px;
+  min-width: 0;
+  min-height: 116px;
+  padding: 16px;
+  background: var(--octant-surface-raised);
+}
+
+.code-overview__signal > svg {
+  margin-top: 1px;
+  color: var(--octant-text-muted);
+}
+
+.code-overview__signal > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.code-overview__signal strong {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.code-overview__signal p {
+  margin: 1px 0 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+}
+
+.code-overview__toolbar {
+  align-items: flex-start;
+  padding: 22px 28px 18px;
+  background: var(--octant-chrome);
+}
+
+.code-overview__identity {
+  display: grid;
+  align-items: start;
+  gap: 5px;
+}
+
+.code-overview__toolbar .project-overview__name {
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.code-overview__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-overview__lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--octant-success-text);
+}
+
+.code-overview__lifecycle-mark {
+  width: 6px;
+  height: 6px;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.code-overview__policy {
+  flex: none;
+  padding: 6px 9px;
+  color: var(--octant-text-secondary);
+  background: var(--octant-control);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+}
+
+.code-overview__context {
+  padding: 11px 28px;
+  background: var(--octant-surface-inset);
+}
+
+.code-overview .project-overview__actions {
+  display: grid;
+  width: min(100%, 980px);
+  min-height: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-self: center;
+  gap: 8px;
+  padding: 0 28px 30px;
+  border-bottom: 0;
+}
+
+.code-overview .project-overview__actions .project-button {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  text-align: left;
+}
+
+.code-overview .project-overview__actions .project-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-overview__action-arrow {
+  margin-left: auto;
+  color: var(--octant-text-muted);
+}
+
+/* Code Project Overview: one thread-major list over host-authoritative
+   projections. Cards, chips, facts, and callouts are the system recipes
+   (.setgroup, .badge, .tag, .kv, .callout); this surface only places them. */
+.code-project-overview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 32px;
+  margin-top: 28px;
+}
+
+.code-project-overview__sessions,
+.code-project-overview__quick-start {
+  min-width: 0;
+}
+
+/* Section labels follow Settings: sentence case, the secondary weight, a
+   hairline underneath, and a count at the far end where there is one. */
+.code-project-overview__section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-project-overview__section-header h2 {
+  margin: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.code-project-overview__count,
+.code-project-overview__note {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-overview__note {
+  margin: 12px 0 0;
+}
+
+.code-project-overview__habit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-overview__habit > span {
+  flex: none;
+}
+
+.code-project-overview__threads {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One thread per row, hairlines between rows, no card: the list is a table
+   of the Project's work, and a card around every row made a page of boxes. */
+.code-project-thread {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-project-thread__row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-project-thread__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 2px 0;
+  margin-inline-start: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  text-align: left;
+}
+
+.code-project-thread__title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-project-thread__chips {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-project-thread__pin {
+  flex: none;
+  opacity: 0;
+}
+
+.code-project-thread:hover .code-project-thread__pin,
+.code-project-thread:focus-within .code-project-thread__pin,
+.code-project-thread__pin[aria-pressed="true"] {
+  opacity: 1;
+}
+
+/* Facts read as one quiet line: "Branch main · Changes 1 changed file". */
+.code-project-thread__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-thread__facts li {
+  display: inline-flex;
+  min-width: 0;
+  gap: 5px;
+}
+
+.code-project-thread__fact-label {
+  color: var(--oct-meta);
+}
+
+.code-project-thread__more {
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-thread__more summary {
+  cursor: pointer;
+  color: var(--oct-meta);
+}
+
+.code-project-thread__more .kv {
+  margin-top: 8px;
+}
+
+.code-project-overview__sessions > p,
+.code-project-overview__quick-start > p,
+.code-project-overview__state p {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* The unavailable alert is the system callout; the surface only keeps the
+   retry control beside the copy instead of under it. */
+.code-project-overview__state {
+  align-items: flex-start;
+}
+
+.code-project-overview__state > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.code-project-overview__state svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* Each thread card is the system setgroup recipe; the surface owns only the
+   interior placement of the title row, inline facts, and disclosure. */
+.code-project-thread {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 14px 12px;
+}
+
+.code-project-thread__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-project-thread__title {
+  flex: 1 1 220px;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.code-project-thread__title span {
+  overflow: hidden;
+  font-weight: var(--oct-weight-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-project-thread__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-project-thread__pin {
+  flex: none;
+}
+
+.code-project-thread__more summary {
+  cursor: pointer;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.code-project-thread__more[open] summary {
+  margin-bottom: 8px;
+  color: var(--oct-fg-2);
+}
+
+.code-project-overview__quick-start-copy {
+  max-width: 72ch;
+  margin-bottom: 5px !important;
+}
+
+.code-project-overview__quick-start .code-composer-adapter {
+  min-height: 0;
+  height: auto;
+  margin-top: 14px;
+  background: transparent;
+}
+
+.code-project-overview__quick-start .welcome {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  gap: 12px;
+}
+
+.code-project-overview__quick-start .welcome__heading {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .code-project-overview__facts,
+  .code-project-overview__sessions,
+  .code-project-overview__quick-start {
+    padding-inline: 18px;
+  }
+}
+
+@media (max-width: 680px) {
+  .code-overview__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .code-overview__toolbar,
+  .code-overview__context {
+    padding-inline: 18px;
+  }
+
+  .code-overview__toolbar .project-overview__name {
+    font-size: var(--oct-text-xl);
+  }
+
+  .code-overview__card--delivery {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .code-overview .project-overview__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 18px;
+  }
+}
+
+.code-branch-selector__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  color: var(--octant-text-muted);
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.code-branch-selector__search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  color: var(--octant-text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: var(--oct-text-sm);
+}
+
+.code-branch-selector__search input::placeholder {
+  color: var(--octant-text-muted);
+}
+
+.code-thread-workspace {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+}
+
+/* The bar spans the surface for its rule; its content sits in the shared
+   thread column so it starts where the transcript below it does. */
+.code-thread-workspace__header {
+  flex: 0 0 auto;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+/* Live child runs are all this band holds now, and the slot that reports them
+   renders nothing at all for a thread with no children — leaving the band's
+   padding and its rule to paint a bare line and an empty strip above every
+   ordinary transcript. It exists only when it has something to say. */
+.code-thread-workspace__header:has(> .code-thread-workspace__header-row:empty) {
+  display: none;
+}
+
+.code-thread-workspace__header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-height: 44px;
+}
+
+.code-thread-workspace__tool {
+  display: inline-flex;
+  height: auto;
+  min-height: var(--oct-control-height-sm);
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: var(--oct-text-xs);
+}
+
+/* Kept for AgentRunHierarchy, which still reports its errors under this
+   class inside the auxiliary panel. The workspace's own notices moved to
+   the system `.callout` recipe in the thread column below. */
+.code-thread-workspace__error {
+  margin: 0;
+  padding: 10px clamp(20px, 4vw, 48px);
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border-bottom: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
+}
+
+.code-thread-workspace__waiting {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 12px auto 0;
+  padding-inline: var(--oct-space-1);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.code-thread-workspace__waiting svg {
+  flex: 0 0 auto;
+  color: var(--octant-warning-text);
+}
+
+/* Placement only: the recipe is the system's `.callout`, the measure the
+   shared `.thread-column`. A notice about this thread spans the thread's
+   own column — running it edge to edge made it read as window chrome. */
+.code-thread-workspace__callout {
+  flex: 0 0 auto;
+  align-items: center;
+  margin: 12px auto 0;
+  /* The workspace notices are warnings: the recipe is tone-neutral, so the
+     warning's tinted ground and hairline live here with the placement. */
+  background: var(--oct-warn-soft);
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
+}
+
+.code-thread-workspace__callout > p {
+  flex: 1 1 auto;
+}
+
+/* A provider's question takes the approval row with its answer field. */
+.code-thread-workspace__provider-request > input {
+  flex: 1 1 200px;
+}
+
+/* Provider questions are actionable composer state. Keep them with the
+   composer at the foot of the thread so the answer never gets separated from
+   the message field by a long transcript. The shared request row supplies
+   its controls and neutral surface; this wrapper owns the stack and measure. */
+.code-thread-workspace__provider-requests {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.code-thread-workspace__provider-requests .approval-row {
+  width: 100%;
+}
+
+/* The scroll frame and its padding are the system's `.transcript-scroll`. */
+.code-thread-workspace__conversation {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.code-thread-workspace__transcript {
+  position: relative;
+  margin: 0 auto;
+}
+
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript {
+  display: grid;
+  gap: 20px;
+}
+
+.code-thread-workspace__empty {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
+}
+
+.code-thread-workspace__message {
+  min-width: 0;
+  color: var(--oct-fg);
+}
+.code-checkout-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-checkout-bar__identity {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.code-checkout-bar__project {
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  color: var(--oct-fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-checkout-bar__branch {
+  overflow: hidden;
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-checkout-bar__diffstat {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-checkout-bar__insertions {
+  color: var(--oct-success-fg);
+}
+
+.code-checkout-bar__deletions {
+  color: var(--oct-danger-fg);
+}
+
+/* The action is the last thing on the line, so the facts read first. */
+.code-checkout-bar__action {
+  margin-inline-start: auto;
+  height: 26px;
+  min-height: 26px;
+  padding-inline: 8px;
+}
+
+@media (max-width: 560px) {
+  .thread-composer__context .code-checkout-bar__action {
+    width: 28px;
+    padding-inline: 0;
+  }
+  .thread-composer__context .code-checkout-bar__action span {
+    display: none;
+  }
+}
+
+/* The composer's frame, placement, focus border, input, chips, bottom row,
+   controls, and status line are the system's (`.composer`,
+   `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
+   Work); this block only pads the pieces the system does not know about. */
+
+/* Chips and attachments are frameless rows of the frame, so they take the
+   same gutter the system gives `.composer-chips`. */
+.code-thread-workspace__composer .thread-mention__chips,
+.code-thread-workspace__attachments {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
+}
+
+/* Attached images, in the composer and on the message that carried them.
+   The chip itself is the system's; only the thumbnail and the name's
+   ellipsis are this surface's own. */
+.code-thread-workspace__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.code-thread-workspace__attachment {
+  max-width: 240px;
+}
+
+.code-thread-workspace__attachment-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--oct-fg-soft);
+}
+
+.code-thread-workspace__attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transcript gallery reuses the attachment classes without the composer's
+   chip frame, so the message rows keep a frame and a readable thumbnail. */
+.code-thread-workspace__message .code-thread-workspace__attachments {
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-thread-workspace__row {
+  display: grid;
+  min-width: 0;
+}
+
+/* Tool rows: what a turn did, one 28px row per call, between the turn header
+   and the reply. The name reads at the body size; the state sits at the
+   right edge as quiet detail text with a 12px mark (a spinner while it runs,
+   a check when it is done, a cross when it failed). Rows are parted by
+   hairlines and share one indent, so a tool row is the same object in every
+   mode that grows one. Before this a dotted rail ran down the left, the name
+   was 11px, and the state word was larger than the name. */
+.code-transcript-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0 0 8px;
+}
+
+.code-transcript-row__disclosure {
+  min-width: 0;
+}
+
+.code-transcript-row__disclosure + .code-transcript-row__disclosure {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.code-transcript-row__disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  overflow: hidden;
+  padding: 0 2px;
+  cursor: default;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  list-style: none;
+}
+
+.code-transcript-row__disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.code-transcript-row__chevron {
+  flex: none;
+  color: var(--oct-meta);
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+.code-transcript-row__disclosure[open] > summary .code-transcript-row__chevron {
+  transform: rotate(90deg);
+}
+
+.code-transcript-row__name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The settled fold ("2 tool calls · 1 file edited") is a summary, so it keeps
+   the quiet colour; the rows it opens onto indent by one chevron. */
+.code-transcript-row__disclosure--toolchain > summary .code-transcript-row__name {
+  color: var(--oct-muted);
+}
+
+.code-transcript-row__toolchain {
+  display: flex;
+  flex-direction: column;
+  padding-left: 20px;
+}
+
+.code-transcript-row__toolchain > .code-transcript-row__disclosure:first-child {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.code-transcript-row__disclosure--thinking > summary .code-transcript-row__name {
+  color: var(--oct-muted);
+}
+
+.code-transcript-row__outcome {
+  flex: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.code-transcript-row__status-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.code-transcript-row__disclosure[data-state="failed"] .code-transcript-row__outcome,
+.code-transcript-row__disclosure[data-state="failed"] .code-transcript-row__status-icon {
+  color: var(--oct-danger-fg);
+}
+
+.code-transcript-row__disclosure[data-state="started"] .code-transcript-row__status-icon,
+.code-transcript-row__disclosure[data-state="running"] .code-transcript-row__status-icon {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* The journaled summary, expanded: detail-size mono on a surface set into
+   the row, indented to where the name starts. */
+.code-transcript-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px 20px;
+  padding: 8px 10px;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
+}
+
+.code-transcript-row__pre {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-transcript-row__thinking-body {
+  margin: 0 0 8px 20px;
+  padding: 0 0 0 var(--oct-space-4);
+  border-left: 2px solid var(--oct-border);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-transcript);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
+  white-space: pre-wrap;
+}
+
+.code-transcript-row__truncated {
+  margin: 0 0 2px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-transcript-row__empty-detail {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-transcript-row__chevron {
+    transition: none;
+  }
+
+  .code-transcript-row__status-icon {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
+  animation: none;
+}
+
+/* The status line under the composer row is the system's `.composer-status`:
+   keyboard hint and receipts on the left, spend and limits trailing. */
+.code-thread-workspace__hint {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-thread-workspace__checkpoint,
+.code-thread-workspace__fork,
+.code-thread-workspace__restore {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* What changed while a turn ran (0141). A work product, so it is the one card
+   in a transcript whose replies are bare prose: a hairline ring on the card
+   fill, no lift. Rows carry no borders; the counts are the only hue, the same
+   diff ink the checkout strip uses. */
+.code-turn-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  max-width: 72ch;
+  margin-top: var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-1) var(--oct-space-1);
+  background: var(--octant-card, var(--octant-workspace));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.code-turn-files__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-2) var(--oct-space-1);
+}
+
+.code-turn-files__title {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+
+.code-turn-files__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-turn-files__row {
+  display: grid;
+  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 28px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+}
+
+.code-turn-files__path {
+  display: flex;
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+}
+
+/* The folder gives way before the name does: the name is what a person scans for. */
+.code-turn-files__directory {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-turn-files__name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-turn-files__counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-turn-files__insertions {
+  color: var(--oct-success-fg);
+}
+
+.code-turn-files__deletions {
+  color: var(--oct-danger-fg);
+}
+
+.code-turn-files__binary,
+.code-turn-files__note {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-turn-files__note {
+  margin: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* Layout only: the link recipe owns this control's paint. */
+.code-turn-files__fold {
+  align-self: flex-start;
+  height: auto;
+  min-height: 24px;
+  gap: var(--oct-space-1);
+  margin-inline-start: var(--oct-space-2);
+  padding: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.code-turn-files__fold [data-open="true"] {
+  transform: rotate(180deg);
+}
+
+/* The bar controls' look is the system's `.composer-row` treatment
+   (ADR 0038); nothing to restate here. */
+
+.code-thread-workspace .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Pull requests: the shell, toolbar, and Project rows come from the surface
+   language; this sheet keeps the search field, the PR row anatomy, and the
+   status line the dock review tools share. */
+.code-project-pull-requests {
+  container: pull-requests / inline-size;
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
+}
+
+.code-project-pull-requests__status {
+  width: 100%;
+  margin: -2px 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.code-project-pull-requests__status[data-state="stale"] {
+  color: var(--oct-warning-text, var(--oct-muted));
+}
+
+.code-project-pull-requests__search input {
+  height: 30px;
+  padding-right: 32px;
+  border-color: var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+}
+
+.code-project-pull-requests__search-clear {
+  position: absolute;
+  right: 4px;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+}
+
+.code-project-pull-requests__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-project-pull-requests__groups {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-6);
+}
+
+.code-project-pull-requests__project-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-4);
+  min-height: 40px;
+  padding: 4px 0 2px;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.code-project-pull-requests__project-actions,
+.code-project-pull-requests__auto-refresh {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.code-project-pull-requests__project-actions {
+  gap: var(--oct-space-2);
+}
+.code-project-pull-requests__auto-refresh {
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-pull-requests__title-line,
+.code-project-pull-requests__meta,
+.code-project-pull-requests__details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-2) 10px;
+}
+
+.code-project-pull-requests__list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-project-pull-requests__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  width: 100%;
+  height: auto;
+  gap: 10px;
+  min-height: 64px;
+  padding: var(--oct-space-3) var(--oct-space-2);
+  border: 0;
+  border-bottom: 1px solid var(--oct-border-soft);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.code-project-pull-requests__row[aria-pressed="true"] {
+  background: var(--oct-selection);
+}
+
+.code-project-pull-requests__row:hover,
+.code-project-pull-requests__row:focus-visible {
+  background: var(--octant-surface-muted);
+}
+
+.code-project-pull-requests__icon {
+  margin-top: 2px;
+  color: var(--oct-success-fg);
+}
+
+.code-project-pull-requests__row-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, auto);
+  align-content: start;
+  align-items: start;
+  min-width: 0;
+  gap: var(--oct-space-2) var(--oct-space-3);
+}
+
+.code-project-pull-requests__title-line,
+.code-project-pull-requests__details,
+.code-project-pull-requests__branch,
+.code-project-pull-requests__linked {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.code-project-pull-requests__meta {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.code-project-pull-requests__title {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-project-pull-requests__number,
+.code-project-pull-requests__details,
+.code-project-pull-requests__linked {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-pull-requests__details {
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.code-project-pull-requests__branch {
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container pull-requests (max-width: 700px) {
+  .code-project-pull-requests__row-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .code-project-pull-requests__meta {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+  .code-project-pull-requests__details {
+    flex-wrap: wrap;
+  }
+}
+
+.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__row-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta {
+  grid-column: 1;
+  grid-row: auto;
+  justify-content: flex-start;
+}
+
+/* The dock lists one thread's Project under the dock's own head: the same rows
+   with the page's outer rhythm tightened to the dock's measure. The dock clips
+   its content, so this root owns the scroll a long Project needs; without it
+   the rows past the dock's height were cut off and unreachable. */
+.code-project-pull-requests[data-presentation="dock"] {
+  align-content: start;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  gap: var(--oct-space-2);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__groups {
+  align-content: start;
+  gap: var(--oct-space-4);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__project-header {
+  min-height: 32px;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row {
+  min-height: 0;
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .surface-toolbar {
+  flex-wrap: wrap;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__meta {
+  grid-column: 1;
+  grid-row: auto;
+  justify-content: flex-start;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__details {
+  flex-wrap: wrap;
+}

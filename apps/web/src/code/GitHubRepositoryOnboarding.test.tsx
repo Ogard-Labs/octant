@@ -385,7 +385,9 @@ describe("GitHubRepositoryOnboardingFlow", () => {
   // holds by construction.
   it("keeps the GitHub surfaces readable in narrow layouts, at 200% zoom, and under contrast and motion settings", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
-    const githubStyles = styles.slice(styles.indexOf(".github-picker"));
+    const githubStart = styles.indexOf(".github-picker");
+    const codeStart = styles.indexOf(".code-", githubStart);
+    const githubStyles = styles.slice(githubStart, codeStart === -1 ? undefined : codeStart);
 
     expect(githubStyles).toMatch(
       /@media \(max-width: 680px\)[\s\S]*?\.github-picker__facts\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
