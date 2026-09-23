@@ -267,7 +267,10 @@ describe("GitHubConnectionSettings", () => {
   it("keeps the section readable in narrow layouts, at 200% zoom, and under motion settings", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
     const factStyles = styles.slice(styles.indexOf(".settings-fact-list"));
-    const githubStyles = styles.slice(styles.indexOf(".github-settings"));
+    const githubStyles = styles.slice(
+      styles.indexOf(".github-settings"),
+      styles.indexOf(".host-data-map"),
+    );
 
     expect(factStyles).toMatch(
       /@media \(max-width: 720px\)[\s\S]*?\.settings-fact-list__row\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
