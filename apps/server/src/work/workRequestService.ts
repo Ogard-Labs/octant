@@ -420,10 +420,18 @@ export class WorkRequestService {
     return this.#systemSettle(requestId, "expired");
   }
 
-  onSettled(requestId: string, callback: () => void): () => void {
-    const key = String(requestId);
-    const decodedRequestId = decodeWorkRequestId(key);
-    const entry = this.#projection.lookup(decodedRequestId);
+  onSettled(
+    input: {
+      readonly providerSessionId: ProviderSessionId;
+      readonly providerCallbackId: string;
+    },
+    callback: () => void,
+  ): () => void {
+    const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
+    const entry = this.#findByProviderSessionCallbackId(
+      input.providerSessionId,
+      input.providerCallbackId,
+    );
     if (entry !== undefined && entry.request.status !== "pending") {
       callback();
       return () => undefined;
@@ -592,8 +600,16 @@ export class WorkRequestService {
       );
     }
     this.#projection.apply(frame);
-    const listeners = this.#settlementListeners.get(String(current.requestId));
-    this.#settlementListeners.delete(String(current.requestId));
+    const currentEntry = this.#projection.lookup(current.requestId);
+    const listenerKey =
+      currentEntry === undefined
+        ? settlementListenerKey(current.providerSessionId, current.providerRequestId)
+        : settlementListenerKey(
+            currentEntry.request.providerSessionId,
+            providerCallbackIdForEntry(currentEntry),
+          );
+    const listeners = this.#settlementListeners.get(listenerKey);
+    this.#settlementListeners.delete(listenerKey);
     for (const callback of listeners ?? []) callback();
     return ok(nextRequest);
   }
@@ -757,6 +773,21 @@ export class WorkRequestService {
     }
     return undefined;
   }
+
+  #findByProviderSessionCallbackId(
+    providerSessionId: ProviderSessionId,
+    providerCallbackId: string,
+  ) {
+    for (const entry of this.#projection.snapshot().values()) {
+      if (
+        String(entry.request.providerSessionId) === String(providerSessionId) &&
+        providerCallbackIdForEntry(entry) === providerCallbackId
+      ) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
 }
 
 function settledCurrent(request: WorkRequest) {
@@ -790,6 +821,10 @@ function providerCallbackId(entry: WorkRequestEntry): string {
 
 function providerCallbackIdForEntry(entry: WorkRequestEntry): string {
   return entry.providerCallbackId ?? entry.request.providerRequestId;
+}
+
+function settlementListenerKey(providerSessionId: ProviderSessionId, providerCallbackId: string) {
+  return `${String(providerSessionId)}:${providerCallbackId}`;
 }
 
 // Re-export the id decoder for callers that only import from this module.

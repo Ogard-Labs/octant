@@ -207,7 +207,10 @@ export interface WorkTurnServiceDependencies {
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
-  readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
+  readonly onRequestSettled?: (
+    input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
+    release: () => void,
+  ) => () => void;
   /**
    * The app-managed tools a Work turn may offer its provider. Absent on a host
    * that composes none, which sends the turn with no tools rather than

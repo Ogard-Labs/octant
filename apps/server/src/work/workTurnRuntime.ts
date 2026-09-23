@@ -20,6 +20,7 @@ import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
+import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
   makeIdleTimeout,
@@ -56,7 +57,10 @@ export interface WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
-    readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
+    readonly onRequestSettled?: (
+      input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
+      release: () => void,
+    ) => () => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
 
@@ -93,7 +97,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly onDelta?: (response: string) => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
-    readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
+    readonly onRequestSettled?: (
+      input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
+      release: () => void,
+    ) => () => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
@@ -144,7 +151,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly onDelta?: (response: string) => void;
       /** The provider's restated task list, whole, whenever it moves. */
       readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
-      readonly onRequestSettled?: (requestId: string, release: () => void) => () => void;
+      readonly onRequestSettled?: (
+        input: {
+          readonly providerSessionId: ProviderSessionId;
+          readonly providerCallbackId: string;
+        },
+        release: () => void,
+      ) => () => void;
     },
     idle: IdleTimeout,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
@@ -207,12 +220,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let terminal: ProviderRuntimeEvent | undefined;
       const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
       const pendingRequestCleanups = new Map<string, () => void>();
-      const releaseRequestHold = (requestId: string) => {
-        const hold = pendingRequestHolds.get(requestId);
+      const releaseRequestHold = (key: string) => {
+        const hold = pendingRequestHolds.get(key);
         if (hold === undefined) return;
-        pendingRequestHolds.delete(requestId);
-        pendingRequestCleanups.get(requestId)?.();
-        pendingRequestCleanups.delete(requestId);
+        pendingRequestHolds.delete(key);
+        pendingRequestCleanups.get(key)?.();
+        pendingRequestCleanups.delete(key);
         void Effect.runPromise(Deferred.succeed(hold, undefined));
       };
       const answeredToolRequestIds = new Set<string>();
@@ -299,13 +312,20 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   return;
                 }
                 if (event.kind === "approval-request" || event.kind === "user-input-request") {
+                  const providerCallbackId = normalizedProviderCallbackId(event.requestId);
+                  if (providerCallbackId === undefined) return;
+                  const requestKey = `${String(event.sessionId)}:${providerCallbackId}`;
                   const hold = yield* Deferred.make<void>();
-                  pendingRequestHolds.set(String(event.requestId), hold);
-                  const cleanup = input.onRequestSettled?.(event.requestId, () =>
-                    releaseRequestHold(String(event.requestId)),
+                  pendingRequestHolds.set(requestKey, hold);
+                  const cleanup = input.onRequestSettled?.(
+                    {
+                      providerSessionId: event.sessionId,
+                      providerCallbackId,
+                    },
+                    () => releaseRequestHold(requestKey),
                   );
                   if (cleanup !== undefined) {
-                    pendingRequestCleanups.set(String(event.requestId), cleanup);
+                    pendingRequestCleanups.set(requestKey, cleanup);
                   }
                   yield* Effect.forkScoped(idle.during(Deferred.await(hold)));
                   return;

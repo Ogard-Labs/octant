@@ -389,6 +389,10 @@ describe("WorkTurnRuntime", () => {
 
   it("keeps the idle window open while a provider request awaits an answer", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    let releaseRequest: (() => void) | undefined;
+    let settlementInput:
+      | { readonly providerSessionId: string; readonly providerCallbackId: string }
+      | undefined;
     const connection: ProviderConnection = {
       subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: (input) => Effect.succeed({ sessionId: input.sessionId }),
@@ -402,7 +406,7 @@ describe("WorkTurnRuntime", () => {
             occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
             kind: "approval-request",
             sessionId: ids.session as never,
-            requestId: "work-approval-1",
+            requestId: "call_1",
             action: "Write a note",
             description: "Save the provider's draft.",
           });
@@ -413,11 +417,27 @@ describe("WorkTurnRuntime", () => {
                 sequence: 2,
                 correlationId: decodeCorrelationId(String(ids.project)),
                 occurredAt: decodeTimestamp("2026-08-11T12:00:40.000Z"),
+                kind: "text-delta",
+                sessionId: ids.session as never,
+                text: "Still waiting.",
+              }),
+            );
+          }, 20);
+          setTimeout(() => {
+            releaseRequest?.();
+          }, 40);
+          setTimeout(() => {
+            void Effect.runPromise(
+              Queue.offer(queue, {
+                instanceId: ids.provider,
+                sequence: 3,
+                correlationId: decodeCorrelationId(String(ids.project)),
+                occurredAt: decodeTimestamp("2026-08-11T12:00:45.000Z"),
                 kind: "completed",
                 sessionId: ids.session as never,
               }),
             );
-          }, 40);
+          }, 45);
         }),
       interrupt: () => Effect.void,
       stop: () => Effect.void,
@@ -450,9 +470,21 @@ describe("WorkTurnRuntime", () => {
         acquire: () => Effect.succeed(connection),
       },
       signal: new AbortController().signal,
+      onRequestSettled: (input, release) => {
+        settlementInput = {
+          providerSessionId: String(input.providerSessionId),
+          providerCallbackId: input.providerCallbackId,
+        };
+        releaseRequest = release;
+        return () => undefined;
+      },
     });
 
-    expect(outcome).toEqual({ kind: "completed", response: "" });
+    expect(outcome).toEqual({ kind: "completed", response: "Still waiting." });
+    expect(settlementInput).toEqual({
+      providerSessionId: String(ids.session),
+      providerCallbackId: "call_1",
+    });
   });
 
   it("still times out when the provider stays silent", async () => {

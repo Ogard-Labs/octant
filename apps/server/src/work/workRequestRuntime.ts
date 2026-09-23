@@ -259,7 +259,7 @@ function isTerminalEvent(event: ProviderRuntimeEvent): boolean {
   return event.kind === "completed" || event.kind === "interrupted" || event.kind === "failed";
 }
 
-function normalizedProviderCallbackId(value: string): string | undefined {
+export function normalizedProviderCallbackId(value: string): string | undefined {
   return value.length > 0 && value.length <= 16_384 ? value : undefined;
 }
 

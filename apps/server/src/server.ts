@@ -5484,8 +5484,8 @@ export function startOctantServer(
       resolveSelectedSkillContext,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
-      onRequestSettled: (requestId, release) =>
-        workRequestService?.onSettled(requestId, release) ?? (() => undefined),
+      onRequestSettled: (input, release) =>
+        workRequestService?.onSettled(input, release) ?? (() => undefined),
       persistence: {
         ...persistence,
         readProviderModel: (providerInstanceId, modelId) =>
