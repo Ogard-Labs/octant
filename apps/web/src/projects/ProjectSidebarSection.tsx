@@ -347,14 +347,21 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           projectViewState.activeViewId,
           allProjectsPreferences,
         );
-  // Search, environment and status filters all hide threads without deleting
-  // them. A status filter can match nothing legitimately — ticking "Snooze
-  // ended" when no snooze has ended empties the list — so it has to count here
-  // or that reader gets a blank sidebar with no explanation.
+  // Search, environment, status and activity-window filters all hide threads
+  // without deleting them. A status filter can match nothing legitimately —
+  // ticking "Snooze ended" when no snooze has ended empties the list — and an
+  // activity window can do the same, so each has to count here or that reader
+  // gets a blank sidebar with no explanation. Lifecycle stays out on purpose:
+  // an archived view's content is the archived Project rows themselves, so
+  // calling it filtered would hide the rows — and their Restore action —
+  // behind the empty message. An activity window on that same view must not
+  // take their place either.
   const filteringThreads =
     searching ||
     (currentFilters !== undefined &&
-      (currentFilters.environmentIds.length > 0 || (currentFilters.statuses?.length ?? 0) > 0));
+      (currentFilters.environmentIds.length > 0 ||
+        (currentFilters.statuses?.length ?? 0) > 0 ||
+        currentFilters.activity !== "all"));
   const threadsReady = props.threadStatus === undefined || props.threadStatus === "ready";
   // A saved view can filter and order on what threads are doing, so the rows it
   // reads carry their status facts alongside their timestamps. Rows keep every
@@ -446,7 +453,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       (unfiled.length > 0 ||
         [...threadsByProject.byProjectId.values()].some((group) => group.length > 0))) ||
     activity.groups.some((group) => group.threads.length > 0);
-  const showFilteredThreadsEmpty = filteringThreads && threadsReady && !hasVisibleThreads;
+  const viewingArchivedProjects = currentFilters?.lifecycle === "archived";
+  const showFilteredThreadsEmpty =
+    filteringThreads && threadsReady && !hasVisibleThreads && !viewingArchivedProjects;
 
   useEffect(() => {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
