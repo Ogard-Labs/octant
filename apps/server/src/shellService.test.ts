@@ -11,7 +11,6 @@ import {
   type ShellCommand,
   type Project,
   type WindowWorkspace,
-  LOCAL_HOST_ID,
 } from "@octant/contracts";
 import {
   defaultEnvironmentPresentationState,

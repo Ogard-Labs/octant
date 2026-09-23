@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EventEnvelope } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   readUsageRecord,

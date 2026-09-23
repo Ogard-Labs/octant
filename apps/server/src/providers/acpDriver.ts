@@ -736,7 +736,7 @@ function makeConnection(
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         connectionClosing = true;
-        await Promise.allSettled([...pendingStarts]);
+        await Promise.allSettled(pendingStarts);
         await Promise.all([...sessions.values()].map(closeState));
         sessions.clear();
         await Effect.runPromise(PubSub.shutdown(queue));

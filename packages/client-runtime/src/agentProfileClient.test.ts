@@ -1,6 +1,6 @@
 import { decodeAgentProfileId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { AgentProfileClientFailure, createAgentProfileClient } from "./agentProfileClient";
+import { createAgentProfileClient } from "./agentProfileClient";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const profileId = decodeAgentProfileId("00000000-0000-0000-0000-000000000001");

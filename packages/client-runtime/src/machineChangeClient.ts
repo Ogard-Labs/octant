@@ -126,6 +126,7 @@ async function readChunk(
   });
 }
 
+// oxlint-disable-next-line require-yield -- the stream fails on first pull and never yields.
 async function* rejected(error: Error): AsyncGenerator<MachineChangeFrame> {
   throw error;
 }

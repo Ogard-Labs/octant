@@ -1730,7 +1730,7 @@ describe("remote credential self-service routes", () => {
 
   // F2: Verify-vs-revoke TOCTOU — revalidation before dispatch.
   it("rejects a request whose session was revoked between proof verification and dispatch (TOCTOU)", async () => {
-    const { auth, privateKey, connection, service } = setup({
+    const { auth, privateKey, connection } = setup({
       withDispatch: true,
       withRegistry: true,
       withRevalidation: true,
@@ -1829,8 +1829,6 @@ describe("remote credential self-service routes", () => {
       },
     });
     const { session } = await issueSessionOverHttp(auth, privateKey);
-    const sessionIdDigest = createHash("sha256").update(session.sessionId, "utf8").digest("hex");
-
     // Start the product dispatch — it will block before the effect.
     const dispatchPromise = auth.handleAuthenticated(
       productRequest(session, privateKey, { nonce: "nonce_s1_dispatch_001" }),
@@ -1857,7 +1855,7 @@ describe("remote credential self-service routes", () => {
     // Release the dispatch barrier — the handler should see the abort and
     // NOT proceed to the effect.
     dispatchBlocked.open();
-    const response = await dispatchPromise;
+    await dispatchPromise;
     expect(effectOccurred).toBe(false);
     connection.close();
   });

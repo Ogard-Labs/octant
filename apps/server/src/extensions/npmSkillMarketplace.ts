@@ -208,6 +208,7 @@ export function extractSkillMarkdownFromTarball(
     const name = readTarString(header, 0, 100);
     const prefix = readTarString(header, 345, 155);
     const sizeText = readTarString(header, 124, 12)
+      // oxlint-disable-next-line no-control-regex -- strips NUL padding from tar header text.
       .replace(/\u0000/g, "")
       .trim();
     const size = sizeText === "" ? 0 : Number.parseInt(sizeText, 8);

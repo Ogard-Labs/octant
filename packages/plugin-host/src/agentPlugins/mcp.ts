@@ -158,6 +158,7 @@ function validateServerEntry(
     name.length < 1 ||
     name.length > 128 ||
     name.trim() !== name ||
+    // oxlint-disable-next-line no-control-regex -- rejects ASCII control bytes in MCP names.
     /[\u0000-\u001f\u007f]/.test(name)
   ) {
     throw new Error("MCP server name must be 1–128 characters.");

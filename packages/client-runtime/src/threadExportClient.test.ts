@@ -53,8 +53,9 @@ describe("createThreadExportClient", () => {
     const outcome = await client.exportThread({ mode: "chat", threadId });
     expect(outcome.kind).toBe("exported");
     const call = fetchImpl.mock.calls[0] as unknown as [string, RequestInit] | undefined;
-    expect(call?.[0]).toContain("/api/threads/export");
-    expect((call?.[1].headers as Record<string, string>)["x-octant-window-capability"]).toBe(
+    if (call === undefined) throw new Error("expected a thread export request");
+    expect(call[0]).toContain("/api/threads/export");
+    expect(new Headers(call[1].headers).get("x-octant-window-capability")).toBe(
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0",
     );
   });

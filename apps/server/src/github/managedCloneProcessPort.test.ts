@@ -184,6 +184,7 @@ describe("managed clone process", () => {
     expect(progress.length).toBeGreaterThan(0);
     for (const message of progress) {
       expect(message).not.toMatch(/ghp_[A-Za-z0-9_]{12,}/);
+      // oxlint-disable-next-line no-control-regex -- asserts terminal control bytes were removed.
       expect(message).not.toMatch(/[\u0000-\u001f\u007f]/);
       expect(message.length).toBeLessThanOrEqual(160);
     }

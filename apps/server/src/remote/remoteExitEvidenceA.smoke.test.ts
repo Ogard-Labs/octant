@@ -48,7 +48,6 @@ import {
   readRemoteCommandReceipt,
 } from "../persistence/remoteAccessProjection";
 import { nodeServe } from "../nodeServe";
-import type { Serve } from "../server";
 import type { RemoteClientPrincipalHandoff } from "./remoteHttpAuthentication";
 import {
   createRemoteGateway,

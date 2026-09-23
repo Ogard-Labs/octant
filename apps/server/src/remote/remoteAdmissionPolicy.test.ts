@@ -85,7 +85,9 @@ describe("remoteAdmissionPolicy pairing buckets", () => {
         method: "POST",
       });
       expect(decision.kind).toBe("admitted");
-      decision.kind === "admitted" && decision.release();
+      if (decision.kind === "admitted") {
+        decision.release();
+      }
     }
     const rejected = acquire(policy, {
       surface: "pairing",
@@ -127,7 +129,9 @@ describe("remoteAdmissionPolicy pairing buckets", () => {
         method: "POST",
       });
       expect(decision.kind).toBe("admitted");
-      decision.kind === "admitted" && decision.release();
+      if (decision.kind === "admitted") {
+        decision.release();
+      }
     }
     expect(
       acquire(policy, {
@@ -158,7 +162,9 @@ describe("remoteAdmissionPolicy auth buckets", () => {
         method: "POST",
       });
       expect(decision.kind).toBe("admitted");
-      decision.kind === "admitted" && decision.release();
+      if (decision.kind === "admitted") {
+        decision.release();
+      }
     }
     expect(
       acquire(policy, {
@@ -179,7 +185,9 @@ describe("remoteAdmissionPolicy auth buckets", () => {
         method: "POST",
       });
       expect(decision.kind).toBe("admitted");
-      decision.kind === "admitted" && decision.release();
+      if (decision.kind === "admitted") {
+        decision.release();
+      }
     }
     // A different source under the same device is still bounded by the device bucket.
     expect(
@@ -268,7 +276,9 @@ describe("remoteAdmissionPolicy product buckets", () => {
         method: "POST",
       });
       expect(decision.kind).toBe("admitted");
-      decision.kind === "admitted" && decision.release();
+      if (decision.kind === "admitted") {
+        decision.release();
+      }
     }
     expect(
       acquire(policy, {
@@ -332,7 +342,9 @@ describe("remoteAdmissionPolicy restart and release safety", () => {
         method: "POST",
       });
       expect(decision.kind).toBe("admitted");
-      decision.kind === "admitted" && decision.release();
+      if (decision.kind === "admitted") {
+        decision.release();
+      }
     }
     expect(
       acquire(policy, {
@@ -904,7 +916,7 @@ describe("remoteAdmissionPolicy abort-to-release", () => {
     });
     const controller = new AbortController();
     const boundary = createRemoteBoundaryFetch({
-      fetch: async (request) => {
+      fetch: async () => {
         // Simulate a handler that ignores cancellation and hangs.
         await new Promise<void>(() => {});
         return new Response("ok");

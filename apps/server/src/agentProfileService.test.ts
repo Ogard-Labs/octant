@@ -1,15 +1,9 @@
-import {
-  decodeAgentProfileId,
-  type AgentProfile,
-  type AgentProfileScope,
-  type ExecutionResolutionReceipt,
-} from "@octant/contracts";
+import { decodeAgentProfileId, type AgentProfile, type AgentProfileScope } from "@octant/contracts";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
-import { ProjectionApplicationFailed } from "./persistence/projection";
-import { AgentProfileService, AgentProfileServiceError } from "./agentProfileService";
+import { AgentProfileService } from "./agentProfileService";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 
 const ts = "2026-07-25T10:00:00.000Z";

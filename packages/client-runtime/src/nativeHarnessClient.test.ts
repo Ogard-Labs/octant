@@ -15,9 +15,8 @@ describe("native harness client", () => {
   it("reads the routing table with the window capability and decodes it", async () => {
     const seen: string[] = [];
     const subject = client(async (input, init) => {
-      seen.push(
-        `${init?.method} ${String(input)} ${(init?.headers as Record<string, string>)["x-octant-window-capability"]}`,
-      );
+      const headers = new Headers(init?.headers);
+      seen.push(`${init?.method} ${String(input)} ${headers.get("x-octant-window-capability")}`);
       return Response.json({
         settings: {
           configuration: { slots: [], jobSlots: [{ job: "lead", slotId: "default" }] },

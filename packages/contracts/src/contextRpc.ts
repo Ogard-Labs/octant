@@ -15,8 +15,6 @@ import {
 import { GlobalSequence, UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-
 export const ContextInspectorRequest = Schema.Struct({
   subject: ContextSubjectRef,
   afterSequence: Schema.optional(GlobalSequence),

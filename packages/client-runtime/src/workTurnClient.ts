@@ -327,6 +327,7 @@ async function readWorkStreamChunk(
   });
 }
 
+// oxlint-disable-next-line require-yield -- the stream fails on first pull and never yields.
 async function* rejectedWorkStream(error: Error): AsyncGenerator<WorkTurnStreamFrame> {
   throw error;
 }
