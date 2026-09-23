@@ -4499,6 +4499,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 0 var(--oct-space-4);
 }
 
+.work-overview {
+  container-type: inline-size;
+  container-name: work-overview;
+}
+
 .work-overview__section {
   min-width: 0;
 }
@@ -4539,6 +4544,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   gap: var(--oct-space-3);
+}
+
+@container work-overview (max-width: 520px) {
+  .work-overview__starter-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .work-overview__starter-fields > label {
