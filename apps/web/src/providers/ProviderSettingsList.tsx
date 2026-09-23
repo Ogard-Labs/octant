@@ -556,6 +556,7 @@ function ProviderRow(props: ProviderRowProps) {
   const [detailsOpen, setDetailsOpen] = useState(
     () => !props.probing && props.observed?.readiness === "unauthenticated",
   );
+  const [renameSaved, setRenameSaved] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const hiddenModelIds = useMemo(
     () =>
@@ -579,6 +580,11 @@ function ProviderRow(props: ProviderRowProps) {
   useEffect(() => {
     if (readiness === "unauthenticated") setDetailsOpen(true);
   }, [readiness]);
+  useEffect(() => {
+    if (!renameSaved) return;
+    const timeout = window.setTimeout(() => setRenameSaved(false), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [renameSaved]);
   const detectedLocally = isDetectedLocally(props.instance, props.discoverySnapshot);
   const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
   const detectedButDisabled = !props.instance.enabled && detectedLocally;
@@ -888,7 +894,11 @@ function ProviderRow(props: ProviderRowProps) {
                 onSubmit={(event) => {
                   event.preventDefault();
                   const data = new FormData(event.currentTarget);
-                  void props.onRename(props.instance.id, String(data.get("displayName") ?? ""));
+                  void props
+                    .onRename(props.instance.id, String(data.get("displayName") ?? ""))
+                    .then((ok) => {
+                      if (ok) setRenameSaved(true);
+                    });
                 }}
               >
                 <label>
@@ -898,18 +908,30 @@ function ProviderRow(props: ProviderRowProps) {
                     className="settings-view__text-input"
                     defaultValue={props.instance.displayName}
                     name="displayName"
+                    onChange={() => setRenameSaved(false)}
                     required
                   />
                 </label>
-                <OctantButton
-                  disabled={disabled}
-                  type="submit"
-                  variant="outline"
-                  size="sm"
-                  aria-label={`Save name for ${props.instance.displayName}`}
-                >
-                  Save
-                </OctantButton>
+                <span className="provider-card__edit-actions">
+                  <OctantButton
+                    disabled={disabled}
+                    type="submit"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Save name for ${props.instance.displayName}`}
+                  >
+                    Save
+                  </OctantButton>
+                  {renameSaved ? (
+                    <span
+                      aria-label="Saved"
+                      className="oct-meta provider-card__saved"
+                      role="status"
+                    >
+                      Saved
+                    </span>
+                  ) : null}
+                </span>
               </form>
               {isCli ? (
                 <form

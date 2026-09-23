@@ -161,10 +161,16 @@
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--oct-space-4);
 }
+/* Keep wrapped labels from lowering their values relative to neighboring totals. */
 .provider-history__totals > div {
   display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
   align-content: start;
   gap: var(--oct-space-1);
+}
+.provider-history__totals > div > span:first-child {
+  align-self: end;
 }
 .provider-history__totals span,
 .provider-history__totals small {

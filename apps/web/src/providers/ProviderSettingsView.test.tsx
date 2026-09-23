@@ -267,6 +267,33 @@ describe("ProviderSettingsView", () => {
     expect(props.onRemove).toHaveBeenCalledWith(id);
   });
 
+  it("shows rename feedback only after a successful save", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ onRename: vi.fn(async () => true) });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    const input = screen.getByLabelText("Display name for Existing CLI");
+    await user.clear(input);
+    await user.type(input, "Renamed CLI");
+    await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
+
+    expect(props.onRename).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("status", { name: /saved/i })).toBeVisible();
+
+    fireEvent.change(input, { target: { value: "Changed again" } });
+    expect(screen.queryByRole("status", { name: /saved/i })).not.toBeInTheDocument();
+  });
+
+  it("does not show rename feedback when saving fails", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ onRename: vi.fn(async () => false) });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Save name for Existing CLI" }));
+
+    expect(screen.queryByRole("status", { name: /saved/i })).not.toBeInTheDocument();
+  });
+
   it("creates Codex from the shared accessible provider form", async () => {
     const user = userEvent.setup();
     const props = fixture();
@@ -2608,6 +2635,7 @@ function fixture(
     credentialManagementAvailable?: boolean;
     discoverySnapshot?: DiscoverySnapshot;
     onOpenExternalUrl?: (url: string) => void;
+    onRename?: ProviderSettingsViewProps["onRename"];
   } = {},
 ): ProviderSettingsViewProps {
   return {
@@ -2688,7 +2716,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onRename: vi.fn(async () => true),
+    onRename: options.onRename ?? vi.fn(async () => true),
     onChangeBinary: vi.fn(async () => true),
     onChangeClaudeConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();

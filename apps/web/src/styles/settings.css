@@ -2600,6 +2600,18 @@ textarea.settings-view__text-input {
   gap: 10px;
 }
 
+.provider-card__edit-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.provider-card__saved {
+  align-self: center;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
 .provider-card__configuration {
   display: grid;
   gap: var(--oct-space-4);
