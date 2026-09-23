@@ -56,7 +56,7 @@ describe("surface language", () => {
   });
 
   it("keeps sidebar and menu labels in sentence case", () => {
-    const sidebar = read("styles.css").match(
+    const sidebar = read("styles/project-threads.css").match(
       /\.project-section > \.sidebar-section \{[^}]+\}/,
     )?.[0];
     expect(sidebar).toContain("text-transform: none;");

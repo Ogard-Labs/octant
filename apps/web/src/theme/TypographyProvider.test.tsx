@@ -13,7 +13,10 @@ const typographyBridge = readFileSync(
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
 const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
-const appStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+const appStyles = [
+  readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"),
+  readFileSync(resolve(process.cwd(), "src/styles/project-threads.css"), "utf8"),
+].join("\n");
 
 describe("ThemeTypographyProvider", () => {
   it("projects Inter at the compact size by default", () => {
