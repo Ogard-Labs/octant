@@ -1644,7 +1644,7 @@ describe("WorkspaceView Work overview", () => {
       />,
     );
 
-    const composer = await screen.findByRole("region", { name: "Create starter artifact" });
+    const composer = await screen.findByRole("region", { name: "Starter note" });
     await user.type(
       within(composer).getByRole("textbox", { name: "Starter artifact content" }),
       "# Notes",
