@@ -34,14 +34,15 @@ describe("WorkPromotionFlow", () => {
   it("requires explicit approve or dismiss and never switches mode silently", async () => {
     const user = userEvent.setup();
     const propose = vi.fn(async () => pendingProposal);
-    const approve = vi.fn(async (): Promise<WorkPromotionProposal> =>
-      decodeWorkPromotionProposal({
-        ...pendingProposal,
-        status: "approved",
-        decidedAt: "2026-07-22T08:05:00.000Z",
-        linkedCodeThreadId: "00000000-0000-4000-8000-000000000910",
-        version: 2,
-      }),
+    const approve = vi.fn(
+      async (): Promise<WorkPromotionProposal> =>
+        decodeWorkPromotionProposal({
+          ...pendingProposal,
+          status: "approved",
+          decidedAt: "2026-07-22T08:05:00.000Z",
+          linkedCodeThreadId: "00000000-0000-4000-8000-000000000910",
+          version: 2,
+        }),
     );
     const dismiss = vi.fn(async () => true);
     const onOpenLinkedCodeThread = vi.fn();
