@@ -49,5 +49,30 @@
     "apps/web/src/styles/settings.css": 11,
     "apps/web/src/styles/shell.css": 48,
     "apps/web/src/styles/zen.css": 3
+  },
+  "spacing-scale": {
+    "apps/web/src/agents/agent-hierarchy.css": 8,
+    "apps/web/src/code/project-pull-request-review.css": 7,
+    "apps/web/src/context/context.css": 17,
+    "apps/web/src/gitHistory/git-history.css": 4,
+    "apps/web/src/styles.css": 246,
+    "apps/web/src/styles/chat.css": 30,
+    "apps/web/src/styles/code.css": 15,
+    "apps/web/src/styles/components.css": 29,
+    "apps/web/src/styles/dock.css": 12,
+    "apps/web/src/styles/extensions-settings.css": 3,
+    "apps/web/src/styles/github.css": 5,
+    "apps/web/src/styles/octant.css": 44,
+    "apps/web/src/styles/palette.css": 8,
+    "apps/web/src/styles/preview.css": 3,
+    "apps/web/src/styles/project-threads.css": 1,
+    "apps/web/src/styles/remote-pairing.css": 3,
+    "apps/web/src/styles/remote-shell.css": 3,
+    "apps/web/src/styles/settings-specialty.css": 8,
+    "apps/web/src/styles/settings.css": 41,
+    "apps/web/src/styles/shell.css": 58,
+    "apps/web/src/styles/surface.css": 7,
+    "apps/web/src/styles/usage.css": 12,
+    "apps/web/src/usage/usageWorkspace.css": 16
   }
 }

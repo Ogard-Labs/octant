@@ -472,6 +472,83 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("button", { name: "Copy support ID" })).toBeVisible();
   });
 
+  it.each([
+    ["timed-out", "The provider stopped responding and the turn timed out."],
+    ["unavailable", "The provider is unavailable."],
+    ["tool-timed-out", "An app-managed tool call did not return before the turn deadline."],
+  ] as const)("states why a %s turn failed in Octant's own words", (code, sentence) => {
+    const failed = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [{ ...failed, outcome: "failed", failure: { code } }],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText(sentence)).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Support correlation")).toHaveTextContent(ids.firstAttempt);
+  });
+
+  it("states the timeout cause on an interrupted attempt too", () => {
+    const interrupted = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                { ...interrupted, outcome: "interrupted", failure: { code: "timed-out" } },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText("The provider stopped responding and the turn timed out."),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("announces a failure when the open attempt newly fails", async () => {
+    const streaming = viewFixture().turns[0]!.attempts[1]!;
+    const turn = viewFixture().turns[0]!;
+    const viewFor = (outcome: "streaming" | "failed", failure?: { readonly code: string }) =>
+      viewFixture({
+        turns: [
+          {
+            ...turn,
+            attempts: [
+              {
+                ...streaming,
+                outcome,
+                responseRefs: [],
+                citationIds: [],
+                ...(failure === undefined ? {} : { failure }),
+              },
+            ],
+          },
+        ],
+      });
+    const { rerender } = render(<ChatTranscript view={viewFor("streaming")} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    rerender(<ChatTranscript view={viewFor("failed", { code: "timed-out" })} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The provider stopped responding and the turn timed out.",
+    );
+  });
+
   it.each(["failed", "interrupted"] as const)("retries only %s attempts", async (outcome) => {
     const onRetryAttempt = vi.fn();
     const view = viewFixture({
