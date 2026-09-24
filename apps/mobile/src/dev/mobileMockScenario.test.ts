@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { decodeCodeDeliveryTarget } from "@octant/contracts";
+import {
+  decodeChatBootstrap,
+  decodeCodeBootstrap,
+  decodeCodeDeliveryTarget,
+  decodeWorkThreadBootstrap,
+} from "@octant/contracts";
 import {
   createMobileChatWithFirstTurn,
   createMobileCodeFromPrompt,
   createMobileWorkFromPrompt,
   fetchMobileCodeProjects,
   fetchMobileWorkProjects,
+  listAllHostsMobileInbox,
   loadMobileChatThread,
   loadMobileCodeConversation,
   sendMobileCodeTurn,
@@ -60,6 +66,32 @@ describe("mobile mock scenarios", () => {
     await expect(code.json()).resolves.toMatchObject({ threads: expect.any(Array) });
   });
 
+  it("decodes every populated mock bootstrap through the real contract decoders", async () => {
+    const scenario = createMobileMockScenario("full");
+    const transport = scenario.transports[0];
+    if (transport === undefined) throw new Error("Expected the Studio Mac mock transport.");
+
+    const [chatResponse, workResponse, codeResponse] = await Promise.all([
+      transport.authenticatedFetch({ method: "GET", path: "/api/chat/bootstrap" }),
+      transport.authenticatedFetch({ method: "GET", path: "/api/work/threads/bootstrap" }),
+      transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
+    ]);
+
+    const [chat, work, code] = await Promise.all([
+      chatResponse.json().then(decodeChatBootstrap),
+      workResponse.json().then(decodeWorkThreadBootstrap),
+      codeResponse.json().then(decodeCodeBootstrap),
+    ]);
+
+    expect(chat.threads).toHaveLength(2);
+    expect(work.threads).toHaveLength(1);
+    expect(code.threads).toHaveLength(1);
+
+    const inbox = await listAllHostsMobileInbox(scenario.transports);
+    expect(inbox.failures).toEqual([]);
+    expect(inbox.rows).toHaveLength(4);
+  });
+
   it("keeps mock Chat creations distinct and persists submitted turns", async () => {
     const scenario = createMobileMockScenario("full");
     const transport = scenario.transports[0]!;
@@ -78,6 +110,7 @@ describe("mobile mock scenarios", () => {
       thread: { id: first.threadId },
       contents: expect.arrayContaining([
         expect.objectContaining({ role: "user", body: "First mock turn" }),
+        expect.objectContaining({ role: "assistant", body: "Mock reply to: First mock turn" }),
       ]),
     });
     await expect(loadMobileChatThread(transport, second.threadId)).resolves.toMatchObject({

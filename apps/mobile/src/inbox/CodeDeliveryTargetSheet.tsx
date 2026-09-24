@@ -33,11 +33,15 @@ export interface CodeDeliveryTargetSheetProps {
 
 export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
   const { colors } = useTheme();
-  const [branchIntent, setBranchIntent] = useState("");
-  const [remoteName, setRemoteName] = useState("");
-  const [baseRepository, setBaseRepository] = useState("");
-  const [baseBranch, setBaseBranch] = useState("");
-  const [outcomeKind, setOutcomeKind] = useState<CodeDeliveryOutcomeKind>("local-implementation");
+  const [branchIntent, setBranchIntent] = useState(() => props.proposal?.branchIntent ?? "");
+  const [remoteName, setRemoteName] = useState(() => props.proposal?.remoteName ?? "");
+  const [baseRepository, setBaseRepository] = useState(
+    () => props.proposal?.proposedBaseRepository ?? "",
+  );
+  const [baseBranch, setBaseBranch] = useState(() => props.proposal?.proposedBaseBranch ?? "");
+  const [outcomeKind, setOutcomeKind] = useState<CodeDeliveryOutcomeKind>(
+    () => props.proposal?.suggestedOutcomeKind ?? "local-implementation",
+  );
   const [validationError, setValidationError] = useState<string | undefined>();
 
   useEffect(() => {
@@ -101,6 +105,16 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
   const canConfirm = [branchIntent, remoteName, baseRepository, baseBranch].every(
     (value) => value.trim().length > 0,
   );
+  const missingFieldReason =
+    branchIntent.trim().length === 0
+      ? "Delivery branch is required."
+      : remoteName.trim().length === 0
+        ? "Remote is required."
+        : baseRepository.trim().length === 0
+          ? "Base repository is required."
+          : baseBranch.trim().length === 0
+            ? "Base branch is required."
+            : undefined;
 
   return (
     <BottomSheet
@@ -181,9 +195,9 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
             );
           })}
         </View>
-        {validationError !== undefined ? (
+        {validationError !== undefined || missingFieldReason !== undefined ? (
           <Text style={styles.validationError} testID="mobile-code-delivery-error">
-            {validationError}
+            {validationError ?? missingFieldReason}
           </Text>
         ) : null}
         <Pressable

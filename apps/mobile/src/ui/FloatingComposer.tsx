@@ -126,7 +126,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
             testID="mobile-composer-attach"
             variant="ghost"
           />
-          {props.modelLabel !== undefined ? (
+          {props.modelLabel !== undefined && props.onPressModel !== undefined ? (
             <Pressable
               accessibilityRole="button"
               onPress={props.onPressModel}
@@ -138,6 +138,10 @@ export function FloatingComposer(props: FloatingComposerProps) {
               </Text>
               <Ionicons color={colors.textSecondary} name="chevron-down" size={14} />
             </Pressable>
+          ) : props.modelLabel !== undefined ? (
+            <Text style={styles.modelLabel} numberOfLines={1}>
+              {props.modelLabel}
+            </Text>
           ) : (
             <View style={styles.spacer} />
           )}

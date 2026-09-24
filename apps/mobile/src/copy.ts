@@ -12,6 +12,23 @@ export const MOBILE_TAB_LABELS = {
   hosts: "Hosts",
 } as const satisfies Record<MobileRouteId, string>;
 
+export const MOBILE_HOST_HEALTH_LABELS = {
+  ready: "Ready",
+  stale: "Stale",
+  unavailable: "Unavailable",
+} as const;
+
+export function mobileHostHealthLabel(kind: string): string {
+  if (kind === "ready" || kind === "stale" || kind === "unavailable") {
+    return MOBILE_HOST_HEALTH_LABELS[kind];
+  }
+  return kind === "idle" ? "Idle" : kind;
+}
+
+export function mobileModelDisplayName(modelId: string): string {
+  return modelId.toLowerCase().startsWith("gpt-") ? `GPT-${modelId.slice(4)}` : modelId;
+}
+
 export const MOBILE_COPY = {
   inboxEmpty: "Pair a host to see Chat, Work, and Code threads.",
   inboxWelcome: "Direct your hosts from anywhere.",

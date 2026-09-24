@@ -123,6 +123,7 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
   );
 
   const status = view?.status ?? "waiting";
+  const unavailable = status === "unavailable";
 
   return (
     <View style={styles.panel} testID="mobile-browser-surface">
@@ -133,7 +134,7 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
         testID="mobile-browser-surface-stage"
       >
         {view?.screenshotDataUrl === undefined ? (
-          <Text style={styles.empty}>
+          <Text style={unavailable ? styles.status : styles.empty}>
             {browserSurfaceStatusNote({
               status,
               stale: view?.stale ?? true,

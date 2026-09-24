@@ -39,6 +39,8 @@ export function HomeComposerSheet(props: {
   readonly onPressModel: () => void;
   readonly onSelectMode: (mode: MobileCreateMode) => void;
   readonly onSubmit: () => void;
+  readonly placementDisabledReason?: string | undefined;
+  readonly onRefreshHost?: (() => void) | undefined;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(
@@ -96,6 +98,17 @@ export function HomeComposerSheet(props: {
           outlineColor: "transparent",
           outlineStyle: "solid",
           outlineWidth: 0,
+        },
+        disabled: { opacity: 0.45 },
+        placementReason: {
+          color: colors.textSecondary,
+          fontSize: typography.caption.fontSize,
+          lineHeight: 18,
+        },
+        refresh: {
+          color: colors.accent,
+          fontSize: typography.caption.fontSize,
+          fontWeight: "500",
         },
         error: { color: colors.danger, fontSize: typography.caption.fontSize, lineHeight: 18 },
         toolbar: { flexDirection: "row", alignItems: "center", gap: space.sm },
@@ -189,6 +202,19 @@ export function HomeComposerSheet(props: {
         </View>
       </View>
 
+      {props.placementDisabledReason === undefined ? null : (
+        <View>
+          <Text selectable style={styles.placementReason}>
+            {props.placementDisabledReason}
+          </Text>
+          {props.onRefreshHost === undefined ? null : (
+            <Pressable onPress={props.onRefreshHost} testID="mobile-home-composer-refresh-host">
+              <Text style={styles.refresh}>Refresh host</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
       <TextInput
         autoFocus
         editable={editable}
@@ -196,7 +222,7 @@ export function HomeComposerSheet(props: {
         onChangeText={props.onChangePrompt}
         placeholder={placeholderFor(props.mode)}
         placeholderTextColor={colors.textTertiary}
-        style={styles.input}
+        style={[styles.input, !editable ? styles.disabled : null]}
         testID="mobile-home-composer-input"
         value={props.prompt}
       />
@@ -233,6 +259,7 @@ export function HomeComposerSheet(props: {
           name={props.busy === true ? "hourglass-outline" : "arrow-up"}
           onPress={props.onSubmit}
           size={38}
+          style={!canSubmit ? styles.disabled : null}
           testID="mobile-home-composer-submit"
           variant="send"
         />

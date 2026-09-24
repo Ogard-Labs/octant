@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { DeviceRevokePanel } from "../approvals/DeviceRevokePanel";
-import { MOBILE_COPY, MOBILE_TAB_LABELS, type MobileRouteId } from "../copy";
+import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRouteId } from "../copy";
 import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
@@ -148,7 +148,7 @@ function HostsBody(props: {
           variant="ghost"
         />
         <Text style={styles.hostsTitle}>
-          {props.entryMode === "add" ? "Add Workspace" : MOBILE_TAB_LABELS.hosts}
+          {props.entryMode === "add" ? "Add host" : MOBILE_TAB_LABELS.hosts}
         </Text>
         <View style={styles.hostsSpacer} />
       </View>
@@ -156,7 +156,7 @@ function HostsBody(props: {
         {props.entryMode === "add" ? (
           environment.kind === "mock" ? (
             <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
-              <Text style={styles.mockTitle}>Pair a workspace</Text>
+              <Text style={styles.mockTitle}>Pair a host</Text>
               <Text selectable style={styles.sectionBody}>
                 Workspace pairing is disabled in mock mode. Switch to the live app to pair a host.
               </Text>
@@ -199,7 +199,7 @@ function HostsBody(props: {
                       <Text style={styles.hostLabel}>{host.label}</Text>
                       <Text style={styles.hostOrigin}>{host.origin}</Text>
                       <Text style={styles.hostHealth} testID={`mobile-host-health-${host.hostId}`}>
-                        {status?.kind ?? "idle"}
+                        {mobileHostHealthLabel(status?.kind ?? "idle")}
                         {status?.detail !== undefined ? ` · ${status.detail}` : ""}
                       </Text>
                     </Pressable>

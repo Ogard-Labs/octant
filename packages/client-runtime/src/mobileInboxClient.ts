@@ -16,6 +16,7 @@ import {
   type CodeThreadReviewState,
   type WorkThread,
 } from "@octant/contracts";
+import { ParseResult } from "effect";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
 
 export type MobileInboxMode = "chat" | "work" | "code";
@@ -45,7 +46,7 @@ export interface MobileRemoteTransport {
 }
 
 export class MobileInboxFailure extends Error {
-  readonly category: "offline" | "rejected" | "unavailable" | "stale";
+  readonly category: "offline" | "rejected" | "unavailable" | "stale" | "incompatible";
 
   constructor(category: MobileInboxFailure["category"], message: string) {
     super(message);
@@ -67,7 +68,13 @@ async function decodeJson<T>(
   }
   try {
     return decode(await response.json());
-  } catch {
+  } catch (cause) {
+    if (ParseResult.isParseError(cause)) {
+      throw new MobileInboxFailure(
+        "incompatible",
+        `${failureMessage} The host sent thread data this app version can't read. Update the app or the host.`,
+      );
+    }
     throw new MobileInboxFailure(
       "unavailable",
       `${failureMessage} The host returned an invalid response.`,
@@ -118,6 +125,7 @@ interface MobileInboxBootstrapRows {
   readonly chatThreads: ReadonlyArray<ChatThread>;
   readonly workThreads: ReadonlyArray<WorkThread>;
   readonly codeThreads: ReadonlyArray<CodeThread>;
+  readonly failure?: MobileInboxFailure;
 }
 
 export function sortMobileInboxRows(
@@ -164,33 +172,51 @@ export async function fetchMobileCodeBoard(
 async function fetchMobileInboxBootstrapRows(
   transport: MobileRemoteTransport,
 ): Promise<MobileInboxBootstrapRows> {
-  const [chatResponse, workResponse, codeResponse] = await Promise.all([
+  const settled = await Promise.allSettled([
     transport.authenticatedFetch({ method: "GET", path: "/api/chat/bootstrap" }),
     transport.authenticatedFetch({ method: "GET", path: "/api/work/threads/bootstrap" }),
     transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
   ]);
-
-  const chat = await decodeJson(
-    chatResponse,
+  const failures: MobileInboxFailure[] = [];
+  const decodeBootstrap = async <T>(
+    result: PromiseSettledResult<Response>,
+    decode: (value: unknown) => T,
+    message: string,
+  ): Promise<T | undefined> => {
+    try {
+      if (result.status === "rejected") throw result.reason;
+      return await decodeJson(result.value, decode, message);
+    } catch (cause) {
+      const failure =
+        cause instanceof MobileInboxFailure
+          ? cause
+          : new MobileInboxFailure("unavailable", `${message} The host could not be reached.`);
+      failures.push(failure);
+      return undefined;
+    }
+  };
+  const chat = await decodeBootstrap(
+    settled[0],
     decodeChatBootstrap,
     "Chat bootstrap failed over the remote session.",
   );
-  const work = await decodeJson(
-    workResponse,
+  const work = await decodeBootstrap(
+    settled[1],
     decodeWorkThreadBootstrap,
     "Work bootstrap failed over the remote session.",
   );
-  const code = await decodeJson(
-    codeResponse,
+  const code = await decodeBootstrap(
+    settled[2],
     decodeCodeBootstrap,
     "Code bootstrap failed over the remote session.",
   );
 
   return {
     hostId: transport.hostId,
-    chatThreads: chat.threads,
-    workThreads: work.threads,
-    codeThreads: code.threads,
+    chatThreads: chat?.threads ?? [],
+    workThreads: work?.threads ?? [],
+    codeThreads: code?.threads ?? [],
+    ...(failures[0] === undefined ? {} : { failure: failures[0] }),
   };
 }
 
@@ -244,7 +270,19 @@ export async function listAllHostsMobileInbox(
       const inboxInput = await fetchMobileInboxBootstrapRows(transport);
       try {
         const board = await fetchMobileCodeBoard(transport);
-        return { hostId: transport.hostId, rows: rowsFromMobileInboxBootstrap(inboxInput, board) };
+        return {
+          hostId: transport.hostId,
+          rows: rowsFromMobileInboxBootstrap(inboxInput, board),
+          ...(inboxInput.failure === undefined
+            ? {}
+            : {
+                failure: {
+                  hostId: transport.hostId,
+                  category: inboxInput.failure.category,
+                  message: inboxInput.failure.message,
+                } satisfies MobileInboxHostFailure,
+              }),
+        };
       } catch (reason) {
         if (!(reason instanceof MobileInboxFailure)) throw reason;
         return {

@@ -8,7 +8,9 @@ export function summarizeMobileInboxFailures(input: {
   return input.failures
     .map((failure) => {
       const label = input.hostLabels.get(failure.hostId) ?? failure.hostId;
-      return `${label}: ${failure.message}`;
+      return failure.category === "incompatible"
+        ? `${label} sent thread data this app version can't read. Update the app or the host.`
+        : `${label}: ${failure.message}`;
     })
     .join(" ");
 }

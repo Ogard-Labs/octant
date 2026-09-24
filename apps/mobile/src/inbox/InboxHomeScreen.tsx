@@ -14,12 +14,13 @@ import {
   type MobileCodeProjectOption,
   type MobileCodeCreationRetry,
   type MobileCodeDeliveryTargetProposal,
+  type MobileInboxHostFailure,
   type MobileWorkProjectOption,
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import type { CodeDeliveryTarget } from "@octant/contracts";
 import { presentStaleHostSecurity } from "@octant/domain";
-import { MOBILE_COPY } from "../copy";
+import { MOBILE_COPY, mobileHostHealthLabel, mobileModelDisplayName } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -66,9 +67,11 @@ function modeIcon(
 
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, placementHostId, transportForHost, health } = useMobileSession();
+  const { transports, hosts, placementHostId, transportForHost, health, refreshHosts } =
+    useMobileSession();
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [transportError, setTransportError] = useState<string | undefined>();
+  const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -130,6 +133,19 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     if (placementTransport === undefined) return undefined;
     return hosts.find((host) => host.hostId === placementTransport.hostId)?.label;
   }, [hosts, placementTransport]);
+  const placementStatus = useMemo(
+    () => health.find((entry) => entry.hostId === placementTransport?.hostId),
+    [health, placementTransport],
+  );
+  const placementDisabledReason = useMemo(() => {
+    if (placementLabel === undefined) return undefined;
+    if (placementStatus?.kind === "stale") {
+      const detail = placementStatus.detail?.replace(/^Last host refresh was /i, "last refresh ");
+      return `${placementLabel} is stale — ${detail ?? "last refresh is unknown"}. Refresh the host to send.`;
+    }
+    if (placementStatus?.kind === "unavailable") return `${placementLabel} is unavailable.`;
+    return undefined;
+  }, [placementLabel, placementStatus]);
   const hostLabels = useMemo(
     () => new Map(hosts.map((host) => [host.hostId, host.label])),
     [hosts],
@@ -185,6 +201,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     try {
       const result = await listAllHostsMobileInbox(transports);
       setRows(result.rows);
+      setFailures(result.failures);
       setTransportError(
         summarizeMobileInboxFailures({
           failures: result.failures,
@@ -192,6 +209,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         }),
       );
     } catch (cause) {
+      setFailures([]);
       setTransportError(
         cause instanceof MobileInboxFailure
           ? cause.message
@@ -305,7 +323,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
 
   const modelLabel =
     selectedModel?.label ??
-    (models.options.length === 0 ? MOBILE_COPY.modelUnavailable : MOBILE_COPY.modelHostOnly);
+    (models.options.length === 0
+      ? MOBILE_COPY.modelUnavailable
+      : mobileModelDisplayName(models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
   const footerHint =
     placementLabel !== undefined
       ? `${MOBILE_COPY.newThreadsUse} ${placementLabel}`
@@ -391,6 +411,11 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
           fontWeight: "500",
+        },
+        workspaceHealth: {
+          flex: 1,
+          color: colors.textSecondary,
+          fontSize: typography.caption.fontSize,
         },
         workspaceCount: {
           color: colors.textSecondary,
@@ -486,6 +511,13 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           lineHeight: 20,
           marginBottom: space.md,
         },
+        failureRow: { paddingBottom: space.sm },
+        retry: {
+          color: colors.accent,
+          fontSize: typography.caption.fontSize,
+          fontWeight: "500",
+          paddingHorizontal: space.md,
+        },
       }),
     [colors],
   );
@@ -576,6 +608,28 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             {transportError}
           </Text>
         ) : null}
+        {failures.map((failure) => {
+          const label = hostLabels.get(failure.hostId) ?? failure.hostId;
+          const message =
+            failure.category === "incompatible"
+              ? `${label} sent thread data this app version can't read. Update the app or the host.`
+              : `${label}: ${failure.message}`;
+          return (
+            <View
+              key={failure.hostId}
+              style={styles.failureRow}
+              testID={`mobile-inbox-failure-${failure.hostId}`}
+            >
+              <Text style={styles.transportError}>{message}</Text>
+              <Pressable
+                onPress={() => void refresh()}
+                testID={`mobile-inbox-retry-${failure.hostId}`}
+              >
+                <Text style={styles.retry}>Retry</Text>
+              </Pressable>
+            </View>
+          );
+        })}
 
         {props.homeMode === "work" || props.homeMode === "code" ? (
           <View>
@@ -677,9 +731,19 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                   testID={`mobile-workspace-${host.hostId}`}
                 >
                   <Ionicons color={colors.textSecondary} name="folder-outline" size={21} />
-                  <Text numberOfLines={1} style={styles.workspaceLabel}>
-                    {host.label}
-                  </Text>
+                  <View style={styles.threadBody}>
+                    <Text numberOfLines={1} style={styles.workspaceLabel}>
+                      {host.label}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.workspaceHealth}>
+                      {mobileHostHealthLabel(
+                        health.find((entry) => entry.hostId === host.hostId)?.kind ?? "idle",
+                      )}
+                      {health.find((entry) => entry.hostId === host.hostId)?.detail !== undefined
+                        ? ` · ${health.find((entry) => entry.hostId === host.hostId)?.detail}`
+                        : ""}
+                    </Text>
+                  </View>
                   {hostWorkCount > 0 ? (
                     <Text style={styles.workspaceCount}>{hostWorkCount}</Text>
                   ) : null}
@@ -764,7 +828,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           setCodeRetry(undefined);
         }}
         onSubmit={() => void createThread(composerMode)}
+        onRefreshHost={() => void refreshHosts()}
         placementLabel={placementLabel}
+        placementDisabledReason={placementDisabledReason}
         projectLabel={composerProjectLabel}
         prompt={prompt}
         visible={composerSheetOpen}
