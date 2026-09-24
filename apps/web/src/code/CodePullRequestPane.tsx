@@ -80,8 +80,9 @@ export function CodePullRequestPane(props: CodePullRequestPaneProps) {
       <section aria-label="Pull request" className="code-delivery-pane code-pr-pane">
         <ReviewHeader {...(props.onRefresh === undefined ? {} : { onRefresh: props.onRefresh })} />
         <p role="alert">
-          The linked pull request could not be observed from GitHub. Check GitHub authentication and
-          retry.
+          {props.review.failureCode === "no-remote"
+            ? "This checkout has no GitHub remote, so there is no pull request to observe or open. Add a GitHub remote to the repository, then retry."
+            : "The linked pull request could not be observed from GitHub. Check GitHub authentication and retry."}
         </p>
       </section>
     );

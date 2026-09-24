@@ -261,6 +261,26 @@
   gap: 2px;
 }
 
+/* Overview rows keep long labels and details inside the shared row border. */
+.work-overview__items .surface-row__copy > .project-button {
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+}
+
+.work-overview__items .oct-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-overview__items .oct-row-detail {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-wrap: anywhere;
+}
+
 .surface-row__control {
   display: inline-flex;
   align-items: center;
