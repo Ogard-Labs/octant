@@ -18,7 +18,7 @@ import {
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import { presentStaleHostSecurity } from "@octant/domain";
-import { MOBILE_COPY, mobileModelDisplayName } from "../copy";
+import { MOBILE_COPY, mobileModelLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -244,7 +244,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     selectedModel?.label ??
     (models.options.length === 0
       ? MOBILE_COPY.modelUnavailable
-      : mobileModelDisplayName(models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
+      : mobileModelLabel(models.options, models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
 
   const styles = useMemo(
     () =>

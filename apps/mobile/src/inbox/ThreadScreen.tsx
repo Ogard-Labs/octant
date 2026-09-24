@@ -40,7 +40,7 @@ import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
-import { MOBILE_COPY, mobileModelDisplayName, mobileThreadComposerCopy } from "../copy";
+import { MOBILE_COPY, mobileModelLabel, mobileThreadComposerCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
@@ -763,7 +763,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const modelLabel =
     selectedModel?.label ??
     (view !== undefined
-      ? mobileModelDisplayName(String(view.thread.modelId))
+      ? mobileModelLabel(models.options, String(view.thread.modelId))
       : MOBILE_COPY.modelHostOnly);
 
   return (
@@ -1050,7 +1050,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           footerHint={followUpComposerCopy?.footerHint ?? MOBILE_COPY.hostOwnedThread}
           modelLabel={
             props.selected.mode === "work" && workThread !== undefined
-              ? mobileModelDisplayName(String(workThread.modelId))
+              ? mobileModelLabel(models.options, String(workThread.modelId))
               : MOBILE_COPY.modelHostOnly
           }
           onChangeText={setPrompt}

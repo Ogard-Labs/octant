@@ -20,7 +20,7 @@ import {
 } from "@octant/client-runtime";
 import type { CodeDeliveryTarget } from "@octant/contracts";
 import { presentStaleHostSecurity } from "@octant/domain";
-import { MOBILE_COPY, mobileHostHealthLabel, mobileModelDisplayName } from "../copy";
+import { MOBILE_COPY, mobileHostHealthLabel, mobileModelLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -325,7 +325,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     selectedModel?.label ??
     (models.options.length === 0
       ? MOBILE_COPY.modelUnavailable
-      : mobileModelDisplayName(models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
+      : mobileModelLabel(models.options, models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
   const footerHint =
     placementLabel !== undefined
       ? `${MOBILE_COPY.newThreadsUse} ${placementLabel}`
@@ -719,6 +719,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
               const hostWorkCount = rows.filter(
                 (row) => row.hostId === host.hostId && row.mode !== "chat",
               ).length;
+              const hostHealth = health.find((entry) => entry.hostId === host.hostId);
               return (
                 <Pressable
                   accessibilityRole="button"
@@ -736,12 +737,8 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                       {host.label}
                     </Text>
                     <Text numberOfLines={1} style={styles.workspaceHealth}>
-                      {mobileHostHealthLabel(
-                        health.find((entry) => entry.hostId === host.hostId)?.kind ?? "idle",
-                      )}
-                      {health.find((entry) => entry.hostId === host.hostId)?.detail !== undefined
-                        ? ` · ${health.find((entry) => entry.hostId === host.hostId)?.detail}`
-                        : ""}
+                      {mobileHostHealthLabel(hostHealth?.kind ?? "idle")}
+                      {hostHealth?.detail !== undefined ? ` · ${hostHealth.detail}` : ""}
                     </Text>
                   </View>
                   {hostWorkCount > 0 ? (

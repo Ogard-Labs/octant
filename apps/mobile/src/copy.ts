@@ -1,3 +1,5 @@
+import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
+
 /** User-facing mobile copy. Keep Octant-owned; no third-party product names. */
 export const MOBILE_PRODUCT_NAME = "Octant";
 export const MOBILE_PRODUCT_TAGLINE = "Remote control for your hosts";
@@ -18,15 +20,20 @@ export const MOBILE_HOST_HEALTH_LABELS = {
   unavailable: "Unavailable",
 } as const;
 
-export function mobileHostHealthLabel(kind: string): string {
+export function mobileHostHealthLabel(kind: MobileHostHealthKind): string {
   if (kind === "ready" || kind === "stale" || kind === "unavailable") {
     return MOBILE_HOST_HEALTH_LABELS[kind];
   }
   return kind === "idle" ? "Idle" : kind;
 }
 
-export function mobileModelDisplayName(modelId: string): string {
-  return modelId.toLowerCase().startsWith("gpt-") ? `GPT-${modelId.slice(4)}` : modelId;
+export function mobileModelLabel(
+  options: ReadonlyArray<{ readonly modelId: string; readonly label: string }>,
+  modelId: string,
+): string {
+  return (
+    options.find((option) => String(option.modelId) === String(modelId))?.label ?? String(modelId)
+  );
 }
 
 export const MOBILE_COPY = {
