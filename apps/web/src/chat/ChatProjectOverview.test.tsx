@@ -744,7 +744,11 @@ describe("ChatProjectOverview", () => {
     expect(
       screen.queryByRole("heading", { name: "Outcomes and decisions" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("No Chat threads in this Project yet.")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Chat quick start" })).getByText(
+        "No Chat threads in this Project yet.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText("No approved Project memory yet.")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", {

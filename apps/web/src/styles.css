@@ -4031,7 +4031,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .chat-project-overview__section p,
-.chat-project-overview__scope {
+.chat-project-overview__scope,
+.chat-project-overview__threads-empty {
   margin: 6px 0 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
