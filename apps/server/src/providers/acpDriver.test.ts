@@ -1979,6 +1979,7 @@ it("forwards ACP client capability requests through managed tools and answers th
             params: {
               sessionId: "agent-session-1",
               path: "/tmp/octant-acp-driver/README.md",
+              line: null,
               _meta: { trace: "ignored" },
             },
           });
@@ -1998,6 +1999,39 @@ it("forwards ACP client capability requests through managed tools and answers th
           expect(firstEvent.inputJson).toBe('{"path":"/tmp/octant-acp-driver/README.md"}');
           yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
           expect(client.respond).toHaveBeenCalledWith("read-1", { content: "hello" });
+
+          const unhandled: unknown[] = [];
+          const onUnhandled = (reason: unknown) => unhandled.push(reason);
+          process.on("unhandledRejection", onUnhandled);
+          client.respond.mockRejectedValueOnce(new Error("transport closed"));
+          const closedEvents = yield* connection.subscribe;
+          const closedEventFiber = yield* Effect.fork(
+            Stream.runHead(
+              closedEvents.pipe(Stream.filter((event) => event.kind === "tool-request")),
+            ),
+          );
+          client.request({
+            kind: "request",
+            id: "read-closed",
+            method: "fs/read_text_file",
+            capability: "readTextFile",
+            params: { sessionId: "agent-session-1", path: "/tmp/closed" },
+          });
+          const closedOption = yield* Fiber.join(closedEventFiber);
+          if (closedOption._tag === "None")
+            throw new Error("Expected the closed transport tool request.");
+          const closedEvent = closedOption.value;
+          if (closedEvent.kind !== "tool-request")
+            throw new Error("Expected the closed transport tool request.");
+          yield* connection.answerTool({
+            sessionId,
+            requestId: closedEvent.requestId,
+            resultJson: JSON.stringify({ content: "closed" }),
+            isError: false,
+          });
+          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+          process.off("unhandledRejection", onUnhandled);
+          expect(unhandled).toEqual([]);
 
           const secondEvents = yield* connection.subscribe;
           const secondEventFiber = yield* Effect.fork(

@@ -141,8 +141,8 @@ const AcpClientRequestMeta = Schema.optional(
 const AcpClientReadTextFileParams = Schema.Struct({
   sessionId: Schema.NonEmptyTrimmedString,
   path: Schema.String,
-  line: Schema.optional(Schema.Int),
-  limit: Schema.optional(Schema.Int),
+  line: Schema.optional(Schema.NullOr(Schema.Int)),
+  limit: Schema.optional(Schema.NullOr(Schema.Int)),
   _meta: AcpClientRequestMeta,
 });
 const AcpClientWriteTextFileParams = Schema.Struct({
@@ -163,8 +163,8 @@ const AcpClientTerminalCreateParams = Schema.Struct({
       }),
     ),
   ),
-  cwd: Schema.optional(Schema.String),
-  outputByteLimit: Schema.optional(Schema.Int),
+  cwd: Schema.optional(Schema.NullOr(Schema.String)),
+  outputByteLimit: Schema.optional(Schema.NullOr(Schema.Int)),
   _meta: AcpClientRequestMeta,
 });
 const AcpClientTerminalOutputParams = Schema.Struct({

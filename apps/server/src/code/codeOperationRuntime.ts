@@ -1971,6 +1971,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   createCodeAcpClientTools({
                     windowId: active.windowId,
                     thread: active.thread,
+                    readExecutionPolicy: () =>
+                      this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+                      active.thread.executionPolicy,
                     checkoutRoot: active.checkoutRoot,
                     uuid: this.#options.uuid,
                     pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,

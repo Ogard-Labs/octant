@@ -318,7 +318,26 @@ describe("ACP protocol boundary", () => {
         jsonrpc: "2.0",
         id: "read-1",
         method: "fs/read_text_file",
-        params: { sessionId: "session-1", path: "/checkout/README.md", _meta: { trace: "x" } },
+        params: {
+          sessionId: "session-1",
+          path: "/checkout/README.md",
+          line: null,
+          limit: null,
+          _meta: { trace: "x" },
+        },
+      })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "create-1",
+        method: "terminal/create",
+        params: {
+          sessionId: "session-1",
+          command: "/bin/true",
+          cwd: null,
+          outputByteLimit: null,
+        },
       })}\n`,
     );
     stdout.write(
@@ -338,11 +357,16 @@ describe("ACP protocol boundary", () => {
       })}\n`,
     );
     await tick();
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
       method: "fs/read_text_file",
       capability: "readTextFile",
       params: { sessionId: "session-1", path: "/checkout/README.md" },
+    });
+    expect(requests[1]).toMatchObject({
+      method: "terminal/create",
+      capability: "terminalCreate",
+      params: { sessionId: "session-1", command: "/bin/true", cwd: null, outputByteLimit: null },
     });
     expect(written.values).toEqual(
       expect.arrayContaining([

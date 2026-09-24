@@ -15,6 +15,7 @@ export interface CodeDirectoryStat {
   readonly size: number;
   readonly device: string;
   readonly inode: string;
+  readonly mode?: number;
 }
 
 /** One raw directory child, before any confinement or classification. */
@@ -125,6 +126,7 @@ const toStat = (info: LiveStat): CodeDirectoryStat => ({
   size: Number(info.size),
   device: String(info.dev),
   inode: String(info.ino),
+  mode: Number(info.mode),
 });
 
 const livePathPort: CodePathPort = {

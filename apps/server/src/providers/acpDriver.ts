@@ -817,7 +817,7 @@ function makeConnection(
       }
       const input = Object.fromEntries(
         Object.entries(requestMessage.params).filter(
-          ([key]) => key !== "sessionId" && key !== "_meta",
+          ([key, value]) => key !== "sessionId" && key !== "_meta" && value !== null,
         ),
       );
       const answer = await requestManagedTool(
@@ -888,7 +888,7 @@ function makeConnection(
 
     const handleRequest = (state: SessionState, requestMessage: AcpServerRequestMessage) => {
       if (requestMessage.method !== "session/request_permission") {
-        void handleClientCapabilityRequest(state, requestMessage);
+        void handleClientCapabilityRequest(state, requestMessage).catch(() => undefined);
         return;
       }
       const mapped = mapAcpPermissionRequest(state.context, requestMessage);

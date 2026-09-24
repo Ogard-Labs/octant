@@ -1,7 +1,8 @@
-import { rename, unlink, writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { accessSync, constants, statSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { basename, delimiter, join } from "node:path";
+import { tmpdir } from "node:os";
 import { TextDecoder } from "node:util";
 import { Schema } from "effect";
 import {
@@ -31,6 +32,7 @@ const MAX_TERMINAL_LIFETIME_MS = 10 * 60 * 1000;
 const DEFAULT_OUTPUT_BYTES = 1024 * 1024;
 const MAX_ENVIRONMENT_ENTRIES = 64;
 const MAX_ENVIRONMENT_VALUE_BYTES = 4096;
+const ACP_WRITE_SCRIPT = 'cp -- "$1" "$2" && chmod -- "$3" "$2" && mv -f -- "$2" "$4"';
 
 const readDefinition = {
   name: ACP_CLIENT_TOOL_NAMES.readTextFile,
@@ -124,6 +126,7 @@ export interface CodeAcpTerminalConfinement {
 export interface CodeAcpClientToolsOptions {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
+  readonly readExecutionPolicy: () => CodeThread["executionPolicy"];
   readonly checkoutRoot: string;
   readonly uuid: () => string;
   readonly pathPort: CodeTestSourcePort;
@@ -140,6 +143,7 @@ interface TerminalRecord {
   readonly exited: Promise<{ readonly exitCode?: number; readonly signal?: string }>;
   resolveExit: (value: { readonly exitCode?: number; readonly signal?: string }) => void;
   hardKill: ReturnType<typeof setTimeout>;
+  exitedState: boolean;
 }
 
 function bytes(value: string): number {
@@ -161,7 +165,7 @@ function decodeInput<A>(schema: Schema.Schema<A>) {
 }
 
 function appendOutput(record: TerminalRecord, chunk: Buffer, limit: number): void {
-  if (chunk.length >= limit) {
+  if (chunk.length > limit) {
     record.output.length = 0;
     record.output.push(chunk.subarray(chunk.length - limit));
     record.outputBytes = limit;
@@ -183,24 +187,45 @@ function appendOutput(record: TerminalRecord, chunk: Buffer, limit: number): voi
 
 function utf8Boundary(value: Buffer): Buffer {
   let start = 0;
-  let end = value.length;
-  while (start < end) {
-    try {
-      new TextDecoder("utf-8", { fatal: true }).decode(value.subarray(start, end));
-      break;
-    } catch {
-      start += 1;
-    }
+  let leading = 0;
+  while (start < value.length && leading < 3 && (value[start] ?? 0) & 0xc0) {
+    if (((value[start] ?? 0) & 0xc0) !== 0x80) break;
+    start += 1;
+    leading += 1;
   }
-  while (end > start) {
-    try {
-      new TextDecoder("utf-8", { fatal: true }).decode(value.subarray(start, end));
-      break;
-    } catch {
-      end -= 1;
-    }
+  let end = value.length;
+  for (let offset = 1; offset <= 3 && end - offset >= start; offset += 1) {
+    const byte = value[end - offset] ?? 0;
+    if ((byte & 0xc0) === 0x80) continue;
+    const length =
+      (byte & 0x80) === 0
+        ? 1
+        : (byte & 0xe0) === 0xc0
+          ? 2
+          : (byte & 0xf0) === 0xe0
+            ? 3
+            : (byte & 0xf8) === 0xf0
+              ? 4
+              : 1;
+    if (length > offset) end -= offset;
+    break;
   }
   return value.subarray(start, end);
+}
+
+function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (pid === undefined) {
+    child.kill(signal);
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH" || code === "EPERM") child.kill(signal);
+    else throw error;
+  }
 }
 
 function signalName(signal: NodeJS.Signals | null): string | undefined {
@@ -254,7 +279,13 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     if (handle === undefined) return errorResult("file-unreadable");
     try {
       const info = await handle.stat();
-      if (!info.isFile || info.size > MAX_FILE_BYTES) return errorResult("file-oversized");
+      if (
+        !info.isFile ||
+        info.device !== resolved.stat.device ||
+        info.inode !== resolved.stat.inode
+      )
+        return errorResult("file-unreadable");
+      if (info.size > MAX_FILE_BYTES) return errorResult("file-oversized");
       const raw = await handle.read(MAX_FILE_BYTES + 1);
       if (raw.length > MAX_FILE_BYTES) return errorResult("file-oversized");
       let text: string;
@@ -282,7 +313,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
   };
 
   const write = async (input: AcpClientWriteTextFileInput) => {
-    if (options.thread.executionPolicy === "plan") return errorResult("read-only-posture");
+    if (options.readExecutionPolicy() === "plan") return errorResult("read-only-posture");
     if (!isAbsolutePosixPath(input.path)) return errorResult("path-outside-checkout");
     if (bytes(input.content) > MAX_FILE_BYTES) return errorResult("content-oversized");
     const lastSegment = input.path.slice(input.path.lastIndexOf("/") + 1);
@@ -296,14 +327,61 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     const target = joinCodePath(parent.canonical, basename(input.path));
     const current = await resolveContainedPath(options.pathPort, root, target);
     if (current !== undefined && !current.stat.isFile) return errorResult("path-not-a-file");
-    const temporary = joinCodePath(parent.canonical, `.octant-${options.uuid()}.tmp`);
+    const mode =
+      current === undefined
+        ? 0o666 & ~process.umask()
+        : (await options.pathPort.lstat(current.canonical).catch(() => undefined))?.mode;
+    if (mode === undefined) return errorResult("file-unreadable");
+    const baseTmpDir = options.terminalConfinement.environment.TMPDIR ?? tmpdir();
+    const staging = join(baseTmpDir, `octant-acp-${options.uuid()}.txt`);
+    const temporaryInParent = join(parent.canonical, `.octant-${options.uuid()}.tmp`);
+    const runConfined = async (
+      executable: string,
+      args: ReadonlyArray<string>,
+    ): Promise<boolean> => {
+      try {
+        const launch = options.terminalConfinement.prepare({
+          executable,
+          args,
+          boundRoot: root,
+          temporaryDirectory: baseTmpDir,
+        });
+        const child = spawn(launch.command, [...launch.args], {
+          stdio: "ignore",
+        });
+        return await new Promise((resolve) => {
+          let settled = false;
+          const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+          child.once("error", () => finish(false));
+          child.once("exit", (code) => finish(code === 0));
+        });
+      } catch {
+        return false;
+      }
+    };
     try {
-      await writeFile(temporary, input.content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      await rename(temporary, target);
-      return { result: {} };
-    } catch {
-      await unlink(temporary).catch(() => undefined);
+      await writeFile(staging, input.content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      const succeeded = await runConfined("/bin/sh", [
+        "-c",
+        ACP_WRITE_SCRIPT,
+        "octant-acp-write",
+        staging,
+        temporaryInParent,
+        (mode & 0o7777).toString(8),
+        target,
+      ]);
+      if (succeeded) return { result: {} };
+      await runConfined("/bin/rm", ["-f", "--", temporaryInParent]);
       return errorResult("file-unreadable");
+    } catch {
+      await runConfined("/bin/rm", ["-f", "--", temporaryInParent]);
+      return errorResult("file-unreadable");
+    } finally {
+      await unlink(staging).catch(() => undefined);
     }
   };
 
@@ -311,10 +389,10 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     const record = terminals.get(terminalId);
     if (record === undefined) return errorResult("terminal-unknown");
     if (record.process.exitCode === null && record.process.signalCode === null) {
-      record.process.kill("SIGTERM");
+      signalProcessGroup(record.process, "SIGTERM");
       await options.wait(2_000);
       if (record.process.exitCode === null && record.process.signalCode === null)
-        record.process.kill("SIGKILL");
+        signalProcessGroup(record.process, "SIGKILL");
     }
     if (release) terminals.delete(terminalId);
     return { result: {} };
@@ -322,6 +400,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
 
   const terminal = async (name: string, inputJson: string, signal?: AbortSignal) => {
     if (name === ACP_CLIENT_TOOL_NAMES.terminalCreate) {
+      if (options.readExecutionPolicy() === "plan") return errorResult("read-only-posture");
       const input = decodeInput(AcpClientTerminalCreateInput)(inputJson);
       if (input === undefined) return errorResult("invalid-input");
       if (terminals.size >= MAX_TERMINALS) return errorResult("terminal-limit");
@@ -339,7 +418,10 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
         for (const entry of input.env) {
           if (
             !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name) ||
-            bytes(entry.value) > MAX_ENVIRONMENT_VALUE_BYTES
+            bytes(entry.value) > MAX_ENVIRONMENT_VALUE_BYTES ||
+            entry.name === "TMPDIR" ||
+            entry.name === "PATH" ||
+            entry.name === "HOME"
           )
             return errorResult("invalid-environment");
           env[entry.name] = entry.value;
@@ -347,27 +429,28 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       }
       const executable = resolveExecutable(input.command, env.PATH);
       if (executable === undefined) return errorResult("command-unavailable");
+      const outputLimit = Math.min(
+        input.outputByteLimit ?? DEFAULT_OUTPUT_BYTES,
+        DEFAULT_OUTPUT_BYTES,
+      );
+      if (outputLimit < 1) return errorResult("invalid-input");
       let child: ChildProcess;
       try {
         const launch = options.terminalConfinement.prepare({
           executable,
           args: input.args ?? [],
           boundRoot: root,
-          temporaryDirectory: env.TMPDIR ?? "/tmp",
+          temporaryDirectory: options.terminalConfinement.environment.TMPDIR ?? "/tmp",
         });
         child = spawn(launch.command, [...launch.args], {
           cwd: resolved.canonical,
           env,
           stdio: ["ignore", "pipe", "pipe"],
+          detached: true,
         });
       } catch {
         return errorResult("terminal-unavailable");
       }
-      const outputLimit = Math.min(
-        input.outputByteLimit ?? DEFAULT_OUTPUT_BYTES,
-        DEFAULT_OUTPUT_BYTES,
-      );
-      if (outputLimit < 1) return errorResult("invalid-input");
       let resolveExit = (_value: { readonly exitCode?: number; readonly signal?: string }) => {};
       const exited = new Promise<{ readonly exitCode?: number; readonly signal?: string }>(
         (resolve) => (resolveExit = resolve),
@@ -381,13 +464,23 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
         exited,
         resolveExit,
         hardKill: setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+          if (child.exitCode === null && child.signalCode === null)
+            signalProcessGroup(child, "SIGKILL");
         }, MAX_TERMINAL_LIFETIME_MS),
+        exitedState: false,
       };
       child.stdout?.on("data", (chunk: Buffer) => appendOutput(record, chunk, outputLimit));
       child.stderr?.on("data", (chunk: Buffer) => appendOutput(record, chunk, outputLimit));
-      child.once("close", (code, signalNameValue) => {
+      const id = options.uuid();
+      child.once("error", () => {
         clearTimeout(record.hardKill);
+        record.exitedState = true;
+        record.resolveExit({});
+        terminals.delete(id);
+      });
+      child.once("exit", (code, signalNameValue) => {
+        clearTimeout(record.hardKill);
+        record.exitedState = true;
         if (code !== null) {
           record.resolveExit({ exitCode: code });
           return;
@@ -395,8 +488,9 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
         const terminatedBy = signalName(signalNameValue);
         record.resolveExit(terminatedBy === undefined ? {} : { signal: terminatedBy });
       });
-      const id = options.uuid();
       terminals.set(id, record);
+      await new Promise((resolve) => setImmediate(resolve));
+      if (!terminals.has(id)) return errorResult("terminal-unavailable");
       return { result: { terminalId: id } };
     }
     const schema =
@@ -415,11 +509,9 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       const output = utf8Boundary(Buffer.concat(record.output));
       return {
         result: {
-          output: output.toString("utf8"),
+          output: new TextDecoder().decode(output),
           truncated: record.truncated,
-          ...(record.process.exitCode !== null || record.process.signalCode !== null
-            ? { exitStatus: await record.exited }
-            : {}),
+          ...(record.exitedState ? { exitStatus: await record.exited } : {}),
         },
       };
     }
