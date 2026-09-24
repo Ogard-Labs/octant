@@ -344,6 +344,9 @@ export class CodeTurnRunner {
                     responseText += sanitizedEvent.text;
                   }
                   if (sanitizedEvent.kind === "tool-request") {
+                    if (boundedEvent.kind !== "tool-request") {
+                      return yield* fail("failed", "Provider event sanitization failed closed.");
+                    }
                     if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
                     answeredToolRequestIds.add(sanitizedEvent.requestId);
                     const toolSet = input.appManagedTools;
@@ -380,13 +383,9 @@ export class CodeTurnRunner {
                     const execution = yield* idle.during(
                       Effect.promise(async () => {
                         try {
-                          const rawInputJson =
-                            boundedEvent.kind === "tool-request"
-                              ? boundedEvent.inputJson
-                              : sanitizedEvent.inputJson;
                           return await toolSet.execute({
                             name: sanitizedEvent.toolName,
-                            inputJson: rawInputJson,
+                            inputJson: boundedEvent.inputJson,
                             ...(executionSignal === undefined ? {} : { signal: executionSignal }),
                           });
                         } catch {
