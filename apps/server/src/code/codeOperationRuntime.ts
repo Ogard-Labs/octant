@@ -249,6 +249,7 @@ export interface CodeOperationRuntimeOptions {
     | "releaseCheckpoint"
   >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
+  readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
    * Whether the thread's provider can take an image. A host that cannot say so
    * answers false: a turn that attached images then fails in words rather than
@@ -1766,6 +1767,99 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     );
   }
 
+  #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
+    const supportsAppManagedTools = this.#options.supportsAppManagedTools?.(active.thread) === true;
+    const supportsAcpClientCapabilities =
+      this.#options.supportsAcpClientCapabilities?.(active.thread) === true;
+    const sets: Array<AppManagedToolSet | undefined> = [];
+    const service = this.#service;
+    if (supportsAppManagedTools && service !== undefined) {
+      sets.push(
+        active.computerUseSelection === undefined
+          ? undefined
+          : this.#options.computerUseTools?.({
+              windowId: active.windowId,
+              thread: active.thread,
+              selection: active.computerUseSelection,
+            }),
+        createCodeAppManagedTools({
+          windowId: active.windowId,
+          thread: active.thread,
+          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+          uuid: this.#options.uuid,
+          browserApproval: {
+            isApproved: (contextId) => {
+              const key = this.#browserApprovalKey(active, contextId);
+              const approved = this.#approvedBrowserContexts.has(key);
+              if (approved) active.browserGrantKeys.add(key);
+              return approved;
+            },
+            request: (origin, signal) => this.#askBrowserApproval(active, origin, signal),
+            remember: (contextId) => {
+              if (this.#approvedBrowserContexts.size >= 256) {
+                const oldest = this.#approvedBrowserContexts.values().next().value;
+                if (oldest !== undefined) this.#approvedBrowserContexts.delete(oldest);
+              }
+              const key = this.#browserApprovalKey(active, contextId);
+              this.#approvedBrowserContexts.add(key);
+              active.browserGrantKeys.add(key);
+            },
+            forget: (contextId) =>
+              this.#approvedBrowserContexts.delete(this.#browserApprovalKey(active, contextId)),
+          },
+          ...(this.#options.recordExternalContentIngestion === undefined
+            ? {}
+            : { recordExternalContentIngestion: this.#options.recordExternalContentIngestion }),
+          executeOperation: (windowId, command) => service.execute(windowId, command),
+          terminal: {
+            read: (windowId, input) => service.readTerminal(windowId, input),
+            interrupt: (windowId, input) => service.interruptTerminal(windowId, input),
+            terminate: (windowId, input) => service.terminateTerminal(windowId, input),
+          },
+          ...(this.#options.browserAutomation === undefined
+            ? {}
+            : { browser: this.#options.browserAutomation }),
+          ...(this.#options.appleToolchain === undefined
+            ? {}
+            : { apple: this.#options.appleToolchain }),
+          ...(this.#options.androidToolchain === undefined
+            ? {}
+            : { android: this.#options.androidToolchain }),
+          ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
+        }),
+        this.#options.githubReadTools?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+        }),
+        this.#options.agentMessages?.({ thread: active.thread }),
+        this.#options.nativeHarnessTools?.({
+          thread: active.thread,
+          checkoutRoot: active.checkoutRoot,
+          windowId: active.windowId,
+        }),
+      );
+    }
+    if (supportsAcpClientCapabilities) {
+      sets.push(
+        createCodeAcpClientTools({
+          windowId: active.windowId,
+          thread: active.thread,
+          readExecutionPolicy: () =>
+            this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+            active.thread.executionPolicy,
+          checkoutRoot: active.checkoutRoot,
+          uuid: this.#options.uuid,
+          pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
+          terminalConfinement:
+            this.#options.acpTerminalConfinement ?? defaultAcpTerminalConfinement(),
+          wait: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+        }),
+      );
+    }
+    return sets.length === 0 ? undefined : combineAppManagedToolSets(...sets);
+  }
+
   #owned(thread: CodeThread, checkoutRoot: string): ActiveTurn | undefined {
     const active = this.#active.get(String(thread.id));
     return active !== undefined &&
@@ -1815,6 +1909,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(context ?? []),
     ];
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
+    const appManagedTools = this.#appManagedTools(active);
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
@@ -1902,100 +1997,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 summary: "Provider tool claim is observational.",
               };
             }),
-          ...(this.#service !== undefined &&
-          this.#options.supportsAppManagedTools?.(active.thread) === true
-            ? {
-                appManagedTools: combineAppManagedToolSets(
-                  active.computerUseSelection === undefined
-                    ? undefined
-                    : this.#options.computerUseTools?.({
-                        windowId: active.windowId,
-                        thread: active.thread,
-                        selection: active.computerUseSelection,
-                      }),
-                  createCodeAppManagedTools({
-                    windowId: active.windowId,
-                    thread: active.thread,
-                    readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
-                    uuid: this.#options.uuid,
-                    browserApproval: {
-                      isApproved: (contextId) => {
-                        const key = this.#browserApprovalKey(active, contextId);
-                        const approved = this.#approvedBrowserContexts.has(key);
-                        if (approved) active.browserGrantKeys.add(key);
-                        return approved;
-                      },
-                      request: (origin, signal) => this.#askBrowserApproval(active, origin, signal),
-                      remember: (contextId) => {
-                        if (this.#approvedBrowserContexts.size >= 256) {
-                          const oldest = this.#approvedBrowserContexts.values().next().value;
-                          if (oldest !== undefined) this.#approvedBrowserContexts.delete(oldest);
-                        }
-                        const key = this.#browserApprovalKey(active, contextId);
-                        this.#approvedBrowserContexts.add(key);
-                        active.browserGrantKeys.add(key);
-                      },
-                      forget: (contextId) =>
-                        this.#approvedBrowserContexts.delete(
-                          this.#browserApprovalKey(active, contextId),
-                        ),
-                    },
-                    ...(this.#options.recordExternalContentIngestion === undefined
-                      ? {}
-                      : {
-                          recordExternalContentIngestion:
-                            this.#options.recordExternalContentIngestion,
-                        }),
-                    executeOperation: (windowId, command) =>
-                      this.#service!.execute(windowId, command),
-                    terminal: {
-                      read: (windowId, input) => this.#service!.readTerminal(windowId, input),
-                      interrupt: (windowId, input) =>
-                        this.#service!.interruptTerminal(windowId, input),
-                      terminate: (windowId, input) =>
-                        this.#service!.terminateTerminal(windowId, input),
-                    },
-                    ...(this.#options.browserAutomation === undefined
-                      ? {}
-                      : { browser: this.#options.browserAutomation }),
-                    ...(this.#options.appleToolchain === undefined
-                      ? {}
-                      : { apple: this.#options.appleToolchain }),
-                    ...(this.#options.androidToolchain === undefined
-                      ? {}
-                      : { android: this.#options.androidToolchain }),
-                    ...(this.#options.planner === undefined
-                      ? {}
-                      : { planner: this.#options.planner }),
-                  }),
-                  createCodeAcpClientTools({
-                    windowId: active.windowId,
-                    thread: active.thread,
-                    readExecutionPolicy: () =>
-                      this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
-                      active.thread.executionPolicy,
-                    checkoutRoot: active.checkoutRoot,
-                    uuid: this.#options.uuid,
-                    pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
-                    terminalConfinement:
-                      this.#options.acpTerminalConfinement ?? defaultAcpTerminalConfinement(),
-                    wait: (milliseconds) =>
-                      new Promise((resolve) => setTimeout(resolve, milliseconds)),
-                  }),
-                  this.#options.githubReadTools?.({
-                    windowId: active.windowId,
-                    thread: active.thread,
-                    readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
-                  }),
-                  this.#options.agentMessages?.({ thread: active.thread }),
-                  this.#options.nativeHarnessTools?.({
-                    thread: active.thread,
-                    checkoutRoot: active.checkoutRoot,
-                    windowId: active.windowId,
-                  }),
-                ),
-              }
-            : {}),
+          ...(appManagedTools === undefined ? {} : { appManagedTools }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome

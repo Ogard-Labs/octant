@@ -3917,6 +3917,9 @@ export function startOctantServer(
             ) === true
           );
         },
+        supportsAcpClientCapabilities: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .acpClientCapabilities === "supported",
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           if (observed?.capabilities.nativeAttachments !== "supported") return false;

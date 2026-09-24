@@ -950,7 +950,9 @@ mechanisms are:
   They are journaled as app-managed tool events, refused in Plan mode, and
   governed by the thread's execution posture together with provider-approved
   permission; the ACP provider does not gain a second permission prompt or a
-  path outside the bound checkout.
+  path outside the bound checkout. These capabilities are offered whenever the
+  driver reports `acpClientCapabilities`, independently of whether the
+  app-managed HTTP MCP bridge was negotiated.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

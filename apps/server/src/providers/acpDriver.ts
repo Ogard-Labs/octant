@@ -23,7 +23,6 @@ import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect, Exit, PubSub, Scope, Stream } from "effect";
@@ -208,6 +207,7 @@ function baseCapabilities(
     harnessAutoReview: "unsupported",
     ...unsupportedChatCapabilities,
     appManagedTools,
+    acpClientCapabilities: "supported",
   } as const;
 }
 
@@ -798,6 +798,13 @@ function makeConnection(
       });
     };
 
+    const partitionTools = (tools: ReadonlyArray<ProviderToolDefinition>) => {
+      const nativeNames = new Set<string>(Object.values(ACP_CLIENT_TOOL_NAMES));
+      const nativeClientTools = tools.filter((tool) => nativeNames.has(tool.name));
+      const bridgeTools = tools.filter((tool) => !nativeNames.has(tool.name));
+      return { nativeClientTools, bridgeTools };
+    };
+
     const handleClientCapabilityRequest = async (
       state: SessionState,
       requestMessage: Exclude<AcpServerRequestMessage, AcpServerRequest>,
@@ -1167,14 +1174,15 @@ function makeConnection(
             }
             const refusal = profile.refuses?.(mode, input.executionPolicy);
             if (refusal !== undefined) throw failure("incompatible", refusal);
-            if (input.tools.length > 0 && process.platform !== "darwin") {
+            const { bridgeTools } = partitionTools(input.tools);
+            if (bridgeTools.length > 0 && process.platform !== "darwin") {
               throw failure(
                 "unsupported",
                 "App-managed tools are unsupported by this ACP runtime on this platform.",
               );
             }
             const stateRef: { state?: SessionState } = {};
-            managedTools = await prepareManagedTools(input.tools, stateRef);
+            managedTools = await prepareManagedTools(bridgeTools, stateRef);
             const started = await startProcess(
               input.executionPolicy,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
@@ -1187,7 +1195,7 @@ function makeConnection(
               profile,
               connection.version,
             );
-            if (input.tools.length > 0 && appManagedTools !== "supported") {
+            if (bridgeTools.length > 0 && appManagedTools !== "supported") {
               throw failure(
                 appManagedTools,
                 "App-managed tools are unsupported by this ACP runtime.",
@@ -1463,8 +1471,10 @@ function makeConnection(
       },
       send: (input) =>
         stateFor(input.sessionId).pipe(
-          Effect.flatMap((state) =>
-            rejectUnsupportedChatTurn(input, {
+          Effect.flatMap((state) => {
+            const { bridgeTools } = partitionTools(input.tools);
+            const validationInput = { ...input, tools: bridgeTools };
+            return rejectUnsupportedChatTurn(validationInput, {
               ...capabilities,
               appManagedTools: state.appManagedTools,
             }).pipe(
@@ -1484,9 +1494,9 @@ function makeConnection(
                 if (state.promptActive) {
                   return Effect.fail(failure("protocol", `${name} already has an active turn.`));
                 }
-                const catalogKey = JSON.stringify(input.tools);
+                const catalogKey = JSON.stringify(bridgeTools);
                 if (
-                  (state.managedTools === undefined) !== (input.tools.length === 0) ||
+                  (state.managedTools === undefined) !== (bridgeTools.length === 0) ||
                   (state.managedTools !== undefined && state.managedTools.catalogKey !== catalogKey)
                 ) {
                   return Effect.fail(
@@ -1551,8 +1561,8 @@ function makeConnection(
                   });
                 return Effect.void;
               }),
-            ),
-          ),
+            );
+          }),
         ),
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(
@@ -1659,9 +1669,6 @@ function makeConnection(
       answerTool: (input: ProviderToolAnswer) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
-            if (state.appManagedTools !== "supported") {
-              return unsupportedAnswerTool(state.appManagedTools);
-            }
             const pending = state.pendingToolAnswers.get(input.requestId);
             if (pending === undefined) {
               return Effect.fail(failure("protocol", `${name} tool request is not pending.`));

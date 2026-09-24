@@ -1567,7 +1567,7 @@ function ProviderRow(props: ProviderRowProps) {
                       {capabilityLabels.map(([key, label]) => (
                         <div key={key}>
                           <dt>{label}</dt>
-                          <dd>{titleCase(props.observed!.capabilities[key])}</dd>
+                          <dd>{titleCase(props.observed!.capabilities[key] ?? "unsupported")}</dd>
                         </div>
                       ))}
                     </dl>

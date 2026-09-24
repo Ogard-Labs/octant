@@ -325,6 +325,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         harnessAutoReview: "unsupported",
+        acpClientCapabilities: "supported",
       },
     });
     expect(client.newSession).toHaveBeenCalledOnce();
@@ -2085,6 +2086,122 @@ it("forwards ACP client capability requests through managed tools and answers th
       ),
     ),
   );
+});
+
+it("serves native ACP client capabilities without negotiating the HTTP MCP bridge", async () => {
+  const { unadvertisedHttpMcpVersions: _ignored, ...profile } = vibe;
+  const nativeTools = Object.values(ACP_CLIENT_TOOL_NAMES).map((name) => ({
+    name,
+    inputSchema: { type: "object" },
+  }));
+  const { driver, client, starts } = fixture(profile, {
+    runtimeVersion: "7.4.11",
+  });
+  client.prompt.mockImplementation(
+    async () => new Promise<{ readonly stopReason: "end_turn" }>(() => undefined),
+  );
+
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: nativeTools,
+        });
+        expect(starts[0]).toMatchObject({
+          clientCapabilities: {
+            readTextFile: true,
+            writeTextFile: true,
+            terminal: true,
+          },
+        });
+        const events = yield* connection.subscribe;
+        yield* Effect.fork(
+          connection.send({
+            sessionId,
+            prompt: "Read the file",
+            attachments: [],
+            tools: nativeTools,
+          }),
+        );
+        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+        const eventFiber = yield* Effect.fork(
+          Stream.runHead(events.pipe(Stream.filter((event) => event.kind === "tool-request"))),
+        );
+        client.request({
+          kind: "request",
+          id: "native-read-1",
+          method: "fs/read_text_file",
+          capability: "readTextFile",
+          params: {
+            sessionId: "agent-session-1",
+            path: "/tmp/octant-acp-driver/README.md",
+          },
+        });
+        const option = yield* Fiber.join(eventFiber);
+        if (option._tag === "None") throw new Error("Expected a native capability request.");
+        const event = option.value;
+        if (event.kind !== "tool-request") throw new Error("Expected a tool request event.");
+        expect(event.toolName).toBe(ACP_CLIENT_TOOL_NAMES.readTextFile);
+        expect(event.inputJson).toBe('{"path":"/tmp/octant-acp-driver/README.md"}');
+        yield* connection.answerTool({
+          sessionId,
+          requestId: event.requestId,
+          resultJson: JSON.stringify({ content: "hello" }),
+          isError: false,
+        });
+        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+        expect(client.respond).toHaveBeenCalledWith("native-read-1", { content: "hello" });
+      }),
+    ),
+  );
+});
+
+it("requires the HTTP MCP bridge when ACP native and bridge tools are mixed", async () => {
+  const { unadvertisedHttpMcpVersions: _ignored, ...profile } = vibe;
+  const bridgeFactory = async () => ({
+    server: {
+      type: "http" as const,
+      name: "octant-tools",
+      url: "http://127.0.0.1:43123/mcp/test",
+      headers: [],
+    },
+    port: 43123,
+    attested: Promise.resolve(),
+    bind: () => {},
+    close: async () => undefined,
+  });
+  const { driver } = fixture(profile, { managedToolsBridgeFactory: bridgeFactory });
+  const mixedTools = [
+    {
+      name: ACP_CLIENT_TOOL_NAMES.readTextFile,
+      inputSchema: { type: "object" },
+    },
+    { name: "octant_computer", inputSchema: { type: "object" } },
+  ];
+
+  await withProcessPlatform("darwin", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.flip(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+              return yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools: mixedTools,
+              });
+            }),
+          ),
+        ),
+      ),
+    ).resolves.toMatchObject({ category: "unsupported" });
+  });
 });
 
 it("refuses a durable cursor in another Project before starting a process", async () => {

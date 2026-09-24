@@ -29,6 +29,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionHandle,
+  ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -2294,6 +2295,8 @@ function runtimeFixture(options: {
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   /** Whether the thread's provider can carry app-managed tools (default true). */
   supportsAppManagedTools?: boolean;
+  /** Whether the provider natively serves ACP client capabilities. */
+  supportsAcpClientCapabilities?: boolean;
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
@@ -2410,11 +2413,25 @@ function runtimeFixture(options: {
       environment: {},
     }),
     resolveProviderDriver: async () => options.provider,
-    ...(options.browserAutomation === undefined
+    ...(options.browserAutomation === undefined &&
+    options.supportsAppManagedTools === undefined &&
+    options.supportsAcpClientCapabilities === undefined
       ? {}
       : {
-          browserAutomation: options.browserAutomation,
-          supportsAppManagedTools: () => options.supportsAppManagedTools ?? true,
+          ...(options.browserAutomation === undefined
+            ? {}
+            : {
+                browserAutomation: options.browserAutomation,
+                supportsAppManagedTools: () => options.supportsAppManagedTools ?? true,
+              }),
+          ...(options.supportsAppManagedTools === undefined
+            ? {}
+            : { supportsAppManagedTools: () => options.supportsAppManagedTools ?? false }),
+          ...(options.supportsAcpClientCapabilities === undefined
+            ? {}
+            : {
+                supportsAcpClientCapabilities: () => options.supportsAcpClientCapabilities ?? false,
+              }),
         }),
     credentialResolver: { resolve: async () => options.credential },
     resolvePullRequestTarget: async () =>
@@ -2559,15 +2576,19 @@ function runtimeFixture(options: {
   };
 }
 
-function providerConnection(queue: Queue.Queue<ProviderRuntimeEvent>): ProviderConnection {
+function providerConnection(
+  queue: Queue.Queue<ProviderRuntimeEvent>,
+  starts: Array<ProviderSessionStart> = [],
+): ProviderConnection {
   return {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
-    start: vi.fn(() =>
-      Effect.succeed<ProviderSessionHandle>({
+    start: vi.fn((input) => {
+      starts.push(input);
+      return Effect.succeed<ProviderSessionHandle>({
         sessionId,
         resumeCursor: { driverKind: "codex", value: "native-code-session" },
-      }),
-    ),
+      });
+    }),
     resume: vi.fn((input) =>
       Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor }),
     ),
@@ -2723,4 +2744,81 @@ it("names why a turn whose provider cannot carry an app-managed tool was refused
   } finally {
     fixture.close();
   }
+});
+
+it("passes only ACP client tools when native ACP capability support is enabled", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const starts: Array<ProviderSessionStart> = [];
+  const provider = providerDriver(providerConnection(queue, starts));
+  const fixture = runtimeFixture({
+    provider,
+    supportsAppManagedTools: false,
+    supportsAcpClientCapabilities: true,
+  });
+
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(77),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+
+  expect(starts[0]?.tools?.map((tool) => tool.name)).toEqual([
+    "octant_acp_fs_read_text_file",
+    "octant_acp_fs_write_text_file",
+    "octant_acp_terminal_create",
+    "octant_acp_terminal_output",
+    "octant_acp_terminal_wait_for_exit",
+    "octant_acp_terminal_kill",
+    "octant_acp_terminal_release",
+  ]);
+  fixture.close();
+});
+
+it("omits app-managed tools when neither bridge nor native ACP support is enabled", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const starts: Array<ProviderSessionStart> = [];
+  const provider = providerDriver(providerConnection(queue, starts));
+  const fixture = runtimeFixture({
+    provider,
+    supportsAppManagedTools: false,
+    supportsAcpClientCapabilities: false,
+  });
+
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(78),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+
+  expect(starts[0]?.tools).toEqual([]);
+  fixture.close();
+});
+
+it("does not include ACP client tools when only bridge support is enabled", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const starts: Array<ProviderSessionStart> = [];
+  const provider = providerDriver(providerConnection(queue, starts));
+  const fixture = runtimeFixture({
+    provider,
+    supportsAppManagedTools: true,
+    supportsAcpClientCapabilities: false,
+  });
+
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(79),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+
+  expect(starts[0]?.tools?.some((tool) => tool.name.startsWith("octant_acp_"))).toBeFalsy();
+  fixture.close();
 });

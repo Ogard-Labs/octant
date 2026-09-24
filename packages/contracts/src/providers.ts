@@ -1061,6 +1061,12 @@ export const ProviderCapabilities = Schema.Struct({
   nativeAttachments: ProviderCapabilitySupport,
   nativeWebResearch: ProviderCapabilitySupport,
   appManagedTools: ProviderCapabilitySupport,
+  /**
+   * The driver natively serves ACP client filesystem and terminal methods
+   * (`fs/read_text_file`, `fs/write_text_file`, `terminal/*`) over its own
+   * connection, independently of the app-managed tool bridge.
+   */
+  acpClientCapabilities: Schema.optional(ProviderCapabilitySupport),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
 }).annotations(strict);
