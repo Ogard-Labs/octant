@@ -350,9 +350,10 @@ export function ProviderUsageHistoryWorkspace(props: {
             loading={busy && data === undefined}
           />
           <Metric
-            label="Cache savings · estimate"
+            label="Cache savings"
             value={data?.cost.cacheSavingsUsd}
             format="money"
+            detail="Estimate"
             coverage={
               data === undefined
                 ? undefined
