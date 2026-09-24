@@ -111,6 +111,31 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
   });
 
+  it("exposes Stop turn while the turn runs and hides it when idle", async () => {
+    const user = userEvent.setup();
+    const cancelTurn = vi.fn(async () => true);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ cancelTurn, turnStatus: "running" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Stop turn" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Stop turn" }));
+    expect(cancelTurn).toHaveBeenCalledOnce();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ cancelTurn, turnStatus: "idle" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Stop turn" })).not.toBeInTheDocument();
+  });
+
   it("keeps the line under the row empty while nothing is running", () => {
     const { container } = render(
       <CodeThreadWorkspace
@@ -3076,6 +3101,7 @@ function controller(
     pendingDraft: "",
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
+    cancelTurn: vi.fn(async () => true),
 
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     noteRestoreUndo: vi.fn(),

@@ -639,6 +639,7 @@ function controller(
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
+    cancelTurn: vi.fn(async () => true),
 
     turnActivity: new Map(),
     turnErrorInTranscript: false,

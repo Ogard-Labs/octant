@@ -2324,6 +2324,7 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       conversationHistory: "loaded",
       providerRequests: [],
       answerProviderRequest: vi.fn(async () => true),
+      cancelTurn: vi.fn(async () => true),
 
       turnActivity: new Map(),
       turnErrorInTranscript: false,

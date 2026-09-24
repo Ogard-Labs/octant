@@ -1180,9 +1180,10 @@ diff presentation; file disclosures mount only their open preview.
 ### Compact task controls
 
 The right Tools launcher starts directly beneath the window control rail, without
-an extra top spacer. While a Code turn runs, its composer action is **Queue
-message**; an accepted queued message shows **Queued** instead of instructions
-about Enter. The idle action sends normally.
+an extra top spacer. While a Code turn runs, its composer keeps the **Queue
+message** action and shows a **Stop turn** control beside it; an accepted queued
+message shows **Queued** instead of instructions about Enter. The idle action
+sends normally.
 
 Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a
