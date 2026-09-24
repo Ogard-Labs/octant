@@ -67,6 +67,15 @@ describe("Local provider usage history", () => {
     );
   });
 
+  it("keeps the cache savings label on one line and marks its value as an estimate", async () => {
+    render(
+      <ProviderUsageHistoryWorkspace client={{ load: vi.fn().mockResolvedValue(history()) }} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Cache savings").parentElement).toHaveTextContent("Estimate"),
+    );
+  });
+
   it("weights the cache hit rate by input tokens rather than averaging model percentages", async () => {
     const data = history();
     const model = data.models[0];

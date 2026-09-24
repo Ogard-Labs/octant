@@ -7461,14 +7461,15 @@ export function startOctantServer(
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     const workPromotionWindowScope: { current: WindowId | undefined } = { current: undefined };
+    const workPromotionProjectPort = createWorkPromotionProjectPort({
+      persistence,
+      projects: projectService,
+      artifacts: workArtifactProjection,
+      gitObservation: gitObservationPort,
+      clock: () => new Date().toISOString(),
+    });
     const workPromotionService = new WorkPromotionService({
-      projects: createWorkPromotionProjectPort({
-        persistence,
-        projects: projectService,
-        artifacts: workArtifactProjection,
-        gitObservation: gitObservationPort,
-        clock: () => new Date().toISOString(),
-      }),
+      projects: workPromotionProjectPort,
       codeThreads: createWorkPromotionCodeThreadPort({
         codeService: routeCodeService,
         clock: () => new Date().toISOString(),
@@ -7483,7 +7484,11 @@ export function startOctantServer(
     const workPromotionApplication = new WorkPromotionApplicationService({
       promotion: workPromotionService,
       projection: workPromotionProjection,
-      projects: projectService,
+      projects: {
+        bootstrap: (windowId) => projectService.bootstrap(windowId),
+        listArtifactRefs: workPromotionProjectPort.listArtifactRefs,
+        resolveDeliveryTarget: workPromotionProjectPort.resolveDeliveryTarget,
+      },
       windowScope: workPromotionWindowScope,
     });
     const workPromotionRoutes = createWorkPromotionRouteHandler({

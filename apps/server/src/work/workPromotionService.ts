@@ -40,8 +40,8 @@ export interface WorkPromotionProjectPort {
     originProjectId: ProjectId,
     artifactRefs: ReadonlyArray<WorkArtifactRef>,
   ): ReadonlyArray<WorkArtifactRef>;
-  readonly listArtifactRefs?: (originProjectId: ProjectId) => ReadonlyArray<WorkArtifactRef>;
-  readonly resolveDeliveryTarget?: (
+  readonly listArtifactRefs: (originProjectId: ProjectId) => ReadonlyArray<WorkArtifactRef>;
+  readonly resolveDeliveryTarget: (
     targetCodeProjectId: ProjectId,
   ) => Promise<CodeDeliveryTarget | undefined> | CodeDeliveryTarget | undefined;
 }
@@ -312,19 +312,17 @@ export class WorkPromotionService {
       return failure("conflict", "Only a proposed promotion may be approved.");
     }
 
-    const authoritativeDeliveryTarget = await this.#projects.resolveDeliveryTarget?.(
+    const authoritativeDeliveryTarget = await this.#projects.resolveDeliveryTarget(
       entry.proposal.targetCodeProjectId,
     );
-    if (this.#projects.resolveDeliveryTarget !== undefined) {
-      if (authoritativeDeliveryTarget === undefined) {
-        return failure(
-          "unavailable",
-          "The target Code Project has no authoritative delivery target.",
-        );
-      }
-      if (!sameDeliveryTarget(authoritativeDeliveryTarget, command.deliveryTarget)) {
-        return failure("stale", "The Code delivery target is stale; reload the promotion context.");
-      }
+    if (authoritativeDeliveryTarget === undefined) {
+      return failure(
+        "unavailable",
+        "The target Code Project has no authoritative delivery target.",
+      );
+    }
+    if (!sameDeliveryTarget(authoritativeDeliveryTarget, command.deliveryTarget)) {
+      return failure("stale", "The Code delivery target is stale; reload the promotion context.");
     }
 
     let created: { codeThreadId: CodeThreadId };

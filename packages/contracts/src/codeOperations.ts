@@ -1019,6 +1019,11 @@ const PullRequestReviewResult = Schema.Union(
     operationId: CodeOperationId,
     state: Schema.Literal("none", "unavailable"),
     freshness: Schema.Literal("fresh", "stale"),
+    /**
+     * The checkout has no GitHub fetch or push remote, so review cannot be
+     * observed or opened from this checkout.
+     */
+    failureCode: Schema.optional(Schema.Literal("no-remote")),
   }).annotations(strict),
 );
 const ReviewFindingResult = Schema.Struct({
