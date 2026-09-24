@@ -7557,7 +7557,7 @@ export function startOctantServer(
             .listForThread(thread.projectId, threadId)
             .filter((request) => request.status === "pending")
         : [];
-      const pendingRequest = pendingRequests.at(-1);
+      const pendingRequest = pendingRequests.at(0);
       const childRuns = persistence.agentRunProjection.parentSummary(
         decodeAgentRunParentThreadId(String(threadId)),
       );
