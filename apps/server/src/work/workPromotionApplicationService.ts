@@ -26,7 +26,7 @@ export interface WorkPromotionApplicationServiceOptions {
   readonly promotion: WorkPromotionService;
   readonly projection: WorkPromotionProjection;
   readonly projects: Pick<Parameters<typeof loadAccessiblePromotionProjects>[0], "bootstrap"> &
-    Partial<Pick<WorkPromotionProjectPort, "listArtifactRefs" | "resolveDeliveryTarget">>;
+    Pick<WorkPromotionProjectPort, "listArtifactRefs" | "resolveDeliveryTarget">;
   readonly windowScope: { current: WindowId | undefined };
 }
 
@@ -73,25 +73,22 @@ export class WorkPromotionApplicationService {
     const artifactRefs =
       originProjectId === undefined
         ? []
-        : (this.#projects.listArtifactRefs?.(originProjectId) ?? []).slice(0, 32);
-    const deliveryTargets = this.#projects.resolveDeliveryTarget
-      ? (
-          await Promise.all(
-            [...accessible.code].map(async (projectId) => {
-              try {
-                const decodedProjectId = decodeProjectId(projectId);
-                const deliveryTarget =
-                  await this.#projects.resolveDeliveryTarget?.(decodedProjectId);
-                return deliveryTarget === undefined
-                  ? undefined
-                  : { projectId: decodedProjectId, deliveryTarget };
-              } catch {
-                return undefined;
-              }
-            }),
-          )
-        ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
-      : [];
+        : this.#projects.listArtifactRefs(originProjectId).slice(0, 32);
+    const deliveryTargets = (
+      await Promise.all(
+        [...accessible.code].map(async (projectId) => {
+          try {
+            const decodedProjectId = decodeProjectId(projectId);
+            const deliveryTarget = await this.#projects.resolveDeliveryTarget(decodedProjectId);
+            return deliveryTarget === undefined
+              ? undefined
+              : { projectId: decodedProjectId, deliveryTarget };
+          } catch {
+            return undefined;
+          }
+        }),
+      )
+    ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
     return { proposals, artifactRefs, deliveryTargets };
   }
 
