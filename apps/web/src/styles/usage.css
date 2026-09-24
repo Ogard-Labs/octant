@@ -320,7 +320,10 @@
 
 .provider-limits__list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  /* The longest scope label measures about 228px at detail text size; 240px
+     keeps that content readable while allowing four columns in the wide view
+     and two columns at the common narrower width. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: var(--oct-space-4);
 }
 

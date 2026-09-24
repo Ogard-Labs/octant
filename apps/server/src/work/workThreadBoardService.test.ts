@@ -411,6 +411,21 @@ describe("boardRuntimeActivityFromTurnsAndSignals", () => {
     expect(activity.blockingReason).toBe("Runtime work is waiting for a decision or input.");
   });
 
+  it("reports which kind of request the thread is waiting on", () => {
+    const activity = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [turn("running")],
+      pendingRequest: true,
+      pendingRequestKind: "approval",
+      childActive: 0,
+      childWaiting: 0,
+    });
+    expect(activity).toMatchObject({
+      executing: true,
+      awaitingInput: true,
+      awaitingKind: "approval",
+    });
+  });
+
   it("holds Waiting from an interrupted latest turn", () => {
     const activity = boardRuntimeActivityFromTurnsAndSignals({
       turns: [

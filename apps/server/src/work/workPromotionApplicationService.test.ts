@@ -4,7 +4,9 @@ import {
   decodeWorkPromotionProposalId,
   decodeProjectId,
   decodeWindowId,
+  decodeCodeDeliveryTarget,
   EventActor,
+  type ProjectId,
   type WorkPromotionFrame,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -17,9 +19,18 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000801");
 const originProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
 const targetProjectId = decodeProjectId("00000000-0000-4000-8000-000000000903");
 const proposalId = decodeWorkPromotionProposalId("00000000-0000-4000-8000-000000000902");
+const artifactRef = decodeWorkArtifactRef("artifact-token-a");
+const deliveryTarget = decodeCodeDeliveryTarget({
+  branchIntent: "feature/report-cli",
+  remoteName: "origin",
+  proposedBaseRepository: "octocat/octant",
+  proposedBaseBranch: "main",
+  outcomeKind: "opened-pr" as const,
+  confirmedAt: "2026-07-22T08:00:00.000Z",
+});
 
 describe("WorkPromotionApplicationService", () => {
-  it("rehydrates journaled proposals for list after hydrate", async () => {
+  it("lists the Project's live artifacts and Code delivery targets in the promotion snapshot", async () => {
     const replayFrames: Array<WorkPromotionFrame> = [];
     const projects = {
       bootstrap: async () =>
@@ -30,6 +41,9 @@ describe("WorkPromotionApplicationService", () => {
           ],
           archived: [],
         }) as unknown as Awaited<ReturnType<ProjectService["bootstrap"]>>,
+      listArtifactRefs: () => [artifactRef],
+      resolveDeliveryTarget: async (projectId: ProjectId) =>
+        String(projectId) === String(targetProjectId) ? deliveryTarget : undefined,
     };
     const windowScope = { current: undefined as typeof windowId | undefined };
 
@@ -44,6 +58,8 @@ describe("WorkPromotionApplicationService", () => {
                 : "unknown",
           workCanonicalRoot: () => "/work",
           resolveArtifactRefs: (_origin, refs) => refs,
+          listArtifactRefs: () => [],
+          resolveDeliveryTarget: async () => deliveryTarget,
         },
         codeThreads: {
           async createApprovalGatedThread() {
@@ -86,7 +102,7 @@ describe("WorkPromotionApplicationService", () => {
       targetCodeProjectId: targetProjectId,
       selectedContext: {
         summary: "Promote the report generator into a CLI",
-        artifactRefs: [decodeWorkArtifactRef("artifact-token-a")],
+        artifactRefs: [artifactRef],
       },
       proposedCodePermissionPersistence: "current-session",
     });
@@ -104,6 +120,10 @@ describe("WorkPromotionApplicationService", () => {
     const list = await restartedApplication.list(windowId, originProjectId);
     expect(list.proposals).toHaveLength(1);
     expect(JSON.stringify(list)).not.toMatch(/canonicalRoot|bindingReceipt|file:|\\\\/);
+    expect(list).toMatchObject({
+      artifactRefs: [artifactRef],
+      deliveryTargets: [{ projectId: targetProjectId, deliveryTarget }],
+    });
   });
 
   it("rejects approve when the target Code Project is no longer accessible", async () => {
@@ -118,6 +138,8 @@ describe("WorkPromotionApplicationService", () => {
           ],
           archived: [],
         }) as unknown as Awaited<ReturnType<ProjectService["bootstrap"]>>,
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     };
     const windowScope = { current: undefined as typeof windowId | undefined };
     const projection = new WorkPromotionProjection();
@@ -131,6 +153,8 @@ describe("WorkPromotionApplicationService", () => {
               : "unknown",
         workCanonicalRoot: () => "/work",
         resolveArtifactRefs: (_origin, refs) => refs,
+        listArtifactRefs: () => [],
+        resolveDeliveryTarget: async () => undefined,
       },
       codeThreads: {
         async createApprovalGatedThread() {
