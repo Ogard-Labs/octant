@@ -391,9 +391,10 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     if (record.process.exitCode === null && record.process.signalCode === null) {
       signalProcessGroup(record.process, "SIGTERM");
       await options.wait(2_000);
-      if (record.process.exitCode === null && record.process.signalCode === null)
-        signalProcessGroup(record.process, "SIGKILL");
     }
+    // The leader may already have exited while a backgrounded grandchild keeps
+    // the group alive; ESRCH on an empty group is absorbed by the fallback.
+    signalProcessGroup(record.process, "SIGKILL");
     if (release) terminals.delete(terminalId);
     return { result: {} };
   };
