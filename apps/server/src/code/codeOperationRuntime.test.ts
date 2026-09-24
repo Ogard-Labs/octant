@@ -1996,6 +1996,34 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("reports a missing GitHub remote instead of an unavailable review when the checkout has no GitHub remote", async () => {
+    const observeReview = vi.fn(async () => ({ status: "unavailable" as const }));
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitObservation: readyGitObservation([]),
+      pullRequestPort: {
+        ensure: async () => ({ status: "unavailable" as const }),
+        observeReview,
+      },
+    });
+    const review = await fixture.runtime.execute(windowId, {
+      kind: "observe-pull-request",
+      operationId: operationId(112),
+      threadId,
+      checkoutId,
+      maxDiffBytes: 1024,
+    });
+
+    expect(review).toMatchObject({
+      kind: "pull-request-review",
+      state: "unavailable",
+      freshness: "stale",
+      failureCode: "no-remote",
+    });
+    expect(observeReview).not.toHaveBeenCalled();
+    fixture.close();
+  });
+
   it.each([
     {
       label: "fetch-only",

@@ -142,6 +142,30 @@ describe("CodePullRequestPane", () => {
     );
   });
 
+  it("explains a missing GitHub remote instead of blaming GitHub authentication", () => {
+    render(
+      <CodePullRequestPane
+        client={codeClient()}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        idempotencyKey="thread-delivery-v1"
+        review={{
+          kind: "pull-request-review",
+          operationId: ids.operation as never,
+          state: "unavailable",
+          freshness: "stale",
+          failureCode: "no-remote",
+        }}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This checkout has no GitHub remote, so there is no pull request to observe or open. Add a GitHub remote to the repository, then retry.",
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/GitHub authentication/i);
+  });
+
   it("renders the linked PR review window read-only with every observed section", async () => {
     const client = codeClient({ evidence: "Delivers the review window." });
     const onNavigateWorktree = vi.fn();
