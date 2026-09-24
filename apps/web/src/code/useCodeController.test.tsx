@@ -1458,7 +1458,7 @@ describe("useCodeController", () => {
     await act(async () => {
       await running;
     });
-    await waitFor(() => expect(result.current.turnStatus).toBe("failed"));
+    await waitFor(() => expect(result.current.turnStatus).toBe("interrupted"));
     expect(result.current.conversation.at(-1)).toEqual(
       expect.objectContaining({ status: "interrupted" }),
     );
@@ -1698,7 +1698,9 @@ describe("useCodeController", () => {
 
       expect(ok).toBe(false);
       expect(subscribeOperation).toHaveBeenCalledOnce();
-      expect(result.current.turnStatus).toBe(state === "waiting" ? "waiting" : "failed");
+      expect(result.current.turnStatus).toBe(
+        state === "waiting" ? "waiting" : state === "interrupted" ? "interrupted" : "failed",
+      );
       expect(result.current.providerRequests).toHaveLength(state === "waiting" ? 1 : 0);
       expect(result.current.pendingDraft).toBe("approve this turn");
     },

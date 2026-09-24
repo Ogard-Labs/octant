@@ -1020,13 +1020,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </span>
         </div>
       ) : props.controller.turnError === undefined ||
-        (props.controller.turnStatus === "failed" &&
+        ((props.controller.turnStatus === "failed" ||
+          props.controller.turnStatus === "interrupted") &&
           props.controller.turnErrorInTranscript &&
           props.controller.conversationHistory !== "unavailable") ? null : (
-        // A failed turn is already in the transcript with its reason; a second
-        // notice above it said the same thing louder. The callout stays for a
-        // history the host cannot read, where the retry offer lives, and for a
-        // send the host refused before any turn existed to carry the reason.
+        // A terminal turn is already in the transcript with its reason; a
+        // second notice above it said the same thing louder. The callout stays
+        // for a history the host cannot read, where the retry offer lives, and
+        // for a send the host refused before any turn existed to carry the
+        // reason.
         <div className="callout thread-column code-thread-workspace__callout" role="alert">
           <CircleAlert aria-hidden="true" size={16} />
           <p>{props.controller.turnError}</p>
@@ -1865,6 +1867,7 @@ function waitingTurnLabel(requests: CodeController["providerRequests"]): string 
 function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
   if (status === "sending" || status === "running") return "running";
   if (status === "waiting") return "waiting";
+  if (status === "interrupted") return "cancelled";
   if (status === "failed") return "failed";
   return "completed";
 }

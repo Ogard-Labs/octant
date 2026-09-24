@@ -430,6 +430,32 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     restore: (message) => message.originRestore(message),
   });
   const turnRunning = workTurnSettlement(turns) === "running";
+  const runningTurn = turns.at(-1);
+  const stoppableTurn =
+    runningTurn?.status === "accepted" || runningTurn?.status === "running"
+      ? runningTurn
+      : undefined;
+  const onStop = useCallback(async () => {
+    const turnClient = props.turnClient;
+    const turn = stoppableTurn;
+    if (turnClient === undefined || turn === undefined) return;
+    const threadKey = String(props.threadId);
+    try {
+      await turnClient.cancelFirstTurn({
+        kind: "cancel-work-turn",
+        requestId: turn.requestId,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+      });
+    } catch (error) {
+      if (currentThreadKeyRef.current !== threadKey) return;
+      setErrorMessage(
+        error instanceof WorkTurnClientFailure
+          ? error.message
+          : "The Work turn could not be stopped. Try again.",
+      );
+    }
+  }, [props.threadId, props.turnClient, stoppableTurn]);
   const answerWorkRequest = useCallback(
     async (
       request: WorkRequest,
@@ -1687,7 +1713,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           ),
           actions: {
-            kind: "send",
+            kind: "send-or-stop",
+            cellClassName: "composer-actions",
+            sending: turnRunning,
             send: {
               ariaLabel:
                 props.turnClient === undefined && !turnRunning
@@ -1695,6 +1723,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   : "Send follow-up",
               disabled: !canSubmit,
               onSend: () => void submit(),
+            },
+            stop: {
+              ariaLabel: "Stop turn",
+              ...(props.turnClient === undefined || stoppableTurn === undefined
+                ? { disabledReason: "Stopping is available once the turn has started." }
+                : {}),
+              onStop: () => void onStop(),
             },
           },
         }}
