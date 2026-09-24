@@ -344,6 +344,9 @@ export class CodeTurnRunner {
                     responseText += sanitizedEvent.text;
                   }
                   if (sanitizedEvent.kind === "tool-request") {
+                    if (boundedEvent.kind !== "tool-request") {
+                      return yield* fail("failed", "Provider event sanitization failed closed.");
+                    }
                     if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
                     answeredToolRequestIds.add(sanitizedEvent.requestId);
                     const toolSet = input.appManagedTools;
@@ -382,7 +385,7 @@ export class CodeTurnRunner {
                         try {
                           return await toolSet.execute({
                             name: sanitizedEvent.toolName,
-                            inputJson: sanitizedEvent.inputJson,
+                            inputJson: boundedEvent.inputJson,
                             ...(executionSignal === undefined ? {} : { signal: executionSignal }),
                           });
                         } catch {
@@ -414,7 +417,7 @@ export class CodeTurnRunner {
                       ...normalized,
                       status: answer.isError ? "failed" : "completed",
                       text: answer.isError
-                        ? "App-managed action failed."
+                        ? appManagedActionFailureText(execution.result)
                         : "App-managed action completed.",
                     });
                     return;
@@ -835,6 +838,21 @@ function boundedToolAnswer(
   } catch {
     return { resultJson: JSON.stringify({ error: "tool-result-invalid" }), isError: true };
   }
+}
+
+function appManagedActionFailureText(result: unknown): string {
+  if (
+    typeof result === "object" &&
+    result !== null &&
+    "error" in result &&
+    typeof result.error === "string" &&
+    result.error.length > 0 &&
+    result.error.length <= 80 &&
+    /^[a-z0-9-]+$/.test(result.error)
+  ) {
+    return `App-managed action failed: ${result.error}.`;
+  }
+  return "App-managed action failed.";
 }
 
 function isSanitizedEventValid(

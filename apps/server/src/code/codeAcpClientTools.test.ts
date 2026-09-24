@@ -1,10 +1,12 @@
+import { existsSync } from "node:fs";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CodeThread, WindowId } from "@octant/contracts";
+import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
-import { createCodeAcpClientTools } from "./codeAcpClientTools";
+import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 
@@ -33,7 +35,14 @@ function thread(executionPolicy: CodeThread["executionPolicy"]): CodeThread {
   } as unknown as CodeThread;
 }
 
-function tools(root: string, executionPolicy: CodeThread["executionPolicy"]) {
+function tools(
+  root: string,
+  executionPolicy: CodeThread["executionPolicy"],
+  terminalConfinement: CodeAcpTerminalConfinement = {
+    environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
+    prepare: ({ executable, args }) => ({ command: executable, args }),
+  },
+) {
   return createCodeAcpClientTools({
     windowId,
     thread: thread(executionPolicy),
@@ -41,10 +50,7 @@ function tools(root: string, executionPolicy: CodeThread["executionPolicy"]) {
     checkoutRoot: root,
     uuid: () => "fixed-id",
     pathPort: liveCodeTestSourcePort,
-    terminalConfinement: {
-      environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
-      prepare: ({ executable, args }) => ({ command: executable, args }),
-    },
+    terminalConfinement,
     wait: async (milliseconds) => {
       await new Promise((resolve) => setTimeout(resolve, milliseconds));
     },
@@ -177,7 +183,10 @@ describe("ACP Code client tools", () => {
       await expect(
         appTools.execute({
           name: "octant_acp_terminal_create",
-          inputJson: JSON.stringify({ command: "/definitely/missing/octant-command" }),
+          inputJson: JSON.stringify({
+            command: "/definitely/missing/octant-command",
+            args: [],
+          }),
         }),
       ).resolves.toMatchObject({ result: { error: "terminal-unavailable" }, isError: true });
     } finally {
@@ -279,4 +288,115 @@ describe("ACP Code client tools", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("runs an ACP shell command through the confined shell when args are absent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    try {
+      const appTools = tools(root, "full-access");
+      const created = await appTools.execute({
+        name: "octant_acp_terminal_create",
+        inputJson: JSON.stringify({ command: "printf a && printf b" }),
+      });
+      const terminalId = (created.result as { terminalId: string }).terminalId;
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { exitCode: 0 } });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_output",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { output: "ab" } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an explicit empty args array on the direct executable path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    try {
+      const appTools = tools(root, "full-access");
+      const created = await appTools.execute({
+        name: "octant_acp_terminal_create",
+        inputJson: JSON.stringify({ command: "/usr/bin/true", args: [] }),
+      });
+      const terminalId = (created.result as { terminalId: string }).terminalId;
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { exitCode: 0 } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps shell commands inside the confined working directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    try {
+      const appTools = tools(root, "full-access");
+      const created = await appTools.execute({
+        name: "octant_acp_terminal_create",
+        inputJson: JSON.stringify({ command: "cd .. && pwd" }),
+      });
+      const terminalId = (created.result as { terminalId: string }).terminalId;
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { exitCode: 0 } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== "darwin")(
+    "refuses shell writes outside the checkout with the production confinement",
+    async () => {
+      const root = await mkdtemp(join(process.cwd(), ".octant-acp-"));
+      const outside = join(root, "..", `${basename(root)}-outside.txt`);
+      const environment = {
+        PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        HOME: process.env.HOME ?? "/tmp",
+        TMPDIR: process.env.TMPDIR ?? tmpdir(),
+      };
+      const confinement = makeSeatbeltConfinementLive({ platform: "darwin" });
+      try {
+        const appTools = tools(root, "full-access", {
+          environment,
+          prepare: (input) =>
+            confinement.prepare({
+              ...input,
+              networkEgress: "allow",
+              allowProcessExec: true,
+              allowProcessFork: true,
+              allowFileReadStar: true,
+              writeBoundRoot: true,
+              readRoots: [input.boundRoot, input.temporaryDirectory, "/bin"],
+            }),
+        });
+        const created = await appTools.execute({
+          name: "octant_acp_terminal_create",
+          inputJson: JSON.stringify({
+            command: `printf escaped > ../${basename(outside)}`,
+          }),
+        });
+        const terminalId = (created.result as { terminalId: string }).terminalId;
+        const exit = await appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        });
+        expect((exit.result as { exitCode?: number }).exitCode).not.toBe(0);
+        expect(existsSync(outside)).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(outside, { force: true });
+      }
+    },
+  );
 });

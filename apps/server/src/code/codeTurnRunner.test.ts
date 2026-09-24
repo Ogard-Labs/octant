@@ -563,6 +563,111 @@ describe("CodeTurnRunner", () => {
     expect(persisted).toContain("[REDACTED]");
   });
 
+  it("executes managed tools with bounded provider paths while persisting sanitized paths", async () => {
+    const checkoutRoot = "/private/worktrees/exact";
+    const rawInputJson = JSON.stringify({ path: `${checkoutRoot}/README.md` });
+    const sanitizedInputJson = JSON.stringify({ path: "[CHECKOUT]/README.md" });
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "raw-path-request",
+            toolName: "octant_acp_fs_read_text_file",
+            inputJson: rawInputJson,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const execute = vi.fn(async ({ inputJson }: { readonly inputJson: string }) => ({
+      result: { acceptedInputJson: inputJson },
+    }));
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            checkoutRoot,
+            provider: { acquire: () => Effect.succeed(connection) },
+            sanitizeProviderEvent: ({ event: providerEvent }) =>
+              Effect.succeed(
+                providerEvent.kind === "tool-request"
+                  ? { ...providerEvent, inputJson: sanitizedInputJson }
+                  : providerEvent,
+              ),
+            appManagedTools: {
+              definitions: [
+                { name: "octant_acp_fs_read_text_file", inputSchema: { type: "object" } },
+              ],
+              execute,
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(execute).toHaveBeenCalledWith({
+      name: "octant_acp_fs_read_text_file",
+      inputJson: rawInputJson,
+    });
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "tool",
+        text: sanitizedInputJson,
+        status: "app-managed-request",
+      }),
+    );
+    expect(JSON.stringify(observed)).not.toContain(checkoutRoot);
+  });
+
+  it("journals a bounded managed-tool error code when execution fails", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "failed-request",
+            toolName: "octant_acp_terminal_create",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            appManagedTools: {
+              definitions: [
+                { name: "octant_acp_terminal_create", inputSchema: { type: "object" } },
+              ],
+              execute: async () => ({
+                result: { error: "cwd-outside-checkout" },
+                isError: true,
+              }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "tool",
+        status: "failed",
+        text: "App-managed action failed: cwd-outside-checkout.",
+      }),
+    );
+  });
+
   it("normalizes interactive and progress events under the immutable thread authority", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
