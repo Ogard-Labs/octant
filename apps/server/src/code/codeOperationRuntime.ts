@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isAbsolute, relative, sep } from "node:path";
+import { dirname, isAbsolute, relative, sep } from "node:path";
 import {
   CodeApprovalId,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
@@ -113,6 +113,9 @@ import {
   type ReviewFindingPersistencePort,
 } from "./reviewFindingService";
 import { TerminalProcessPort } from "./terminalProcessPort";
+import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
+import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
+import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
@@ -145,6 +148,32 @@ interface ProcessTestPort {
   execute: RepositoryTestProcessPort["execute"];
   readArtifact: RepositoryTestProcessPort["readArtifact"];
   reconcile?: () => Promise<void>;
+}
+
+function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
+  const environment = {
+    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    HOME: process.env.HOME ?? "/tmp",
+    TMPDIR: process.env.TMPDIR ?? process.env.TMP ?? "/tmp",
+    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+  };
+  const confinement = makeSeatbeltConfinementLive({ platform: process.platform });
+  return {
+    environment,
+    prepare: (input) =>
+      confinement.prepare({
+        executable: input.executable,
+        args: input.args,
+        boundRoot: input.boundRoot,
+        temporaryDirectory: input.temporaryDirectory,
+        networkEgress: "allow",
+        allowProcessExec: true,
+        allowProcessFork: true,
+        allowFileReadStar: true,
+        writeBoundRoot: true,
+        readRoots: [input.boundRoot, input.temporaryDirectory, dirname(input.executable)],
+      }),
+  };
 }
 
 export interface CodeOperationRuntimeOptions {
@@ -196,6 +225,8 @@ export interface CodeOperationRuntimeOptions {
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
     readonly reconcile?: () => Promise<void>;
   };
+  readonly acpTerminalConfinement?: CodeAcpTerminalConfinement;
+  readonly acpPathPort?: CodeTestSourcePort;
   readonly repositoryTestProcessPort?: ProcessTestPort;
   /**
    * Discovery of the definitions a checkout offers. A run is authorized against
@@ -1936,6 +1967,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     ...(this.#options.planner === undefined
                       ? {}
                       : { planner: this.#options.planner }),
+                  }),
+                  createCodeAcpClientTools({
+                    windowId: active.windowId,
+                    thread: active.thread,
+                    readExecutionPolicy: () =>
+                      this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+                      active.thread.executionPolicy,
+                    checkoutRoot: active.checkoutRoot,
+                    uuid: this.#options.uuid,
+                    pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
+                    terminalConfinement:
+                      this.#options.acpTerminalConfinement ?? defaultAcpTerminalConfinement(),
+                    wait: (milliseconds) =>
+                      new Promise((resolve) => setTimeout(resolve, milliseconds)),
                   }),
                   this.#options.githubReadTools?.({
                     windowId: active.windowId,

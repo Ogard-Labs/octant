@@ -942,6 +942,15 @@ mechanisms are:
   runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+- **ACP client capabilities.** ACP client filesystem and terminal effects are
+  executed by Octant inside the Code confinement, with bounded reads, writes,
+  terminal lifetimes, and output. Writes are placed through a confined process,
+  and execution posture is re-checked for every write and terminal creation.
+  Provider terminal overlays cannot replace `TMPDIR`, `PATH`, or `HOME`.
+  They are journaled as app-managed tool events, refused in Plan mode, and
+  governed by the thread's execution posture together with provider-approved
+  permission; the ACP provider does not gain a second permission prompt or a
+  path outside the bound checkout.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

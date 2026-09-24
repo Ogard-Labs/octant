@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import type { Readable, Writable } from "node:stream";
-
 const decode = <A, I>(schema: Schema.Schema<A, I>) => Schema.decodeUnknownSync(schema);
 const RpcId = Schema.Union(Schema.String, Schema.Int);
 type RpcId = typeof RpcId.Type;
@@ -136,6 +135,59 @@ const PermissionRequestParams = Schema.Struct({
   ),
 });
 
+const AcpClientRequestMeta = Schema.optional(
+  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+);
+const AcpClientReadTextFileParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  path: Schema.String,
+  line: Schema.optional(Schema.NullOr(Schema.Int)),
+  limit: Schema.optional(Schema.NullOr(Schema.Int)),
+  _meta: AcpClientRequestMeta,
+});
+const AcpClientWriteTextFileParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  path: Schema.String,
+  content: Schema.String,
+  _meta: AcpClientRequestMeta,
+});
+const AcpClientTerminalCreateParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  command: Schema.String,
+  args: Schema.optional(Schema.Array(Schema.String)),
+  env: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        value: Schema.String,
+      }),
+    ),
+  ),
+  cwd: Schema.optional(Schema.NullOr(Schema.String)),
+  outputByteLimit: Schema.optional(Schema.NullOr(Schema.Int)),
+  _meta: AcpClientRequestMeta,
+});
+const AcpClientTerminalOutputParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  terminalId: Schema.String,
+  _meta: AcpClientRequestMeta,
+});
+const AcpClientTerminalWaitForExitParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  terminalId: Schema.String,
+  _meta: AcpClientRequestMeta,
+});
+const AcpClientTerminalKillParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  terminalId: Schema.String,
+  _meta: AcpClientRequestMeta,
+});
+const AcpClientTerminalReleaseParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  terminalId: Schema.String,
+  _meta: AcpClientRequestMeta,
+});
+
 const DelegatedBrowserStart = Schema.Struct({
   _meta: Schema.Struct({
     "browser-auth-delegated": Schema.Struct({
@@ -168,6 +220,65 @@ export interface AcpServerRequest {
   readonly id: RpcId;
   readonly method: "session/request_permission";
   readonly params: typeof PermissionRequestParams.Type;
+}
+
+export type AcpClientCapabilityRequest =
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "fs/read_text_file";
+      readonly capability: "readTextFile";
+      readonly params: typeof AcpClientReadTextFileParams.Type;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "fs/write_text_file";
+      readonly capability: "writeTextFile";
+      readonly params: typeof AcpClientWriteTextFileParams.Type;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "terminal/create";
+      readonly capability: "terminalCreate";
+      readonly params: typeof AcpClientTerminalCreateParams.Type;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "terminal/output";
+      readonly capability: "terminalOutput";
+      readonly params: typeof AcpClientTerminalOutputParams.Type;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "terminal/wait_for_exit";
+      readonly capability: "terminalWaitForExit";
+      readonly params: typeof AcpClientTerminalWaitForExitParams.Type;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "terminal/kill";
+      readonly capability: "terminalKill";
+      readonly params: typeof AcpClientTerminalKillParams.Type;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: RpcId;
+      readonly method: "terminal/release";
+      readonly capability: "terminalRelease";
+      readonly params: typeof AcpClientTerminalReleaseParams.Type;
+    };
+
+export type AcpServerRequestMessage = AcpServerRequest | AcpClientCapabilityRequest;
+
+export interface AcpClientCapabilities {
+  readonly readTextFile: boolean;
+  readonly writeTextFile: boolean;
+  readonly terminal: boolean;
 }
 
 type FailureKind = "capacity" | "closed" | "protocol" | "remote" | "timeout";
@@ -258,6 +369,7 @@ export interface AcpClientOptions {
 export interface AcpClient {
   readonly exited: Promise<void>;
   initialize(
+    capabilities: AcpClientCapabilities,
     metadata?: Readonly<Record<string, string | number | boolean>>,
   ): Promise<AcpInitializeResult>;
   authenticate(): Promise<void>;
@@ -295,7 +407,7 @@ export interface AcpClient {
   call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
   closeSession(sessionId: string): Promise<void>;
   onNotification(listener: (message: AcpServerNotification) => void): () => void;
-  onRequest(listener: (message: AcpServerRequest) => void): () => void;
+  onRequest(listener: (message: AcpServerRequestMessage) => void): () => void;
   respond(id: RpcId, result: unknown): Promise<void>;
   respondPermission(id: RpcId, optionId?: string): Promise<void>;
   reject(id: RpcId, code: number, message: string): Promise<void>;
@@ -322,7 +434,7 @@ interface PendingRequest {
   readonly timeout: ReturnType<typeof setTimeout>;
 }
 
-type QueuedMessage = AcpServerNotification | AcpServerRequest;
+type QueuedMessage = AcpServerNotification | AcpServerRequestMessage;
 
 export function makeAcpClient(options: AcpClientOptions): AcpClient {
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
@@ -537,12 +649,95 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       return;
     }
     if (envelope.method === "session/request_permission") {
-      enqueue({
-        kind: "request",
+      try {
+        enqueue({
+          kind: "request",
+          id: envelope.id,
+          method: "session/request_permission",
+          params: decode(PermissionRequestParams)(envelope.params),
+        });
+      } catch {
+        void write({
+          jsonrpc: "2.0",
+          id: envelope.id,
+          error: { code: -32602, message: "Invalid params" },
+        });
+      }
+      return;
+    }
+    const capabilityRequest: AcpClientCapabilityRequest | "invalid-params" | undefined = (() => {
+      try {
+        return envelope.method === "fs/read_text_file"
+          ? {
+              kind: "request" as const,
+              id: envelope.id,
+              method: "fs/read_text_file",
+              capability: "readTextFile" as const,
+              params: decode(AcpClientReadTextFileParams)(envelope.params),
+            }
+          : envelope.method === "fs/write_text_file"
+            ? {
+                kind: "request" as const,
+                id: envelope.id,
+                method: "fs/write_text_file",
+                capability: "writeTextFile" as const,
+                params: decode(AcpClientWriteTextFileParams)(envelope.params),
+              }
+            : envelope.method === "terminal/create"
+              ? {
+                  kind: "request" as const,
+                  id: envelope.id,
+                  method: "terminal/create",
+                  capability: "terminalCreate" as const,
+                  params: decode(AcpClientTerminalCreateParams)(envelope.params),
+                }
+              : envelope.method === "terminal/output"
+                ? {
+                    kind: "request" as const,
+                    id: envelope.id,
+                    method: "terminal/output",
+                    capability: "terminalOutput" as const,
+                    params: decode(AcpClientTerminalOutputParams)(envelope.params),
+                  }
+                : envelope.method === "terminal/wait_for_exit"
+                  ? {
+                      kind: "request" as const,
+                      id: envelope.id,
+                      method: "terminal/wait_for_exit",
+                      capability: "terminalWaitForExit" as const,
+                      params: decode(AcpClientTerminalWaitForExitParams)(envelope.params),
+                    }
+                  : envelope.method === "terminal/kill"
+                    ? {
+                        kind: "request" as const,
+                        id: envelope.id,
+                        method: "terminal/kill",
+                        capability: "terminalKill" as const,
+                        params: decode(AcpClientTerminalKillParams)(envelope.params),
+                      }
+                    : envelope.method === "terminal/release"
+                      ? {
+                          kind: "request" as const,
+                          id: envelope.id,
+                          method: "terminal/release",
+                          capability: "terminalRelease" as const,
+                          params: decode(AcpClientTerminalReleaseParams)(envelope.params),
+                        }
+                      : undefined;
+      } catch {
+        return "invalid-params" as const;
+      }
+    })();
+    if (capabilityRequest === "invalid-params") {
+      void write({
+        jsonrpc: "2.0",
         id: envelope.id,
-        method: "session/request_permission",
-        params: decode(PermissionRequestParams)(envelope.params),
+        error: { code: -32602, message: "Invalid params" },
       });
+      return;
+    }
+    if (capabilityRequest !== undefined) {
+      enqueue(capabilityRequest);
       return;
     }
     void write({
@@ -641,20 +836,38 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
 
   return {
     exited,
-    initialize: (metadata) =>
-      request(
+    initialize: (
+      capabilitiesOrMetadata:
+        | AcpClientCapabilities
+        | Readonly<Record<string, string | number | boolean>>
+        | undefined = undefined,
+      metadata = undefined,
+    ) => {
+      const capabilities =
+        capabilitiesOrMetadata !== undefined &&
+        "readTextFile" in capabilitiesOrMetadata &&
+        typeof capabilitiesOrMetadata.readTextFile === "boolean"
+          ? capabilitiesOrMetadata
+          : { readTextFile: false, writeTextFile: false, terminal: false };
+      const resolvedMetadata =
+        metadata ?? (capabilities === capabilitiesOrMetadata ? undefined : capabilitiesOrMetadata);
+      return request(
         "initialize",
         {
           protocolVersion: 1,
           clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-            ...(metadata === undefined ? {} : { _meta: metadata }),
+            fs: {
+              readTextFile: capabilities.readTextFile,
+              writeTextFile: capabilities.writeTextFile,
+            },
+            terminal: capabilities.terminal,
+            ...(resolvedMetadata === undefined ? {} : { _meta: resolvedMetadata }),
           },
           clientInfo: { name: "Octant", version: "1" },
         },
         decode(InitializeResult),
-      ),
+      );
+    },
     authenticate: () =>
       request("authenticate", { methodId: "login" }, decode(EmptyResult)).then(() => undefined),
     authenticateWith: (methodId, fields = {}) =>

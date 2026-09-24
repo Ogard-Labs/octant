@@ -248,6 +248,8 @@ class ConformanceClient implements AcpClientPort {
   setConfigOption = async () => ({ configOptions: this.configOptions });
   call = async <T = unknown>() => ({}) as T;
   respondPermission = async () => undefined;
+  respond = async () => undefined;
+  reject = async () => undefined;
   onNotification(listener: Parameters<AcpClientPort["onNotification"]>[0]) {
     this.#notifications.add(listener);
     return () => this.#notifications.delete(listener);
