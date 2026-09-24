@@ -299,6 +299,33 @@ describe("WorkThreadWorkspace", () => {
     });
   });
 
+  it("disables Stop turn for a running turn from another thread", async () => {
+    const otherThreadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000102");
+    const running = workTurn({ status: "running", threadId: otherThreadId });
+    const cancelFirstTurn = vi.fn();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 })),
+      cancelFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const stop = await screen.findByRole("button", { name: "Stop turn" });
+    expect(stop).toBeDisabled();
+    expect(cancelFirstTurn).not.toHaveBeenCalled();
+  });
+
   it("confirms completion through the user-facing Work action", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => ({

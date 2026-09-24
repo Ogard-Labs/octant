@@ -432,7 +432,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const turnRunning = workTurnSettlement(turns) === "running";
   const runningTurn = turns.at(-1);
   const stoppableTurn =
-    runningTurn?.status === "accepted" || runningTurn?.status === "running"
+    (runningTurn?.status === "accepted" || runningTurn?.status === "running") &&
+    String(runningTurn.threadId) === String(props.threadId)
       ? runningTurn
       : undefined;
   const onStop = useCallback(async () => {
