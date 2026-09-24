@@ -2243,10 +2243,43 @@ export function useCodeController(options: CodeControllerOptions) {
     [activeView, client],
   );
 
+  const cancelTurn = useCallback(async (): Promise<boolean> => {
+    const view = activeView;
+    if (view === undefined || turnStatus !== "running") {
+      return false;
+    }
+    const cancellationThreadId = String(view.thread.id);
+    const scope = {
+      operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+      threadId: view.thread.id,
+      checkoutId: view.checkout.id,
+    } as const;
+    const setCancellationError = (message: string) => {
+      if (mounted.current && String(activeThreadId.current) === cancellationThreadId) {
+        setTurnError(message);
+      }
+    };
+    try {
+      const result = await client.executeOperation({
+        kind: "cancel-provider-turn",
+        ...scope,
+      });
+      if (result.kind === "operation-failed") {
+        setCancellationError(result.failure.message);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      setCancellationError(codeFailure(error).message);
+      return false;
+    }
+  }, [activeView, client, turnStatus]);
+
   return {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     announceFirstPrompt,
     answerProviderRequest,
+    cancelTurn,
     archiveThread,
     completeThread,
     reopenThread,

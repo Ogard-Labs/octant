@@ -2,6 +2,7 @@ import {
   CodeClientSnapshotRequiredError,
   type CodeClient,
 } from "@octant/client-runtime/code-client";
+import type { CodeOperationCommand } from "@octant/contracts";
 import type {
   CodeBootstrap,
   CodeCommand,
@@ -1391,6 +1392,157 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.turnStatus).toBe("idle"));
   });
 
+  it("stops a running turn by cancelling the provider turn on the host", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000043";
+    const interrupted = deferred<void>();
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId,
+            state: "running",
+          },
+        },
+      };
+      await interrupted.promise;
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "interrupted" },
+      };
+    }
+    const executeOperation = vi.fn(async (command: CodeOperationCommand) => ({
+      kind: "provider-turn-state" as const,
+      operationId: command.operationId,
+      state:
+        command.kind === "cancel-provider-turn" ? ("interrupted" as const) : ("running" as const),
+    }));
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    let running: Promise<boolean> | undefined;
+    await act(async () => {
+      running = result.current.sendFollowUp("stop this turn");
+    });
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+
+    let cancelled = false;
+    await act(async () => {
+      cancelled = await result.current.cancelTurn();
+    });
+    expect(cancelled).toBe(true);
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "cancel-provider-turn",
+        operationId: expect.any(String),
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+      }),
+    );
+
+    interrupted.resolve();
+    await act(async () => {
+      await running;
+    });
+    await waitFor(() => expect(result.current.turnStatus).toBe("failed"));
+    expect(result.current.conversation.at(-1)).toEqual(
+      expect.objectContaining({ status: "interrupted" }),
+    );
+    await expect(result.current.cancelTurn()).resolves.toBe(false);
+  });
+
+  it("keeps a cancellation failure on the thread that was stopped", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000044";
+    const cancellation = deferred<{
+      readonly kind: "operation-failed";
+      readonly failure: { readonly category: "unavailable"; readonly message: string };
+    }>();
+    const interrupted = deferred<void>();
+    const switchedThreadId = "10000000-0000-4000-8000-000000000002" as CodeThreadId;
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId,
+            state: "running",
+          },
+        },
+      };
+      await interrupted.promise;
+    }
+    const executeOperation = vi.fn(async (command: CodeOperationCommand) => {
+      if (command.kind === "cancel-provider-turn") return cancellation.promise;
+      return {
+        kind: "provider-turn-state" as const,
+        operationId: command.operationId,
+        state: "running" as const,
+      };
+    });
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+      thread: vi.fn(async (threadId) => ({
+        ...view(1),
+        thread: { ...view(1).thread, id: threadId },
+      })),
+    });
+    const { result, rerender } = renderHook(
+      ({ activeThreadId }) =>
+        useCodeController({
+          activeThreadId,
+          client,
+          reconnectDelayMs: 60_000,
+        }),
+      { initialProps: { activeThreadId: ids.thread as CodeThreadId } },
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    const running = result.current.sendFollowUp("stop this after switching");
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+    let cancelled: Promise<boolean> | undefined;
+    act(() => {
+      cancelled = result.current.cancelTurn();
+    });
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "cancel-provider-turn" }),
+      ),
+    );
+
+    rerender({ activeThreadId: switchedThreadId });
+    cancellation.resolve({
+      kind: "operation-failed",
+      failure: { category: "unavailable", message: "Cancellation failed." },
+    });
+    interrupted.resolve();
+    await act(async () => {
+      await cancelled;
+      await running;
+    });
+
+    expect(result.current.turnError).toBeUndefined();
+  });
+
   it("keeps an identical draft typed after a follow-up dispatches", async () => {
     const operationId = "70000000-0000-4000-8000-000000000042";
     const started = deferred<{
@@ -1646,6 +1798,8 @@ describe("useCodeController", () => {
       sent = result.current.sendFollowUp("Do not send this after navigation");
     });
     await waitFor(() => expect(client.putEvidence).toHaveBeenCalledOnce());
+    await waitFor(() => expect(result.current.turnStatus).toBe("sending"));
+    await expect(result.current.cancelTurn()).resolves.toBe(false);
     rerender({ activeThreadId: undefined });
     evidence.resolve({
       contentId: "60000000-0000-4000-8000-000000000022",

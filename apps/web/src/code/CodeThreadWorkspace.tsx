@@ -1711,11 +1711,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           ),
           actions: {
-            kind: "send",
+            kind: "send-or-stop",
+            cellClassName: "composer-actions",
+            sending: busy,
             send: {
               ariaLabel: busy ? "Queue message" : "Send follow-up",
               disabled: !canSend || steered.pending !== undefined,
               onSend: () => void submitFollowUp(),
+            },
+            stop: {
+              ariaLabel: "Stop turn",
+              ...(props.controller.turnStatus === "sending"
+                ? { disabledReason: "Stopping is available once the turn has started." }
+                : {}),
+              onStop: () => void props.controller.cancelTurn(),
             },
           },
         }}

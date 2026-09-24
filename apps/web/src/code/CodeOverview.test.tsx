@@ -523,6 +523,7 @@ function controller(): CodeController {
     activeView: { checkout, lastSequence: 1, thread } as never,
     announceFirstPrompt: vi.fn(),
     answerProviderRequest: vi.fn(async () => true),
+    cancelTurn: vi.fn(async () => true),
     archiveThread: vi.fn(async () => true),
     completeThread: vi.fn(async () => ({ status: "ok" }) as const),
     reopenThread: vi.fn(async () => ({ status: "ok" }) as const),
