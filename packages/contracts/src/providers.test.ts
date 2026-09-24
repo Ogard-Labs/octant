@@ -2165,6 +2165,12 @@ describe("provider registry contracts", () => {
 
     expect(decodeProviderObservedState(observed)).toEqual(observed);
     expect(decodeProviderProbeResult(observed)).toEqual(observed);
+    expect(
+      decodeProviderObservedState({
+        ...observed,
+        capabilities: { ...observed.capabilities, acpClientCapabilities: "supported" },
+      }),
+    ).toMatchObject({ capabilities: { acpClientCapabilities: "supported" } });
     expect(() =>
       decodeProviderObservedState({ ...observed, rawDiagnostics: { port: 1234 } }),
     ).toThrow();
