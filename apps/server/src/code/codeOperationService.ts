@@ -1831,7 +1831,7 @@ export class CodeOperationService {
       case "create-pull-request":
         return this.#pullRequest(command, root.checkoutRoot);
       case "observe-pull-request":
-        return this.#pullRequestReview(command);
+        return this.#pullRequestReview(command, root.checkoutRoot);
       case "create-review-finding": {
         const finding = await this.#options.reviewFindings.create(windowId, {
           id: command.findingId,
@@ -2390,15 +2390,7 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "create-pull-request" }>,
     checkoutRoot: string,
   ): Promise<CodeOperationResult> {
-    const remotes = await this.#options.git.observeRemotes?.({ checkoutRoot });
-    if (
-      remotes !== undefined &&
-      !remotes.some(
-        (remote) =>
-          (remote.fetch.kind === "network" && isGitHubRemote(remote.fetch.url)) ||
-          (remote.push.kind === "network" && isGitHubRemote(remote.push.url)),
-      )
-    )
+    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
       return decodeCodeOperationResult({
         kind: "pull-request-state",
         operationId: command.operationId,
@@ -2431,7 +2423,16 @@ export class CodeOperationService {
 
   async #pullRequestReview(
     command: Extract<CodeOperationCommand, { readonly kind: "observe-pull-request" }>,
+    checkoutRoot: string,
   ): Promise<CodeOperationResult> {
+    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+      return decodeCodeOperationResult({
+        kind: "pull-request-review",
+        operationId: command.operationId,
+        state: "unavailable",
+        freshness: "stale",
+        failureCode: "no-remote",
+      });
     const result = await this.#options.pullRequests.observeReview(
       { threadId: command.threadId, maxDiffBytes: command.maxDiffBytes },
       new AbortController().signal,
@@ -2476,6 +2477,16 @@ export class CodeOperationService {
       reviews: result.reviews,
       comments: result.comments,
     });
+  }
+
+  async #hasGitHubRemote(checkoutRoot: string): Promise<boolean | undefined> {
+    const remotes = await this.#options.git.observeRemotes?.({ checkoutRoot });
+    if (remotes === undefined) return undefined;
+    return remotes.some(
+      (remote) =>
+        (remote.fetch.kind === "network" && isGitHubRemote(remote.fetch.url)) ||
+        (remote.push.kind === "network" && isGitHubRemote(remote.push.url)),
+    );
   }
 
   async #providerTurn(

@@ -125,6 +125,8 @@ export interface ThreadCheckoutChip {
 export interface ChatThreadNavigationItem {
   /** Absent leaves the row's dot idle rather than inventing a state. */
   readonly activity?: ThreadRowActivity;
+  /** The kind of Work request currently waiting on the person, when known. */
+  readonly awaitingKind?: "approval" | "user-input";
   /** Present when the host projected a Git checkout for this row. */
   readonly checkoutChip?: ThreadCheckoutChip;
   readonly followUp?: boolean;

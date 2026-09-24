@@ -176,6 +176,7 @@ export interface WorkspaceViewProps {
    */
   readonly draftProjectSelection?: Partial<Readonly<Record<OctantMode, ProjectId>>>;
   readonly onDraftSelectProject?: (mode: OctantMode, projectId: ProjectId) => void;
+  readonly onDraftSelectUnfiled?: (mode: OctantMode) => void;
   readonly focusedPaneId?: PaneId;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedCreateHostId?: import("@octant/contracts/host").HostId;
@@ -1226,6 +1227,9 @@ function renderNonCodeTab(
             : {
                 onSelectProject: (projectId) => props.onDraftSelectProject?.(tab.mode, projectId),
               })}
+          {...(props.onDraftSelectUnfiled === undefined
+            ? {}
+            : { onSelectUnfiled: () => props.onDraftSelectUnfiled?.(tab.mode) })}
           {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
           {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
           {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}

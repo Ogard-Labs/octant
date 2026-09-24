@@ -17,6 +17,7 @@ export function buildWorkThreadNavigation(
     readonly threadId: WorkThread["id"];
     readonly executing: boolean;
     readonly awaitingInput?: boolean | undefined;
+    readonly awaitingKind?: "approval" | "user-input" | undefined;
     readonly followUpDue?: WorkStatusDatedItem | undefined;
   }> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
@@ -26,15 +27,16 @@ export function buildWorkThreadNavigation(
     .map((thread) => {
       const live = runtimeByThread.get(String(thread.id));
       return {
-        // Working outranks attention: a turn that is running is not yet
-        // waiting on anyone, whatever an earlier request left pending.
-        ...(live?.executing === true
-          ? { activity: "working" as const }
-          : live?.awaitingInput === true
-            ? { activity: "attention" as const }
+        // A held turn is still executing while its approval or question waits
+        // on the person, so attention outranks executing here.
+        ...(live?.awaitingInput === true
+          ? { activity: "attention" as const }
+          : live?.executing === true
+            ? { activity: "working" as const }
             : {}),
         threadId: String(thread.id),
         title: thread.title,
+        ...(live?.awaitingKind === undefined ? {} : { awaitingKind: live.awaitingKind }),
         ...(live?.followUpDue === undefined ? {} : { followUpDue: live.followUpDue }),
         projectId: String(thread.projectId),
         providerInstanceId: String(thread.providerInstanceId),

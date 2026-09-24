@@ -296,6 +296,31 @@ describe("useShellController", () => {
     );
   });
 
+  it("opens a Chat draft without a Project when the active Chat context has one", async () => {
+    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
+    const initial = initialBootstrap();
+    const server = statefulClient({
+      ...initial,
+      workspace: {
+        ...initial.workspace,
+        activeMode: "chat",
+        contextByMode: {
+          ...initial.workspace.contextByMode,
+          chat: { ...initial.workspace.contextByMode.chat, projectId },
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openDraftThread("chat", undefined, { unfiled: true }));
+
+    expect(result.current.workspace?.contextByMode.chat.projectId).toBeNull();
+    expect(result.current.announcement).toBe("New Chat thread draft opened without a Project.");
+  });
+
   it("opens one mode-matched Project surface and reuses its pane on repeat selection", async () => {
     const server = statefulClient();
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");

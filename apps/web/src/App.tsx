@@ -5871,6 +5871,18 @@ function LaunchedShell(
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);
                     }}
+                    onDraftSelectUnfiled={(mode) => {
+                      if (mode !== "chat") return;
+                      const binding = controller
+                        .openDraftThread("chat", undefined, { unfiled: true })
+                        .then((accepted) => {
+                          if (accepted) {
+                            setDraftProjectSelection(({ chat: _drop, ...rest }) => rest);
+                          }
+                        });
+                      draftProjectBinding.current = binding;
+                      void binding.catch(() => undefined);
+                    }}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}

@@ -111,6 +111,7 @@ export interface DraftThreadWorkspaceProps {
   readonly onSelectHost?: (hostId: HostId) => void;
   readonly projects?: ReadonlyArray<ProjectSummary>;
   readonly availabilityByProject?: ReadonlyMap<ProjectId, ProjectAvailability>;
+  readonly onSelectUnfiled?: () => void;
   readonly folderBrowseClient?: FolderBrowseClient;
   readonly hostBridge?: OctantHostBridge;
   readonly hostId?: string;
@@ -268,6 +269,14 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     if (props.onSelectProject === undefined) setLocalProjectId(projectId);
     else props.onSelectProject(projectId);
   };
+  const selectUnfiled = () => {
+    if (props.onSelectUnfiled === undefined) {
+      setLocalProjectId(undefined);
+      setSelectedProjectLabel(undefined);
+    } else {
+      props.onSelectUnfiled();
+    }
+  };
   useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
   type CreateFromSelection =
     | {
@@ -396,7 +405,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     () =>
       (props.projects ?? []).filter(
         (project) =>
-          (props.mode === "code" || props.mode === "work") &&
+          (props.mode === "chat" || props.mode === "code" || props.mode === "work") &&
           project.type === props.mode &&
           project.lifecycle === "active" &&
           props.availabilityByProject?.get(project.id)?.status !== "unavailable",
@@ -438,8 +447,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
       }),
     ),
-    ...(defaultFolderEntry === undefined ? [] : [defaultFolderEntry]),
-    { kind: "add-folder" },
+    ...(props.mode === "chat"
+      ? [{ kind: "unfiled" as const }]
+      : [
+          ...(defaultFolderEntry === undefined ? [] : [defaultFolderEntry]),
+          { kind: "add-folder" as const },
+        ]),
   ];
   const selectedProjectName =
     selectedProjectId === undefined ? undefined : (selectedProject?.name ?? selectedProjectLabel);
@@ -500,7 +513,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }
 
   const folderControl =
-    props.mode === "code" || props.mode === "work" ? (
+    props.mode === "chat" || props.mode === "code" || props.mode === "work" ? (
       <ComposerProjectSelector
         {...(props.creating === undefined ? {} : { disabled: props.creating })}
         entries={projectEntries}
@@ -509,6 +522,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           if (entry.kind === "saved-project") {
             selectProject(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
+          } else if (entry.kind === "unfiled") {
+            selectUnfiled();
           } else if (
             entry.kind === "default-folder" &&
             props.onEnsureDefaultProject !== undefined &&
@@ -972,7 +987,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               {...hostSelectorBinding}
               {...(props.approvalLabel === undefined ? {} : { approvalLabel: props.approvalLabel })}
               {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-              {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
+              {...(props.mode === "chat" || props.projectName === undefined
+                ? {}
+                : { projectName: props.projectName })}
               {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
             />
           </div>
@@ -1024,6 +1041,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             row={{
               leading: (
                 <>
+                  {folderControl}
                   <ComposerVoiceButton
                     disabled={props.creating}
                     onTranscript={(transcript) =>
@@ -1241,7 +1259,7 @@ function DraftContextStrip(props: {
         {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
         requiredCapability={props.mode}
       />
-      {props.projectName !== undefined ? (
+      {props.mode !== "chat" && props.projectName !== undefined ? (
         <span className="draft-thread__context-item" title={props.projectRoot}>
           <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
           <span>{props.projectName}</span>

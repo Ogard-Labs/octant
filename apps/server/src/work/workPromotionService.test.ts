@@ -7,6 +7,7 @@ import {
   decodeProjectId,
   decodeProviderInstanceId,
   decodeWindowId,
+  decodeCodeDeliveryTarget,
   type CodeThreadId,
   type WorkPromotionCommand,
   type WorkPromotionFrame,
@@ -39,14 +40,14 @@ const selectedContext = {
   artifactRefs: ["opaque-artifact-token-1"],
 } as const;
 
-const deliveryTarget = {
+const deliveryTarget = decodeCodeDeliveryTarget({
   branchIntent: "feature/report-cli",
   remoteName: "origin",
   proposedBaseRepository: "git@github.com:example/repo.git",
   proposedBaseBranch: "main",
   outcomeKind: "opened-pr",
   confirmedAt: clockLater,
-} as const;
+});
 
 interface TestHarness {
   service: WorkPromotionService;
@@ -77,6 +78,8 @@ function createService(
     projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
     workCanonicalRoot: () => "/work",
     resolveArtifactRefs: (_origin, refs) => refs,
+    listArtifactRefs: () => [],
+    resolveDeliveryTarget: async () => deliveryTarget,
   },
 ): TestHarness {
   const projection = new WorkPromotionProjection();
@@ -215,6 +218,7 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
       workCanonicalRoot: () => "/work",
       resolveArtifactRefs: (_origin, refs) => refs,
+      listArtifactRefs: () => [],
       resolveDeliveryTarget: () => ({
         ...deliveryTarget,
         branchIntent: "feature/server-authoritative",
@@ -290,6 +294,8 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "chat" : id === ids.target ? "code" : "unknown"),
       workCanonicalRoot: () => undefined,
       resolveArtifactRefs: (_origin, refs) => refs,
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     });
     const result = await service.execute(proposeCommand());
     expect(result.status).toBe("failure");
@@ -302,6 +308,8 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "work" : "unknown"),
       workCanonicalRoot: () => "/work",
       resolveArtifactRefs: (_origin, refs) => refs,
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     });
     const result = await service.execute(proposeCommand());
     expect(result.status).toBe("failure");
@@ -312,6 +320,8 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
       workCanonicalRoot: () => "workdata",
       resolveArtifactRefs: (_origin, refs) => refs,
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     });
     const result = await service.execute(
       proposeCommand({
@@ -374,6 +384,8 @@ describe("WorkPromotionService", () => {
         projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
         workCanonicalRoot: () => "/work",
         resolveArtifactRefs: (_origin, refs) => refs,
+        listArtifactRefs: () => [],
+        resolveDeliveryTarget: async () => deliveryTarget,
       },
       codeThreads: {
         async createApprovalGatedThread() {
@@ -413,6 +425,8 @@ describe("WorkPromotionService", () => {
         projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
         workCanonicalRoot: () => "/work",
         resolveArtifactRefs: (_origin, refs) => refs,
+        listArtifactRefs: () => [],
+        resolveDeliveryTarget: async () => deliveryTarget,
       },
       codeThreads: {
         async createApprovalGatedThread() {
@@ -444,6 +458,8 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
       workCanonicalRoot: () => undefined,
       resolveArtifactRefs: (_origin, refs) => refs,
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     });
     const result = await service.execute(proposeCommand());
     expect(result.status).toBe("failure");
@@ -456,6 +472,8 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
       workCanonicalRoot: () => "/work",
       resolveArtifactRefs: (_origin, refs) => refs.slice(0, 0),
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     });
     const result = await service.execute(proposeCommand());
     expect(result.status).toBe("failure");
@@ -480,6 +498,8 @@ describe("WorkPromotionService", () => {
       projectType: (id) => (id === ids.origin ? "work" : id === ids.target ? "code" : "unknown"),
       workCanonicalRoot: () => "",
       resolveArtifactRefs: (_origin, refs) => refs,
+      listArtifactRefs: () => [],
+      resolveDeliveryTarget: async () => undefined,
     });
     const result = await service.execute(proposeCommand());
     expect(result.status).toBe("failure");
