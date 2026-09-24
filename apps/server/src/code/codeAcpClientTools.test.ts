@@ -177,7 +177,10 @@ describe("ACP Code client tools", () => {
       await expect(
         appTools.execute({
           name: "octant_acp_terminal_create",
-          inputJson: JSON.stringify({ command: "/definitely/missing/octant-command" }),
+          inputJson: JSON.stringify({
+            command: "/definitely/missing/octant-command",
+            args: [],
+          }),
         }),
       ).resolves.toMatchObject({ result: { error: "terminal-unavailable" }, isError: true });
     } finally {
@@ -275,6 +278,72 @@ describe("ACP Code client tools", () => {
           inputJson: JSON.stringify({ terminalId }),
         }),
       ).resolves.toMatchObject({ result: { output: "é", truncated: true } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs an ACP shell command through the confined shell when args are absent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    try {
+      const appTools = tools(root, "full-access");
+      const created = await appTools.execute({
+        name: "octant_acp_terminal_create",
+        inputJson: JSON.stringify({ command: "printf a && printf b" }),
+      });
+      const terminalId = (created.result as { terminalId: string }).terminalId;
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { exitCode: 0 } });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_output",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { output: "ab" } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an explicit empty args array on the direct executable path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    try {
+      const appTools = tools(root, "full-access");
+      const created = await appTools.execute({
+        name: "octant_acp_terminal_create",
+        inputJson: JSON.stringify({ command: "/usr/bin/true", args: [] }),
+      });
+      const terminalId = (created.result as { terminalId: string }).terminalId;
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { exitCode: 0 } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps shell commands inside the confined working directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    try {
+      const appTools = tools(root, "full-access");
+      const created = await appTools.execute({
+        name: "octant_acp_terminal_create",
+        inputJson: JSON.stringify({ command: "cd .. && pwd" }),
+      });
+      const terminalId = (created.result as { terminalId: string }).terminalId;
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_wait_for_exit",
+          inputJson: JSON.stringify({ terminalId }),
+        }),
+      ).resolves.toMatchObject({ result: { exitCode: 0 } });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

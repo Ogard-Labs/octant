@@ -944,8 +944,10 @@ mechanisms are:
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
-  terminal lifetimes, and output. Writes are placed through a confined process,
-  and execution posture is re-checked for every write and terminal creation.
+  terminal lifetimes, and output. Terminal requests with direct `args` use
+  direct argv; requests without `args` run their command line through the
+  confined shell. Writes are placed through a confined process, and execution
+  posture is re-checked for every write and terminal creation.
   Provider terminal overlays cannot replace `TMPDIR`, `PATH`, or `HOME`.
   They are journaled as app-managed tool events, refused in Plan mode, and
   governed by the thread's execution posture together with provider-approved

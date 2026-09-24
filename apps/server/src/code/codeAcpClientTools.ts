@@ -55,7 +55,7 @@ const writeDefinition = {
 const terminalDefinitions = [
   {
     name: ACP_CLIENT_TOOL_NAMES.terminalCreate,
-    description: "Create a confined direct child process.",
+    description: "Create a confined process from direct argv or a shell command line.",
     inputSchema: {
       type: "object",
       properties: {
@@ -428,7 +428,9 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
           env[entry.name] = entry.value;
         }
       }
-      const executable = resolveExecutable(input.command, env.PATH);
+      const usesShell = input.args === undefined;
+      // ACP agents send the model's shell line as `command` without `args`.
+      const executable = usesShell ? "/bin/sh" : resolveExecutable(input.command, env.PATH);
       if (executable === undefined) return errorResult("command-unavailable");
       const outputLimit = Math.min(
         input.outputByteLimit ?? DEFAULT_OUTPUT_BYTES,
@@ -439,7 +441,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       try {
         const launch = options.terminalConfinement.prepare({
           executable,
-          args: input.args ?? [],
+          args: usesShell ? ["-c", input.command] : input.args,
           boundRoot: root,
           temporaryDirectory: options.terminalConfinement.environment.TMPDIR ?? "/tmp",
         });
