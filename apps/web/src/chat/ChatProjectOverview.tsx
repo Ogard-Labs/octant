@@ -114,8 +114,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const createAvailable = props.onCreateThread !== undefined;
   const visibleSections = SECTIONS.filter(([key]) => isVisibleOverviewSection(model[key]));
   const homeOnly = visibleSections.length === 0;
-  const threadsEmptyMessage =
-    model.threads.status === "empty" ? model.threads.message : undefined;
+  const threadsEmptyMessage = model.threads.status === "empty" ? model.threads.message : undefined;
 
   useEffect(() => {
     if (!restoreFocus || submitting) return;
