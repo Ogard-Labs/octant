@@ -1721,6 +1721,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             },
             stop: {
               ariaLabel: "Stop turn",
+              ...(props.controller.turnStatus === "sending"
+                ? { disabledReason: "Stopping is available once the turn has started." }
+                : {}),
               onStop: () => void props.controller.cancelTurn(),
             },
           },

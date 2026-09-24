@@ -128,6 +128,15 @@ describe("CodeThreadWorkspace", () => {
 
     rerender(
       <CodeThreadWorkspace
+        controller={controller({ cancelTurn, turnStatus: "sending" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Stop turn" })).toBeDisabled();
+
+    rerender(
+      <CodeThreadWorkspace
         controller={controller({ cancelTurn, turnStatus: "idle" })}
         providerGroups={[providerGroup()]}
         threadId={threadId}
