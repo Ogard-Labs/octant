@@ -57,11 +57,17 @@ const initializeResult = {
   agentInfo: { name: "Fixture Agent", version: "0.27.0" },
 } as const;
 
+const noClientCapabilities = {
+  readTextFile: false,
+  writeTextFile: false,
+  terminal: false,
+} as const;
+
 describe("ACP protocol boundary", () => {
   it("negotiates ACP protocol 1 and strips unconsumed provider fields", async () => {
     const { client, stdin, stdout } = transport();
     const written = lines(stdin);
-    const initialized = client.initialize();
+    const initialized = client.initialize(noClientCapabilities);
     await tick();
     expect(written.values).toEqual([
       {
@@ -92,7 +98,7 @@ describe("ACP protocol boundary", () => {
     // methods, and a session/new that spells its models three ways at once.
     const { client, stdin, stdout } = transport();
     const written = lines(stdin);
-    const initialized = client.initialize();
+    const initialized = client.initialize(noClientCapabilities);
     const session = client.newSession("/tmp/octant-acp");
     await tick();
     stdout.write(
@@ -199,7 +205,7 @@ describe("ACP protocol boundary", () => {
       url: "http://127.0.0.1:43123/mcp/session-token",
       headers: [{ name: "Authorization", value: "Bearer session-token" }],
     };
-    const initialized = client.initialize();
+    const initialized = client.initialize(noClientCapabilities);
     const created = client.newSession("/tmp/octant-acp", [server]);
     const loaded = client.loadSession("agent-session", "/tmp/octant-acp", [server]);
     const resumed = client.resumeSession("agent-session", "/tmp/octant-acp", [server]);
@@ -236,7 +242,7 @@ describe("ACP protocol boundary", () => {
   it("correlates concurrent responses that arrive out of order", async () => {
     const { client, stdin, stdout } = transport();
     const written = lines(stdin);
-    const first = client.initialize();
+    const first = client.initialize(noClientCapabilities);
     const second = client.newSession("/tmp/octant-acp");
     await tick();
     expect(written.values.map((value) => (value as { id: number }).id)).toEqual([1, 2]);
@@ -352,7 +358,7 @@ describe("ACP protocol boundary", () => {
         },
       ]),
     );
-    await client.respondResult("read-1", { content: "ok" });
+    await client.respond("read-1", { content: "ok" });
     expect(written.values).toContainEqual({
       jsonrpc: "2.0",
       id: "read-1",
@@ -407,7 +413,7 @@ describe("ACP protocol boundary", () => {
     }
 
     const { client, stdout } = transport();
-    const pending = client.initialize();
+    const pending = client.initialize(noClientCapabilities);
     stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initializeResult })}\n`);
     await expect(pending).resolves.toEqual(initializeResult);
     const exited = client.exited;
@@ -508,7 +514,7 @@ describe("ACP protocol boundary", () => {
     vi.useFakeTimers();
     try {
       const { client } = transport({ limits: { requestTimeoutMs: 50, turnTimeoutMs: 5_000 } });
-      const observed = failureOf(client.initialize());
+      const observed = failureOf(client.initialize(noClientCapabilities));
       await vi.advanceTimersByTimeAsync(50);
       const failure = await observed;
       expect(failure).toMatchObject({ kind: "timeout", message: "ACP request timed out." });
@@ -534,7 +540,7 @@ describe("ACP protocol boundary", () => {
   it("negotiates delegated browser authentication metadata without terminal or fs authority", async () => {
     const { client, stdin, stdout } = transport();
     const written = lines(stdin);
-    const initialized = client.initialize({
+    const initialized = client.initialize(noClientCapabilities, {
       "browser-auth-delegated": true,
       "terminal-auth": false,
     });

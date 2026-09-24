@@ -1,7 +1,7 @@
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { accessSync, constants, statSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { TextDecoder } from "node:util";
 import { Schema } from "effect";
 import {
@@ -17,7 +17,12 @@ import {
 } from "@octant/provider-sdk";
 import type { CodeThread, WindowId } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
-import { isAbsolutePosixPath, parentCodePath, resolveContainedPath } from "./codePathConfinement";
+import {
+  isAbsolutePosixPath,
+  joinCodePath,
+  parentCodePath,
+  resolveContainedPath,
+} from "./codePathConfinement";
 import type { CodeTestSourcePort } from "./codeDirectoryPort";
 
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -113,7 +118,6 @@ export interface CodeAcpTerminalConfinement {
     readonly args: ReadonlyArray<string>;
     readonly boundRoot: string;
     readonly temporaryDirectory: string;
-    readonly environment: Readonly<Record<string, string>>;
   }) => { readonly command: string; readonly args: ReadonlyArray<string> };
 }
 
@@ -124,7 +128,6 @@ export interface CodeAcpClientToolsOptions {
   readonly uuid: () => string;
   readonly pathPort: CodeTestSourcePort;
   readonly terminalConfinement: CodeAcpTerminalConfinement;
-  readonly clock: () => string;
   readonly wait: (milliseconds: number) => Promise<void>;
 }
 
@@ -247,8 +250,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       return errorResult(
         resolved.stat.size > MAX_FILE_BYTES ? "file-oversized" : "file-unreadable",
       );
-    const source = options.pathPort as CodeTestSourcePort;
-    const handle = await source.openFile(resolved.canonical).catch(() => undefined);
+    const handle = await options.pathPort.openFile(resolved.canonical).catch(() => undefined);
     if (handle === undefined) return errorResult("file-unreadable");
     try {
       const info = await handle.stat();
@@ -283,17 +285,21 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     if (options.thread.executionPolicy === "plan") return errorResult("read-only-posture");
     if (!isAbsolutePosixPath(input.path)) return errorResult("path-outside-checkout");
     if (bytes(input.content) > MAX_FILE_BYTES) return errorResult("content-oversized");
+    const lastSegment = input.path.slice(input.path.lastIndexOf("/") + 1);
+    if (lastSegment === "" || lastSegment === "." || lastSegment === "..")
+      return errorResult("path-outside-checkout");
     const root = await options.pathPort.realpath(options.checkoutRoot).catch(() => undefined);
     if (root === undefined) return errorResult("path-outside-checkout");
-    const current = await resolveContainedPath(options.pathPort, root, input.path);
     const parent = await resolveContainedPath(options.pathPort, root, parentCodePath(input.path));
     if (parent === undefined || !parent.stat.isDirectory)
       return errorResult("path-outside-checkout");
-    if (current !== undefined && !current.stat.isFile) return errorResult("file-unreadable");
-    const temporary = `${input.path}.octant-${options.uuid()}.tmp`;
+    const target = joinCodePath(parent.canonical, basename(input.path));
+    const current = await resolveContainedPath(options.pathPort, root, target);
+    if (current !== undefined && !current.stat.isFile) return errorResult("path-not-a-file");
+    const temporary = joinCodePath(parent.canonical, `.octant-${options.uuid()}.tmp`);
     try {
       await writeFile(temporary, input.content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      await rename(temporary, input.path);
+      await rename(temporary, target);
       return { result: {} };
     } catch {
       await unlink(temporary).catch(() => undefined);
@@ -348,7 +354,6 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
           args: input.args ?? [],
           boundRoot: root,
           temporaryDirectory: env.TMPDIR ?? "/tmp",
-          environment: env,
         });
         child = spawn(launch.command, [...launch.args], {
           cwd: resolved.canonical,

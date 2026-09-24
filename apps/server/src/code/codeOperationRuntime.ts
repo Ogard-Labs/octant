@@ -113,7 +113,7 @@ import {
   type ReviewFindingPersistencePort,
 } from "./reviewFindingService";
 import { TerminalProcessPort } from "./terminalProcessPort";
-import { liveCodeTestSourcePort } from "./codeDirectoryPort";
+import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
 import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
 import { TerminalService } from "./terminalService";
@@ -226,7 +226,7 @@ export interface CodeOperationRuntimeOptions {
     readonly reconcile?: () => Promise<void>;
   };
   readonly acpTerminalConfinement?: CodeAcpTerminalConfinement;
-  readonly acpPathPort?: typeof liveCodeTestSourcePort;
+  readonly acpPathPort?: CodeTestSourcePort;
   readonly repositoryTestProcessPort?: ProcessTestPort;
   /**
    * Discovery of the definitions a checkout offers. A run is authorized against
@@ -1976,7 +1976,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
                     terminalConfinement:
                       this.#options.acpTerminalConfinement ?? defaultAcpTerminalConfinement(),
-                    clock: this.#options.clock,
                     wait: (milliseconds) =>
                       new Promise((resolve) => setTimeout(resolve, milliseconds)),
                   }),

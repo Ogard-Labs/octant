@@ -369,9 +369,6 @@ export interface AcpClientOptions {
 export interface AcpClient {
   readonly exited: Promise<void>;
   initialize(
-    metadata?: Readonly<Record<string, string | number | boolean>>,
-  ): Promise<AcpInitializeResult>;
-  initialize(
     capabilities: AcpClientCapabilities,
     metadata?: Readonly<Record<string, string | number | boolean>>,
   ): Promise<AcpInitializeResult>;
@@ -412,8 +409,6 @@ export interface AcpClient {
   onNotification(listener: (message: AcpServerNotification) => void): () => void;
   onRequest(listener: (message: AcpServerRequestMessage) => void): () => void;
   respond(id: RpcId, result: unknown): Promise<void>;
-  respondResult(id: RpcId, result: unknown): Promise<void>;
-  respondError(id: RpcId, code: number, message: string): Promise<void>;
   respondPermission(id: RpcId, optionId?: string): Promise<void>;
   reject(id: RpcId, code: number, message: string): Promise<void>;
   notify(method: "session/cancel", params: { readonly sessionId: string }): Promise<void>;
@@ -933,8 +928,6 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       return () => requestListeners.delete(listener);
     },
     respond: (id, result) => write({ jsonrpc: "2.0", id, result }),
-    respondResult: (id, result) => write({ jsonrpc: "2.0", id, result }),
-    respondError: (id, code, message) => write({ jsonrpc: "2.0", id, error: { code, message } }),
     respondPermission: (id, optionId) =>
       write({
         jsonrpc: "2.0",

@@ -6,6 +6,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
+import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
@@ -37,6 +38,8 @@ class FakeClient implements AcpClientPort {
   readonly setConfigOption = vi.fn(async () => ({ configOptions: this.configOptions }));
   readonly call = vi.fn(async () => ({})) as unknown as AcpClientPort["call"];
   readonly respondPermission = vi.fn(async () => undefined);
+  readonly respond = vi.fn(async () => undefined);
+  readonly reject = vi.fn(async () => undefined);
   readonly closeSession = vi.fn(async () => undefined);
   readonly authenticate = vi.fn(async () => undefined);
   readonly startBrowserAuthentication = vi.fn(async () => ({
@@ -1908,6 +1911,142 @@ it("adding Computer use on a resumed task can send the next message", async () =
           });
           expect(client.newSession).toHaveBeenCalledOnce();
           expect(client.loadSession).toHaveBeenLastCalledWith("agent-session-1", projectRoot);
+        }),
+      ),
+    ),
+  );
+});
+
+it("forwards ACP client capability requests through managed tools and answers their JSON-RPC requests", async () => {
+  const bridgeFactory = async () => ({
+    server: {
+      type: "http" as const,
+      name: "octant-tools",
+      url: "http://127.0.0.1:43123/mcp/test",
+      headers: [],
+    },
+    port: 43123,
+    attested: Promise.resolve(),
+    bind: () => {},
+    close: async () => undefined,
+  });
+  const { driver, client } = fixture(vibe, {
+    mcpHttp: true,
+    managedToolsBridgeFactory: bridgeFactory,
+  });
+  const readTool = {
+    name: ACP_CLIENT_TOOL_NAMES.readTextFile,
+    inputSchema: { type: "object" },
+  } as const;
+  let finishPrompt: ((result: { readonly stopReason: "end_turn" }) => void) | undefined;
+  client.prompt.mockImplementation(
+    async () =>
+      new Promise((resolve) => {
+        finishPrompt = resolve;
+      }),
+  );
+
+  await withProcessPlatform("darwin", () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            tools: [readTool],
+          });
+          const events = yield* connection.subscribe;
+          const send = yield* Effect.fork(
+            connection.send({
+              sessionId,
+              prompt: "Read the file",
+              attachments: [],
+              tools: [readTool],
+            }),
+          );
+          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+          const firstEventFiber = yield* Effect.fork(
+            Stream.runHead(events.pipe(Stream.filter((event) => event.kind === "tool-request"))),
+          );
+          client.request({
+            kind: "request",
+            id: "read-1",
+            method: "fs/read_text_file",
+            capability: "readTextFile",
+            params: {
+              sessionId: "agent-session-1",
+              path: "/tmp/octant-acp-driver/README.md",
+              _meta: { trace: "ignored" },
+            },
+          });
+          const firstOption = yield* Fiber.join(firstEventFiber);
+          if (firstOption._tag === "None")
+            throw new Error("Expected the read capability tool request.");
+          const firstEvent = firstOption.value;
+          if (firstEvent.kind !== "tool-request")
+            throw new Error("Expected the read capability tool request.");
+          yield* connection.answerTool({
+            sessionId,
+            requestId: firstEvent.requestId,
+            resultJson: JSON.stringify({ content: "hello" }),
+            isError: false,
+          });
+          expect(firstEvent.toolName).toBe(ACP_CLIENT_TOOL_NAMES.readTextFile);
+          expect(firstEvent.inputJson).toBe('{"path":"/tmp/octant-acp-driver/README.md"}');
+          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+          expect(client.respond).toHaveBeenCalledWith("read-1", { content: "hello" });
+
+          const secondEvents = yield* connection.subscribe;
+          const secondEventFiber = yield* Effect.fork(
+            Stream.runHead(
+              secondEvents.pipe(Stream.filter((event) => event.kind === "tool-request")),
+            ),
+          );
+          client.request({
+            kind: "request",
+            id: "read-2",
+            method: "fs/read_text_file",
+            capability: "readTextFile",
+            params: { sessionId: "agent-session-1", path: "/tmp/missing" },
+          });
+          const secondOption = yield* Fiber.join(secondEventFiber);
+          if (secondOption._tag === "None")
+            throw new Error("Expected the second read capability tool request.");
+          const secondEvent = secondOption.value;
+          if (secondEvent.kind !== "tool-request")
+            throw new Error("Expected the second read capability tool request.");
+          yield* connection.answerTool({
+            sessionId,
+            requestId: secondEvent.requestId,
+            resultJson: JSON.stringify({ error: "file-unreadable" }),
+            isError: true,
+          });
+          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+          expect(client.reject).toHaveBeenCalledWith("read-2", -32000, "file-unreadable");
+
+          client.request({
+            kind: "request",
+            id: "missing-1",
+            method: "fs/write_text_file",
+            capability: "writeTextFile",
+            params: { sessionId: "agent-session-1", path: "/tmp/file", content: "no" },
+          });
+          client.request({
+            kind: "request",
+            id: "foreign-1",
+            method: "fs/read_text_file",
+            capability: "readTextFile",
+            params: { sessionId: "other-session", path: "/tmp/file" },
+          });
+          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+          expect(client.reject).toHaveBeenCalledWith("missing-1", -32601, "Method not found");
+          expect(client.reject).toHaveBeenCalledWith("foreign-1", -32602, "Invalid params");
+
+          finishPrompt?.({ stopReason: "end_turn" });
+          yield* Fiber.join(send);
         }),
       ),
     ),

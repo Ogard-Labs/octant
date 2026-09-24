@@ -44,7 +44,6 @@ function tools(root: string, executionPolicy: CodeThread["executionPolicy"]) {
       environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
       prepare: ({ executable, args }) => ({ command: executable, args }),
     },
-    clock: () => "2026-08-06T08:00:00.000Z",
     wait: async (milliseconds) => {
       await new Promise((resolve) => setTimeout(resolve, milliseconds));
     },

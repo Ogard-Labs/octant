@@ -86,8 +86,8 @@ export interface AcpClientPort {
   readonly onNotification: (listener: (message: AcpServerNotification) => void) => () => void;
   readonly onRequest: (listener: (message: AcpServerRequestMessage) => void) => () => void;
   readonly respondPermission: (id: string | number, optionId?: string) => Promise<void>;
-  readonly respondResult?: (id: string | number, result: unknown) => Promise<void>;
-  readonly respondError?: (id: string | number, code: number, message: string) => Promise<void>;
+  readonly respond: (id: string | number, result: unknown) => Promise<void>;
+  readonly reject: (id: string | number, code: number, message: string) => Promise<void>;
   readonly notify: (
     method: "session/cancel",
     params: { readonly sessionId: string },
@@ -803,17 +803,16 @@ function makeConnection(
       requestMessage: Exclude<AcpServerRequestMessage, AcpServerRequest>,
     ): Promise<void> => {
       if (requestMessage.params.sessionId !== state.sourceSessionId) {
-        await state.client.respondError?.(requestMessage.id, -32602, "Invalid params");
+        await state.client.reject(requestMessage.id, -32602, "Invalid params");
         return;
       }
       const toolName = ACP_CLIENT_TOOL_NAMES[requestMessage.capability];
       if (
-        toolName === undefined ||
         !state.toolNames.has(toolName) ||
         (requestMessage.capability.startsWith("terminal") &&
           !ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) => state.toolNames.has(name)))
       ) {
-        await state.client.respondError?.(requestMessage.id, -32601, "Method not found");
+        await state.client.reject(requestMessage.id, -32601, "Method not found");
         return;
       }
       const input = Object.fromEntries(
@@ -841,17 +840,17 @@ function makeConnection(
         } catch {
           // Use the stable protocol error when an app-managed tool broke its contract.
         }
-        await state.client.respondError?.(requestMessage.id, -32000, message);
+        await state.client.reject(requestMessage.id, -32000, message);
         return;
       }
       let result: unknown;
       try {
         result = JSON.parse(answer.resultJson);
       } catch {
-        await state.client.respondError?.(requestMessage.id, -32000, "Client capability failed.");
+        await state.client.reject(requestMessage.id, -32000, "Client capability failed.");
         return;
       }
-      await state.client.respondResult?.(requestMessage.id, result);
+      await state.client.respond(requestMessage.id, result);
     };
 
     function cancelPendingTools(state: SessionState): void {

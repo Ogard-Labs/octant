@@ -1011,21 +1011,20 @@ function acquireConnection(
       });
     child.once("error", onError);
     child.once("close", onEarlyExit);
+    const initialize = () =>
+      acp.initialize(
+        clientCapabilities ?? {
+          readTextFile: false,
+          writeTextFile: false,
+          terminal: false,
+        },
+        profile.authentication.kind === "delegated-browser"
+          ? { "browser-auth-delegated": true, "terminal-auth": false }
+          : undefined,
+      );
     void ownershipReady.then(
       () =>
-        (clientCapabilities === undefined
-          ? acp.initialize(
-              profile.authentication.kind === "delegated-browser"
-                ? { "browser-auth-delegated": true, "terminal-auth": false }
-                : undefined,
-            )
-          : acp.initialize(
-              clientCapabilities,
-              profile.authentication.kind === "delegated-browser"
-                ? { "browser-auth-delegated": true, "terminal-auth": false }
-                : undefined,
-            )
-        ).then(
+        initialize().then(
           (initialized) => {
             if (settled || child.pid === undefined) return;
             const identityMatches = profile.process.verifyAgentInfo
