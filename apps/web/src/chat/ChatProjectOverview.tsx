@@ -114,6 +114,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const createAvailable = props.onCreateThread !== undefined;
   const visibleSections = SECTIONS.filter(([key]) => isVisibleOverviewSection(model[key]));
   const homeOnly = visibleSections.length === 0;
+  const threadsEmptyMessage = model.threads.status === "empty" ? model.threads.message : undefined;
 
   useEffect(() => {
     if (!restoreFocus || submitting) return;
@@ -219,6 +220,9 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
             }}
           />
         </form>
+        {threadsEmptyMessage === undefined ? null : (
+          <p className="chat-project-overview__threads-empty">{threadsEmptyMessage}</p>
+        )}
       </section>
       {visibleSections.length === 0 ? null : (
         <div className="chat-project-overview__sections">
