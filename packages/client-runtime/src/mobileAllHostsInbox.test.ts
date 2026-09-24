@@ -46,6 +46,7 @@ function transportFor(input: {
   readonly title: string;
   readonly updatedAt: string;
   readonly fail?: boolean;
+  readonly parseFail?: boolean;
   readonly boardFail?: boolean;
 }): MobileRemoteTransport {
   const thread = decodeChatThread({
@@ -73,7 +74,10 @@ function transportFor(input: {
       if (path === "/api/work/threads/bootstrap") {
         return Response.json(decodeWorkThreadBootstrap({ threads: [] }));
       }
-      if (path === "/api/code/bootstrap") return Response.json(emptyCode);
+      if (path === "/api/code/bootstrap") {
+        if (input.parseFail) return Response.json({ threads: "not-an-array" });
+        return Response.json(emptyCode);
+      }
       if (path === "/api/code/board") {
         if (input.boardFail) return new Response("board unavailable", { status: 503 });
         return Response.json(emptyCodeBoard);
@@ -150,6 +154,32 @@ describe("listAllHostsMobileInbox", () => {
         hostId: "44444444-4444-4444-8444-444444444444",
         category: "unavailable",
         message: "Code Board state could not be loaded from the host.",
+      }),
+    ]);
+  });
+
+  it("keeps another host's threads when one host sends an incompatible bootstrap", async () => {
+    const healthy = transportFor({
+      hostId: "55555555-5555-4555-8555-555555555555",
+      threadId: "00000000-0000-0000-8000-000000000005",
+      title: "Healthy host",
+      updatedAt: later,
+    });
+    const incompatible = transportFor({
+      hostId: "66666666-6666-4666-8666-666666666666",
+      threadId: "00000000-0000-0000-8000-000000000006",
+      title: "Incompatible host",
+      updatedAt: now,
+      parseFail: true,
+    });
+
+    const result = await listAllHostsMobileInbox([healthy, incompatible]);
+
+    expect(result.rows.map((row) => row.title)).toContain("Healthy host");
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        hostId: "66666666-6666-4666-8666-666666666666",
+        category: "incompatible",
       }),
     ]);
   });

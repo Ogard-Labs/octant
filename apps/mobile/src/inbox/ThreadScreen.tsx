@@ -40,7 +40,7 @@ import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
-import { MOBILE_COPY, mobileThreadComposerCopy } from "../copy";
+import { MOBILE_COPY, mobileModelLabel, mobileThreadComposerCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
@@ -163,6 +163,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<PendingAttachment>>(
     [],
   );
+  const [pendingPrompt, setPendingPrompt] = useState<string | undefined>();
+  const [pendingFailure, setPendingFailure] = useState<string | undefined>();
   const viewRef = useRef<ChatThreadView | undefined>(undefined);
   viewRef.current = view;
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
@@ -468,6 +470,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
     }
     setBusy(true);
     setError(undefined);
+    setPendingFailure(undefined);
+    setPendingPrompt(prompt.trim());
     try {
       const bytes = await readUriBytes(asset.uri);
       const attachmentId = globalThis.crypto.randomUUID();
@@ -524,8 +528,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
       setPrompt("");
       setPendingAttachments([]);
       setView(await loadMobileChatThread(transport, view.thread.id));
+      setPendingPrompt(undefined);
     } catch (cause) {
-      setError(cause instanceof MobileInboxFailure ? cause.message : "Follow-up failed.");
+      const message = cause instanceof MobileInboxFailure ? cause.message : "Follow-up failed.";
+      setPendingPrompt(undefined);
+      setPendingFailure(message);
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -754,7 +762,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const title = formatScreenshotSafeLabel(props.selected.title);
   const modelLabel =
     selectedModel?.label ??
-    (view !== undefined ? String(view.thread.modelId) : MOBILE_COPY.modelHostOnly);
+    (view !== undefined
+      ? mobileModelLabel(models.options, String(view.thread.modelId))
+      : MOBILE_COPY.modelHostOnly);
 
   return (
     <View style={styles.shell} testID="mobile-thread-screen">
@@ -889,6 +899,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ) : null}
             {view !== undefined ? (
               <View style={styles.transcript} testID="mobile-thread-transcript">
+                {pendingPrompt !== undefined ? (
+                  <Text style={styles.metaText} testID="mobile-chat-pending">
+                    Sending… {pendingPrompt}
+                  </Text>
+                ) : null}
+                {pendingFailure !== undefined ? (
+                  <Text style={styles.warningText} testID="mobile-chat-failure">
+                    {pendingFailure}
+                  </Text>
+                ) : null}
                 {activeAttempt !== undefined ? (
                   <AttemptStatus
                     outcome={activeAttempt.outcome}
@@ -1030,7 +1050,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           footerHint={followUpComposerCopy?.footerHint ?? MOBILE_COPY.hostOwnedThread}
           modelLabel={
             props.selected.mode === "work" && workThread !== undefined
-              ? String(workThread.modelId)
+              ? mobileModelLabel(models.options, String(workThread.modelId))
               : MOBILE_COPY.modelHostOnly
           }
           onChangeText={setPrompt}

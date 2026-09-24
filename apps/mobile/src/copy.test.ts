@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   collectMobileUserFacingCopy,
+  mobileHostHealthLabel,
+  mobileModelLabel,
   mobileThreadComposerCopy,
   MOBILE_PRODUCT_NAME,
   MOBILE_ROUTE_IDS,
@@ -35,5 +37,18 @@ describe("mobile package identity", () => {
     expect(mobileThreadComposerCopy("code").footerHint).toMatch(/approve/i);
     expect(mobileThreadComposerCopy("work").footerHint).toMatch(/desktop/i);
     expect(mobileThreadComposerCopy("code")).not.toEqual(mobileThreadComposerCopy("work"));
+  });
+
+  it("uses host-advertised model labels instead of inventing display names", () => {
+    const options = [{ modelId: "gpt-5.6", label: "OpenAI flagship" }];
+
+    expect(mobileModelLabel(options, "gpt-5.6")).toBe("OpenAI flagship");
+    expect(mobileModelLabel(options, "provider-model")).toBe("provider-model");
+  });
+
+  it("maps supported host health kinds to user-facing labels", () => {
+    expect(mobileHostHealthLabel("ready")).toBe("Ready");
+    expect(mobileHostHealthLabel("stale")).toBe("Stale");
+    expect(mobileHostHealthLabel("unavailable")).toBe("Unavailable");
   });
 });

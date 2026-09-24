@@ -279,6 +279,14 @@ function appendMockChatTurn(
     digest: mockDigest(mutationSequence),
     byteLength: new TextEncoder().encode(prompt).byteLength,
   };
+  const assistantBody = `Mock reply to: ${prompt}`;
+  const assistantMessage = {
+    contentId: mockUuid(0x8a, mutationSequence),
+    role: "assistant" as const,
+    body: assistantBody,
+    digest: mockDigest(mutationSequence + 1),
+    byteLength: new TextEncoder().encode(assistantBody).byteLength,
+  };
   const turn = {
     id: turnId,
     threadId: view.thread.id,
@@ -299,7 +307,13 @@ function appendMockChatTurn(
         modelId: view.thread.modelId,
         contextManifestId: mockUuid(0x89, mutationSequence),
         outcome: "completed" as const,
-        responseRefs: [],
+        responseRefs: [
+          {
+            contentId: assistantMessage.contentId,
+            digest: assistantMessage.digest,
+            byteLength: assistantMessage.byteLength,
+          },
+        ],
         citationIds: [],
         createdAt: NOW,
         updatedAt: NOW,
@@ -312,7 +326,7 @@ function appendMockChatTurn(
     thread: { ...view.thread, version: view.thread.version + 1, updatedAt: NOW },
     turns: [...view.turns, turn],
     lastSequence: turnSequence,
-    contents: [...view.contents, userMessage],
+    contents: [...view.contents, userMessage, assistantMessage],
   });
 }
 
@@ -354,9 +368,11 @@ function createCodeBoardView(threads: ReadonlyArray<CodeThread>) {
         deletions: 12,
       },
       linkedPullRequest: { kind: "none", freshness: "fresh" },
+      pullRequestSummaries: { items: [], hiddenCount: 0 },
       checks: { freshness: "fresh", state: "passing" },
       reviewState: { freshness: "fresh", state: "approved" },
       childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+      planProgress: { kind: "none" },
       recovery: { kind: "ok" },
       githubFreshness: "fresh",
       followUp: false,

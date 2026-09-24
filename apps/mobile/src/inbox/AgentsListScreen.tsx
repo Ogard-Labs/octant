@@ -18,7 +18,7 @@ import {
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import { presentStaleHostSecurity } from "@octant/domain";
-import { MOBILE_COPY } from "../copy";
+import { MOBILE_COPY, mobileModelLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -58,6 +58,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     placementHostId,
     transportForHost,
     health,
+    refreshHosts,
   } = useMobileSession();
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
@@ -84,6 +85,10 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const placementHealth = useMemo(() => {
     if (placementTransport === undefined) return "idle" as const;
     return health.find((entry) => entry.hostId === placementTransport.hostId)?.kind ?? "idle";
+  }, [health, placementTransport]);
+  const placementHealthDetail = useMemo(() => {
+    if (placementTransport === undefined) return undefined;
+    return health.find((entry) => entry.hostId === placementTransport.hostId)?.detail;
   }, [health, placementTransport]);
   const staleGate = useMemo(() => presentStaleHostSecurity(placementHealth), [placementHealth]);
   const models = usePlacementHostModels(placementTransport);
@@ -237,7 +242,9 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
 
   const modelLabel =
     selectedModel?.label ??
-    (models.options.length === 0 ? MOBILE_COPY.modelUnavailable : MOBILE_COPY.modelHostOnly);
+    (models.options.length === 0
+      ? MOBILE_COPY.modelUnavailable
+      : mobileModelLabel(models.options, models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
 
   const styles = useMemo(
     () =>
@@ -349,6 +356,13 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
           color: colors.textSecondary,
           paddingHorizontal: mobileSpacing.md,
         },
+        failureRow: { paddingBottom: mobileSpacing.sm },
+        retry: {
+          color: colors.accent,
+          paddingHorizontal: mobileSpacing.md,
+          fontSize: mobileTypography.caption.fontSize,
+          fontWeight: "500",
+        },
         error: {
           color: colors.danger,
           paddingHorizontal: mobileSpacing.md,
@@ -425,12 +439,28 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
       ) : null}
 
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
-      {failures.length > 0 ? (
-        <Text style={styles.warn} testID="mobile-inbox-partial-failure">
-          {failures.length} host{failures.length === 1 ? "" : "s"} unavailable — showing healthy
-          hosts only.
-        </Text>
-      ) : null}
+      {failures.map((failure) => {
+        const label = hostLabel(failure.hostId);
+        const message =
+          failure.category === "incompatible"
+            ? `${label} sent thread data this app version can't read. Update the app or the host.`
+            : `${label}: ${failure.message}`;
+        return (
+          <View
+            key={failure.hostId}
+            style={styles.failureRow}
+            testID={`mobile-inbox-failure-${failure.hostId}`}
+          >
+            <Text style={styles.warn}>{message}</Text>
+            <Pressable
+              onPress={() => void refresh()}
+              testID={`mobile-inbox-retry-${failure.hostId}`}
+            >
+              <Text style={styles.retry}>Retry</Text>
+            </Pressable>
+          </View>
+        );
+      })}
       {error !== undefined ? (
         <Text style={styles.error} testID="mobile-inbox-error">
           {error}
@@ -514,7 +544,18 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         onPressModel={() => setModelOpen(true)}
         onSelectMode={() => undefined}
         onSubmit={() => void createChat()}
+        onRefreshHost={() => void refreshHosts()}
         placementLabel={placementLabel}
+        placementDisabledReason={
+          placementHealth === "stale"
+            ? `${placementLabel ?? "This host"} is stale — ${
+                placementHealthDetail?.replace(/^Last host refresh was /i, "last refresh ") ??
+                "last refresh is unknown"
+              }. Refresh the host to send.`
+            : placementHealth === "unavailable"
+              ? `${placementLabel ?? "This host"} is unavailable.`
+              : undefined
+        }
         prompt={prompt}
         visible={composerOpen}
       />

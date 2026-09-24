@@ -1,3 +1,5 @@
+import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
+
 /** User-facing mobile copy. Keep Octant-owned; no third-party product names. */
 export const MOBILE_PRODUCT_NAME = "Octant";
 export const MOBILE_PRODUCT_TAGLINE = "Remote control for your hosts";
@@ -11,6 +13,28 @@ export const MOBILE_TAB_LABELS = {
   thread: "Thread",
   hosts: "Hosts",
 } as const satisfies Record<MobileRouteId, string>;
+
+export const MOBILE_HOST_HEALTH_LABELS = {
+  ready: "Ready",
+  stale: "Stale",
+  unavailable: "Unavailable",
+} as const;
+
+export function mobileHostHealthLabel(kind: MobileHostHealthKind): string {
+  if (kind === "ready" || kind === "stale" || kind === "unavailable") {
+    return MOBILE_HOST_HEALTH_LABELS[kind];
+  }
+  return kind === "idle" ? "Idle" : kind;
+}
+
+export function mobileModelLabel(
+  options: ReadonlyArray<{ readonly modelId: string; readonly label: string }>,
+  modelId: string,
+): string {
+  return (
+    options.find((option) => String(option.modelId) === String(modelId))?.label ?? String(modelId)
+  );
+}
 
 export const MOBILE_COPY = {
   inboxEmpty: "Pair a host to see Chat, Work, and Code threads.",
