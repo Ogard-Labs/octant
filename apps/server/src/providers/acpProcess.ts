@@ -33,6 +33,7 @@ import {
   resolveProviderRuntimeEgressPolicy,
   resolveProbeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import type { AcpClientCapabilities } from "./acpProtocol";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 
 export type { AcpSessionMode } from "./acpProfiles";
@@ -83,6 +84,7 @@ export interface AcpProcessStartInput {
   readonly apiKey?: string;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
+  readonly clientCapabilities?: AcpClientCapabilities;
   readonly onProcessStarted?: ProviderProcessStartedListener;
 }
 
@@ -915,6 +917,7 @@ function acquireConnection(
   version: string,
   options: Required<Pick<AcpProcessOptions, "shutdownTimeoutMs" | "startupTimeoutMs">> &
     Pick<AcpProcessOptions, "onDiagnostic" | "stderrBytes">,
+  clientCapabilities: AcpClientCapabilities | undefined,
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedConnection, ProviderFailure> {
   const name = profile.displayName;
@@ -1010,80 +1013,86 @@ function acquireConnection(
     child.once("close", onEarlyExit);
     void ownershipReady.then(
       () =>
-        acp
-          .initialize(
-            profile.authentication.kind === "delegated-browser"
-              ? { "browser-auth-delegated": true, "terminal-auth": false }
-              : undefined,
-          )
-          .then(
-            (initialized) => {
-              if (settled || child.pid === undefined) return;
-              const identityMatches = profile.process.verifyAgentInfo
-                ? profile.process.verifyAgentInfo(initialized)
-                : initialized.agentInfo?.name === profile.process.agentName;
-              if (initialized.protocolVersion !== 1 || !identityMatches) {
+        (clientCapabilities === undefined
+          ? acp.initialize(
+              profile.authentication.kind === "delegated-browser"
+                ? { "browser-auth-delegated": true, "terminal-auth": false }
+                : undefined,
+            )
+          : acp.initialize(
+              clientCapabilities,
+              profile.authentication.kind === "delegated-browser"
+                ? { "browser-auth-delegated": true, "terminal-auth": false }
+                : undefined,
+            )
+        ).then(
+          (initialized) => {
+            if (settled || child.pid === undefined) return;
+            const identityMatches = profile.process.verifyAgentInfo
+              ? profile.process.verifyAgentInfo(initialized)
+              : initialized.agentInfo?.name === profile.process.agentName;
+            if (initialized.protocolVersion !== 1 || !identityMatches) {
+              finishFailure({
+                ...failure("incompatible", `${name} ACP negotiation was incompatible.`),
+                diagnostic: {
+                  stage: "initialization",
+                  kind: "protocol-failed",
+                  detectedVersion: version,
+                },
+              });
+              return;
+            }
+            settled = true;
+            child.off("error", onError);
+            child.off("close", onEarlyExit);
+            resume(
+              Effect.succeed({
+                connection: {
+                  version,
+                  pid: child.pid,
+                  root: launch.cwd,
+                  initialized,
+                  acp,
+                  exited,
+                },
+                terminate: cleanup,
+              }),
+            );
+          },
+          (error: unknown) => {
+            if (!(error instanceof AcpFailure) || error.kind !== "timeout") {
+              void Promise.race([childExited, wait(25)]).then(() => {
+                if (child.exitCode !== null || child.signalCode !== null) {
+                  onEarlyExit(child.exitCode, child.signalCode);
+                  return;
+                }
                 finishFailure({
-                  ...failure("incompatible", `${name} ACP negotiation was incompatible.`),
+                  ...failure("protocol", `${name} ACP initialization failed.`),
                   diagnostic: {
                     stage: "initialization",
                     kind: "protocol-failed",
                     detectedVersion: version,
+                    ...(boundedStderr.context() === undefined
+                      ? {}
+                      : { stderrContext: boundedStderr.context() }),
                   },
                 });
-                return;
-              }
-              settled = true;
-              child.off("error", onError);
-              child.off("close", onEarlyExit);
-              resume(
-                Effect.succeed({
-                  connection: {
-                    version,
-                    pid: child.pid,
-                    root: launch.cwd,
-                    initialized,
-                    acp,
-                    exited,
-                  },
-                  terminate: cleanup,
-                }),
-              );
-            },
-            (error: unknown) => {
-              if (!(error instanceof AcpFailure) || error.kind !== "timeout") {
-                void Promise.race([childExited, wait(25)]).then(() => {
-                  if (child.exitCode !== null || child.signalCode !== null) {
-                    onEarlyExit(child.exitCode, child.signalCode);
-                    return;
-                  }
-                  finishFailure({
-                    ...failure("protocol", `${name} ACP initialization failed.`),
-                    diagnostic: {
-                      stage: "initialization",
-                      kind: "protocol-failed",
-                      detectedVersion: version,
-                      ...(boundedStderr.context() === undefined
-                        ? {}
-                        : { stderrContext: boundedStderr.context() }),
-                    },
-                  });
-                });
-                return;
-              }
-              finishFailure({
-                ...failure("unavailable", `${name} ACP initialization timed out.`),
-                diagnostic: {
-                  stage: "initialization",
-                  kind: "timed-out",
-                  detectedVersion: version,
-                  ...(boundedStderr.context() === undefined
-                    ? {}
-                    : { stderrContext: boundedStderr.context() }),
-                },
               });
-            },
-          ),
+              return;
+            }
+            finishFailure({
+              ...failure("unavailable", `${name} ACP initialization timed out.`),
+              diagnostic: {
+                stage: "initialization",
+                kind: "timed-out",
+                detectedVersion: version,
+                ...(boundedStderr.context() === undefined
+                  ? {}
+                  : { stderrContext: boundedStderr.context() }),
+              },
+            });
+          },
+        ),
       () => finishFailure(failure("unavailable", `${name} process receipt is unavailable.`)),
     );
     return cleanupEffect(name, async () => {
@@ -1141,6 +1150,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
               ...(options.onDiagnostic === undefined ? {} : { onDiagnostic: options.onDiagnostic }),
               ...(options.stderrBytes === undefined ? {} : { stderrBytes: options.stderrBytes }),
             },
+            input.clientCapabilities,
             input.onProcessStarted,
           ),
           ({ terminate }) => cleanupEffect(profile.displayName, terminate),

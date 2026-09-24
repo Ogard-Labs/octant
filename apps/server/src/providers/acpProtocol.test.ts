@@ -5,7 +5,7 @@ import {
   makeAcpClient,
   type AcpClientOptions,
   type AcpServerNotification,
-  type AcpServerRequest,
+  type AcpServerRequestMessage,
   type AcpMcpHttpServer,
 } from "./acpProtocol";
 
@@ -259,7 +259,7 @@ describe("ACP protocol boundary", () => {
   it("delivers only stable bounded notifications and reverse requests", async () => {
     const { client, stdout } = transport();
     const notifications: AcpServerNotification[] = [];
-    const requests: AcpServerRequest[] = [];
+    const requests: AcpServerRequestMessage[] = [];
     client.onNotification((message) => notifications.push(message));
     client.onRequest((message) => requests.push(message));
 
@@ -302,11 +302,70 @@ describe("ACP protocol boundary", () => {
     await client.close();
   });
 
+  it("decodes capability requests and answers malformed known methods without closing", async () => {
+    const { client, stdin, stdout } = transport();
+    const written = lines(stdin);
+    const requests: AcpServerRequestMessage[] = [];
+    client.onRequest((request) => requests.push(request));
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "read-1",
+        method: "fs/read_text_file",
+        params: { sessionId: "session-1", path: "/checkout/README.md", _meta: { trace: "x" } },
+      })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "bad-1",
+        method: "terminal/output",
+        params: { sessionId: "session-1", terminalId: 7 },
+      })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "unknown-1",
+        method: "fs/unknown",
+        params: { sessionId: "session-1" },
+      })}\n`,
+    );
+    await tick();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      method: "fs/read_text_file",
+      capability: "readTextFile",
+      params: { sessionId: "session-1", path: "/checkout/README.md" },
+    });
+    expect(written.values).toEqual(
+      expect.arrayContaining([
+        {
+          jsonrpc: "2.0",
+          id: "bad-1",
+          error: { code: -32602, message: "Invalid params" },
+        },
+        {
+          jsonrpc: "2.0",
+          id: "unknown-1",
+          error: { code: -32601, message: "Method not found" },
+        },
+      ]),
+    );
+    await client.respondResult("read-1", { content: "ok" });
+    expect(written.values).toContainEqual({
+      jsonrpc: "2.0",
+      id: "read-1",
+      result: { content: "ok" },
+    });
+    await client.close();
+  });
+
   it.each([{ toolCallId: "tool-1" }, { toolCallId: "tool-1", title: null, kind: null }])(
     "delivers permission requests with partial tool metadata: %j",
     async (toolCall) => {
       const { client, stdout } = transport();
-      const requests: AcpServerRequest[] = [];
+      const requests: AcpServerRequestMessage[] = [];
       client.onRequest((request) => requests.push(request));
       stdout.write(
         `${JSON.stringify({
@@ -325,7 +384,10 @@ describe("ACP protocol boundary", () => {
       );
       await tick();
       expect(requests).toHaveLength(1);
-      expect(requests[0]?.params.toolCall.toolCallId).toBe("tool-1");
+      const request = requests[0];
+      expect(request?.method).toBe("session/request_permission");
+      if (request?.method === "session/request_permission")
+        expect(request.params.toolCall.toolCallId).toBe("tool-1");
       await client.close();
     },
   );

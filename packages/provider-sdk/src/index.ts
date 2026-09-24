@@ -5,3 +5,4 @@ export * from "./contextFactsConformance";
 export * from "./discovery";
 export * from "./driver";
 export * from "./driverPlugins";
+export * from "./acpClientCapabilities";

@@ -18,6 +18,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
@@ -42,8 +43,9 @@ import {
   type AcpMcpHttpServer,
   type AcpNewSessionResult,
   type AcpPromptResult,
-  type AcpServerNotification,
   type AcpServerRequest,
+  type AcpServerRequestMessage,
+  type AcpServerNotification,
   type AcpSessionConfigOption,
   type AcpSessionModelState,
 } from "./acpProtocol";
@@ -82,8 +84,10 @@ export interface AcpClientPort {
   ) => Promise<AcpConfigOptionsResult>;
   readonly call: <T = unknown>(method: string, params: Record<string, unknown>) => Promise<T>;
   readonly onNotification: (listener: (message: AcpServerNotification) => void) => () => void;
-  readonly onRequest: (listener: (message: AcpServerRequest) => void) => () => void;
+  readonly onRequest: (listener: (message: AcpServerRequestMessage) => void) => () => void;
   readonly respondPermission: (id: string | number, optionId?: string) => Promise<void>;
+  readonly respondResult?: (id: string | number, result: unknown) => Promise<void>;
+  readonly respondError?: (id: string | number, code: number, message: string) => Promise<void>;
   readonly notify: (
     method: "session/cancel",
     params: { readonly sessionId: string },
@@ -794,6 +798,62 @@ function makeConnection(
       });
     };
 
+    const handleClientCapabilityRequest = async (
+      state: SessionState,
+      requestMessage: Exclude<AcpServerRequestMessage, AcpServerRequest>,
+    ): Promise<void> => {
+      if (requestMessage.params.sessionId !== state.sourceSessionId) {
+        await state.client.respondError?.(requestMessage.id, -32602, "Invalid params");
+        return;
+      }
+      const toolName = ACP_CLIENT_TOOL_NAMES[requestMessage.capability];
+      if (
+        toolName === undefined ||
+        !state.toolNames.has(toolName) ||
+        (requestMessage.capability.startsWith("terminal") &&
+          !ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) => state.toolNames.has(name)))
+      ) {
+        await state.client.respondError?.(requestMessage.id, -32601, "Method not found");
+        return;
+      }
+      const input = Object.fromEntries(
+        Object.entries(requestMessage.params).filter(
+          ([key]) => key !== "sessionId" && key !== "_meta",
+        ),
+      );
+      const answer = await requestManagedTool(
+        state,
+        toolName,
+        JSON.stringify(input),
+        new AbortController().signal,
+      );
+      if (answer.isError === true) {
+        let message = "Client capability failed.";
+        try {
+          const result = JSON.parse(answer.resultJson);
+          if (
+            typeof result === "object" &&
+            result !== null &&
+            "error" in result &&
+            typeof result.error === "string"
+          )
+            message = result.error;
+        } catch {
+          // Use the stable protocol error when an app-managed tool broke its contract.
+        }
+        await state.client.respondError?.(requestMessage.id, -32000, message);
+        return;
+      }
+      let result: unknown;
+      try {
+        result = JSON.parse(answer.resultJson);
+      } catch {
+        await state.client.respondError?.(requestMessage.id, -32000, "Client capability failed.");
+        return;
+      }
+      await state.client.respondResult?.(requestMessage.id, result);
+    };
+
     function cancelPendingTools(state: SessionState): void {
       for (const [requestId, pending] of state.pendingToolAnswers) {
         state.pendingToolAnswers.delete(requestId);
@@ -827,7 +887,11 @@ function makeConnection(
       }
     };
 
-    const handleRequest = (state: SessionState, requestMessage: AcpServerRequest) => {
+    const handleRequest = (state: SessionState, requestMessage: AcpServerRequestMessage) => {
+      if (requestMessage.method !== "session/request_permission") {
+        void handleClientCapabilityRequest(state, requestMessage);
+        return;
+      }
       const mapped = mapAcpPermissionRequest(state.context, requestMessage);
       if (mapped.kind === "protocol-failure") {
         state.completed = false;
@@ -942,6 +1006,7 @@ function makeConnection(
     const startProcess = async (
       executionPolicy: ProviderExecutionPolicy,
       loopbackPorts: ReadonlyArray<number> = [],
+      tools: ReadonlyArray<ProviderToolDefinition> = [],
     ) => {
       const scope = await Effect.runPromise(Scope.make());
       try {
@@ -958,6 +1023,17 @@ function makeConnection(
               executionPolicy,
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
+              clientCapabilities: {
+                readTextFile: tools.some(
+                  (tool) => tool.name === ACP_CLIENT_TOOL_NAMES.readTextFile,
+                ),
+                writeTextFile: tools.some(
+                  (tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile,
+                ),
+                terminal: ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) =>
+                  tools.some((tool) => tool.name === name),
+                ),
+              },
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
                 return receipt;
@@ -1103,6 +1179,7 @@ function makeConnection(
             const started = await startProcess(
               input.executionPolicy,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
+              input.tools,
             );
             scope = started.scope;
             const { client, connection } = started;
@@ -1425,6 +1502,7 @@ function makeConnection(
                   .prompt(state.sourceSessionId, prompt)
                   .then((result) => {
                     state.promptActive = false;
+                    if (result.stopReason === "cancelled") cancelPendingTools(state);
                     if (state.closed || state.context.terminal) return;
                     state.context.terminal = true;
                     if (result.stopReason === "cancelled") {

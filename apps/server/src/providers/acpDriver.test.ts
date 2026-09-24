@@ -1052,6 +1052,11 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           managedHome,
           mode: productMode,
           executionPolicy,
+          clientCapabilities: {
+            readTextFile: false,
+            writeTextFile: false,
+            terminal: false,
+          },
           onProcessStarted: expect.any(Function),
         },
       ]);
