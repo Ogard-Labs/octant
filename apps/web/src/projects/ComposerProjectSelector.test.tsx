@@ -87,6 +87,26 @@ describe("ComposerProjectSelector", () => {
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
   });
 
+  it("offers an unfiled thread and selects it when no Project is selected", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerProjectSelector
+        entries={[...entries, { kind: "unfiled" }]}
+        onSelect={onSelect}
+        onAddFolder={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Project: No Project" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Project: No Project" }));
+    const row = screen.getByRole("option", { name: /No Project/ });
+    expect(row).toHaveTextContent("Start an unfiled thread");
+    expect(row).toHaveAttribute("aria-selected", "true");
+    await user.click(row);
+    expect(onSelect).toHaveBeenCalledWith({ kind: "unfiled" });
+  });
+
   it("names the chosen Project", () => {
     render(
       <ComposerProjectSelector

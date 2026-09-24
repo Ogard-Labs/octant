@@ -22,6 +22,7 @@ import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 
 const codeProjectId = "00000000-0000-4000-8000-000000000111" as ProjectId;
 const workProjectId = "00000000-0000-4000-8000-000000000112" as ProjectId;
+const chatProjectId = "00000000-0000-4000-8000-000000000113" as ProjectId;
 
 const projects = [
   {
@@ -48,6 +49,18 @@ const projects = [
     createdAt: "2026-07-28T12:00:00.000Z",
     updatedAt: "2026-07-28T12:00:00.000Z",
     binding: { canonicalRoot: "/Users/example/Knowledge" },
+  },
+  {
+    id: chatProjectId,
+    type: "chat",
+    name: "Audit Chat",
+    lifecycle: "active",
+    pinned: false,
+    rank: "2/1",
+    version: 1,
+    createdAt: "2026-07-28T12:00:00.000Z",
+    updatedAt: "2026-07-28T12:00:00.000Z",
+    binding: { canonicalRoot: "" },
   },
 ] as unknown as ReadonlyArray<ProjectSummary>;
 
@@ -160,6 +173,25 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
     expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
     expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
+  });
+
+  it("lets a Chat draft choose an unfiled thread instead of showing an inert Project chip", async () => {
+    const user = userEvent.setup();
+    const onSelectUnfiled = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="chat"
+        projectName="Audit Chat"
+        projects={projects}
+        onSelectUnfiled={onSelectUnfiled}
+      />,
+    );
+
+    expect(screen.queryByText("Audit Chat")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Project: No Project" }));
+    await user.click(screen.getByRole("option", { name: /No Project/ }));
+    expect(onSelectUnfiled).toHaveBeenCalledOnce();
   });
 
   it("seeds the Chat composer when a review hands it a prompt", async () => {
@@ -627,7 +659,7 @@ describe("DraftThreadWorkspace", () => {
         branchName="main"
       />,
     );
-    expect(screen.getByText("Chat Project")).toBeVisible();
+    expect(screen.queryByText("Chat Project")).not.toBeInTheDocument();
     expect(screen.queryByText("main")).not.toBeInTheDocument();
   });
 

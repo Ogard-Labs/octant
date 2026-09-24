@@ -212,6 +212,7 @@ type WorkspaceIntent =
       readonly kind: "open-draft-thread";
       readonly mode: OctantMode;
       readonly projectId?: ProjectId;
+      readonly unfiled?: true;
     }
   | {
       readonly kind: "open-chat-thread";
@@ -594,7 +595,11 @@ export function useShellController(options: ShellControllerOptions) {
     await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode } });
   }
 
-  async function openDraftThread(mode: OctantMode, projectId?: ProjectId): Promise<boolean> {
+  async function openDraftThread(
+    mode: OctantMode,
+    projectId?: ProjectId,
+    options?: { readonly unfiled?: true },
+  ): Promise<boolean> {
     if (authoritative?.workspace.activeMode !== mode) {
       const changed = await enqueueMutation({
         kind: "workspace",
@@ -608,6 +613,7 @@ export function useShellController(options: ShellControllerOptions) {
         kind: "open-draft-thread",
         mode,
         ...(projectId === undefined ? {} : { projectId }),
+        ...(options?.unfiled === true ? { unfiled: true } : {}),
       },
     });
   }
@@ -1266,6 +1272,16 @@ function createWorkspaceMutation(
         title: `New ${modeLabel(mode)} thread`,
         ...(intent.projectId === undefined ? {} : { projectId: intent.projectId }),
       };
+      if (
+        mode === "chat" &&
+        intent.unfiled === true &&
+        latest.workspace.contextByMode.chat.projectId !== null
+      ) {
+        return {
+          operation: { kind: "switch-project-surface", mode, surface },
+          message: "New Chat thread draft opened without a Project.",
+        };
+      }
       // Starting a task in another Project is the person choosing to work
       // there, so the window moves with them, exactly as it does when they
       // open an existing thread from that Project. Without this branch the
