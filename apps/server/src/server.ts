@@ -7552,17 +7552,19 @@ export function startOctantServer(
     workRequestService.reconcileUnavailableRequests();
     observeWorkThreadRuntime = (threadId) => {
       const thread = workThreadProjection.read(threadId);
-      const pending = thread
+      const pendingRequests = thread
         ? workRequestService
             .listForThread(thread.projectId, threadId)
-            .some((request) => request.status === "pending")
-        : false;
+            .filter((request) => request.status === "pending")
+        : [];
+      const pendingRequest = pendingRequests.at(0);
       const childRuns = persistence.agentRunProjection.parentSummary(
         decodeAgentRunParentThreadId(String(threadId)),
       );
       return boardRuntimeActivityFromTurnsAndSignals({
         turns: workTurnProjection.listForThread(threadId),
-        pendingRequest: pending,
+        pendingRequest: pendingRequest !== undefined,
+        ...(pendingRequest === undefined ? {} : { pendingRequestKind: pendingRequest.detail.kind }),
         childActive: childRuns.filter(
           (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
         ).length,

@@ -45,6 +45,7 @@ export interface WorkBoardThreadSource {
 export interface WorkBoardRuntimeActivity {
   readonly executing: boolean;
   readonly awaitingInput: boolean;
+  readonly awaitingKind?: "approval" | "user-input";
   readonly interrupted: boolean;
   readonly blockingReason?: string;
 }
@@ -83,6 +84,7 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
     readonly transcript: WorkTurnState["transcript"];
   }>;
   readonly pendingRequest: boolean;
+  readonly pendingRequestKind?: "approval" | "user-input";
   readonly childActive: number;
   readonly childWaiting: number;
 }): WorkBoardRuntimeActivity {
@@ -98,6 +100,9 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
     executing,
     awaitingInput,
     interrupted,
+    ...(awaitingInput && input.pendingRequestKind !== undefined
+      ? { awaitingKind: input.pendingRequestKind }
+      : {}),
     ...(waiting && !executing
       ? {
           blockingReason: awaitingInput

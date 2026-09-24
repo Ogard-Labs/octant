@@ -59,11 +59,17 @@ export function collectThreadAttentionSignals(
     } else if (thread.unread === true) {
       signals.push({ ...shared, reason: "turn-finished" });
     } else if (thread.activity === "attention") {
-      signals.push({
-        ...shared,
-        reason: "approval-required",
-        detail: "Waiting for your decision or input.",
-      });
+      signals.push(
+        thread.awaitingKind === "user-input"
+          ? { ...shared, reason: "question-asked", detail: "Waiting for your answer." }
+          : thread.awaitingKind === "approval"
+            ? { ...shared, reason: "approval-required", detail: "Waiting for your approval." }
+            : {
+                ...shared,
+                reason: "approval-required",
+                detail: "Waiting for your decision or input.",
+              },
+      );
     }
   }
   for (const thread of sources.codeThreads) {

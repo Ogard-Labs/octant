@@ -214,6 +214,11 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
    */
   awaitingInput: Schema.optional(Schema.Boolean),
   /**
+   * The kind of request currently waiting on the person. Optional so older
+   * hosts decode; absent means the request kind is unknown.
+   */
+  awaitingKind: Schema.optional(Schema.Literal("approval", "user-input")),
+  /**
    * A dated line in the Project's `STATUS.md` that has passed or is near,
    * carried on the Project's newest open thread so the inbox can surface the
    * reminder (decision 0119). Optional so an older host's payload still

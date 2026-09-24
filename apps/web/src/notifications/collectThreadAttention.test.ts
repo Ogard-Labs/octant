@@ -110,6 +110,56 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("reports a pending Work approval as waiting for approval", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [
+          {
+            threadId: "work-approval",
+            title: "Approval",
+            activity: "attention",
+            awaitingKind: "approval",
+          },
+        ],
+        codeThreads: [],
+      }),
+    ).toEqual([
+      {
+        threadId: "work-approval",
+        reason: "approval-required",
+        title: "Approval",
+        detail: "Waiting for your approval.",
+        source: "work",
+      },
+    ]);
+  });
+
+  it("reports a pending Work question as a question", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [
+          {
+            threadId: "work-question",
+            title: "Question",
+            activity: "attention",
+            awaitingKind: "user-input",
+          },
+        ],
+        codeThreads: [],
+      }),
+    ).toEqual([
+      {
+        threadId: "work-question",
+        reason: "question-asked",
+        title: "Question",
+        detail: "Waiting for your answer.",
+        source: "work",
+      },
+    ]);
+  });
+
   it("raises a live Code approval with the summary the workspace shows", () => {
     const threadId = "code-a" as CodeThreadId;
     expect(
