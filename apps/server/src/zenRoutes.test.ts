@@ -558,4 +558,76 @@ describe("Zen terminal routes", () => {
 
     expect(response?.status).toBe(401);
   });
+
+  const projectTerminalRequest = {
+    projectId: "abababab-abab-4bab-8bab-abababababab",
+    terminalId: terminalRequest.terminalId,
+    expectedVersion: 2,
+  };
+
+  function projectTerminalRouteFixture() {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId, capability, now: 0 });
+    const pinProjectTerminal = vi.fn(async () => ({ result: "terminal-pinned" }));
+    const handleCommand = vi.fn();
+    const handler = createZenRouteHandler({
+      windowAuthorityStore,
+      zenService: { pinProjectTerminal, handleCommand } as never,
+      now: () => 0,
+    });
+    return { handler, pinProjectTerminal, handleCommand };
+  }
+
+  it("pins a Project terminal for the window that proved its own identity, and no other", async () => {
+    const { handler, pinProjectTerminal } = projectTerminalRouteFixture();
+    const pin = (headers: Record<string, string>) =>
+      handler(
+        new Request("http://127.0.0.1/api/zen/project-terminals/pin", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(projectTerminalRequest),
+        }),
+      );
+
+    expect((await pin({}))?.status).toBe(401);
+    expect(pinProjectTerminal).not.toHaveBeenCalled();
+
+    const response = await pin({ "x-octant-window-capability": capability });
+    expect(response?.status).toBe(200);
+    expect(pinProjectTerminal).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ projectId: projectTerminalRequest.projectId }),
+      expect.anything(),
+    );
+  });
+
+  it("refuses a Project terminal card the caller wrote itself", async () => {
+    const { handler, handleCommand } = projectTerminalRouteFixture();
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/command", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({
+          command: "add-element",
+          spaceId: "12121212-1212-4212-8212-121212121212",
+          expectedVersion: 2,
+          element: {
+            elementId: "13131313-1313-4313-8313-131313131313",
+            kind: "project-terminal",
+            hostId: LOCAL_HOST_ID,
+            projectId: projectTerminalRequest.projectId,
+            terminalId: projectTerminalRequest.terminalId,
+            geometry: { x: 0, y: 0, width: 520, height: 320 },
+            zIndex: 1,
+            minimized: false,
+            locked: false,
+          },
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+    expect(handleCommand).not.toHaveBeenCalled();
+  });
 });

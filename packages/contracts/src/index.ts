@@ -69,6 +69,7 @@ export * from "./navigatorAssistant";
 export * from "./userProfile";
 export * from "./previews";
 export * from "./productFeedback";
+export * from "./projectTerminals";
 export * from "./projects";
 export * from "./projectView";
 export * from "./sidebarThreadStatus";

@@ -22,6 +22,7 @@ import { cycleZenSpace } from "@octant/domain";
 import type { WindowId } from "@octant/contracts/shell";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -899,6 +900,68 @@ export function useZenController(options: UseZenControllerOptions) {
   );
 
   /**
+   * Pin a terminal this window opened for a Code Project. The card names the
+   * Project and the shell; the server writes it once the owner confirms this
+   * window holds that shell. Resolves whether the card was written, because a
+   * Project shell has no thread to find it by: a caller whose card was not
+   * written stops the shell rather than leave it running out of reach.
+   */
+  const pinProjectTerminal = useCallback(
+    async (request: {
+      readonly projectId: ProjectId;
+      readonly terminalId: CodeTerminalId;
+      readonly title?: string;
+    }): Promise<boolean> => {
+      if (client === undefined || space === null) return false;
+      setPanelBusy(true);
+      try {
+        const result = await client.pinProjectTerminal({
+          projectId: request.projectId,
+          terminalId: request.terminalId,
+          expectedVersion: space.version,
+          ...(request.title === undefined ? {} : { title: request.title }),
+        });
+        if (mounted.current) {
+          setSpace(result.space);
+          presentationSpace.current = result.space;
+          setMessage(undefined);
+        }
+        return true;
+      } catch (error) {
+        // A failed request is not proof the card is missing: the server may
+        // have written it and lost the reply. The space is read again, twice
+        // if the first read fails too. If neither read answers, the card is
+        // treated as missing: the caller then stops the shell, and a card
+        // left naming a stopped shell says so, while a running shell with no
+        // card could never be found again.
+        const refreshed =
+          (await client.bootstrap().catch(() => null)) ??
+          (await client.bootstrap().catch(() => null));
+        const pinned = refreshed?.space?.elements.some(
+          (element) =>
+            element.kind === "project-terminal" &&
+            String(element.terminalId) === String(request.terminalId),
+        );
+        if (mounted.current) {
+          if (pinned === true && refreshed?.space !== null && refreshed?.space !== undefined) {
+            setSpace(refreshed.space);
+            presentationSpace.current = refreshed.space;
+            setMessage(undefined);
+          } else {
+            setMessage(
+              error instanceof Error ? error.message : "That terminal could not be pinned.",
+            );
+          }
+        }
+        return pinned === true;
+      } finally {
+        if (mounted.current) setPanelBusy(false);
+      }
+    },
+    [client, space],
+  );
+
+  /**
    * Pin a canvas this window may already open.
    *
    * The request names the document; the card is written by the server after
@@ -1469,6 +1532,7 @@ export function useZenController(options: UseZenControllerOptions) {
     active,
     space,
     pinTerminal,
+    pinProjectTerminal,
     dockResearch,
     pinCanvas,
     focusZone,

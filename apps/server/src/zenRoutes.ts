@@ -4,6 +4,7 @@ import {
   decodeZenCanvasPinRequest,
   decodeZenResearchDockRequest,
   decodeZenTerminalPinRequest,
+  decodeZenProjectTerminalPinRequest,
   decodeZenThreadPinRequest,
   decodeZenThreadCatalogRef,
   ZenError,
@@ -78,6 +79,9 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
     }
     if (url.pathname === "/api/zen/terminals/pin" && request.method === "POST") {
       return await handleZenTerminalPin(request, url, origin, dependencies, now);
+    }
+    if (url.pathname === "/api/zen/project-terminals/pin" && request.method === "POST") {
+      return await handleZenProjectTerminalPin(request, url, origin, dependencies, now);
     }
     if (url.pathname === "/api/zen/canvases/pin" && request.method === "POST") {
       return await handleZenCanvasPin(request, url, origin, dependencies, now);
@@ -209,6 +213,13 @@ async function handleZenCommand(
       origin,
     );
   }
+  if (command.command === "add-element" && command.element.kind === "project-terminal") {
+    return failureResponse(
+      "Zen does not accept caller-supplied terminal cards; a terminal is pinned by naming it.",
+      400,
+      origin,
+    );
+  }
   if (command.command === "add-element" && command.element.kind === "timer") {
     return failureResponse("Zen timer state is server-authoritative.", 400, origin);
   }
@@ -239,7 +250,9 @@ async function handleZenCommand(
   try {
     const result =
       command.command === "update-element" &&
-      (command.element.kind === "thread" || command.element.kind === "terminal")
+      (command.element.kind === "thread" ||
+        command.element.kind === "terminal" ||
+        command.element.kind === "project-terminal")
         ? deps.zenService.updateBoundElementPresentation(command, authenticatedWindowId)
         : deps.zenService.handleCommand(command, authenticatedWindowId, request.signal);
     return new Response(JSON.stringify(result), {
@@ -334,6 +347,38 @@ async function handleZenThreadPin(
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
     return failureResponse("Zen thread pin is invalid.", 400, origin);
+  }
+}
+
+/**
+ * Pin a terminal this window opened for a Code Project. The caller names the
+ * Project and the shell; the server asks the owner and writes the card.
+ */
+async function handleZenProjectTerminalPin(
+  request: Request,
+  url: URL,
+  origin: string | null,
+  deps: ZenRouteDependencies,
+  now: () => number,
+): Promise<Response> {
+  let windowId: WindowId;
+  try {
+    if (url.search !== "") {
+      return failureResponse("Zen terminal pin is invalid.", 400, origin);
+    }
+    windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
+  } catch (error) {
+    return authenticationFailure(error, "Zen terminal pin", origin);
+  }
+  try {
+    const body = decodeZenProjectTerminalPinRequest(await request.json());
+    return jsonResponse(
+      await deps.zenService.pinProjectTerminal(windowId, body, request.signal),
+      origin,
+    );
+  } catch (error) {
+    if (error instanceof ZenError) return zenFailureResponse(error, origin);
+    return failureResponse("Zen terminal pin is invalid.", 400, origin);
   }
 }
 

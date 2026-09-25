@@ -37,6 +37,7 @@ import {
   getZenBuiltinBackground,
 } from "@octant/contracts/zen";
 import type { SettingsDeepLink } from "@octant/contracts";
+import type { ProjectId } from "@octant/contracts/projects";
 import {
   UNSUPPORTED_NAVIGATOR_ASSISTANT,
   type NavigatorAssistantController,
@@ -84,6 +85,14 @@ export interface ZenSurfaceProps {
   readonly canAddTerminal?: (sourceContext: ZenSourceContext) => boolean;
   /** Docks a research browser for the focused Work or Code thread. */
   readonly onAddBrowser?: (sourceContext: ZenSourceContext) => void;
+  /**
+   * The Code Project this window holds, offered as "This Project" for a
+   * terminal with no thread. Absent when the window holds no Code Project or
+   * the host cannot open Project terminals.
+   */
+  readonly projectTerminalTarget?: { readonly projectId: ProjectId; readonly name: string };
+  /** Starts a terminal at that Project's root and pins its card. */
+  readonly onAddProjectTerminal?: (projectId: ProjectId) => void;
   readonly onExpandBar: () => void;
   readonly onHideBar: () => void;
   readonly onCreateWidget?: (kind: "notes" | "checklist") => void;
@@ -161,6 +170,15 @@ export interface ZenSurfaceProps {
    */
   readonly renderTerminal?: (input: {
     readonly element: Extract<ZenElementPayload, { kind: "terminal" }>;
+    readonly activity: ZenLiveCardActivity;
+  }) => ReactNode | undefined;
+  /**
+   * Builds the surface for one pinned Project terminal, or returns undefined
+   * when this window cannot open one. The card names a Project and a shell and
+   * nothing else; the host decides what that shell may still do.
+   */
+  readonly renderProjectTerminal?: (input: {
+    readonly element: Extract<ZenElementPayload, { kind: "project-terminal" }>;
     readonly activity: ZenLiveCardActivity;
   }) => ReactNode | undefined;
   /**
@@ -398,6 +416,14 @@ export function ZenSurface(props: ZenSurfaceProps) {
     const activity = threadCardActivity.get(String(element.elementId));
     if (props.renderTerminal === undefined || activity === undefined) return undefined;
     return props.renderTerminal({ element, activity });
+  }
+
+  function renderProjectTerminalCard(
+    element: Extract<ZenElementPayload, { kind: "project-terminal" }>,
+  ): ReactNode | undefined {
+    const activity = threadCardActivity.get(String(element.elementId));
+    if (props.renderProjectTerminal === undefined || activity === undefined) return undefined;
+    return props.renderProjectTerminal({ element, activity });
   }
 
   const resolvedBackground = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
@@ -676,7 +702,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
         {laidOut.map((element) => {
           const threadCard = element.kind === "thread" ? resolveThreadCard(element) : undefined;
           const title =
-            element.kind === "terminal"
+            element.kind === "terminal" || element.kind === "project-terminal"
               ? `Terminal · ${element.title ?? "Terminal"}`
               : "title" in element && typeof element.title === "string"
                 ? element.title
@@ -821,6 +847,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       <ZenReference element={element} />
                     ) : element.kind === "terminal" ? (
                       (renderTerminalCard(element) ?? (
+                        <p role="status">This window cannot open a terminal.</p>
+                      ))
+                    ) : element.kind === "project-terminal" ? (
+                      (renderProjectTerminalCard(element) ?? (
                         <p role="status">This window cannot open a terminal.</p>
                       ))
                     ) : element.kind === "canvas" ? (
@@ -1031,6 +1061,24 @@ export function ZenSurface(props: ZenSurfaceProps) {
                 >
                   Add browser
                 </OctantButton>
+                {/* A terminal for the Project itself, with no thread: the
+                    person's own shell at the Project's root. */}
+                {props.projectTerminalTarget === undefined ||
+                props.onAddProjectTerminal === undefined ? null : (
+                  <OctantButton
+                    aria-label={`Add terminal for this Project, ${props.projectTerminalTarget.name}`}
+                    onClick={() => {
+                      const target = props.projectTerminalTarget;
+                      if (target === undefined) return;
+                      props.onAddProjectTerminal?.(target.projectId);
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Terminal in this Project
+                  </OctantButton>
+                )}
                 {focusedThreadContext === undefined ? (
                   <p className="zen-add-picker__hint" role="status">
                     Focus a thread card to add its terminal or browser.

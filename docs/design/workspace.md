@@ -227,7 +227,15 @@ states. Project memory lives on every mode's Project Overview. Navigator is one 
 as an app-wide popover from the bottom-left profile and Settings control, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
-fourth authority mode.
+fourth authority mode. Zen's Add terminal offers the window's Code Project as
+"This Project" ahead of the Code threads that can open one; choosing it starts
+a Project terminal and pins a card that names the Project and the terminal,
+never a thread. The card is a window onto the shell and grants nothing: a card
+naming a terminal this window does not own is refused. Authority, lifecycle,
+and the journal record follow the
+[Project terminal rule](../architecture.md#security-and-authority). A Project
+browser in Zen follows the Project browsing context rule there and is not built
+yet, so Add browser still lists Work and Code threads only.
 
 ## Local-server ownership
 

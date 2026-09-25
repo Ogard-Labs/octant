@@ -210,6 +210,87 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
+  it("carries a Project terminal command with the window and caller the host proved", async () => {
+    const execute = vi.fn(async (_windowId, _caller, command) => ({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message: `No ${command.kind}.`,
+    }));
+    const route = routeFixture({}, undefined, { execute });
+    const command = {
+      kind: "start",
+      projectId: "00000000-0000-4000-8000-000000000920",
+      terminalId: "00000000-0000-4000-8000-000000000921",
+      columns: 100,
+      rows: 30,
+    } as const;
+    const post = (body: unknown, init: RequestInit = {}) =>
+      request("/api/code/project-terminals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        ...init,
+      });
+
+    const response = await route(post(command));
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message: "No start.",
+    });
+    expect(execute).toHaveBeenCalledWith(windowId, "local-window", command);
+
+    // A caller cannot name the window or point the shell at a folder.
+    expect((await route(post({ ...command, windowId })))?.status).toBe(400);
+    expect((await route(post({ ...command, cwd: "/private/repository" })))?.status).toBe(400);
+    expect(execute).toHaveBeenCalledOnce();
+
+    // A window that cannot prove itself never reaches the owner.
+    const unproven = await route(
+      new Request("http://127.0.0.1/api/code/project-terminals", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": "wrong" },
+        body: JSON.stringify(command),
+      }),
+    );
+    expect(unproven?.status).toBe(401);
+    expect(execute).toHaveBeenCalledOnce();
+
+    // The remote gateway shares this chain; the owner is told who is asking.
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000922";
+    const remoteRequest = post(command);
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000923" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    await route(remoteRequest);
+    expect(execute).toHaveBeenLastCalledWith(remoteDeviceId, "remote-device", command);
+  });
+
+  it("reports Project terminals unavailable on a host without them", async () => {
+    const response = await routeFixture()(
+      request("/api/code/project-terminals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "attach",
+          projectId: "00000000-0000-4000-8000-000000000920",
+          terminalId: "00000000-0000-4000-8000-000000000921",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(503);
+  });
+
   it("inspects a terminal through a non-journaling authenticated route", async () => {
     const inspectTerminal = vi.fn(async () => ({
       terminalId: "00000000-0000-4000-8000-000000000911",
@@ -1464,7 +1545,11 @@ function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });
 }
 
-function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?: number) {
+function routeFixture(
+  overrides: Record<string, unknown> = {},
+  maxJsonBodySize?: number,
+  projectTerminals?: { readonly execute: (...args: never[]) => unknown },
+) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service = {
@@ -1486,5 +1571,6 @@ function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?:
     windowAuthorityStore: store,
     now: () => 1,
     ...(maxJsonBodySize === undefined ? {} : { maxJsonBodySize }),
+    ...(projectTerminals === undefined ? {} : { projectTerminals: projectTerminals as never }),
   });
 }

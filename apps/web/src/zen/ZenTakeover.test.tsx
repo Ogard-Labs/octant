@@ -109,6 +109,7 @@ describe("Zen takeover shell restore", () => {
       }),
       space: vi.fn() as never,
       pinTerminal: vi.fn() as never,
+      pinProjectTerminal: vi.fn() as never,
       searchThreads: vi.fn() as never,
       pinThread: vi.fn() as never,
       continueThread: vi.fn() as never,

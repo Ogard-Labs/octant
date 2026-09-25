@@ -103,6 +103,7 @@
     "./thread-export": "./src/threadExport.ts",
     "./thread-hand-off": "./src/threadHandOff.ts",
     "./zen": "./src/zen.ts",
+    "./project-terminals": "./src/projectTerminals.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",
     "./github-issue-context": "./src/githubIssueContext.ts",
     "./tracker-reference": "./src/trackerReference.ts",

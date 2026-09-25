@@ -396,6 +396,15 @@ CREATE INDEX thread_checkpoint_thread_idx
   ON thread_checkpoint_projection (thread_id, last_sequence);
 `;
 
+const PROJECT_TERMINAL_PROJECTION_SQL = `
+CREATE TABLE project_terminal_projection (
+  terminal_id TEXT PRIMARY KEY CHECK(length(trim(terminal_id)) > 0),
+  project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+  state TEXT NOT NULL CHECK(state IN ('running', 'ended')),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+`;
+
 const SPEND_CEILING_PROJECTION_SQL = `
 CREATE TABLE spend_ceiling_projection (
   scope_kind TEXT NOT NULL CHECK(scope_kind IN ('project', 'thread')),
@@ -1840,6 +1849,11 @@ ALTER TABLE code_runtime_projection
       aggregate_type, CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END,
       CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END, global_sequence DESC
     );`,
+  },
+  {
+    version: 62,
+    name: "create_project_terminal_projection",
+    sql: PROJECT_TERMINAL_PROJECTION_SQL,
   },
 ];
 

@@ -415,6 +415,11 @@ export interface CodeOperationRuntime {
   }): boolean;
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
+  /**
+   * The host's terminals, shared with Project terminals so one receipt store,
+   * one reconcile, and one shutdown cover every shell the host started.
+   */
+  readonly terminals?: TerminalService;
 }
 
 export function createCodeOperationRuntime(
@@ -679,6 +684,7 @@ export function createCodeOperationRuntime(
   turns.bindService(service);
 
   return {
+    terminals: terminal,
     prepareApproval: async (windowId, rawRequest) => {
       if (approvalStore === undefined) return undefined;
       const request = decodeCodeOperationApprovalRequest(rawRequest);

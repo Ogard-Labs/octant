@@ -101,6 +101,9 @@ import {
   ExtensionLifecycleEvent,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
+  PROJECT_TERMINAL_EVENT_NAMES,
+  ProjectTerminalEnded,
+  ProjectTerminalStarted,
   ProductFeedbackDiscarded,
   ThreadCheckpointForgotten,
   ThreadCheckpointMarked,
@@ -168,6 +171,7 @@ import {
   PRODUCT_FEEDBACK_DISCARDED,
   ProductFeedbackProjection,
 } from "./productFeedbackProjection";
+import { ProjectTerminalProjection } from "./projectTerminalProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { ExternalContentTaintProjection } from "../context/externalContentTaintProjection";
@@ -362,6 +366,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
+    .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
+    .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)
@@ -426,6 +432,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())
+      .register(new ProjectTerminalProjection())
       .register(new ThreadRetentionProjection())
       .register(new ExternalContentTaintProjection())
       .register(new SpendCeilingProjection()),
