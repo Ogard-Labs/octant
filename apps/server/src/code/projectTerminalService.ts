@@ -303,6 +303,17 @@ export class ProjectTerminalService {
         );
       },
     );
+    // The launch awaited the process receipt, and an archive or relink that
+    // committed meanwhile settled the Project before this shell had an owner
+    // to find. Checked again now that it has one, so that end is not missed.
+    const launched = this.#authority(windowId, command.projectId);
+    if (
+      launched.kind === "refused" ||
+      String(launched.bindingRevisionId) !== String(authority.bindingRevisionId)
+    ) {
+      await this.#end(command.terminalId, owner, "authority-revoked");
+      return refused("authority-revoked", "This Project changed while its terminal was starting.");
+    }
     return this.#view(command.terminalId, owner, 0);
   }
 

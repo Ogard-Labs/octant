@@ -902,15 +902,17 @@ export function useZenController(options: UseZenControllerOptions) {
   /**
    * Pin a terminal this window opened for a Code Project. The card names the
    * Project and the shell; the server writes it once the owner confirms this
-   * window holds that shell.
+   * window holds that shell. Resolves whether the card was written, because a
+   * Project shell has no thread to find it by: a caller whose card was not
+   * written stops the shell rather than leave it running out of reach.
    */
   const pinProjectTerminal = useCallback(
     async (request: {
       readonly projectId: ProjectId;
       readonly terminalId: CodeTerminalId;
       readonly title?: string;
-    }) => {
-      if (client === undefined || space === null) return;
+    }): Promise<boolean> => {
+      if (client === undefined || space === null) return false;
       setPanelBusy(true);
       try {
         const result = await client.pinProjectTerminal({
@@ -924,10 +926,12 @@ export function useZenController(options: UseZenControllerOptions) {
           presentationSpace.current = result.space;
           setMessage(undefined);
         }
+        return true;
       } catch (error) {
         if (mounted.current) {
           setMessage(error instanceof Error ? error.message : "That terminal could not be pinned.");
         }
+        return false;
       } finally {
         if (mounted.current) setPanelBusy(false);
       }
