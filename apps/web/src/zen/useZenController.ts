@@ -928,10 +928,27 @@ export function useZenController(options: UseZenControllerOptions) {
         }
         return true;
       } catch (error) {
+        // A failed request is not proof the card is missing: the server may
+        // have written it and lost the reply. The space is read again, and
+        // only a space without the card answers "not pinned".
+        const refreshed = await client.bootstrap().catch(() => null);
+        const pinned = refreshed?.space?.elements.some(
+          (element) =>
+            element.kind === "project-terminal" &&
+            String(element.terminalId) === String(request.terminalId),
+        );
         if (mounted.current) {
-          setMessage(error instanceof Error ? error.message : "That terminal could not be pinned.");
+          if (pinned === true && refreshed?.space !== null && refreshed?.space !== undefined) {
+            setSpace(refreshed.space);
+            presentationSpace.current = refreshed.space;
+            setMessage(undefined);
+          } else {
+            setMessage(
+              error instanceof Error ? error.message : "That terminal could not be pinned.",
+            );
+          }
         }
-        return false;
+        return pinned === true;
       } finally {
         if (mounted.current) setPanelBusy(false);
       }
