@@ -93,6 +93,13 @@ export interface ZenSurfaceProps {
   readonly projectTerminalTarget?: { readonly projectId: ProjectId; readonly name: string };
   /** Starts a terminal at that Project's root and pins its card. */
   readonly onAddProjectTerminal?: (projectId: ProjectId) => void;
+  /**
+   * The Work or Code Project this window holds, offered as "This Project" for
+   * a browser with no thread. Absent when the window holds neither.
+   */
+  readonly projectBrowserTarget?: { readonly projectId: ProjectId; readonly name: string };
+  /** Docks that Project's own browser at the space's edge. */
+  readonly onAddProjectBrowser?: (projectId: ProjectId) => void;
   readonly onExpandBar: () => void;
   readonly onHideBar: () => void;
   readonly onCreateWidget?: (kind: "notes" | "checklist") => void;
@@ -1077,6 +1084,22 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     variant="secondary"
                   >
                     Terminal in this Project
+                  </OctantButton>
+                )}
+                {props.projectBrowserTarget === undefined ||
+                props.onAddProjectBrowser === undefined ? null : (
+                  <OctantButton
+                    aria-label={`Add browser for this Project, ${props.projectBrowserTarget.name}`}
+                    onClick={() => {
+                      const target = props.projectBrowserTarget;
+                      if (target === undefined) return;
+                      props.onAddProjectBrowser?.(target.projectId);
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Browser in this Project
                   </OctantButton>
                 )}
                 {focusedThreadContext === undefined ? (

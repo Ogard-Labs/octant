@@ -311,4 +311,66 @@ describe("browser automation routes", () => {
     }
     expect(service.act).toHaveBeenCalledOnce();
   });
+
+  it("carries a Project browser command with the window and caller the host proved", async () => {
+    const projectBrowsers = {
+      execute: vi.fn(async () => ({
+        kind: "project-browser-refused" as const,
+        reason: "unauthorized" as const,
+        message: "Not here.",
+      })),
+    };
+    const withProjects = createBrowserAutomationRouteHandler({
+      service: service as any,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      projectBrowsers,
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const command = {
+      kind: "open",
+      projectId: "40000000-0000-4000-8000-000000000001",
+      url: "https://example.com/",
+    };
+    const post = (value: unknown, headers: Record<string, string> = {}) =>
+      new Request("http://127.0.0.1/api/browser/project-contexts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+          ...headers,
+        },
+        body: JSON.stringify(value),
+      });
+
+    const response = await withProjects(post(command));
+    expect(response?.status).toBe(200);
+    expect(projectBrowsers.execute).toHaveBeenCalledWith(windowId, "local-window", command);
+
+    // A caller cannot name a thread's context or its origin approval here.
+    expect((await withProjects(post({ ...command, threadId })))?.status).toBe(400);
+    expect(
+      (await withProjects(post(command, { "x-octant-window-capability": "wrong" })))?.status,
+    ).toBe(401);
+    expect(projectBrowsers.execute).toHaveBeenCalledOnce();
+
+    const paired = post(command);
+    bindPrincipalRouteContext(paired, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000001" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+      }),
+      scopeId: windowId,
+    });
+    await withProjects(paired);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "remote-device", command);
+
+    const without = await handler(post(command));
+    expect(without?.status).toBe(503);
+  });
 });

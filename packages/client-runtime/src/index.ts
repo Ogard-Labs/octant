@@ -68,6 +68,7 @@ export * from "./connectionSupervisor";
 export * from "./shellClient";
 export * from "./threadMentionClient";
 export * from "./fileMentionClient";
+export * from "./projectBrowserClient";
 export * from "./projectTerminalClient";
 export * from "./usageClient";
 export * from "./usageDashboardClient";

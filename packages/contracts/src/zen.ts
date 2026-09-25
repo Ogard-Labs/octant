@@ -812,6 +812,32 @@ export const ZenResearchDock = Schema.Struct({
   .annotations(strict);
 export type ZenResearchDock = typeof ZenResearchDock.Type;
 
+/**
+ * A Project's own browser docked to the edge of a space.
+ *
+ * It names a Work or Code Project and no thread: the page is the person's,
+ * in an isolated context the host keeps for this window and Project, and no
+ * agent can reach it. Docking grants nothing either; whether the window may
+ * still show that Project's page is decided by the host each time it is asked.
+ */
+export const ZenProjectResearchDock = Schema.Struct({
+  project: Schema.Struct({
+    hostId: HostId,
+    projectId: ProjectId,
+    mode: Schema.Literal("work", "code"),
+  }).annotations(strict),
+  width: Schema.Number.pipe(
+    Schema.greaterThanOrEqualTo(MIN_ZEN_RESEARCH_DOCK_WIDTH),
+    Schema.lessThanOrEqualTo(MAX_ZEN_RESEARCH_DOCK_WIDTH),
+  ),
+  collapsed: Schema.Boolean,
+}).annotations(strict);
+export type ZenProjectResearchDock = typeof ZenProjectResearchDock.Type;
+
+/** What a space can have docked: a thread's browsing context or a Project's own browser. */
+export const ZenDockedResearch = Schema.Union(ZenResearchDock, ZenProjectResearchDock);
+export type ZenDockedResearch = typeof ZenDockedResearch.Type;
+
 export const ZenSpace = Schema.Struct({
   spaceId: ZenSpaceId,
   windowId: WindowId,
@@ -829,7 +855,7 @@ export const ZenSpace = Schema.Struct({
   // by hand gets that arrangement back exactly by pressing Arrange once.
   layout: Schema.optionalWith(ZenSpaceLayout, { default: () => "wall" as const }),
   assistant: Schema.NullOr(ZenAssistantBinding),
-  research: Schema.optionalWith(Schema.NullOr(ZenResearchDock), { default: () => null }),
+  research: Schema.optionalWith(Schema.NullOr(ZenDockedResearch), { default: () => null }),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })
@@ -1025,7 +1051,8 @@ export type ZenProjectTerminalPinRequest = typeof ZenProjectTerminalPinRequest.T
  * the thread's own context from the catalog and writes the dock itself, so a
  * caller cannot dock onto authority by describing it. A null thread closes the
  * dock; naming the bound thread again with a new width or collapsed flag
- * rearranges it.
+ * rearranges it. Naming a `project` instead of a thread docks that Project's
+ * own browser, which the server resolves the same way.
  */
 export const ZenResearchDockRequest = Schema.Struct({
   thread: Schema.NullOr(
@@ -1034,6 +1061,7 @@ export const ZenResearchDockRequest = Schema.Struct({
       mode: Schema.Literal("work", "code"),
     }).annotations(strict),
   ),
+  project: Schema.optional(Schema.Struct({ projectId: ProjectId }).annotations(strict)),
   width: Schema.optional(
     Schema.Number.pipe(
       Schema.greaterThanOrEqualTo(MIN_ZEN_RESEARCH_DOCK_WIDTH),
@@ -1042,7 +1070,9 @@ export const ZenResearchDockRequest = Schema.Struct({
   ),
   collapsed: Schema.optional(Schema.Boolean),
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+})
+  .pipe(Schema.filter((request) => request.thread === null || request.project === undefined))
+  .annotations(strict);
 export type ZenResearchDockRequest = typeof ZenResearchDockRequest.Type;
 
 export const ZenResearchDockResult = Schema.Struct({
@@ -1337,7 +1367,7 @@ export type ZenBindAssistantCommand = typeof ZenBindAssistantCommand.Type;
 export const ZenDockResearchCommand = Schema.Struct({
   command: Schema.Literal("dock-research"),
   spaceId: ZenSpaceId,
-  research: Schema.NullOr(ZenResearchDock),
+  research: Schema.NullOr(ZenDockedResearch),
   expectedVersion: AggregateVersion,
 }).annotations(strict);
 export type ZenDockResearchCommand = typeof ZenDockResearchCommand.Type;

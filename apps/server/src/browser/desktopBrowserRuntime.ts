@@ -9,6 +9,7 @@ import {
   BrowserNavigationBlockedError,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
+  type BrowserRuntimeAction,
   type BrowserTargetInspection,
 } from "./browserRuntimePort";
 
@@ -83,7 +84,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
 
   act(
     contextId: BrowserContextId,
-    request: BrowserActionRequest,
+    request: BrowserRuntimeAction,
     signal: AbortSignal,
   ): Promise<BrowserRuntimeObservation> {
     return this.#request(
