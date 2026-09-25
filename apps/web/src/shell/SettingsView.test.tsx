@@ -549,6 +549,18 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
   });
 
+  it("shows the glass level's own tint until a person sets one, and saves the one they set", () => {
+    const applyPatch = vi.fn(async () => true);
+    renderSettings({
+      themeController: { draft: { ...DEFAULT_THEME_SETTINGS, mode: "dark" }, applyPatch } as never,
+    });
+    navigateTo("Appearance");
+    const tint = screen.getByRole("slider", { name: "Glass tint" });
+    expect(tint).toHaveValue("58");
+    fireEvent.change(tint, { target: { value: "12" } });
+    expect(applyPatch).toHaveBeenLastCalledWith({ glassTint: 12 });
+  });
+
   it("writes the chosen glass level to the theme's vibrancy", async () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);

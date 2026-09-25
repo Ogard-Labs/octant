@@ -290,11 +290,24 @@ export const ThemeSettings = Schema.Struct({
   appBackground: Schema.optionalWith(AppBackground, {
     default: () => DEFAULT_APP_BACKGROUND,
   }),
+  /**
+   * How much of the theme's sidebar colour lies over the glass behind the
+   * sidebar and the card gutters, in percent. Absent means the glass level's
+   * own default (Subtle or Strong); set, it replaces both. Optional so rows
+   * written before the slider existed still decode.
+   */
+  glassTint: Schema.optional(Schema.Int.pipe(Schema.between(0, 90))),
   increasedContrast: Schema.Boolean,
   reducedMotion: Schema.Boolean,
   reducedTransparency: Schema.Boolean,
 }).annotations(strict);
 export type ThemeSettings = typeof ThemeSettings.Type;
+
+/** The tint each glass level uses until a person sets one, by theme mode. */
+export const GLASS_TINT_DEFAULTS = {
+  light: { subtle: 78, strong: 62 },
+  dark: { subtle: 58, strong: 32 },
+} as const;
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",

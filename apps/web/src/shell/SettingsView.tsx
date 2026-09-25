@@ -9,6 +9,7 @@ import {
 } from "@octant/contracts";
 import {
   DEFAULT_APP_BACKGROUND,
+  GLASS_TINT_DEFAULTS,
   decodeSidebarBackgroundPresetId,
   decodeThemeHexColor,
   type SidebarBackground,
@@ -16,6 +17,7 @@ import {
 } from "@octant/contracts/theme";
 import { SIDEBAR_BACKGROUND_PRESETS } from "@octant/theme/backgrounds";
 import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
+import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
 import { ProviderSettingsView } from "../providers/ProviderSettingsView";
@@ -1177,6 +1179,19 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
   // Vibrancy mode select that read and wrote the same material.
   const glass: SidebarVibrancyMode =
     props.settings.sidebarMaterial === "system" ? sidebarBackground.vibrancyMode : "off";
+  const themeDraft = props.themeController?.draft ?? props.themeController?.settings;
+  // Until a person moves the slider it shows what the chosen level uses.
+  const glassTint =
+    themeDraft?.glassTint ??
+    GLASS_TINT_DEFAULTS[
+      themeDraft === undefined
+        ? "dark"
+        : resolveEffectiveThemeMode(
+            themeDraft,
+            typeof window !== "undefined" &&
+              window.matchMedia?.("(prefers-color-scheme: dark)").matches === true,
+          )
+    ][glass === "strong" ? "strong" : "subtle"];
   const windowSection = (
     <SettingsSection title="Window">
       <div className="setgroup">
@@ -1219,6 +1234,30 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                 Translucency is unavailable, so Octant is using an opaque sidebar.
               </p>
             ) : null}
+          </SettingRow>
+        ) : null}
+        {isAvailable("glass-tint") && glass !== "off" && props.themeController !== undefined ? (
+          <SettingRow
+            description="How much colour lies over the glass behind the sidebar and around the cards. Lower is more see-through."
+            focused={focusedSetting === settingId("glass-tint")}
+            label="Tint"
+            scope="app"
+            settingId="glass-tint"
+          >
+            <SliderField
+              aria-label="Glass tint"
+              className="settings-view__range"
+              format={(value) => `${String(value)}%`}
+              max={90}
+              min={0}
+              onChange={(event) => {
+                void props.themeController?.applyPatch({
+                  glassTint: Number(event.currentTarget.value),
+                });
+              }}
+              step={1}
+              value={glassTint}
+            />
           </SettingRow>
         ) : null}
         {isAvailable("workspace-material") ? (

@@ -33,6 +33,38 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe("");
   });
 
+  it("lays a chosen glass tint over the sidebar at every level, and keeps it readable under increased contrast", () => {
+    const result = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light", glassTint: 20 }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    const root = document.documentElement;
+    for (const level of ["", "-subtle", "-strong"]) {
+      expect(root.style.getPropertyValue(`--octant-sidebar-translucent${level}`)).toBe(
+        "color-mix(in srgb, #fafaf9 20%, transparent)",
+      );
+    }
+    // Glass cards keep their own tint.
+    expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
+      "color-mix(in srgb, #ffffff 78%, transparent)",
+    );
+    result.rerender(
+      <ThemeSettingsProvider
+        settings={{
+          ...DEFAULT_THEME_SETTINGS,
+          mode: "light",
+          glassTint: 20,
+          increasedContrast: true,
+        }}
+      >
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toMatch(/ 80%, /);
+    result.unmount();
+  });
+
   it("publishes accessibility state on the data-octant-* attributes the stylesheets read", () => {
     const result = render(
       <ThemeSettingsProvider
