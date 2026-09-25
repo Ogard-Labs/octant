@@ -134,7 +134,8 @@ page sit on it as cards: the card radius, one hairline, no shadow, 8px apart,
 all in the workspace colour. Reader pages inside a card use that colour too,
 so every card reads the same. A pane header and the dock head share the 38px
 title rail, and the card draws the one hairline under both. Below 681px the
-sidebar is an overlay drawer and the frame stays flat.
+workspace sidebar is an overlay drawer and the frame stays flat; Settings keeps
+its own narrow layout, a drawer with a flat page, below 960px.
 
 ### Page shell
 

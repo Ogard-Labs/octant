@@ -87,18 +87,23 @@
     background: var(--octant-sidebar-opaque);
   }
 
+  /* Settings is a standalone surface, not inside the workspace layer, so no
+     ancestor frosts it: the back takes the blur the rail used to carry. */
   .shell--material-translucent .settings-view:not(.settings-view--narrow) {
     background: var(--octant-sidebar-translucent);
+    backdrop-filter: blur(22px) saturate(125%);
   }
 
   .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"]
     .settings-view:not(.settings-view--narrow) {
     background: var(--octant-sidebar-translucent-subtle);
+    backdrop-filter: blur(18px) saturate(118%);
   }
 
   .shell--material-translucent[data-octant-sidebar-vibrancy="strong"]
     .settings-view:not(.settings-view--narrow) {
     background: var(--octant-sidebar-translucent-strong);
+    backdrop-filter: blur(30px) saturate(140%);
   }
 
   .settings-view:not(.settings-view--narrow) > .settings-view__sidebar {
@@ -1977,6 +1982,7 @@ textarea.settings-view__text-input {
   .shell--material-translucent[data-octant-sidebar-vibrancy]
     .settings-view:not(.settings-view--narrow) {
     background: var(--octant-sidebar-opaque);
+    backdrop-filter: none;
   }
 
   .shell--material-translucent .settings-view__effective-note {
