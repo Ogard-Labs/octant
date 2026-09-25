@@ -19,7 +19,10 @@ import {
 export function ThemeAppearanceEditor(props: {
   readonly controller: ThemeController;
   readonly effectivePlugins?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
+  /** The control a Settings deep link or search result landed on. */
+  readonly focusedSetting?: string;
 }) {
+  const focusedSetting = props.focusedSetting;
   const theme = props.controller;
   const draft = theme.draft;
   const availablePresets = THEME_PRESETS.filter((preset) =>
@@ -95,7 +98,12 @@ export function ThemeAppearanceEditor(props: {
               </OctantButton>
             ))}
           </div>
-          <SettingRow label="Light preset" scope="app" settingId="appearance.scheme.light-preset">
+          <SettingRow
+            label="Light preset"
+            scope="app"
+            settingId="appearance.scheme.light-preset"
+            focused={focusedSetting === "appearance.scheme.light-preset"}
+          >
             <OctantSelectField
               aria-label="Light preset"
               className="settings-view__select"
@@ -106,7 +114,12 @@ export function ThemeAppearanceEditor(props: {
               value={draft.lightPresetId ?? "system"}
             />
           </SettingRow>
-          <SettingRow label="Dark preset" scope="app" settingId="appearance.scheme.dark-preset">
+          <SettingRow
+            label="Dark preset"
+            scope="app"
+            settingId="appearance.scheme.dark-preset"
+            focused={focusedSetting === "appearance.scheme.dark-preset"}
+          >
             <OctantSelectField
               aria-label="Dark preset"
               className="settings-view__select"
@@ -115,22 +128,6 @@ export function ThemeAppearanceEditor(props: {
                 .filter((preset) => preset.supportedModes.includes("dark"))
                 .map((preset) => ({ id: preset.id, label: preset.displayName }))}
               value={draft.darkPresetId ?? "system"}
-            />
-          </SettingRow>
-          <SettingRow label="Density" scope="app" settingId="appearance.density">
-            <OctantSelectField
-              aria-label="Theme density"
-              className="settings-view__select"
-              onValueChange={(value) =>
-                void theme.applyPatch({
-                  density: value as ThemeSettings["density"],
-                })
-              }
-              options={[
-                { id: "comfortable", label: "Comfortable" },
-                { id: "compact", label: "Compact" },
-              ]}
-              value={draft.density}
             />
           </SettingRow>
         </div>
@@ -144,18 +141,21 @@ export function ThemeAppearanceEditor(props: {
             label="Interface typography"
             familyLabel="Interface font"
             surface="ui"
+            focusedSetting={focusedSetting}
             value={draft.typography.ui}
             onChange={(patch) => setTypography("ui", patch)}
             hideLegend
           />
           <SettingsDisclosure
             title="Code typography"
+            defaultOpen={focusedSetting?.startsWith("appearance.typography.editor.") === true}
             description="Font, size, and spacing inside code editors."
           >
             <TypographyControl
               label="Code typography"
               familyLabel="Code font"
               surface="editor"
+              focusedSetting={focusedSetting}
               value={draft.typography.editor}
               onChange={(patch) => setTypography("editor", patch)}
               extended
@@ -164,12 +164,14 @@ export function ThemeAppearanceEditor(props: {
           </SettingsDisclosure>
           <SettingsDisclosure
             title="Terminal typography"
+            defaultOpen={focusedSetting?.startsWith("appearance.typography.terminal.") === true}
             description="Font, size, and spacing inside terminals."
           >
             <TypographyControl
               label="Terminal typography"
               familyLabel="Terminal font family"
               surface="terminal"
+              focusedSetting={focusedSetting}
               value={draft.typography.terminal}
               onChange={(patch) => setTypography("terminal", patch)}
               extended
@@ -185,6 +187,7 @@ export function ThemeAppearanceEditor(props: {
             label="Increased contrast"
             scope="app"
             settingId="appearance.accessibility.increased-contrast"
+            focused={focusedSetting === "appearance.accessibility.increased-contrast"}
           >
             <OctantSwitch
               checked={draft.increasedContrast}
@@ -196,6 +199,7 @@ export function ThemeAppearanceEditor(props: {
             label="Reduced motion"
             scope="app"
             settingId="appearance.accessibility.reduced-motion"
+            focused={focusedSetting === "appearance.accessibility.reduced-motion"}
           >
             <OctantSwitch
               checked={draft.reducedMotion}
@@ -207,6 +211,7 @@ export function ThemeAppearanceEditor(props: {
             label="Reduced transparency"
             scope="app"
             settingId="appearance.accessibility.reduced-transparency"
+            focused={focusedSetting === "appearance.accessibility.reduced-transparency"}
           >
             <OctantSwitch
               checked={draft.reducedTransparency}
@@ -216,7 +221,10 @@ export function ThemeAppearanceEditor(props: {
           </SettingRow>
         </div>
       </fieldset>
-      <details className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
+      <details
+        className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
+        {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}
+      >
         <summary>
           <span>Import or export theme</span>
           <ChevronDown
@@ -226,7 +234,10 @@ export function ThemeAppearanceEditor(props: {
           />
         </summary>
         <div className="setgroup settings-theme-editor__disclosure-body">
-          <ThemeTransfer controller={theme} />
+          <ThemeTransfer
+            controller={theme}
+            focused={focusedSetting === "appearance.theme-import-export"}
+          />
         </div>
       </details>
     </div>
@@ -247,14 +258,17 @@ function TypographyControl(props: {
   readonly onChange: (patch: Record<string, unknown>) => void;
   readonly extended?: boolean;
   readonly hideLegend?: boolean;
+  readonly focusedSetting?: string | undefined;
 }) {
+  const rowId = (field: string) => `appearance.typography.${props.surface}.${field}`;
   return (
     <fieldset className="settings-view__theme-group">
       <legend className={props.hideLegend ? "sr-only" : undefined}>{props.label}</legend>
       <SettingRow
         label={props.familyLabel}
         scope="app"
-        settingId={`appearance.typography.${props.surface}.family`}
+        settingId={rowId("family")}
+        focused={props.focusedSetting === rowId("family")}
       >
         <FontFamilyPicker
           label={props.familyLabel}
@@ -277,7 +291,8 @@ function TypographyControl(props: {
       <SettingRow
         label="Font size"
         scope="app"
-        settingId={`appearance.typography.${props.surface}.size`}
+        settingId={rowId("size")}
+        focused={props.focusedSetting === rowId("size")}
       >
         <OctantNumberStepper
           label={`${props.label} font size`}
@@ -293,7 +308,8 @@ function TypographyControl(props: {
           <SettingRow
             label="Line height"
             scope="app"
-            settingId={`appearance.typography.${props.surface}.line-height`}
+            settingId={rowId("line-height")}
+            focused={props.focusedSetting === rowId("line-height")}
           >
             <OctantNumberStepper
               label={`${props.label} line height`}
@@ -307,7 +323,8 @@ function TypographyControl(props: {
           <SettingRow
             label={`${props.label} ligatures`}
             scope="app"
-            settingId={`appearance.typography.${props.surface}.ligatures`}
+            settingId={rowId("ligatures")}
+            focused={props.focusedSetting === rowId("ligatures")}
           >
             <OctantSwitch
               checked={props.value.ligatures ?? false}
@@ -321,7 +338,7 @@ function TypographyControl(props: {
   );
 }
 
-function ThemeTransfer(props: { readonly controller: ThemeController }) {
+function ThemeTransfer(props: { readonly controller: ThemeController; readonly focused: boolean }) {
   const [value, setValue] = useState("");
   const [dropped, setDropped] = useState<ReadonlyArray<string>>([]);
   return (
@@ -331,7 +348,12 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
           {`The export left out ${String(dropped.length)} override this theme does not accept: ${[...new Set(dropped)].join(", ")}.`}
         </p>
       )}
-      <SettingRow label="Theme JSON" scope="app" settingId="appearance.theme-import-export">
+      <SettingRow
+        focused={props.focused}
+        label="Theme JSON"
+        scope="app"
+        settingId="appearance.theme-import-export"
+      >
         <OctantTextarea
           aria-label="Theme JSON"
           className="textarea settings-view__textarea"

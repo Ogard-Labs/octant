@@ -8,6 +8,7 @@ import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo, useState } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { SettingRow } from "../settings/primitives";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -60,6 +61,14 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
         current.defaultPersonalityInstructions === before.defaultPersonalityInstructions
           ? next.defaultPersonalityInstructions
           : current.defaultPersonalityInstructions,
+      fallbackProviderInstanceId:
+        current.fallbackProviderInstanceId === before.fallbackProviderInstanceId
+          ? next.fallbackProviderInstanceId
+          : current.fallbackProviderInstanceId,
+      fallbackModelId:
+        current.fallbackModelId === before.fallbackModelId
+          ? next.fallbackModelId
+          : current.fallbackModelId,
     }));
   }
   const [endpointError, setEndpointError] = useState<string>();
@@ -93,6 +102,28 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       : (draft.defaultProviderInstanceId as ProviderInstanceId);
   const selectedModelId =
     draft.defaultModelId === "" ? undefined : (draft.defaultModelId as ProviderModelId);
+  const fallbackGroups = useMemo(
+    () =>
+      buildModelPickerGroups({
+        instances: props.providerSnapshot?.instances ?? [],
+        observedByInstance: new Map(
+          (props.providerSnapshot?.observedStates ?? []).map(
+            (state) => [state.instanceId, state] as const,
+          ),
+        ),
+        providerOrder: props.providerSnapshot?.defaults.providerOrder,
+        hiddenModels: props.providerSnapshot?.defaults.hiddenModels,
+        mode: "chat",
+        currentSelection:
+          draft.fallbackProviderInstanceId === "" || draft.fallbackModelId === ""
+            ? undefined
+            : {
+                providerInstanceId: draft.fallbackProviderInstanceId as ProviderInstanceId,
+                modelId: draft.fallbackModelId as ProviderModelId,
+              },
+      }),
+    [props.providerSnapshot, draft.fallbackProviderInstanceId, draft.fallbackModelId],
+  );
 
   const busy = props.busy === true || saving;
 
@@ -140,9 +171,14 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       defaultResearchRouting: next.defaultResearchRouting,
       ...(searxngBaseUrl === "" ? {} : { searxngBaseUrl }),
       defaultPersonalityInstructions: instructions,
-      ...(props.settings.providerFallback === undefined
+      ...(next.fallbackProviderInstanceId === "" || next.fallbackModelId === ""
         ? {}
-        : { providerFallback: props.settings.providerFallback }),
+        : {
+            providerFallback: {
+              providerInstanceId: next.fallbackProviderInstanceId as ProviderInstanceId,
+              modelId: next.fallbackModelId as ProviderModelId,
+            },
+          }),
     };
     setSaving(true);
     try {
@@ -200,6 +236,57 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             selectedModelId={selectedModelId}
             selectedProviderInstanceId={selectedProviderInstanceId}
           />
+        </SettingRow>
+        {/* The server already routes a turn to this model when the default
+            provider cannot serve it, but nothing in Settings could set it. */}
+        <SettingRow
+          description="Answers when the default provider cannot serve a turn. Optional."
+          label="Fallback model"
+          scope="host"
+          settingId="chat-fallback-model"
+        >
+          <div className="chat-settings__fallback">
+            <ComposerModelPicker
+              rememberChoice={false}
+              menuSide="bottom"
+              unselectedLabel="None"
+              ariaLabel="Chat fallback provider and model"
+              groups={fallbackGroups}
+              onSelect={(selection) => {
+                const change = {
+                  fallbackProviderInstanceId: String(selection.providerInstanceId),
+                  fallbackModelId: String(selection.modelId),
+                };
+                setDraft((current) => ({ ...current, ...change }));
+                void commit(change);
+              }}
+              selectedModelId={
+                draft.fallbackModelId === ""
+                  ? undefined
+                  : (draft.fallbackModelId as ProviderModelId)
+              }
+              selectedProviderInstanceId={
+                draft.fallbackProviderInstanceId === ""
+                  ? undefined
+                  : (draft.fallbackProviderInstanceId as ProviderInstanceId)
+              }
+            />
+            {draft.fallbackModelId === "" ? null : (
+              <OctantButton
+                disabled={busy}
+                onClick={() => {
+                  const change = { fallbackProviderInstanceId: "", fallbackModelId: "" };
+                  setDraft((current) => ({ ...current, ...change }));
+                  void commit(change);
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Clear
+              </OctantButton>
+            )}
+          </div>
         </SettingRow>
         <SettingRow
           description="New Chat threads start with research turned on."
@@ -317,6 +404,12 @@ function draftFrom(settings: ChatSettings) {
     defaultResearchRouting: settings.defaultResearchRouting,
     searxngBaseUrl: settings.searxngBaseUrl ?? "",
     defaultPersonalityInstructions: settings.defaultPersonalityInstructions,
+    fallbackProviderInstanceId:
+      settings.providerFallback === undefined
+        ? ""
+        : String(settings.providerFallback.providerInstanceId),
+    fallbackModelId:
+      settings.providerFallback === undefined ? "" : String(settings.providerFallback.modelId),
   };
 }
 

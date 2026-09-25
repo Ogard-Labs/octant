@@ -14,6 +14,8 @@ import { SettingRow, SettingsFactList } from "../settings/primitives";
  */
 export interface AutomationNotificationSettingsProps {
   readonly client: AutomationNotificationClient;
+  /** A Settings deep link or search result landed on the Notifications row. */
+  readonly focused?: boolean;
 }
 
 type LoadState =
@@ -113,6 +115,7 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
       <div className="setgroup">
         <SettingRow
           description="Send automation status notifications from this host."
+          focused={props.focused === true}
           label="Notifications"
           scope="host"
           settingId="host-automation-notifications"

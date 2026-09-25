@@ -14,26 +14,32 @@ const POSTURES: ReadonlyArray<{
   readonly label: string;
   readonly description: string;
 }> = [
+  // The descriptions say what each choice does, not what it was meant to
+  // do: under Ask a person starting a helper from the Agents dock is the
+  // confirmation (there is no separate prompt), and only the Harness model's
+  // delegate tool is refused.
   {
     value: "off",
     label: "Off",
-    description: "No child runs can be created. Existing hierarchy stays viewable.",
+    description:
+      "Nobody can start a helper agent, including Add agent in the Agents dock. Existing ones stay viewable.",
   },
   {
     value: "ask",
-    label: "Ask",
-    description: "Every child creation requires an explicit, human-initiated request.",
+    label: "Only when I start them",
+    description:
+      "You start helpers from the Agents dock. The model can suggest one but cannot start it.",
   },
   {
     value: "automatic",
-    label: "Automatic",
+    label: "Automatically",
     description:
-      "Child creation requests are admitted without a separate confirmation step, still bounded by authority ceilings and capacity limits.",
+      "The model can start helpers on its own, within the thread's access and capacity limits.",
   },
 ];
 
 /**
- * Settings → Agents panel: server-authoritative Off / Ask /
+ * Settings → Octant Harness › Helper agents: server-authoritative Off / Ask /
  * Automatic creation posture. Reads and writes go straight through
  * `AgentRunSettingsClient`; there is no local override or cache that could
  * drift from the server's own event-sourced state.
@@ -110,16 +116,16 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
   return (
     <section aria-label="Agents" className="agent-run-settings-panel">
       <div className="settings-card-section settings-card-section--open">
-        <h2>Subagents</h2>
+        <h2>Helper agents</h2>
         <div className="setgroup">
           <SettingRow
             description={current?.description}
-            label="Subagent creation"
+            label="Let the model start helper agents"
             scope="app"
             settingId="subagent-creation-posture"
           >
             <OctantSelectField
-              aria-label="Subagent creation"
+              aria-label="Let the model start helper agents"
               disabled={saving}
               onValueChange={(value) => {
                 const posture = POSTURES.find((entry) => entry.value === value);

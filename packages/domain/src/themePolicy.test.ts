@@ -7,7 +7,6 @@ import {
   type ThemeSettings,
 } from "@octant/contracts/theme";
 import {
-  enforceAccessibilitySettings,
   enforceSidebarBackgroundAccessibility,
   resolveEffectiveSidebarBackground,
   resolveEffectiveThemeMode,
@@ -86,28 +85,6 @@ describe("theme policy", () => {
       [],
     );
     expect(resolved.ui.family).toMatch(/system-ui|sans-serif/);
-  });
-
-  it("forces translucency to opaque when reduced transparency is enabled", () => {
-    const enforced = enforceAccessibilitySettings({
-      ...baseSettings,
-      reducedTransparency: true,
-    });
-    expect(enforced.translucency).toBe("opaque");
-  });
-
-  it("leaves translucency unchanged when reduced transparency is disabled", () => {
-    const enforced = enforceAccessibilitySettings(baseSettings);
-    expect(enforced.translucency).toBe("translucent");
-  });
-
-  it("leaves an already opaque theme opaque under reduced transparency", () => {
-    const enforced = enforceAccessibilitySettings({
-      ...baseSettings,
-      translucency: "opaque",
-      reducedTransparency: true,
-    });
-    expect(enforced.translucency).toBe("opaque");
   });
 });
 

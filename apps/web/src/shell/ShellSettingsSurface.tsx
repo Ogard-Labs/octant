@@ -21,7 +21,6 @@ import type { ProviderController } from "../providers/useProviderController";
 import type { ThemeController } from "../theme/useThemeController";
 import { visuallyHiddenStyle } from "./shellCommandWiring";
 import { SettingsSurfaceErrorBoundary } from "./SettingsSurfaceErrorBoundary";
-import type { ImplementedSettingId } from "./useShellController";
 import { ShellState } from "./ShellState";
 import { ShellThemeRoot } from "./ShellFrame";
 import type { OctantHostBridge } from "./hostBridge";
@@ -68,7 +67,6 @@ export interface ShellSettingsSurfaceProps {
   readonly usageClient: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
-  readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
   readonly backgroundImageLibrary?: BackgroundImageLibrary;
   readonly announcement: string;
   readonly announcementSequence: number;
@@ -142,7 +140,6 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.localUsageHistoryClient === undefined
               ? {}
               : { localUsageHistoryClient: props.localUsageHistoryClient })}
-            visibleSettings={props.visibleSettings}
           />
         </Suspense>
       </SettingsSurfaceErrorBoundary>

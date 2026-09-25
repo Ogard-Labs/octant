@@ -22,6 +22,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { SettingsDisclosure } from "../settings/primitives";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 /**
@@ -677,13 +678,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       className="extensions-settings"
       id="settings-skills"
     >
+      {/* Inside Settings the page subtitle already says this, and a second
+          lead paragraph under it read as a stutter. */}
       {props.showHeading === false ? null : (
-        <h2 id="extensions-settings-heading">Skills &amp; Extensions</h2>
+        <>
+          <h2 id="extensions-settings-heading">Skills &amp; Extensions</h2>
+          <p className="extensions-settings__description">
+            Skills extend what agents can do. Review the source, then trust and enable only what you
+            want available.
+          </p>
+        </>
       )}
-      <p className="extensions-settings__description">
-        Skills extend what agents can do. Review the source, then trust and enable only what you
-        want available.
-      </p>
       {view === "installed" ? (
         <>
           <section
@@ -777,7 +782,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               ) : (
                 <>
                   <div className="extensions-settings__installed-filter">
-                    <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <Search aria-hidden="true" size={14} strokeWidth={1.75} />
                     <OctantInput
                       aria-label="Filter installed skills"
                       onChange={(event) => {
@@ -814,7 +819,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                     {standaloneSkillSummary.other === 0 ? null : (
                       <span>{standaloneSkillSummary.other} need attention</span>
                     )}
-                    <span>
+                    <span className="extensions-settings__summary-count">
                       Showing {visibleStandaloneSkills.length} of {filteredStandaloneSkills.length}
                     </span>
                   </div>
@@ -823,11 +828,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       No installed skills match this filter.
                     </p>
                   ) : (
-                    <ul
-                      aria-label="Standalone skills"
-                      className="extensions-settings__cards settings-collection-scroll"
-                      tabIndex={0}
-                    >
+                    <ul aria-label="Standalone skills" className="extensions-settings__cards">
                       {visibleStandaloneSkills.map((skill) => (
                         <StandaloneSkillCard
                           key={String(skill.skill.qualifiedId)}
@@ -943,8 +944,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
             {!marketplaceFetchesEnabled ? (
               <p className="extensions-settings__state" role="status">
-                Marketplace fetches are off in Settings → General → Marketplace. Catalog search,
-                Inspect, Search skills, preview, and install will not contact registries.
+                Marketplace fetches are off in Settings → Skills &amp; Extensions → Marketplace.
+                Catalog search, Inspect, Search skills, preview, and install will not contact
+                registries.
               </p>
             ) : null}
             <div className="extensions-settings__body">
@@ -1449,26 +1451,25 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
   // runtime state blocks turning the skill on, but never blocks turning it off,
   // so the supervisor can still drain a skill the user no longer wants.
   const enableDisabled = (runtimeBlocked && !skill.desiredEnabled) || props.busy;
+  // A row is one decision: is this skill on? Review and trust are the steps
+  // before it, so a row offers only the next step it is waiting on, and the
+  // rest (revoke, the qualified id, the load failure) waits in Details. Six
+  // controls on every row read as clutter across seventy-five skills.
+  const unavailable = !skill.skill.available || runtimeBlocked;
+  const problem =
+    skill.effectiveState.kind === "blocked" && !needsReview
+      ? BLOCK_REASON_LABELS[skill.effectiveState.reason]
+      : "Unavailable";
+  const sourceLine = unavailable
+    ? `${standaloneSkillSummarySourceLabel(skill)} · ${problem}`
+    : standaloneSkillSummarySourceLabel(skill);
   return (
-    <li className="extcard">
+    <li className="extcard" data-unavailable={unavailable ? "true" : undefined}>
       <span aria-hidden="true" className="icon-mark">
         <BookOpen aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
-        {needsReview ? (
-          <span className="extensions-settings__state-label">Needs review</span>
-        ) : (
-          <span
-            className={blocked || !skill.skill.available ? "badge badge-warn" : "badge badge-ok"}
-          >
-            {blocked
-              ? effectiveLabel(skill.effectiveState)
-              : skill.skill.available
-                ? "Available"
-                : "Unavailable"}
-          </span>
-        )}
         {!skill.reviewed ? (
           <OctantButton
             aria-label={`Review ${skill.displayName}`}
@@ -1476,38 +1477,22 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
             onClick={() => void props.onReview()}
             size="sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             Review
           </OctantButton>
-        ) : (
+        ) : !skill.provenance.reviewed ? (
           <OctantButton
-            aria-label={
-              skill.provenance.reviewed
-                ? `Revoke review for ${skill.displayName}`
-                : `Trust ${skill.displayName}`
-            }
+            aria-label={`Trust ${skill.displayName}`}
             disabled={props.busy}
-            onClick={() => void props.onTrust(!skill.provenance.reviewed)}
+            onClick={() => void props.onTrust(true)}
             size="sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            {skill.provenance.reviewed ? "Revoke trust" : "Trust source"}
+            Trust
           </OctantButton>
-        )}
-        <OctantButton
-          aria-label={
-            skill.desiredEnabled ? `Disable ${skill.displayName}` : `Enable ${skill.displayName}`
-          }
-          disabled={enableDisabled}
-          onClick={() => void props.onDesired(!skill.desiredEnabled)}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {skill.desiredEnabled ? "Disable" : "Enable"}
-        </OctantButton>
+        ) : null}
         {props.colliding ? (
           <OctantButton
             aria-label={`Use ${skill.displayName} from this source`}
@@ -1515,34 +1500,48 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
             onClick={() => void props.onSelectCollision()}
             size="sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             Use this source
           </OctantButton>
         ) : null}
-        <OctantButton
+        <OctantSwitch
+          checked={skill.desiredEnabled}
+          disabled={enableDisabled}
+          {...(enableDisabled && !props.busy
+            ? { disabledReason: "This skill cannot load, so it cannot be turned on." }
+            : {})}
+          label={`Enable ${skill.displayName}`}
+          onCheckedChange={(checked) => void props.onDesired(checked)}
+        />
+        <OctantIconButton
           aria-expanded={detailsOpen}
-          aria-label={`${detailsOpen ? "Hide" : "Show"} details for ${skill.displayName}`}
+          label={`${detailsOpen ? "Hide" : "Show"} details for ${skill.displayName}`}
           onClick={() => setDetailsOpen((current) => !current)}
-          size="sm"
           type="button"
-          variant="ghost"
         >
           {detailsOpen ? (
             <ChevronUp aria-hidden="true" size={14} />
           ) : (
             <ChevronDown aria-hidden="true" size={14} />
           )}
-          Details
-        </OctantButton>
+        </OctantIconButton>
       </span>
-      <span className="extcard-src">{standaloneSkillSummarySourceLabel(skill)}</span>
+      <span className="extcard-src">
+        {needsReview ? `${sourceLine} · Needs review` : sourceLine}
+      </span>
       {skill.description === undefined ? null : <p className="extcard-desc">{skill.description}</p>}
       {detailsOpen ? (
         <div className="extensions-settings__technical-details">
           <span className="extensions-settings__technical-source">
             {standaloneSkillSourceLabel(skill)}
           </span>
+          {skill.skill.diagnostic === undefined ? null : (
+            <p className="extensions-settings__failure" role="status">
+              <span>{skill.skill.diagnostic.code}</span>
+              <span>{skill.skill.diagnostic.message}</span>
+            </p>
+          )}
           {/* The qualified id carries a full content hash. It identifies the
               exact package for support and remains available on demand. */}
           <code className="extensions-settings__skill-id" title={String(skill.skill.qualifiedId)}>
@@ -1572,14 +1571,21 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
               <dd>{skillContentSize(skill.contentBytes)}</dd>
             </div>
           </dl>
+          {skill.provenance.reviewed ? (
+            <OctantButton
+              aria-label={`Revoke trust for ${skill.displayName}`}
+              className="extensions-settings__revoke"
+              disabled={props.busy}
+              onClick={() => void props.onTrust(false)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Revoke trust
+            </OctantButton>
+          ) : null}
         </div>
       ) : null}
-      {skill.skill.diagnostic === undefined ? null : (
-        <p className="extensions-settings__failure" role="status">
-          <span>{skill.skill.diagnostic.code}</span>
-          <span>{skill.skill.diagnostic.message}</span>
-        </p>
-      )}
     </li>
   );
 }

@@ -152,7 +152,12 @@ Surface (reading measure 880px, or wide for boards)
 Leaving a reader route is always the ghost "Back to workspace" control in the
 header. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
-draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
+draws no hairline between groups. The groups are Personal (how Octant looks and
+behaves for you), Modes (each mode's defaults), Models (which provider or model
+answers each job), Agents (what a running agent may do), Integrations, and
+System (the running host, its data, remote access, and usage). A setting lives
+on the page of the thing it changes, and a moved setting keeps answering links
+to its old page. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
 
 ### Content tabs

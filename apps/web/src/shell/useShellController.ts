@@ -67,43 +67,6 @@ export type ShellControllerStatus =
   | "recovery-required"
   | "conflict-reload";
 
-export type ImplementedSettingId =
-  | "enable-chat"
-  | "enable-work"
-  | "stream-replies"
-  | "sidebar-width"
-  | "sidebar-destinations"
-  | "sidebar-more"
-  | "sidebar-material"
-  | "workspace-material"
-  | "sidebar-background"
-  | "app-background"
-  | "mode-switcher"
-  | "project-view-switcher"
-  | "transcript-text-size"
-  | "transcript-width"
-  | "thread-provider-icons"
-  | "sidebar-projects-branch"
-  | "sidebar-projects-pull-request"
-  | "sidebar-projects-last-updated"
-  | "sidebar-projects-status"
-  | "sidebar-activity-project"
-  | "sidebar-activity-branch"
-  | "sidebar-activity-pull-request"
-  | "sidebar-activity-last-updated"
-  | "sidebar-activity-status"
-  | "open-in-applications"
-  | "theme-mode"
-  | "theme-preset"
-  | "ui-typography"
-  | "editor-typography"
-  | "terminal-typography"
-  | "theme-accessibility"
-  | "theme-import-export"
-  | "reset-layout"
-  | "reset-window-bounds"
-  | "export-diagnostics";
-
 export interface NativeShellHost {
   readonly resetBounds: () => Promise<void> | void;
   readonly openInNewWindow?: (target: ProjectWindowTarget) => Promise<void> | void;
@@ -300,57 +263,6 @@ function nextAnnouncement(current: AnnouncementEvent, message: string): Announce
   return { message, sequence: current.sequence + 1 };
 }
 
-const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
-  "enable-chat": "enable chat mode",
-  "enable-work": "enable work mode",
-  "stream-replies": "stream replies answer presentation",
-  "sidebar-width": "sidebar width",
-  "sidebar-destinations": "sidebar destinations customize show hide rows menu reorder order",
-  "sidebar-more":
-    "sidebar more row reveal hidden menu destinations account menu customize ellipsis overflow",
-  "sidebar-material": "appearance translucent sidebar translucency material system opaque",
-  "workspace-material":
-    "appearance translucent workspace window translucency material vibrancy glass system opaque",
-  "sidebar-background":
-    "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
-  "app-background":
-    "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
-  "mode-switcher": "mode switcher compact buttons dropdown sidebar navigation",
-  "project-view-switcher": "project view switcher icons dropdown sidebar code",
-  "transcript-text-size": "transcript conversation text font size small medium large",
-  "transcript-width": "transcript conversation composer width narrow medium wide centered",
-  "thread-provider-icons": "thread provider icon avatar logo sidebar compact visibility",
-  "sidebar-projects-branch":
-    "sidebar projects rows branch worktree checkout show hide metadata appearance",
-  "sidebar-projects-pull-request":
-    "sidebar projects rows pull request pr number state chip show hide metadata appearance",
-  "sidebar-projects-last-updated":
-    "sidebar projects rows last updated age timestamp show hide metadata appearance",
-  "sidebar-projects-status":
-    "sidebar projects rows status mark working waiting unread show hide metadata appearance",
-  "sidebar-activity-project": "sidebar activity rows project name show hide metadata appearance",
-  "sidebar-activity-branch":
-    "sidebar activity rows branch worktree checkout show hide metadata appearance",
-  "sidebar-activity-pull-request":
-    "sidebar activity rows pull request pr number state chip show hide metadata appearance",
-  "sidebar-activity-last-updated":
-    "sidebar activity rows last updated age timestamp show hide metadata appearance",
-  "sidebar-activity-status":
-    "sidebar activity rows status mark working waiting unread show hide metadata appearance",
-  "open-in-applications": "open in vscode cursor zed finder terminal ghostty xcode",
-  "theme-mode": "theme mode system light dark appearance",
-  "theme-preset": "theme preset Octant palette light dark",
-  "ui-typography": "ui typography font family size prose interface",
-  "editor-typography": "editor typography font code line height ligatures",
-  "terminal-typography": "terminal typography font code line height ligatures",
-  "theme-accessibility": "theme accessibility contrast motion transparency",
-  "theme-import-export": "theme import export json vscode safe",
-  "reset-layout": "reset active mode layout workspace",
-  "reset-window-bounds": "reset native window bounds",
-  "export-diagnostics": "export diagnostics evidence packet support redacted safe sealed receipt",
-};
-
-const implementedSettings = Object.keys(settingSearchText) as Array<ImplementedSettingId>;
 const settledMutationQueue = Promise.resolve();
 
 export function useShellController(options: ShellControllerOptions) {
@@ -1141,10 +1053,6 @@ export function useShellController(options: ShellControllerOptions) {
       : authoritative.workspace.activePaneIds[authoritative.workspace.activeMode],
     options.isNarrow ?? false,
   );
-  const normalizedSearch = normalizeSettingsSearch(settingsSearch);
-  const visibleSettings = implementedSettings.filter(
-    (setting) => normalizedSearch === "" || settingSearchText[setting].includes(normalizedSearch),
-  );
   // Derive the surface catalog from the live workspace context so the launcher
   // reflects context changes (e.g. first Project open) without a full reload.
   const availableSurfaces =
@@ -1206,17 +1114,8 @@ export function useShellController(options: ShellControllerOptions) {
     status,
     tabActivation,
     updateSettings,
-    visibleSettings,
     workspace: authoritative?.workspace,
   };
-}
-
-function normalizeSettingsSearch(value: string): string {
-  return value
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .replace(/\s+/g, " ");
 }
 
 /**

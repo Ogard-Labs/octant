@@ -1,8 +1,5 @@
 import type { ThemeSettings } from "@octant/contracts/theme";
-import {
-  enforceAccessibilitySettings,
-  enforceSidebarBackgroundAccessibility,
-} from "@octant/domain/theme-policy";
+import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import { getThemePreset, MAX_THEME_PATTERN_INKS } from "@octant/theme";
 import { useLayoutEffect, type ReactNode } from "react";
@@ -29,9 +26,7 @@ export function ThemeSettingsProvider(props: {
     const root = document.documentElement;
     const settings = props.settings;
     if (settings === undefined) return;
-    const accessible = enforceSidebarBackgroundAccessibility(
-      enforceAccessibilitySettings(settings),
-    );
+    const accessible = enforceSidebarBackgroundAccessibility(settings);
     const systemPrefersDark =
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;

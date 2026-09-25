@@ -12,7 +12,7 @@ import type { PurgeThreadsOutcome } from "@octant/contracts/thread-retention";
 import { localHostDisplayName } from "@octant/client-runtime";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
-import { HostSettingsSection } from "./HostSettingsSection";
+import { HostDataSettingsSection, HostSettingsSection } from "./HostSettingsSection";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 
 const serviceStatus: HostControlStatus = {
@@ -96,7 +96,7 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
       related: [
         {
           kind: "thread-retention" as const,
-          settings: { section: "host" as const, setting: "thread-retention" },
+          settings: { section: "data" as const, setting: "thread-retention" },
         },
       ],
     }),
@@ -117,33 +117,44 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
 }
 
 describe("HostSettingsSection", () => {
-  it("keeps host controls and a backup draft when refreshing status fails", async () => {
+  it("keeps host controls on screen when refreshing status fails", async () => {
     const pending = Promise.withResolvers<HostControlStatus>();
     const status = vi
       .fn()
       .mockResolvedValueOnce(serviceStatus)
       .mockReturnValueOnce(pending.promise);
     render(<HostSettingsSection client={makeClient({ status })} />);
-    const input = await screen.findByLabelText("Backup label");
-    fireEvent.change(input, { target: { value: "before-upgrade" } });
+    const stop = await screen.findByRole("button", { name: "Stop host" });
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
-    expect(screen.getByLabelText("Backup label")).toBe(input);
     await act(async () => pending.reject(new Error("Host status could not be refreshed.")));
-    expect(screen.getByLabelText("Backup label")).toBe(input);
-    expect(input).toHaveValue("before-upgrade");
+    expect(screen.getByRole("button", { name: "Stop host" })).toBe(stop);
+    expect(screen.getByText("host-1")).toBeInTheDocument();
     expect(await screen.findByText("Host status could not be refreshed.")).toBeVisible();
   });
 
-  it("keeps host health visible while the data inventory is disclosed on demand", async () => {
-    const user = userEvent.setup();
-    render(<HostSettingsSection client={makeClient()} />);
-    await screen.findByText("host-1");
-    expect(screen.getByRole("region", { name: "Readiness" })).toBeVisible();
-    const inventory = screen.getByText("Stored data").closest("details");
-    expect(inventory).not.toHaveAttribute("open");
-    await user.click(screen.getByText("Stored data"));
-    expect(inventory).toHaveAttribute("open");
+  it("keeps layout resets and diagnostics reachable while the host is unreachable", async () => {
+    render(
+      <HostSettingsSection
+        client={makeClient({
+          status: async () => {
+            throw new Error("The host control service is unreachable.");
+          },
+        })}
+        maintenance={<button type="button">Reset active mode layout</button>}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("unreachable");
+    expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeVisible();
+  });
+
+  it("shows the data inventory openly on Data & privacy, beside retention and backup", async () => {
+    render(<HostDataSettingsSection client={makeClient()} />);
+    expect(await screen.findByRole("region", { name: "Thread retention" })).toHaveClass(
+      "settings-panel",
+    );
+    expect(screen.getByText("Data map").closest("details")).toBeNull();
     expect(screen.getByRole("button", { name: "Create backup" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Restore from backup" })).toBeVisible();
   });
 
   it("renders identity, owner mode, policy, versions, readiness, and capabilities", async () => {
@@ -173,7 +184,6 @@ describe("HostSettingsSection", () => {
       "settings-card-section--open",
     );
     expect(screen.getByRole("region", { name: "Identity" })).not.toHaveClass("settings-panel");
-    expect(screen.getByRole("region", { name: "Thread retention" })).toHaveClass("settings-panel");
   });
 
   it("keeps the section navigable by headings for assistive technology", async () => {
@@ -182,14 +192,15 @@ describe("HostSettingsSection", () => {
 
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
     expect(headings).toEqual(
-      expect.arrayContaining([
-        "Identity",
-        "Service policy",
-        "Readiness",
-        "Backup",
-        "Recovery",
-        "Thread retention",
-      ]),
+      expect.arrayContaining(["Identity", "Service policy", "Readiness", "Lifecycle"]),
+    );
+    expect(headings).not.toContain("Backup");
+
+    render(<HostDataSettingsSection client={makeClient()} />);
+    await screen.findByText("Thread retention");
+    const dataHeadings = screen.getAllByRole("heading").map((h) => h.textContent);
+    expect(dataHeadings).toEqual(
+      expect.arrayContaining(["Backup", "Recovery", "Thread retention"]),
     );
   });
 
@@ -226,8 +237,8 @@ describe("HostSettingsSection", () => {
 
   it("offers only the declared thread retention scopes and modes", async () => {
     const user = userEvent.setup();
-    render(<HostSettingsSection client={makeClient()} />);
-    await screen.findByText("host-1");
+    render(<HostDataSettingsSection client={makeClient()} />);
+    await screen.findByText("Thread retention");
 
     const scope = screen.getByLabelText("Scope");
     expect(scope).toHaveTextContent("This host");
@@ -318,9 +329,9 @@ describe("HostSettingsSection", () => {
         byteLength: 2_048,
       }),
     );
-    render(<HostSettingsSection client={makeClient({ backup })} />);
+    render(<HostDataSettingsSection client={makeClient({ backup })} />);
 
-    await screen.findByText("host-1");
+    await screen.findByLabelText("Backup label");
     fireEvent.change(screen.getByLabelText("Backup label"), {
       target: { value: "pre-upgrade" },
     });
@@ -337,18 +348,18 @@ describe("HostSettingsSection", () => {
     const backup = vi.fn(
       async (): Promise<HostBackupOutcome> => ({ kind: "failed", code: "backup-failed" }),
     );
-    render(<HostSettingsSection client={makeClient({ backup })} />);
+    render(<HostDataSettingsSection client={makeClient({ backup })} />);
 
-    await screen.findByText("host-1");
+    await screen.findByLabelText("Backup label");
     fireEvent.click(screen.getByRole("button", { name: "Create backup" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The backup was not created");
   });
 
   it("shows the honest online-restore refusal with offline guidance", async () => {
-    render(<HostSettingsSection client={makeClient()} />);
+    render(<HostDataSettingsSection client={makeClient()} />);
 
-    await screen.findByText("host-1");
+    await screen.findByLabelText("Backup label");
     fireEvent.click(screen.getByRole("button", { name: "Restore from backup" }));
 
     await waitFor(() => {
@@ -363,8 +374,14 @@ describe("HostSettingsSection", () => {
   it("completes a full load, lifecycle, backup, and recovery walkthrough with zero console errors", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      render(<HostSettingsSection client={makeClient()} />);
+      render(
+        <>
+          <HostSettingsSection client={makeClient()} />
+          <HostDataSettingsSection client={makeClient()} />
+        </>,
+      );
       await screen.findByText("host-1");
+      await screen.findByLabelText("Backup label");
 
       fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
       fireEvent.click(screen.getByRole("button", { name: "Restart host" }));
@@ -394,8 +411,11 @@ describe("HostSettingsSection", () => {
       await user.tab();
       expect(screen.getByRole("button", { name })).toHaveFocus();
     }
-    await user.tab();
-    expect(screen.getByLabelText("Backup label")).toHaveFocus();
+
+    render(<HostDataSettingsSection client={makeClient()} />);
+    const backupLabel = await screen.findByLabelText("Backup label");
+    backupLabel.focus();
+    expect(backupLabel).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: "Create backup" })).toHaveFocus();
     await user.tab();
@@ -406,8 +426,14 @@ describe("HostSettingsSection", () => {
   });
 
   it("keeps every control keyboard-reachable as a native button or input", async () => {
-    render(<HostSettingsSection client={makeClient()} />);
+    render(
+      <>
+        <HostSettingsSection client={makeClient()} />
+        <HostDataSettingsSection client={makeClient()} />
+      </>,
+    );
     await screen.findByText("host-1");
+    await screen.findByLabelText("Backup label");
 
     for (const name of [
       "Refresh status",
@@ -433,7 +459,7 @@ describe("HostSettingsSection", () => {
       stagedDropped: false,
     });
     render(
-      <HostSettingsSection
+      <HostDataSettingsSection
         client={makeClient({
           purgeThreads: async () => ({
             operation: "purge-threads",

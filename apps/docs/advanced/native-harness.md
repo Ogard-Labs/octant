@@ -57,9 +57,9 @@ The lead can hand a bounded task to a child with `delegate`: research,
 implementation, or review. The child runs on the model its role's slot names,
 under authority no wider than its parent, in its own worktree for Code, and
 returns a reply the lead collects. Whether a child may start at all is the
-**Subagent creation** posture in **Settings → Agents**: under _Ask_ the lead is
-told a person must start children; under _Automatic_ they start within the
-usual bounds.
+**Helper agents** setting in **Settings → Octant Harness**: under _Only when I
+start them_ the lead is told a person must start children; under
+_Automatically_ they start within the usual bounds.
 
 This is how a frontier model plans and reviews while cheaper models read and
 implement: put the strong model on `default` and `slow`, the cheap one on

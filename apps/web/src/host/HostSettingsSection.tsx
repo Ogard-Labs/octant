@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
 import { Schema } from "effect";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type {
@@ -21,13 +21,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
-import {
-  SettingRow,
-  SettingsDisclosure,
-  SettingsFactList,
-  SettingsPanel,
-  SettingsState,
-} from "../settings/primitives";
+import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
 import {
   AutomationNotificationSettings,
   type AutomationNotificationSettingsProps,
@@ -55,6 +49,9 @@ export interface HostSettingsSectionProps {
   readonly client: HostControlClient;
   readonly automationNotifications?: AutomationNotificationSettingsProps["client"];
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  /** Layout resets and diagnostics export, which close the Host page. */
+  readonly maintenance?: ReactNode;
+  readonly focusedSetting?: string | undefined;
 }
 
 type StatusState =
@@ -114,17 +111,14 @@ export function HostSettingsSection({
   client,
   automationNotifications,
   hostFederationLifecycle,
+  maintenance,
+  focusedSetting,
 }: HostSettingsSectionProps) {
-  const backupLabelId = useId();
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
-  const [dataMapState, setDataMapState] = useState<DataMapState>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string>();
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMessage, setLifecycleMessage] = useState<LifecycleMessage>();
-  const [backupLabel, setBackupLabel] = useState("");
-  const [backupState, setBackupState] = useState<BackupState>({ kind: "idle" });
-  const [restoreOutcome, setRestoreOutcome] = useState<HostRestoreOutcome>();
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -139,15 +133,6 @@ export function HostSettingsSection({
         current.kind === "ready" ? current : { kind: "error", message },
       );
       setRefreshMessage(message);
-    }
-    try {
-      const report = await client.readDataMap();
-      setDataMapState({ kind: "ready", report });
-    } catch (error) {
-      setDataMapState({
-        kind: "error",
-        message: error instanceof Error ? error.message : "The host data map is unreachable.",
-      });
     } finally {
       setRefreshing(false);
     }
@@ -155,7 +140,6 @@ export function HostSettingsSection({
 
   useEffect(() => {
     setStatusState({ kind: "loading" });
-    setDataMapState({ kind: "loading" });
     void refresh();
   }, [refresh]);
 
@@ -187,33 +171,6 @@ export function HostSettingsSection({
     }
   };
 
-  const runBackup = async () => {
-    setBackupState({ kind: "pending" });
-    const label = backupLabel.trim();
-    try {
-      const outcome = await client.backup(label === "" ? undefined : label);
-      setBackupState({ kind: "done", outcome });
-    } catch (error) {
-      setBackupState({
-        kind: "error",
-        message:
-          error instanceof Error ? error.message : "The backup request could not be delivered.",
-      });
-    }
-  };
-
-  const runRestore = async () => {
-    setRestoreOutcome(undefined);
-    try {
-      setRestoreOutcome(await client.restore());
-    } catch {
-      setRestoreOutcome({
-        kind: "refused-online",
-        guidance: "The restore request could not be delivered. Use the offline restore command.",
-      });
-    }
-  };
-
   if (statusState.kind === "loading") {
     return (
       <section aria-label="Host" className="host-settings" id="settings-host">
@@ -236,6 +193,9 @@ export function HostSettingsSection({
         >
           Retry
         </OctantButton>
+        {/* Resetting a layout or exporting diagnostics is most wanted when the
+            host is misbehaving, so an unreachable host must not hide them. */}
+        {maintenance}
       </section>
     );
   }
@@ -245,9 +205,6 @@ export function HostSettingsSection({
   const policyToggleAction: HostLifecycleAction =
     policy.kind === "known" && policy.enabled ? "disable" : "enable";
   const policyToggle = status.lifecycle[policyToggleAction];
-  const trimmedBackupLabel = backupLabel.trim();
-  const backupLabelValid =
-    trimmedBackupLabel === "" || BACKUP_LABEL_PATTERN.test(trimmedBackupLabel);
 
   return (
     <section aria-label="Host" aria-busy={refreshing} className="host-settings" id="settings-host">
@@ -407,6 +364,92 @@ export function HostSettingsSection({
         )}
       </section>
 
+      {automationNotifications === undefined ? null : (
+        <AutomationNotificationSettings
+          client={automationNotifications}
+          focused={focusedSetting === "host-automation-notifications"}
+        />
+      )}
+
+      {hostFederationLifecycle === undefined ? null : (
+        <FederatedHostsLifecyclePanel lifecycle={hostFederationLifecycle} />
+      )}
+
+      {maintenance}
+    </section>
+  );
+}
+
+/**
+ * What this host keeps and how to get it back: snapshots, recovery, the data
+ * inventory, and thread retention. Split from Host, whose page is about the
+ * running process, because the two answer different questions and together
+ * made one seventeen-section page.
+ */
+export function HostDataSettingsSection({ client }: { readonly client: HostControlClient }) {
+  const backupLabelId = useId();
+  const [dataMapState, setDataMapState] = useState<DataMapState>({ kind: "loading" });
+  const [backupLabel, setBackupLabel] = useState("");
+  const [backupState, setBackupState] = useState<BackupState>({ kind: "idle" });
+  const [restoreOutcome, setRestoreOutcome] = useState<HostRestoreOutcome>();
+
+  useEffect(() => {
+    let current = true;
+    setDataMapState({ kind: "loading" });
+    client.readDataMap().then(
+      (report) => {
+        if (current) setDataMapState({ kind: "ready", report });
+      },
+      (error: unknown) => {
+        if (current)
+          setDataMapState({
+            kind: "error",
+            message: error instanceof Error ? error.message : "The host data map is unreachable.",
+          });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [client]);
+
+  const runBackup = async () => {
+    setBackupState({ kind: "pending" });
+    const label = backupLabel.trim();
+    try {
+      const outcome = await client.backup(label === "" ? undefined : label);
+      setBackupState({ kind: "done", outcome });
+    } catch (error) {
+      setBackupState({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "The backup request could not be delivered.",
+      });
+    }
+  };
+
+  const runRestore = async () => {
+    setRestoreOutcome(undefined);
+    try {
+      setRestoreOutcome(await client.restore());
+    } catch {
+      setRestoreOutcome({
+        kind: "refused-online",
+        guidance: "The restore request could not be delivered. Use the offline restore command.",
+      });
+    }
+  };
+
+  const trimmedBackupLabel = backupLabel.trim();
+  const backupLabelValid =
+    trimmedBackupLabel === "" || BACKUP_LABEL_PATTERN.test(trimmedBackupLabel);
+
+  return (
+    <section aria-label="Data & privacy" className="host-settings" id="settings-data">
+      <DataMapPanel state={dataMapState} />
+
+      <ThreadRetentionPanel client={client} />
+
       <section aria-label="Backup" className="settings-card-section settings-card-section--open">
         <h2>Backup</h2>
         <div className="setgroup">
@@ -459,27 +502,6 @@ export function HostSettingsSection({
           )}
         </div>
       </SettingsPanel>
-
-      <SettingsDisclosure
-        title="Stored data"
-        description={
-          dataMapState.kind === "error"
-            ? "Data inventory unavailable. Open for details."
-            : "Inspect what this host stores and where it lives."
-        }
-      >
-        <DataMapPanel state={dataMapState} />
-      </SettingsDisclosure>
-
-      <ThreadRetentionPanel client={client} />
-
-      {automationNotifications === undefined ? null : (
-        <AutomationNotificationSettings client={automationNotifications} />
-      )}
-
-      {hostFederationLifecycle === undefined ? null : (
-        <FederatedHostsLifecyclePanel lifecycle={hostFederationLifecycle} />
-      )}
     </section>
   );
 }

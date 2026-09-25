@@ -1,11 +1,10 @@
 import type { SettingsSectionId } from "@octant/contracts";
 import {
   Blocks,
-  Bot,
-  Briefcase,
   ChartNoAxesColumnIncreasing,
   Code2,
   Compass,
+  Database,
   FolderGit2,
   Hexagon,
   Image as ImageIcon,
@@ -19,7 +18,6 @@ import {
   Radio,
   Server,
   Settings2,
-  SlidersHorizontal,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -38,7 +36,16 @@ export interface SettingsNavigationProps {
   readonly onSelect: (sectionId: SettingsSectionId) => void;
 }
 
-const SETTINGS_GROUPS = ["Personal", "Modes", "Agents", "Integrations", "System"] as const;
+/* Personal is how Octant looks and behaves for you; Models is which model or
+   provider answers each job; Agents is what an agent may do once running. */
+const SETTINGS_GROUPS = [
+  "Personal",
+  "Modes",
+  "Models",
+  "Agents",
+  "Integrations",
+  "System",
+] as const;
 
 const SETTINGS_NAVIGATION_META: Readonly<
   Record<
@@ -51,23 +58,20 @@ const SETTINGS_NAVIGATION_META: Readonly<
   appearance: { group: "Personal", icon: Palette },
   keybindings: { group: "Personal", icon: Keyboard },
   chat: { group: "Modes", icon: MessageCircle },
-  work: { group: "Modes", icon: Briefcase },
   code: { group: "Modes", icon: Code2 },
-  "navigator-assistant": { group: "Personal", icon: Compass },
-  voice: { group: "Personal", icon: Mic },
-  "image-generation": { group: "Personal", icon: ImageIcon },
+  providers: { group: "Models", icon: Plug },
+  harness: { group: "Models", icon: Hexagon },
+  "navigator-assistant": { group: "Models", icon: Compass },
+  voice: { group: "Models", icon: Mic },
+  "image-generation": { group: "Models", icon: ImageIcon },
   "computer-use": { group: "Agents", icon: Monitor },
-  providers: { group: "Agents", icon: Plug },
-  profiles: { group: "Agents", icon: UserRound },
-  agents: { group: "Agents", icon: Bot },
-  harness: { group: "Agents", icon: Hexagon },
   skills: { group: "Agents", icon: Blocks },
-  usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
-  "remote-access": { group: "System", icon: Radio },
-  host: { group: "System", icon: Server },
   github: { group: "Integrations", icon: FolderGit2 },
   linear: { group: "Integrations", icon: ListTodo },
-  advanced: { group: "System", icon: SlidersHorizontal },
+  host: { group: "System", icon: Server },
+  data: { group: "System", icon: Database },
+  "remote-access": { group: "System", icon: Radio },
+  usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
 };
 
 /**

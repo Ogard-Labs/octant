@@ -42,7 +42,6 @@ describe("ShellSettingsSurface host integration", () => {
         sidebarVibrancySupported={false}
         themeController={{ draft: undefined, settings: undefined } as never}
         usageClient={{} as never}
-        visibleSettings={["open-in-applications"]}
       />,
     );
 

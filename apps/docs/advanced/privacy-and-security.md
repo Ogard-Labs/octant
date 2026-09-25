@@ -39,7 +39,7 @@ and derived projections so a rebuild cannot resurrect the transcript. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
-Settings → Host includes a read-only data map of what this host stores and
+Settings → Data & privacy includes a read-only data map of what this host stores and
 where — journal, projections, artifacts, named Keychain or secret-service
 entries (never values), caches, and the categories that leave the machine
 (provider calls, update checks, marketplace fetches). A category the host
@@ -161,7 +161,7 @@ tarballs; **Inspect** and install of a curated entry fetch its pinned GitHub
 tree. Standalone skill **Search skills** queries skills.sh
 and the npm registry with the text you typed; preview and install then fetch
 the package. Turn marketplace fetches off in
-**Settings → General → Marketplace**; off means no request is made and
+**Settings → Skills & Extensions → Marketplace**; off means no request is made and
 catalog search stays with the in-memory curated entries. Details live under
 [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 
