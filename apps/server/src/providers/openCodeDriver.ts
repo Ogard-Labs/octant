@@ -1009,6 +1009,7 @@ function makeConnection(
                     runtimeClient.createSession({
                       permission: permissionRules(
                         input.executionPolicy,
+                        mode,
                         state.managedTools?.serverName,
                       ),
                     }),
@@ -1205,6 +1206,7 @@ function makeConnection(
                           attachments: input.attachments,
                           permission: permissionRules(
                             state.executionPolicy,
+                            mode,
                             managedTools?.serverName,
                           ),
                         }),
@@ -1464,6 +1466,7 @@ function mapAndOffer(
 
 function permissionRules(
   policy: ProviderExecutionPolicy,
+  mode: "chat" | "work" | "code",
   managedToolServerName?: string,
 ): PermissionRuleset {
   let rules: PermissionRuleset;
@@ -1495,6 +1498,10 @@ function permissionRules(
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
   }
+  // Work has no shell or Git authority: its bash is refused outright rather
+  // than asked about, since approving a command would grant the thread more
+  // than its mode holds. OpenCode applies the last matching rule.
+  if (mode === "work") rules.push({ permission: "bash", pattern: "*", action: "deny" });
   rules.push(
     { permission: "*_*", pattern: "*", action: "deny" },
     { permission: "skill", pattern: "*", action: "deny" },

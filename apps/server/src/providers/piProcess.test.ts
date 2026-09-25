@@ -413,6 +413,9 @@ describe("Pi process boundary", () => {
     expect(piArguments("/bridge.ts", "/sessions", "full-1", "code", "full-access")).toEqual(
       expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls"]),
     );
+    expect(piArguments("/bridge.ts", "/sessions", "work-1", "work", "approval-gated")).toEqual(
+      expect.arrayContaining(["--tools", "edit,write,read,grep,find,ls"]),
+    );
 
     const f = fixture();
     const launch = await Effect.runPromise(

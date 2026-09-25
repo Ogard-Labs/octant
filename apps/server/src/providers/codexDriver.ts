@@ -20,7 +20,11 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderAcquireInput,
+  ProviderConnection,
+  ProviderDriver,
+} from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   attachmentMediaTypeToModality,
@@ -74,14 +78,39 @@ export interface CodexThreadStartInput {
   readonly approvalsReviewer: "auto_review" | "user";
   /** app-server `thread/start` `serviceTier`: the model's declared speed tier. */
   readonly serviceTier?: string;
-  /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
-  readonly config?: { readonly model_reasoning_effort: string };
+  /**
+   * app-server config overrides: `model_reasoning_effort` carries the reasoning
+   * selection, and a Work thread carries `CODEX_WORK_CONFIG`.
+   */
+  readonly config?: CodexThreadConfig;
   readonly dynamicTools?: readonly CodexDynamicToolSpec[];
+}
+
+export interface CodexThreadConfig {
+  readonly model_reasoning_effort?: string;
+  readonly "features.shell_tool"?: false;
+  readonly "features.unified_exec"?: false;
 }
 
 export interface CodexThreadResumeInput {
   readonly threadId: string;
+  readonly config?: CodexThreadConfig;
 }
+
+/**
+ * Work has no shell or Git authority, so a Work thread starts with Codex's
+ * shell tools switched off rather than offered and asked about. Declining
+ * `command` approvals alone is not enough: measured against codex-cli 0.155.1
+ * under the read-only sandbox, `echo` ran with no approval request at all,
+ * because a command that only reads never escalates. With both features off
+ * the same request answered that it had no shell, while a patch edit still
+ * raised `item/fileChange/requestApproval`. A thread does not keep these
+ * overrides across `thread/resume`, so they are sent there too.
+ */
+const CODEX_WORK_CONFIG = {
+  "features.shell_tool": false,
+  "features.unified_exec": false,
+} as const satisfies CodexThreadConfig;
 
 export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
@@ -550,7 +579,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot }) => {
+    acquire: ({ instanceId, projectRoot, mode }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -566,7 +595,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const runtime = yield* acquireRuntime(options, clientFactory);
-        return yield* makeConnection(options, runtime.client, projectRoot, {
+        return yield* makeConnection(options, runtime.client, projectRoot, mode, {
           instanceId: options.instanceId,
           clock,
           makeCorrelation,
@@ -751,6 +780,7 @@ function makeConnection(
   options: CodexDriverOptions,
   client: CodexClientPort,
   projectRoot: string,
+  mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -873,6 +903,12 @@ function makeConnection(
           }
           if (
             state.executionPolicy === "plan" ||
+            // Work has no shell or Git authority. Under the read-only sandbox
+            // every shell write escalates as `command`, and a permissions
+            // request asks to widen that sandbox, so both are declined at
+            // the agent; only a Project-confined file change may reach a
+            // person.
+            (mode === "work" && item.approval.kind !== "file-change") ||
             !approvalRequestIsProjectConfined(item.approval, state.projectRoot)
           ) {
             Effect.runFork(
@@ -1077,12 +1113,15 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
+            const config =
+              mode === "work" ? { ...optionSettings.config, ...CODEX_WORK_CONFIG } : undefined;
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
                 ...settings,
                 ...optionSettings,
+                ...(config === undefined ? {} : { config }),
                 ...(dynamicTools === undefined ? {} : { dynamicTools }),
               }),
             );
@@ -1117,7 +1156,14 @@ function makeConnection(
               // the settings the thread was created with: a thread resumed with
               // `read-only` still wrote in-root without asking. The posture is
               // re-asserted per turn instead, where it does take effect.
-              client.threadResume({ threadId: input.resumeCursor.value }),
+              // `config` is different: measured against codex-cli 0.155.1, a
+              // Work thread started with its shell off had it back after a
+              // plain resume, and had it off again when the resume carried
+              // the same overrides, so they are stated on every resume.
+              client.threadResume({
+                threadId: input.resumeCursor.value,
+                ...(mode === "work" ? { config: CODEX_WORK_CONFIG } : {}),
+              }),
             ).pipe(
               Effect.mapError(() =>
                 failure("stale-resume", "Codex thread is no longer available for resume."),
