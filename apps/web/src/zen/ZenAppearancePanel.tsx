@@ -96,8 +96,13 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
     });
   }
 
+  /**
+   * A new ground keeps the darkness the Dim dial shows. The dial reads the
+   * stronger of the dimming and a picture's overlay, so leaving a picture
+   * without writing that value down dropped the ground to the bare dimming.
+   */
   function commit(next: ZenBackground): void {
-    update({ background: next });
+    update({ dimming: dim, background: next });
   }
 
   function updateEffect(patch: Partial<ZenGroundEffect>): void {

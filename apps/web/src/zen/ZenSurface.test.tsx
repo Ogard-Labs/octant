@@ -365,8 +365,10 @@ describe("ZenSurface", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     fireEvent.click(screen.getByRole("button", { name: "App background" }));
+    // The picture's overlay of 20 is what the Dim dial showed, so the app
+    // ground keeps that darkness rather than dropping to the bare dimming.
     expect(onUpdateAppearance).toHaveBeenCalledWith({
-      dimming: 0,
+      dimming: 20,
       elementOpacity: 1,
       background: { kind: "theme" },
     });
@@ -392,7 +394,7 @@ describe("ZenSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     fireEvent.click(screen.getByRole("button", { name: "Lofoten night" }));
     expect(onUpdateAppearance).toHaveBeenCalledWith({
-      dimming: 0,
+      dimming: 20,
       elementOpacity: 1,
       background: {
         kind: "builtin",
@@ -408,7 +410,7 @@ describe("ZenSurface", () => {
     await user.click(await screen.findByRole("option", { name: "Radial" }));
     await user.click(screen.getByRole("button", { name: "Apply custom gradient" }));
     expect(onUpdateAppearance).toHaveBeenLastCalledWith({
-      dimming: 0,
+      dimming: 20,
       elementOpacity: 1,
       background: {
         kind: "gradient",
@@ -1041,6 +1043,78 @@ describe("ZenSurface", () => {
       expect(titleOf(second)).toBe("Note 1");
       expect(first?.geometry.y).toBe(second?.geometry.y);
       expect(first?.geometry.x ?? 0).toBeLessThan(second?.geometry.x ?? 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("brings a window stranded off screen by the old pan and zoom back onto the desk", async () => {
+    const restore = withSurfaceSize(1200, 800);
+    try {
+      const onUpdateElement = vi.fn(async () => undefined);
+      const note = (suffix: string, x: number, y: number) => ({
+        elementId: `00000000-0000-4000-8000-00000000091${suffix}` as never,
+        kind: "notes" as const,
+        widgetVersion: 0 as AggregateVersion,
+        content: suffix,
+        geometry: { x, y, width: 220, height: 140 },
+        zIndex: 1,
+        minimized: false,
+        locked: false,
+        title: `Note ${suffix}`,
+      });
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={onUpdateElement}
+          onUpdateViewport={() => undefined}
+          onExpandBar={() => undefined}
+          space={makeSpace([note("1", 100, 120), note("2", 6400, 5200)])}
+        />,
+      );
+
+      await waitFor(() => expect(onUpdateElement).toHaveBeenCalled());
+      for (const call of onUpdateElement.mock.calls) {
+        const { geometry } = (call as unknown as [ZenElementPayload])[0];
+        expect(geometry.x + geometry.width).toBeLessThanOrEqual(1200);
+        expect(geometry.y + geometry.height).toBeLessThanOrEqual(800);
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves an arranged desk alone when every window is within reach", async () => {
+    const restore = withSurfaceSize(1200, 800);
+    try {
+      const onUpdateElement = vi.fn(async () => undefined);
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={onUpdateElement}
+          onUpdateViewport={() => undefined}
+          onExpandBar={() => undefined}
+          space={makeSpace([
+            {
+              elementId: "00000000-0000-4000-8000-000000000921" as never,
+              kind: "notes",
+              widgetVersion: 0 as AggregateVersion,
+              content: "",
+              geometry: { x: 300, y: 200, width: 220, height: 140 },
+              zIndex: 1,
+              minimized: false,
+              locked: false,
+              title: "Near",
+            },
+          ])}
+        />,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(onUpdateElement).not.toHaveBeenCalled();
     } finally {
       restore();
     }

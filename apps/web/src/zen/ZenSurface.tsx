@@ -421,6 +421,22 @@ export function ZenSurface(props: ZenSurfaceProps) {
     })();
   }, [laidOut, onSetLayout, onUpdateElement, props.space.spaceId, surfaceSize, wall]);
 
+  // A space arranged under the old canvas kept the geometry its pan and zoom
+  // drew it at, up to thousands of pixels outside the window. With no pan or
+  // zoom left to reach them, such windows are tidied onto the desk once when
+  // the space opens; a desk whose windows are all within reach is left alone.
+  const rescuedSpace = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (wall || surfaceSize.width === 0 || surfaceSize.height === 0) return;
+    const spaceId = String(props.space.spaceId);
+    if (rescuedSpace.current === spaceId) return;
+    rescuedSpace.current = spaceId;
+    if (props.space.elements.some((element) => outOfReach(element.geometry, surfaceSize))) {
+      void tidy();
+    }
+    // Once per space: tidy reads the elements and surface it is called with.
+  }, [props.space.spaceId, surfaceSize, wall]);
+
   /** Re-tiles every card to the room the surface has now, in reading order. */
   async function tidy(): Promise<void> {
     const ordered = [...props.space.elements].sort(
@@ -1379,6 +1395,22 @@ function mediaBackgroundStyle(src: string, fill: "cover" | "contain" | "tile"): 
     backgroundRepeat: "no-repeat",
     backgroundSize: fill,
   };
+}
+
+/** Keeps a title bar's grab margin inside the desk on every side. */
+const REACH_MARGIN_PX = 48;
+
+/** True when a window's title bar cannot be reached on a desk this size. */
+function outOfReach(
+  geometry: ZenGeometry,
+  surface: { readonly width: number; readonly height: number },
+): boolean {
+  return (
+    geometry.x + geometry.width < REACH_MARGIN_PX ||
+    geometry.x > surface.width - REACH_MARGIN_PX ||
+    geometry.y < 0 ||
+    geometry.y > surface.height - REACH_MARGIN_PX
+  );
 }
 
 /** One thing the Add sheet can put on the desk: its mark over its name. */
