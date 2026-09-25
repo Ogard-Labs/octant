@@ -149,6 +149,14 @@ it; a paired phone cannot. Archiving the Project or pointing it at another
 folder ends the shell, and so does restarting Octant. **Stop** in the card's
 **…** menu ends it yourself.
 
+**Add** → **Browser in this Project** docks your own browser for the Work or
+Code Project this window is on. It is a private, isolated browser: no agent
+can see or use its page, and it shares no sign-in with any thread's browser.
+Type an address and press **Open**. Opening a different site starts a fresh
+session. Closing the dock, archiving the Project, or pointing it at another
+folder closes the page; it also closes on its own after a while, like every
+Octant browser session.
+
 When Zen state cannot be decoded, a **Recover Zen** path restores the main
 workspace instead of trapping you. Zen rebuilds from the event journal after
 a restart or reconnect.

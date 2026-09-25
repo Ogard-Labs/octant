@@ -58,6 +58,33 @@ describe("ComputerUseLifecyclePane", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
 
+  it("describes an application-session approval as a five-minute app grant", () => {
+    const approve = vi.fn();
+    const appApproval = decodeComputerUseSessionView({
+      ...waiting,
+      pendingApproval: {
+        approvalId: "80000000-0000-4000-8000-000000000001",
+        actionId: "90000000-0000-4000-8000-000000000001",
+        expiresAt: "2026-07-27T21:01:00.000Z",
+        summary: "click in Preview",
+        scope: "application-session",
+      },
+    });
+    render(
+      <ComputerUseLifecyclePane
+        onApprove={approve}
+        onDeny={() => undefined}
+        onStop={() => undefined}
+        view={appApproval}
+      />,
+    );
+
+    expect(
+      screen.getByText("Octant is waiting for approval to control this application for 5 minutes."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow app for 5 minutes" })).toBeVisible();
+  });
+
   it.each([
     ["running", "Running"],
     ["stopping", "Stopping"],

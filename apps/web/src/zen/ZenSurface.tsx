@@ -113,6 +113,13 @@ export interface ZenSurfaceProps {
   readonly projectTerminalTarget?: { readonly projectId: ProjectId; readonly name: string };
   /** Starts a terminal at that Project's root and pins its card. */
   readonly onAddProjectTerminal?: (projectId: ProjectId) => void;
+  /**
+   * The Work or Code Project this window holds, offered as "This Project" for
+   * a browser with no thread. Absent when the window holds neither.
+   */
+  readonly projectBrowserTarget?: { readonly projectId: ProjectId; readonly name: string };
+  /** Docks that Project's own browser at the space's edge. */
+  readonly onAddProjectBrowser?: (projectId: ProjectId) => void;
   readonly onExpandBar: () => void;
   readonly onHideBar: () => void;
   readonly onCreateWidget?: (kind: "notes" | "checklist") => void;
@@ -389,10 +396,12 @@ export function ZenSurface(props: ZenSurfaceProps) {
   );
   const focusedThreadContext =
     focusedElement?.kind === "thread" ? focusedElement.sourceContext : undefined;
-  // The Project this window holds, when it can take a terminal of its own.
-  // Offered first in the terminal picker, before any thread.
+  // The Project this window holds, when it can take a terminal or browser of
+  // its own. Offered first in the pickers, before any thread.
   const projectTerminal =
     props.onAddProjectTerminal === undefined ? undefined : props.projectTerminalTarget;
+  const projectBrowser =
+    props.onAddProjectBrowser === undefined ? undefined : props.projectBrowserTarget;
   // The threads a terminal or browser can open in, the focused card's first.
   const toolCandidates = (props.threadEntries ?? [])
     .filter((entry) =>
@@ -1069,7 +1078,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     text="Terminal"
                   />
                   <AddTile
-                    disabled={props.onAddBrowser === undefined}
+                    disabled={props.onAddBrowser === undefined && projectBrowser === undefined}
                     expanded={toolTarget === "browser"}
                     icon={Globe}
                     label="Add browser"
@@ -1091,8 +1100,8 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     className="zen-add-targets"
                     role="group"
                   >
-                    {/* The Project itself comes first: a terminal at its root,
-                        with no thread's authority. */}
+                    {/* The Project itself comes first: a terminal at its root
+                        or its own browser, with no thread's authority. */}
                     {toolTarget === "terminal" && projectTerminal !== undefined ? (
                       <OctantButton
                         aria-label={`Add terminal for this Project, ${projectTerminal.name}`}
@@ -1108,6 +1117,24 @@ export function ZenSurface(props: ZenSurfaceProps) {
                         <span className="zen-add-target__title">This Project</span>
                         <span className="zen-add-target__detail">
                           {projectTerminal.name} · a terminal at its root
+                        </span>
+                      </OctantButton>
+                    ) : null}
+                    {toolTarget === "browser" && projectBrowser !== undefined ? (
+                      <OctantButton
+                        aria-label={`Add browser for this Project, ${projectBrowser.name}`}
+                        className="zen-add-target"
+                        onClick={() => {
+                          props.onAddProjectBrowser?.(projectBrowser.projectId);
+                          setToolTarget(null);
+                          setManualPanel(null);
+                        }}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <span className="zen-add-target__title">This Project</span>
+                        <span className="zen-add-target__detail">
+                          {projectBrowser.name} · its own browser
                         </span>
                       </OctantButton>
                     ) : null}

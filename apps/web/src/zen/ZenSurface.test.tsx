@@ -648,6 +648,30 @@ describe("ZenSurface", () => {
     expect(screen.queryByRole("dialog", { name: "Add to this space" })).not.toBeInTheDocument();
   });
 
+  it("offers a browser for this Project with no thread, and hands over only the Project", () => {
+    const projectId = "00000000-0000-4000-8000-000000000918" as never;
+    const onAddProjectBrowser = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onAddProjectBrowser={onAddProjectBrowser}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        projectBrowserTarget={{ projectId, name: "Research" }}
+        space={makeSpace([])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add browser" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add browser for this Project, Research" }));
+
+    expect(onAddProjectBrowser).toHaveBeenCalledWith(projectId);
+  });
+
   it("offers no Project terminal to a window that holds no Code Project", () => {
     render(
       <ZenSurface

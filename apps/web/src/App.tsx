@@ -316,6 +316,7 @@ import {
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,
+  ZenProjectResearchDock,
   ZenProjectTerminalCard,
   ZenResearchDock,
   ZenSurface,
@@ -1196,6 +1197,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    projectBrowserClient,
     projectTerminalClient,
     hostControlClient,
     imageGenerationClient,
@@ -4949,6 +4951,27 @@ function LaunchedShell(
     await stop();
   }
 
+  // The Project a browser opens for: the one the active mode holds when that
+  // is Work or Code, otherwise the window's Code Project, then its Work one.
+  const zenProjectBrowserTarget = (() => {
+    const workspace = controller.workspace;
+    if (workspace === undefined) return undefined;
+    const modes: ReadonlyArray<"work" | "code"> =
+      workspace.activeMode === "work" ? ["work", "code"] : ["code", "work"];
+    for (const mode of modes) {
+      const projectId = workspace.contextByMode[mode].projectId ?? undefined;
+      if (projectId === undefined) continue;
+      const project = projectController.allProjects.find(
+        (candidate) =>
+          String(candidate.id) === String(projectId) &&
+          candidate.type === mode &&
+          candidate.lifecycle === "active",
+      );
+      if (project !== undefined) return { projectId: project.id, name: project.name };
+    }
+    return undefined;
+  })();
+
   const zenProjectTerminalTarget = (() => {
     const projectId = controller.workspace?.contextByMode.code.projectId ?? undefined;
     if (projectId === undefined) return undefined;
@@ -5223,6 +5246,31 @@ function LaunchedShell(
                 );
               }}
               renderResearchDock={({ dock }) => {
+                if ("project" in dock) {
+                  // A Project's own browser: the person's page, in a context
+                  // no thread shares. The host decides whether this window
+                  // still holds the Project each time the dock asks.
+                  return (
+                    <Suspense fallback={null}>
+                      <ZenProjectResearchDock
+                        client={projectBrowserClient}
+                        dock={dock}
+                        {...(props.hostBridge === undefined
+                          ? {}
+                          : { hostBridge: props.hostBridge })}
+                        onCollapse={(collapsed) =>
+                          void zen.dockResearch({
+                            thread: null,
+                            project: { projectId: dock.project.projectId },
+                            width: dock.width,
+                            collapsed,
+                          })
+                        }
+                        onUndock={() => void zen.dockResearch({ thread: null })}
+                      />
+                    </Suspense>
+                  );
+                }
                 // The dock shows the bound thread's own browsing context. Zen
                 // holds no browser client of its own; it hands over the binding
                 // and the shell's client, and the server decides what that
@@ -5279,6 +5327,12 @@ function LaunchedShell(
                 ? {}
                 : { projectTerminalTarget: zenProjectTerminalTarget })}
               onAddProjectTerminal={(projectId) => void addZenProjectTerminal(projectId)}
+              {...(zenProjectBrowserTarget === undefined
+                ? {}
+                : { projectBrowserTarget: zenProjectBrowserTarget })}
+              onAddProjectBrowser={(projectId) =>
+                void zen.dockResearch({ thread: null, project: { projectId } })
+              }
               renderProjectTerminal={({ element, activity }) => (
                 <Suspense fallback={null}>
                   <ZenProjectTerminalCard
