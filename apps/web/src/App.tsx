@@ -107,7 +107,6 @@ import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
-  enforceAccessibilitySettings,
   enforceSidebarBackgroundAccessibility,
   resolveEffectiveSidebarBackground,
   resolveAppBackground,
@@ -668,9 +667,7 @@ function LaunchedShell(
     () =>
       themeController.draft === undefined
         ? undefined
-        : enforceSidebarBackgroundAccessibility(
-            enforceAccessibilitySettings(themeController.draft),
-          ),
+        : enforceSidebarBackgroundAccessibility(themeController.draft),
     [themeController.draft],
   );
   const presentedShellSettings = useMemo(
@@ -5110,7 +5107,6 @@ function LaunchedShell(
       usageClient={usageClient}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}
-      visibleSettings={controller.visibleSettings}
       backgroundImageLibrary={backgroundImageLibrary}
       announcement={controller.announcement}
       announcementSequence={controller.announcementSequence}

@@ -152,7 +152,7 @@ input remain visible. Chat, Work, and Code share this history treatment and fold
 inline reasoning into an expandable Thinking disclosure. Code also keeps its
 provider-reported reasoning channel in the turn’s existing disclosure.
 
-In Settings → Appearance, turn off **Stream replies** to wait for the finished
+In Settings → Chat, turn off **Stream replies** to wait for the finished
 answer in Chat, Work, and Code. Reasoning remains expandable during the turn;
 approval requests and provider questions remain available immediately. Streaming
 is enabled by default. This preference changes presentation, not provider execution.

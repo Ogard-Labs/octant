@@ -16,23 +16,20 @@ describe("SettingsSectionId", () => {
       "appearance",
       "keybindings",
       "chat",
-      "work",
       "code",
+      "providers",
+      "harness",
       "navigator-assistant",
       "voice",
       "image-generation",
       "computer-use",
-      "providers",
-      "profiles",
-      "agents",
-      "harness",
       "skills",
-      "usage",
-      "remote-access",
-      "host",
       "github",
       "linear",
-      "advanced",
+      "host",
+      "data",
+      "remote-access",
+      "usage",
     ]);
   });
 
@@ -65,6 +62,16 @@ describe("SettingsDeepLink", () => {
         setting: "sidebar-width",
       }),
     ).toEqual({ section: "appearance", setting: "sidebar-width" });
+  });
+
+  it("reads a link to a retired section as the section that holds its settings now", () => {
+    const decode = Schema.decodeUnknownSync(SettingsDeepLink);
+    expect(decode({ section: "advanced", setting: "reset-layout" })).toEqual({
+      section: "host",
+      setting: "reset-layout",
+    });
+    expect(decode({ section: "agents" })).toEqual({ section: "harness" });
+    expect(Schema.encodeSync(SettingsDeepLink)({ section: "host" })).toEqual({ section: "host" });
   });
 
   it("rejects a deep link without a section", () => {

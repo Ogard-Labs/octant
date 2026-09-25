@@ -3377,14 +3377,16 @@ describe("App", () => {
       "shell--material-translucent",
     );
     fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
-    await user.click(screen.getByRole("switch", { name: "Translucent sidebar" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Off" }),
+    );
     await waitFor(() => expect(setSidebarMaterialPreference).toHaveBeenLastCalledWith("opaque"));
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
 
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Advanced" }));
-    await user.click(screen.getByRole("button", { name: "Reset native window bounds" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Host" }));
+    await user.click(await screen.findByRole("button", { name: "Reset native window bounds" }));
     expect(hostBridge.resetBounds).toHaveBeenCalledOnce();
     await waitFor(() =>
       expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
@@ -4169,13 +4171,13 @@ describe("App", () => {
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search is navigation: typing "material" shows a result list, and
-    // selecting the Translucent sidebar result deep-links to Appearance.
+    // selecting the Glass result deep-links to Appearance.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "material");
     const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
     listbox.focus();
     fireEvent.keyDown(listbox, { key: "ArrowDown" });
     fireEvent.keyDown(listbox, { key: "Enter" });
-    expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Glass" })).toBeVisible();
     expect(screen.queryByRole("switch", { name: "Enable Chat" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("listbox", { name: "Settings search results" }),

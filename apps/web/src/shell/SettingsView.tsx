@@ -16,7 +16,6 @@ import {
 } from "@octant/contracts/theme";
 import { SIDEBAR_BACKGROUND_PRESETS } from "@octant/theme/backgrounds";
 import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
-import type { ImplementedSettingId } from "./useShellController";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
 import { ProviderSettingsView } from "../providers/ProviderSettingsView";
@@ -54,7 +53,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import { HostSettingsSection } from "../host/HostSettingsSection";
+import { HostDataSettingsSection, HostSettingsSection } from "../host/HostSettingsSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
@@ -126,7 +125,6 @@ export interface SettingsViewProps {
    * Implemented setting ids. Kept as a stable contract of what is implemented;
    * the registry is the source of truth for rendering and search.
    */
-  readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
   readonly providerController?: ProviderController;
   readonly discoveryController?: DiscoveryController;
   readonly usageClient?: UsageClient;
@@ -173,32 +171,48 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
-  work: "Defaults for tasks.",
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   voice: "The providers that turn speech into text and text into speech.",
   "image-generation": "Choose connected providers and models for image generation.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
   providers: "Connect providers, manage authentication, and pick default models.",
-  agents: "How agent runs behave in this app.",
   harness: "Octant's own agent loop for API-key and local models: which model does which job.",
-  skills: "Skills and extensions available to agents.",
+  skills:
+    "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
-  host: "Host status, local storage, and recovery.",
+  host: "The host process: its status, startup, notifications, and maintenance.",
+  data: "What this host stores, how long it keeps threads, and how to back it up.",
   usage: "Activity and usage across providers.",
-  advanced: "Layout resets and diagnostics.",
 };
 
 const APPEARANCE_SECTION = (): SettingsSectionEntry =>
   findSection(octantSettingsRegistry, "appearance")!;
-const ADVANCED_SECTION = (): SettingsSectionEntry =>
-  findSection(octantSettingsRegistry, "advanced")!;
+const HOST_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "host")!;
 
-// The profile setting moved out of General; existing deep links still reach it.
+/**
+ * Settings that moved to another page keep answering the links that name
+ * their old one: an empty state, a doc, or a remote client built against the
+ * earlier layout still lands on the control.
+ */
+const MOVED_SETTINGS: ReadonlyArray<{
+  readonly from: SettingsSectionId;
+  readonly setting: string;
+  readonly to: SettingsSectionId;
+}> = [
+  { from: "general", setting: "user-profile", to: "profile" },
+  { from: "general", setting: "marketplace-fetches", to: "skills" },
+  { from: "appearance", setting: "stream-replies", to: "chat" },
+  { from: "appearance", setting: "project-view-switcher", to: "code" },
+  { from: "host", setting: "data-map", to: "data" },
+  { from: "host", setting: "thread-retention", to: "data" },
+];
+
 function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
-  return link.section === "general" && link.setting === "user-profile"
-    ? { ...link, section: "profile" }
-    : link;
+  const moved = MOVED_SETTINGS.find(
+    (entry) => entry.from === link.section && entry.setting === link.setting,
+  );
+  return moved === undefined ? link : { ...link, section: moved.to };
 }
 
 export function SettingsView(props: SettingsViewProps) {
@@ -520,35 +534,83 @@ function ActiveSectionContent({
     case "keybindings":
       return <KeybindingsSection focusedSetting={focusedSetting} />;
     case "chat":
-      return props.chatController?.bootstrap !== undefined ? (
-        <div id="settings-chat">
-          <ChatSettingsView
-            {...(props.chatController.settingsMessage === undefined
-              ? {}
-              : { message: props.chatController.settingsMessage })}
-            onUpdate={props.chatController.updateSettings}
-            {...(props.providerController?.snapshot === undefined
-              ? {}
-              : { providerSnapshot: props.providerController.snapshot })}
-            settings={props.chatController.bootstrap.settings}
-          />
+      // Stream replies is this app's own preference, so it stays on the page
+      // while the host's Chat defaults are still loading or unreachable.
+      return (
+        <div className="settings-section-stack" id="settings-chat">
+          {props.chatController?.bootstrap === undefined ? null : (
+            <ChatSettingsView
+              {...(props.chatController.settingsMessage === undefined
+                ? {}
+                : { message: props.chatController.settingsMessage })}
+              onUpdate={props.chatController.updateSettings}
+              {...(props.providerController?.snapshot === undefined
+                ? {}
+                : { providerSnapshot: props.providerController.snapshot })}
+              settings={props.chatController.bootstrap.settings}
+            />
+          )}
+          <SettingsSection title="Replies">
+            <div className="setgroup">
+              <SettingRow
+                label="Stream replies"
+                description="Show answers as they arrive. Turn off to wait for the finished answer; reasoning stays expandable."
+                scope="app"
+                settingId="stream-replies"
+                focused={focusedSetting === settingId("stream-replies")}
+              >
+                <OctantSwitch
+                  label="Stream replies"
+                  checked={props.settings.streamReplies !== false}
+                  onCheckedChange={(checked) => props.onSettingsChange({ streamReplies: checked })}
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
         </div>
-      ) : null;
+      );
     case "code":
-      return props.codeController?.bootstrap !== undefined ? (
+      return (
         <div className="settings-code-stack" id="settings-code">
-          <CodeSettingsView
-            focusedSetting={focusedSetting}
-            onUpdate={props.codeController.updateSettings}
-            settings={props.codeController.bootstrap.settings}
-          />
+          {props.codeController?.bootstrap === undefined ? null : (
+            <CodeSettingsView
+              focusedSetting={focusedSetting}
+              onUpdate={props.codeController.updateSettings}
+              settings={props.codeController.bootstrap.settings}
+            />
+          )}
           <OpenInApplicationSettings
             applications={props.settings.openInApplications}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             onChange={(openInApplications) => props.onSettingsChange({ openInApplications })}
           />
+          <SettingsSection title="Sidebar">
+            <div className="setgroup">
+              <SettingRow
+                description="How the Code sidebar offers saved project views."
+                focused={focusedSetting === settingId("project-view-switcher")}
+                label="Project view switcher"
+                scope="app"
+                settingId="project-view-switcher"
+              >
+                <OctantToggleGroup<ShellSettings["projectViewSwitcherPresentation"]>
+                  aria-label="Project view switcher"
+                  onValueChange={(value) => {
+                    const selected = value[0];
+                    if (selected !== undefined) {
+                      props.onSettingsChange({ projectViewSwitcherPresentation: selected });
+                    }
+                  }}
+                  value={[props.settings.projectViewSwitcherPresentation]}
+                >
+                  <OctantToggleGroupItem value="dropdown">Dropdown</OctantToggleGroupItem>
+                  <OctantToggleGroupItem value="inline">Buttons</OctantToggleGroupItem>
+                </OctantToggleGroup>
+              </SettingRow>
+            </div>
+          </SettingsSection>
         </div>
-      ) : null;
+      );
     case "navigator-assistant":
       return (
         <NavigatorAssistantSettingsView
@@ -602,38 +664,33 @@ function ActiveSectionContent({
           providerController={props.providerController}
         />
       ) : null;
-    case "agents":
-      return props.agentRunSettingsClient !== undefined ? (
-        <div id="settings-agents">
-          <AgentRunSettingsPanel client={props.agentRunSettingsClient} />
-        </div>
-      ) : null;
     case "harness":
-      return props.nativeHarnessClient !== undefined ? (
-        <div id="settings-harness">
-          <p className="native-harness-panel__lead">
-            Models connected through API keys or local endpoints appear under{" "}
-            <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
-            permissions are managed in Agents.
-          </p>
-          <NativeHarnessRoutingPanel
-            client={props.nativeHarnessClient}
-            hostId={LOCAL_HOST_ID}
-            onOpenProviders={() => onOpenSection("providers")}
-            providers={nativeHarnessProviderOptions(props.providerController)}
-          />
-        </div>
-      ) : null;
-    case "advanced":
+      // Everything the Octant Harness decides lives on this one page: which
+      // model does which job, and whether its model may start helper agents
+      // (the one place the creation posture's Ask and Automatic differ).
       return (
-        <AdvancedSection
-          capabilities={capabilities}
-          focusedSetting={focusedSetting}
-          props={props}
-          {...(props.diagnosticsExportClient === undefined
-            ? {}
-            : { diagnosticsExportClient: props.diagnosticsExportClient })}
-        />
+        <div className="settings-section-stack" id="settings-harness">
+          {props.nativeHarnessClient === undefined ? null : (
+            <>
+              <p className="native-harness-panel__lead">
+                Models connected through API keys or local endpoints appear under{" "}
+                <strong>Octant</strong> in the model picker. Assign models to roles below.
+              </p>
+              <NativeHarnessRoutingPanel
+                client={props.nativeHarnessClient}
+                hostId={LOCAL_HOST_ID}
+                onOpenProviders={() => onOpenSection("providers")}
+                providers={nativeHarnessProviderOptions(props.providerController)}
+              />
+            </>
+          )}
+          {props.agentRunSettingsClient === undefined ? null : (
+            <AgentRunSettingsPanel
+              client={props.agentRunSettingsClient}
+              focused={focusedSetting === settingId("subagent-creation-posture")}
+            />
+          )}
+        </div>
       );
     case "usage":
       return props.usageClient !== undefined ? (
@@ -669,7 +726,17 @@ function ActiveSectionContent({
         </section>
       );
     }
-    case "host":
+    case "host": {
+      const maintenance = (
+        <MaintenanceSection
+          capabilities={capabilities}
+          focusedSetting={focusedSetting}
+          props={props}
+          {...(props.diagnosticsExportClient === undefined
+            ? {}
+            : { diagnosticsExportClient: props.diagnosticsExportClient })}
+        />
+      );
       return props.hostControlClient !== undefined ? (
         <HostSettingsSection
           client={props.hostControlClient}
@@ -679,32 +746,48 @@ function ActiveSectionContent({
           {...(props.hostFederationLifecycle === undefined
             ? {}
             : { hostFederationLifecycle: props.hostFederationLifecycle })}
+          maintenance={maintenance}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
-      ) : props.hostFederationLifecycle !== undefined ? (
-        <section aria-label="Host" id="settings-host">
-          <p>
-            Host lifecycle, backup, and recovery controls are available on the host machine only.
-          </p>
-          <FederatedHostsLifecyclePanel lifecycle={props.hostFederationLifecycle} />
-        </section>
       ) : (
-        <section aria-label="Host" id="settings-host">
-          <p>
-            Host lifecycle, backup, and recovery controls are available on the host machine only.
-          </p>
+        <section aria-label="Host" className="settings-section-stack" id="settings-host">
+          <p>Host lifecycle controls are available on the host machine only.</p>
+          {props.hostFederationLifecycle === undefined ? null : (
+            <FederatedHostsLifecyclePanel lifecycle={props.hostFederationLifecycle} />
+          )}
+          {maintenance}
+        </section>
+      );
+    }
+    case "data":
+      return props.hostControlClient !== undefined ? (
+        <HostDataSettingsSection
+          client={props.hostControlClient}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
+        />
+      ) : (
+        <section aria-label="Data & privacy" id="settings-data">
+          <p>Backup, recovery, and retention controls are available on the host machine only.</p>
         </section>
       );
     case "skills":
-      return props.extensionClient !== undefined ? (
-        <ExtensionsSettingsView
-          client={props.extensionClient}
-          marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
-          showHeading={false}
-          {...(props.pickLocalPluginFolder === undefined
-            ? {}
-            : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
-        />
-      ) : null;
+      // Marketplace fetches is this host's own switch, so it stays reachable
+      // while the extension catalog is loading or unavailable.
+      return (
+        <div className="settings-section-stack" id="settings-skills">
+          {props.extensionClient === undefined ? null : (
+            <ExtensionsSettingsView
+              client={props.extensionClient}
+              marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
+              showHeading={false}
+              {...(props.pickLocalPluginFolder === undefined
+                ? {}
+                : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
+            />
+          )}
+          <MarketplaceSection focusedSetting={focusedSetting} props={props} />
+        </div>
+      );
     default:
       return null;
   }
@@ -985,26 +1068,36 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
-      <SettingsSection title="Marketplace">
-        <div className="setgroup">
-          <SettingRow
-            description="Skill and extension catalog search contacts third-party registries only when you ask."
-            focused={focusedSetting === settingId("marketplace-fetches")}
-            label="Marketplace fetches"
-            scope="host"
-            settingId="marketplace-fetches"
-          >
-            <MarketplaceFetchSettings
-              enabled={props.settings.marketplaceFetchesEnabled}
-              onEnabledChange={(enabled) =>
-                props.onSettingsChange({ marketplaceFetchesEnabled: enabled })
-              }
-            />
-          </SettingRow>
-        </div>
-        <MarketplaceFetchDisclosure />
-      </SettingsSection>
     </section>
+  );
+}
+
+/**
+ * Whether catalog search may reach third-party registries. It lived in
+ * General, but the only thing it changes is Skills & Extensions, which sent
+ * its readers back to General to find it.
+ */
+function MarketplaceSection({ focusedSetting, props }: SectionProps) {
+  return (
+    <SettingsSection title="Marketplace">
+      <div className="setgroup">
+        <SettingRow
+          description="Skill and extension catalog search contacts third-party registries only when you ask."
+          focused={focusedSetting === settingId("marketplace-fetches")}
+          label="Marketplace fetches"
+          scope="host"
+          settingId="marketplace-fetches"
+        >
+          <MarketplaceFetchSettings
+            enabled={props.settings.marketplaceFetchesEnabled}
+            onEnabledChange={(enabled) =>
+              props.onSettingsChange({ marketplaceFetchesEnabled: enabled })
+            }
+          />
+        </SettingRow>
+      </div>
+      <MarketplaceFetchDisclosure />
+    </SettingsSection>
   );
 }
 
@@ -1042,32 +1135,145 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
     resolvedBackground.coversSidebar;
   const isAvailable = (id: string) =>
     isSettingAvailable(findSetting(APPEARANCE_SECTION(), settingId(id))!, capabilities);
+  const sidebarBackground =
+    props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground;
+  // One control for what used to be two: a Translucent sidebar switch and a
+  // Vibrancy mode select that read and wrote the same material.
+  const glass: SidebarVibrancyMode =
+    props.settings.sidebarMaterial === "system" ? sidebarBackground.vibrancyMode : "off";
   return (
     <section aria-label="Appearance" className="settings-section-stack" id="settings-appearance">
       {props.themeController !== undefined ? (
-        <ThemeAppearanceEditor controller={props.themeController} />
+        <ThemeAppearanceEditor
+          controller={props.themeController}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
+        />
       ) : null}
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Workspace and reading</h2>
-        <p className="settings-section-note">
-          How much room the sidebar and the conversation take, and what the sidebar shows.
-        </p>
+      <SettingsSection title="Window">
         <div className="setgroup">
-          {isAvailable("stream-replies") ? (
+          {isAvailable("sidebar-material") ? (
             <SettingRow
-              label="Stream replies"
-              description="Show answers as they arrive. Turn off to wait for the finished answer; reasoning stays expandable."
+              description="The frosted material behind the sidebar and around the cards. Off paints it solid."
+              focused={focusedSetting === settingId("sidebar-material")}
+              label="Glass"
               scope="app"
-              settingId="stream-replies"
-              focused={focusedSetting === settingId("stream-replies")}
+              settingId="sidebar-material"
             >
-              <OctantSwitch
-                label="Stream replies"
-                checked={props.settings.streamReplies !== false}
-                onCheckedChange={(checked) => props.onSettingsChange({ streamReplies: checked })}
-              />
+              <OctantToggleGroup<SidebarVibrancyMode>
+                aria-label="Glass"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected === undefined) return;
+                  props.onSettingsChange({
+                    sidebarMaterial: selected === "off" ? "opaque" : "system",
+                  });
+                  if (selected === sidebarBackground.vibrancyMode) return;
+                  const next = { ...sidebarBackground, vibrancyMode: selected };
+                  if (props.themeController !== undefined) {
+                    void props.themeController.applyPatch({ sidebarBackground: next });
+                  } else {
+                    props.onSettingsChange({ sidebarBackground: next });
+                  }
+                }}
+                value={[glass]}
+              >
+                <OctantToggleGroupItem value="off">Off</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="subtle">Subtle</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="strong">Strong</OctantToggleGroupItem>
+              </OctantToggleGroup>
+              {props.settings.sidebarMaterial === "system" ? (
+                <p
+                  className="settings-view__effective-note"
+                  data-visible-when-material="opaque"
+                  id="translucent-sidebar-effective-note"
+                >
+                  Translucency is unavailable, so Octant is using an opaque sidebar.
+                </p>
+              ) : null}
             </SettingRow>
           ) : null}
+          {isAvailable("workspace-material") ? (
+            <SettingRow
+              description="Let the glass show through the cards as well."
+              focused={focusedSetting === settingId("workspace-material")}
+              label="Glass cards"
+              scope="app"
+              settingId="workspace-material"
+            >
+              <OctantSwitch
+                checked={props.settings.workspaceMaterial === "system" && glass !== "off"}
+                describedBy="workspace-material-description"
+                disabled={glass === "off"}
+                label="Glass cards"
+                onCheckedChange={(checked) => {
+                  props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
+                }}
+              />
+              {glass === "off" ? (
+                <p className="settings-view__effective-note" id="workspace-material-effective-note">
+                  Turn on Glass first.
+                </p>
+              ) : null}
+            </SettingRow>
+          ) : null}
+        </div>
+      </SettingsSection>
+      {isAvailable("app-background") || isAvailable("sidebar-background") ? (
+        <SettingsSection className="settings-app-background" title="Background">
+          {isAvailable("app-background") && props.themeController !== undefined ? (
+            <>
+              <AppBackgroundSettings
+                background={
+                  (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
+                  DEFAULT_APP_BACKGROUND
+                }
+                focused={focusedSetting === settingId("app-background")}
+                increasedContrast={
+                  (props.themeController.draft ?? props.themeController.settings)
+                    ?.increasedContrast === true
+                }
+                library={props.backgroundImageLibrary}
+                onChange={(appBackground) => {
+                  void props.themeController?.applyPatch({ appBackground });
+                }}
+              />
+            </>
+          ) : null}
+          <div className="setgroup">
+            {isAvailable("sidebar-background") ? (
+              <SettingRow
+                description="A preset gradient behind the sidebar, or none. Adjust the overlay color and opacity for readability."
+                focused={focusedSetting === settingId("sidebar-background")}
+                label="Sidebar background"
+                scope="app"
+                settingId="sidebar-background"
+              >
+                <SidebarBackgroundSettings
+                  suspended={sidebarDecorationSuspended}
+                  background={
+                    props.themeController?.draft?.sidebarBackground ??
+                    props.settings.sidebarBackground
+                  }
+                  onSettingsChange={(patch) => {
+                    if (
+                      patch.sidebarBackground !== undefined &&
+                      props.themeController !== undefined
+                    ) {
+                      void props.themeController.applyPatch({
+                        sidebarBackground: patch.sidebarBackground,
+                      });
+                    } else {
+                      props.onSettingsChange(patch);
+                    }
+                  }}
+                />
+              </SettingRow>
+            ) : null}
+          </div>
+        </SettingsSection>
+      ) : null}
+      <SettingsSection title="Sidebar">
+        <div className="setgroup">
           {isAvailable("sidebar-width") ? (
             <SettingRow
               focused={focusedSetting === settingId("sidebar-width")}
@@ -1122,90 +1328,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               />
             </SettingRow>
           ) : null}
-          {isAvailable("sidebar-material") ? (
-            <SettingRow
-              description="Use the system sidebar material when available."
-              focused={focusedSetting === settingId("sidebar-material")}
-              label="Translucent sidebar"
-              scope="app"
-              settingId="sidebar-material"
-            >
-              <OctantSwitch
-                checked={
-                  props.settings.sidebarMaterial === "system" &&
-                  (
-                    props.themeController?.draft?.sidebarBackground ??
-                    props.settings.sidebarBackground
-                  ).vibrancyMode !== "off"
-                }
-                describedBy="sidebar-material-description"
-                label="Translucent sidebar"
-                onCheckedChange={(checked) => {
-                  props.onSettingsChange({ sidebarMaterial: checked ? "system" : "opaque" });
-                  const background =
-                    props.themeController?.draft?.sidebarBackground ??
-                    props.settings.sidebarBackground;
-                  if (
-                    checked &&
-                    props.sidebarVibrancySupported &&
-                    background.vibrancyMode === "off"
-                  ) {
-                    void props.themeController?.applyPatch({
-                      sidebarBackground: { ...background, vibrancyMode: "subtle" },
-                    });
-                  }
-                }}
-              />
-              {props.settings.sidebarMaterial === "system" ? (
-                <p
-                  className="settings-view__effective-note"
-                  data-visible-when-material="opaque"
-                  id="translucent-sidebar-effective-note"
-                >
-                  Translucency is unavailable, so Octant is using an opaque sidebar.
-                </p>
-              ) : null}
-            </SettingRow>
-          ) : null}
-          {isAvailable("workspace-material") ? (
-            <SettingRow
-              description="Extend translucency from the sidebar across the whole workspace."
-              focused={focusedSetting === settingId("workspace-material")}
-              label="Translucent workspace"
-              scope="app"
-              settingId="workspace-material"
-            >
-              <OctantSwitch
-                checked={
-                  props.settings.workspaceMaterial === "system" &&
-                  props.settings.sidebarMaterial === "system" &&
-                  (
-                    props.themeController?.draft?.sidebarBackground ??
-                    props.settings.sidebarBackground
-                  ).vibrancyMode !== "off"
-                }
-                describedBy="workspace-material-description"
-                disabled={
-                  props.settings.sidebarMaterial !== "system" ||
-                  (
-                    props.themeController?.draft?.sidebarBackground ??
-                    props.settings.sidebarBackground
-                  ).vibrancyMode === "off"
-                }
-                label="Translucent workspace"
-                onCheckedChange={(checked) => {
-                  props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
-                }}
-              />
-              {props.settings.sidebarMaterial !== "system" ||
-              (props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground)
-                .vibrancyMode === "off" ? (
-                <p className="settings-view__effective-note" id="workspace-material-effective-note">
-                  Turn on Translucent sidebar first.
-                </p>
-              ) : null}
-            </SettingRow>
-          ) : null}
           {isAvailable("mode-switcher") ? (
             <SettingRow
               focused={focusedSetting === settingId("mode-switcher")}
@@ -1228,74 +1350,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               </OctantToggleGroup>
             </SettingRow>
           ) : null}
-          {isAvailable("project-view-switcher") ? (
-            <SettingRow
-              description="How the Code sidebar offers saved project views."
-              focused={focusedSetting === settingId("project-view-switcher")}
-              label="Project view switcher"
-              scope="app"
-              settingId="project-view-switcher"
-            >
-              <OctantToggleGroup<ShellSettings["projectViewSwitcherPresentation"]>
-                aria-label="Project view switcher"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected !== undefined) {
-                    props.onSettingsChange({ projectViewSwitcherPresentation: selected });
-                  }
-                }}
-                value={[props.settings.projectViewSwitcherPresentation]}
-              >
-                <OctantToggleGroupItem value="dropdown">Dropdown</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="inline">Buttons</OctantToggleGroupItem>
-              </OctantToggleGroup>
-            </SettingRow>
-          ) : null}
-          {isAvailable("transcript-text-size") ? (
-            <SettingRow
-              description="Conversation text in Chat, Work, and Code threads."
-              focused={focusedSetting === settingId("transcript-text-size")}
-              label="Transcript text size"
-              scope="app"
-              settingId="transcript-text-size"
-            >
-              <OctantToggleGroup<ShellSettings["transcriptTextSize"]>
-                aria-label="Transcript text size"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected !== undefined)
-                    props.onSettingsChange({ transcriptTextSize: selected });
-                }}
-                value={[props.settings.transcriptTextSize]}
-              >
-                <OctantToggleGroupItem value="small">Small</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="large">Large</OctantToggleGroupItem>
-              </OctantToggleGroup>
-            </SettingRow>
-          ) : null}
-          {isAvailable("transcript-width") ? (
-            <SettingRow
-              description="Maximum width of transcript and composer columns."
-              focused={focusedSetting === settingId("transcript-width")}
-              label="Transcript width"
-              scope="app"
-              settingId="transcript-width"
-            >
-              <OctantToggleGroup<ShellSettings["transcriptWidth"]>
-                aria-label="Transcript width"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected !== undefined) props.onSettingsChange({ transcriptWidth: selected });
-                }}
-                value={[props.settings.transcriptWidth]}
-              >
-                <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
-              </OctantToggleGroup>
-            </SettingRow>
-          ) : null}
           {isAvailable("thread-provider-icons") ? (
             <SettingRow
               description="Show a compact provider mark before each thread title."
@@ -1313,57 +1367,8 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               />
             </SettingRow>
           ) : null}
-          {isAvailable("sidebar-background") ? (
-            <SettingRow
-              description="Choose a preset gradient, a custom image, or none. Adjust the overlay color and opacity for readability."
-              focused={focusedSetting === settingId("sidebar-background")}
-              label="Sidebar background"
-              scope="app"
-              settingId="sidebar-background"
-            >
-              <SidebarBackgroundSettings
-                suspended={sidebarDecorationSuspended}
-                background={
-                  props.themeController?.draft?.sidebarBackground ??
-                  props.settings.sidebarBackground
-                }
-                onSettingsChange={(patch) => {
-                  if (
-                    patch.sidebarBackground !== undefined &&
-                    props.themeController !== undefined
-                  ) {
-                    void props.themeController.applyPatch({
-                      sidebarBackground: patch.sidebarBackground,
-                    });
-                  } else {
-                    props.onSettingsChange(patch);
-                  }
-                }}
-                sidebarVibrancySupported={props.sidebarVibrancySupported}
-              />
-            </SettingRow>
-          ) : null}
         </div>
-      </div>
-      {isAvailable("app-background") && props.themeController !== undefined ? (
-        <SettingsSection className="settings-app-background" title="Background">
-          <AppBackgroundSettings
-            background={
-              (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
-              DEFAULT_APP_BACKGROUND
-            }
-            focused={focusedSetting === settingId("app-background")}
-            increasedContrast={
-              (props.themeController.draft ?? props.themeController.settings)?.increasedContrast ===
-              true
-            }
-            library={props.backgroundImageLibrary}
-            onChange={(appBackground) => {
-              void props.themeController?.applyPatch({ appBackground });
-            }}
-          />
-        </SettingsSection>
-      ) : null}
+      </SettingsSection>
       <SettingsSection
         description="Choose which facts a thread row in the sidebar shows. A hidden property is omitted rather than left as a gap."
         title="Sidebar thread rows"
@@ -1583,6 +1588,55 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
         </SettingGroup>
       </SettingsSection>
+      <SettingsSection title="Reading">
+        <div className="setgroup">
+          {isAvailable("transcript-text-size") ? (
+            <SettingRow
+              description="Conversation text in Chat, Work, and Code threads."
+              focused={focusedSetting === settingId("transcript-text-size")}
+              label="Transcript text size"
+              scope="app"
+              settingId="transcript-text-size"
+            >
+              <OctantToggleGroup<ShellSettings["transcriptTextSize"]>
+                aria-label="Transcript text size"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined)
+                    props.onSettingsChange({ transcriptTextSize: selected });
+                }}
+                value={[props.settings.transcriptTextSize]}
+              >
+                <OctantToggleGroupItem value="small">Small</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="large">Large</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </SettingRow>
+          ) : null}
+          {isAvailable("transcript-width") ? (
+            <SettingRow
+              description="Maximum width of transcript and composer columns."
+              focused={focusedSetting === settingId("transcript-width")}
+              label="Transcript width"
+              scope="app"
+              settingId="transcript-width"
+            >
+              <OctantToggleGroup<ShellSettings["transcriptWidth"]>
+                aria-label="Transcript width"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) props.onSettingsChange({ transcriptWidth: selected });
+                }}
+                value={[props.settings.transcriptWidth]}
+              >
+                <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </SettingRow>
+          ) : null}
+        </div>
+      </SettingsSection>
       {props.themeController === undefined ? null : (
         <SettingsSection
           description="Return every appearance setting to its default."
@@ -1592,7 +1646,12 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             {/* The section says Reset and its note says what returns to its
                 default, so the row and its button each said "Reset appearance"
                 a second and third time. */}
-            <SettingRow label="Appearance" scope="app" settingId="reset-appearance">
+            <SettingRow
+              focused={focusedSetting === settingId("reset-appearance")}
+              label="Appearance"
+              scope="app"
+              settingId="reset-appearance"
+            >
               <OctantButton
                 className="settings-view__action"
                 onClick={() => void props.themeController?.reset()}
@@ -1610,7 +1669,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
   );
 }
 
-interface AdvancedSectionProps extends SectionProps {
+interface MaintenanceSectionProps extends SectionProps {
   readonly capabilities: SettingsNativeCapabilities;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
 }
@@ -1674,18 +1733,19 @@ function UsageSettingsSection(props: {
   );
 }
 
-function AdvancedSection({
+/** Layout resets and the diagnostics bundle, at the end of the Host page. */
+function MaintenanceSection({
   focusedSetting,
   props,
   capabilities,
   diagnosticsExportClient,
-}: AdvancedSectionProps) {
+}: MaintenanceSectionProps) {
   const resetBoundsAvailable = isSettingAvailable(
-    findSetting(ADVANCED_SECTION(), settingId("reset-window-bounds"))!,
+    findSetting(HOST_SECTION(), settingId("reset-window-bounds"))!,
     capabilities,
   );
   return (
-    <section aria-label="Advanced" id="settings-advanced">
+    <section aria-label="Maintenance" id="settings-maintenance">
       <div className="settings-card-section settings-card-section--open">
         <h2>Maintenance</h2>
         <div className="setgroup">
@@ -1744,22 +1804,23 @@ interface SidebarBackgroundSettingsProps {
   readonly suspended: boolean;
   readonly background: SidebarBackground;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
-  readonly sidebarVibrancySupported: boolean;
 }
 
+/**
+ * The gradient behind the sidebar. Its material (Off, Subtle, Strong) is the
+ * Glass control, and there is no Custom choice: nothing in the app uploads a
+ * sidebar image, so choosing Custom did nothing and pointed at a picker that
+ * does not exist. A background already stored as custom still renders; it
+ * reads as None here until another choice replaces it.
+ */
 function SidebarBackgroundSettings({
   suspended,
   background,
   onSettingsChange,
-  sidebarVibrancySupported,
 }: SidebarBackgroundSettingsProps) {
   const setBackground = (next: SidebarBackground) => {
     onSettingsChange({ sidebarBackground: next });
   };
-
-  const vibrancyMode: SidebarVibrancyMode = sidebarVibrancySupported
-    ? background.vibrancyMode
-    : "off";
 
   return (
     <div className="settings-view__setting">
@@ -1799,18 +1860,13 @@ function SidebarBackgroundSettings({
                   vibrancyMode: background.vibrancyMode,
                 });
               }
-            } else if (kind === "custom") {
-              if (background.kind === "custom") {
-                setBackground(background);
-              }
             }
           }}
           options={[
             { id: "none", label: "None" },
             { id: "preset", label: "Preset" },
-            { id: "custom", label: "Custom" },
           ]}
-          value={background.kind === "custom" ? "custom" : background.kind}
+          value={background.kind === "preset" ? "preset" : "none"}
         />
       </label>
       {background.kind === "preset" ? (
@@ -1855,11 +1911,6 @@ function SidebarBackgroundSettings({
           </div>
         </div>
       ) : null}
-      {background.kind === "custom" ? (
-        <p className="settings-view__effective-note">
-          Custom backgrounds can be uploaded from the sidebar background picker.
-        </p>
-      ) : null}
       <label className="settings-view__field">
         <span>Overlay color</span>
         <OctantInput
@@ -1895,28 +1946,6 @@ function SidebarBackgroundSettings({
           value={background.overlayOpacity}
         />
       </label>
-      {sidebarVibrancySupported ? (
-        <label className="settings-view__field">
-          <span>Vibrancy mode</span>
-          <OctantSelectField
-            aria-label="Sidebar vibrancy mode"
-            disabled={suspended}
-            className="settings-view__select"
-            onValueChange={(value) =>
-              setBackground({
-                ...background,
-                vibrancyMode: value as SidebarVibrancyMode,
-              } as SidebarBackground)
-            }
-            options={[
-              { id: "off", label: "Off" },
-              { id: "subtle", label: "Subtle" },
-              { id: "strong", label: "Strong" },
-            ]}
-            value={vibrancyMode}
-          />
-        </label>
-      ) : null}
     </div>
   );
 }

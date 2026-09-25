@@ -467,7 +467,7 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Settings → Host exposes a read-only, server-authoritative data
+  the port. Settings → Data & privacy exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.

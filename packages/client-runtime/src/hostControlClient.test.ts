@@ -83,7 +83,7 @@ describe("createHostControlClient", () => {
       },
       projects: { kind: "known", projects: [] },
       related: [
-        { kind: "thread-retention", settings: { section: "host", setting: "thread-retention" } },
+        { kind: "thread-retention", settings: { section: "data", setting: "thread-retention" } },
       ],
     };
     const fetchImpl = fetchReturning(200, dataMapBody);

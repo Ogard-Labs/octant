@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
 
 describe("octantSettingsRegistry", () => {
-  it("registers only sections with working content, in IA order", () => {
+  it("registers only sections with working content, in navigation order", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
       "profile",
@@ -10,20 +10,19 @@ describe("octantSettingsRegistry", () => {
       "keybindings",
       "chat",
       "code",
+      "providers",
+      "harness",
       "navigator-assistant",
       "voice",
       "image-generation",
       "computer-use",
-      "providers",
-      "agents",
-      "harness",
       "skills",
-      "usage",
-      "remote-access",
-      "host",
       "github",
       "linear",
-      "advanced",
+      "host",
+      "data",
+      "remote-access",
+      "usage",
     ]);
   });
 
@@ -37,36 +36,23 @@ describe("octantSettingsRegistry", () => {
     expect(github?.keywords).toMatch(/repositories/);
   });
 
-  it("registers the Host section as a host-scoped operational destination with notifications", () => {
+  it("keeps the running host and its maintenance on Host, and its data on Data & privacy", () => {
     const host = octantSettingsRegistry.sections.find((s) => s.id === "host");
-    expect(host?.label).toBe("Host");
+    const data = octantSettingsRegistry.sections.find((s) => s.id === "data");
     expect(host?.scope).toBe("host");
-    expect(host?.settings).toEqual([
-      {
-        id: "data-map",
-        label: "Data map",
-        scope: "host",
-        keywords:
-          "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
-      },
-      {
-        id: "automation-notifications",
-        label: "Automation notifications",
-        scope: "host",
-        keywords:
-          "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
-      },
-      {
-        id: "thread-retention",
-        label: "Thread retention",
-        scope: "host",
-        keywords: "thread retention window purge journal erase delete history",
-      },
+    expect(host?.settings.map((setting) => setting.id)).toEqual([
+      "host-automation-notifications",
+      "reset-layout",
+      "reset-window-bounds",
+      "export-diagnostics",
     ]);
     expect(host?.keywords).toMatch(/lifecycle/);
-    expect(host?.keywords).toMatch(/backup/);
-    expect(host?.keywords).toMatch(/service/);
-    expect(host?.keywords).toMatch(/notifications/);
+    expect(host?.keywords).toMatch(/diagnostics/);
+    expect(data?.label).toBe("Data & privacy");
+    expect(data?.scope).toBe("host");
+    expect(data?.settings.map((setting) => setting.id)).toEqual(["data-map", "thread-retention"]);
+    expect(data?.keywords).toMatch(/backup/);
+    expect(data?.keywords).toMatch(/retention/);
   });
 
   it("does not register placeholder sections for future work", () => {
@@ -74,9 +60,9 @@ describe("octantSettingsRegistry", () => {
     expect(ids).not.toContain("work");
   });
 
-  it("registers marketplace fetches next to Updates under General", () => {
-    const general = octantSettingsRegistry.sections.find((s) => s.id === "general");
-    const marketplace = general?.settings.find((s) => s.id === "marketplace-fetches");
+  it("registers marketplace fetches with the Skills & Extensions it governs", () => {
+    const skills = octantSettingsRegistry.sections.find((s) => s.id === "skills");
+    const marketplace = skills?.settings.find((s) => s.id === "marketplace-fetches");
     expect(marketplace).toEqual({
       id: "marketplace-fetches",
       label: "Marketplace fetches",
@@ -104,7 +90,6 @@ describe("octantSettingsRegistry", () => {
     expect(skills?.scope).toBe("host");
     expect(skills?.keywords).toMatch(/marketplace/);
     expect(skills?.keywords).toMatch(/installed/);
-    expect(skills?.settings).toEqual([]);
   });
 
   it("titles the provider section Providers & Models", () => {
@@ -113,46 +98,49 @@ describe("octantSettingsRegistry", () => {
   });
 
   it("does not offer retired execution-profile settings", () => {
-    expect(octantSettingsRegistry.sections.some((section) => section.id === "profiles")).toBe(
-      false,
-    );
+    const ids = octantSettingsRegistry.sections.map((section) => String(section.id));
+    expect(ids).not.toContain("profiles");
+    expect(ids).not.toContain("advanced");
   });
 
   it("gates reset-window-bounds on native bounds availability", () => {
-    const advanced = octantSettingsRegistry.sections.find((s) => s.id === "advanced");
-    const resetBounds = advanced?.settings.find((s) => s.id === "reset-window-bounds");
+    const host = octantSettingsRegistry.sections.find((s) => s.id === "host");
+    const resetBounds = host?.settings.find((s) => s.id === "reset-window-bounds");
     expect(resetBounds?.nativeRequired).toBe("nativeBoundsAvailable");
   });
 
-  it("does not gate the translucent sidebar toggle on vibrancy support", () => {
+  it("does not gate the Glass control on vibrancy support", () => {
     const appearance = octantSettingsRegistry.sections.find((s) => s.id === "appearance");
     const material = appearance?.settings.find((s) => s.id === "sidebar-material");
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("registers the translucent workspace toggle beside the sidebar toggle, ungated", () => {
+  it("registers Glass cards beside Glass, ungated", () => {
     const appearance = octantSettingsRegistry.sections.find((s) => s.id === "appearance");
     const material = appearance?.settings.find((s) => s.id === "workspace-material");
-    expect(material?.label).toBe("Translucent workspace");
+    expect(material?.label).toBe("Glass cards");
     expect(material?.nativeRequired).toBeUndefined();
   });
 
   it("keeps opaque sections without individual settings and registers the Code setup destinations", () => {
-    for (const id of ["chat", "providers", "skills", "usage"] as const) {
+    for (const id of ["providers", "usage"] as const) {
       const section = octantSettingsRegistry.sections.find((s) => s.id === id);
       expect(section?.settings).toEqual([]);
     }
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-default-folder-threads",
-      "open-in-applications",
+      "project-view-switcher",
     ]);
+    const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");
+    expect(chat?.settings.map((setting) => setting.id)).toEqual(["stream-replies"]);
   });
 
-  it("registers the Agents section as an opaque destination for the creation-posture policy", () => {
-    const agents = octantSettingsRegistry.sections.find((s) => s.id === "agents");
-    expect(agents?.label).toBe("Agents");
-    expect(agents?.settings).toEqual([]);
-    expect(agents?.keywords).toMatch(/posture/);
+  it("keeps the helper-agent posture with the Octant Harness it governs", () => {
+    const ids = octantSettingsRegistry.sections.map((section) => String(section.id));
+    expect(ids).not.toContain("agents");
+    const harness = octantSettingsRegistry.sections.find((s) => s.id === "harness");
+    expect(harness?.settings.map((setting) => setting.id)).toEqual(["subagent-creation-posture"]);
+    expect(harness?.keywords).toMatch(/posture/);
   });
 });

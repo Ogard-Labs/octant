@@ -26,8 +26,23 @@
   box-shadow: none;
 }
 
+/* The view's own 28px gap already spaces its sections at the Settings
+   rhythm; a margin on top of it doubled the distance. */
 .extensions-settings__section + .extensions-settings__section {
-  margin-top: var(--oct-space-6);
+  margin-top: 0;
+}
+
+/* The feedback line sits at the end of the view. Empty, its reserved height
+   and the grid gap before it opened a blank band above whatever Settings put
+   next (Marketplace). Out of flow it takes no track, and it stays mounted so
+   the live region still announces a failure. */
+.extensions-settings > .settings-feedback-slot:empty {
+  position: absolute;
+  height: 0;
+}
+
+.extensions-settings {
+  position: relative;
 }
 
 /* Section labels wear the section-label recipe (13/500 over a hairline), not
@@ -72,7 +87,14 @@
   list-style: none;
 }
 
+/* A row reads icon, name over source, then state and actions, all on one
+   centre line. The shared card recipe top-aligned the actions against a
+   single text line and let the icon span the description too, so the state
+   word, the buttons, and the icon each sat at a different height. */
 .extensions-settings__cards .extcard {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--oct-space-3);
   padding: 12px 0;
   background: transparent;
   border: 0;
@@ -81,10 +103,43 @@
   box-shadow: none;
 }
 
+.extensions-settings__cards .extcard:last-child {
+  border-bottom: 0;
+}
+
+.extensions-settings__cards .extcard > .icon-mark {
+  display: inline-flex;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--oct-meta);
+}
+
+.extensions-settings__cards .extcard > .extcard-name {
+  grid-column: 2;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extensions-settings__cards .extcard > .extcard-src {
+  grid-column: 2;
+  grid-row: 2;
+  /* "User skill" is a label, not an identifier, so it takes the interface
+     face; the qualified id in Details keeps the monospace. */
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+}
+
+.extensions-settings__cards .extcard > .extcard-right {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
 .extensions-settings__state {
-  min-height: 40px;
   margin: 0;
-  padding: 10px 0 12px;
+  padding: 2px 0 4px;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
 }
@@ -92,23 +147,31 @@
 .extensions-settings__summary {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--oct-space-2) var(--oct-space-4);
-  padding: 0 4px var(--oct-space-2);
-  color: var(--oct-muted);
+  gap: var(--oct-space-1) var(--oct-space-4);
+  padding: 0;
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
+.extensions-settings__summary-count {
+  margin-inline-start: auto;
+}
+
+/* The glass sits inside the field, the way every other search field in
+   Settings draws it, instead of floating in a column of its own. */
 .extensions-settings__installed-filter {
   position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
-  gap: var(--oct-space-2);
 }
 
 .extensions-settings__installed-filter > svg {
+  position: absolute;
+  z-index: 1;
+  left: 10px;
   color: var(--oct-meta);
+  pointer-events: none;
 }
 
 .extensions-settings__installed-filter-clear {
@@ -121,11 +184,14 @@
 }
 
 .extensions-settings__installed-filter input {
+  width: 100%;
   padding-right: 34px;
+  padding-left: 30px;
 }
 
 .extensions-settings__show-all {
   justify-self: start;
+  margin-top: var(--oct-space-2);
 }
 
 /* A skill's state is a word in secondary text, coloured only through the
@@ -143,6 +209,15 @@
 
 .extensions-settings__state-label {
   color: var(--oct-muted);
+}
+
+/* One quiet status word per row; only its ink says whether it is fine. */
+.extensions-settings .extcard-right > .badge-ok {
+  color: var(--oct-muted);
+}
+
+.extensions-settings .extcard-right > .badge-warn {
+  color: var(--oct-warn-fg);
 }
 
 .extensions-settings__search,
@@ -166,7 +241,11 @@
   flex-wrap: wrap;
   gap: var(--oct-space-2);
   justify-content: flex-end;
-  align-items: flex-start;
+  align-items: center;
+}
+
+.extensions-settings .extcard-right > :is(.badge, .extensions-settings__state-label) {
+  margin-inline-end: var(--oct-space-1);
 }
 
 .extensions-settings__skill-id {
@@ -355,4 +434,19 @@
   line-height: var(--oct-leading-code);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* The row's second line carries a problem when there is one, in the warning
+   ink, so the list needs no separate status column. */
+.extensions-settings__cards .extcard[data-unavailable="true"] > .extcard-src {
+  color: var(--oct-warn-fg);
+}
+
+.extensions-settings__cards .extcard[data-unavailable="true"] > .extcard-name {
+  color: var(--oct-muted);
+}
+
+.extensions-settings__revoke {
+  justify-self: start;
+  margin-top: var(--oct-space-2);
 }

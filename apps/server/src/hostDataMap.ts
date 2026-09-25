@@ -36,7 +36,7 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
 
 const RELATED_RETENTION = {
   kind: "thread-retention" as const,
-  settings: { section: "host" as const, setting: "thread-retention" },
+  settings: { section: "data" as const, setting: "thread-retention" },
 };
 
 const RELATED_EXPORT = {

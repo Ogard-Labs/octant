@@ -12,8 +12,9 @@ the parent thread's provider, model, and authority ceiling.
 
 Subagent infrastructure — contracts, journaling, projection, the
 orchestration service, process supervision, and packaged child smoke — is on
-`main`. **Settings → Agents** is available and holds one control: the
-server-authoritative child-creation posture (Off, Ask, Automatic). Role cards,
+`main`. **Settings → Octant Harness → Helper agents** holds the
+server-authoritative child-creation posture: **Off**, **Only when I start
+them** (Ask), or **Automatically**. Role cards,
 mixed-vendor routing per role, and a child-creation form remain planned; the
 **Add agent** action in a Chat, Work, or Code thread opens the Agents dock tool. The dock is also available on an existing thread before the first child exists. Off posture still opens Agents and shows a visible refusal instead of a create form. What you can use today is compact child-run status on a live
 parent thread in Chat, Work, or Code — how many children are working, waiting,
@@ -54,8 +55,12 @@ and Review, with advanced rules behind an **Advanced** disclosure.
 
 ## Posture and clamps
 
-Creation postures are **Off**, **Ask** (the default), and **Automatic within
-policy**. The server enforces hard clamps:
+Creation postures are **Off**, **Only when I start them** (Ask, the default),
+and **Automatically** within policy. Off also refuses **Add agent** in the
+Agents dock. Under Ask, starting a helper from the dock is the confirmation;
+there is no separate prompt, and only the Octant Harness model's `delegate` tool
+is refused. Provider-native subagents are not governed by this posture: Octant
+keeps them off where the provider allows it. The server enforces hard clamps:
 
 - At most **4 concurrently running children** globally.
 - At most **3 children per parent**.

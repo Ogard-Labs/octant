@@ -60,7 +60,7 @@ export function createNativeHarnessDelegatePort(
         return {
           status: "refused",
           reason: "creation-posture-off",
-          message: "Child runs are turned off in Settings → Agents.",
+          message: "Child runs are turned off in Settings → Octant Harness → Helper agents.",
         };
       }
       if (posture === "ask") {
@@ -68,7 +68,7 @@ export function createNativeHarnessDelegatePort(
           status: "refused",
           reason: "creation-posture-ask",
           message:
-            "Child runs need a person's confirmation under the Ask posture. Ask the user to start the child, or to set the posture to Automatic.",
+            "Child runs need a person to start them under the current setting. Ask the user to start the child from the Agents dock, or to choose Automatically under Settings → Octant Harness → Helper agents.",
         };
       }
       let controlRequest: AgentRunControlRequest;

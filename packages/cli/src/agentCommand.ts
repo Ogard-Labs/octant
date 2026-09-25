@@ -164,7 +164,9 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       return 0;
     }
     if (settings.configuration.slots.length === 0) {
-      input.stdout.write("No model slots are configured. Configure them in Settings → Agents.\n");
+      input.stdout.write(
+        "No model slots are configured. Configure them in Settings → Octant Harness.\n",
+      );
     }
     for (const slot of settings.configuration.slots) {
       input.stdout.write(`${slot.id}\n`);

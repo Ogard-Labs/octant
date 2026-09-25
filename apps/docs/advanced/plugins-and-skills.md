@@ -119,7 +119,7 @@ entries as package metadata and a tarball from `registry.npmjs.org` (the
 same User-Agent on every marketplace request).
 
 **Off switch.** Turn marketplace fetches off in
-**Settings → General → Marketplace**. Off means no request is made: catalog
+**Settings → Skills & Extensions → Marketplace**. Off means no request is made: catalog
 search falls back to the in-memory curated entries, and Search skills,
 Inspect, preview, and install refuse rather than calling out. Opening the
 Marketplace tab still does not fetch on its own. Skills already on disk under
