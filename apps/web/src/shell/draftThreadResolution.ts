@@ -48,16 +48,28 @@ export function checkoutNotPreparedMessage(projectName: string): string {
   return `"${projectName}" has no Git checkout. Choose another Project above, or run git init in that folder and retry.`;
 }
 
+/**
+ * The model a new Work thread starts on: the one picked in the composer, then
+ * Work's default from Settings, then the first available. A default the host
+ * no longer offers falls through rather than starting a thread nothing serves.
+ */
 export function resolveWorkProviderChoice(
   choices: ReadonlyArray<CodeThreadProviderChoice>,
   selectedProviderInstanceId?: CodeThreadProviderChoice["instanceId"],
   selectedModelId?: CodeThreadProviderChoice["modelId"],
+  defaults?: {
+    readonly defaultProviderInstanceId?: CodeThreadProviderChoice["instanceId"] | undefined;
+    readonly defaultModelId?: CodeThreadProviderChoice["modelId"] | undefined;
+  },
 ): CodeThreadProviderChoice | undefined {
+  const find = (
+    instanceId: CodeThreadProviderChoice["instanceId"] | undefined,
+    modelId: CodeThreadProviderChoice["modelId"] | undefined,
+  ) => choices.find((choice) => choice.instanceId === instanceId && choice.modelId === modelId);
   return (
-    choices.find(
-      (choice) =>
-        choice.instanceId === selectedProviderInstanceId && choice.modelId === selectedModelId,
-    ) ?? choices[0]
+    find(selectedProviderInstanceId, selectedModelId) ??
+    find(defaults?.defaultProviderInstanceId, defaults?.defaultModelId) ??
+    choices[0]
   );
 }
 

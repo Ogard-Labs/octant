@@ -8,6 +8,10 @@ import {
   decodeWorkThreadBootstrap,
   decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
+  DEFAULT_WORK_ACCESS,
+  WorkSettings as WorkSettingsSchema,
+  type AggregateVersion,
+  type WorkSettings,
   type WorkThread,
   type WorkThreadBootstrap,
   type WorkThreadNavigation,
@@ -80,6 +84,9 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const decodeWorkThreadFailure = Schema.decodeUnknownSync(WorkThreadFailureSchema);
+const decodeWorkSettings = Schema.decodeUnknownSync(WorkSettingsSchema);
+/** Work's defaults are one aggregate, like Code's. */
+const WORK_SETTINGS_AGGREGATE_ID = "00000000-0000-4000-8000-000000000030";
 
 export interface WorkThreadServiceDependencies {
   readonly persistence: {
@@ -240,7 +247,7 @@ export class WorkThreadService {
           });
         }
       }
-      return decodeWorkThreadBootstrap({ threads, runtime });
+      return decodeWorkThreadBootstrap({ threads, runtime, settings: this.#currentSettings() });
     } catch (error) {
       throw this.#mapFailure(error);
     }
@@ -309,6 +316,40 @@ export class WorkThreadService {
     this.#assertReady();
     try {
       const command = decodeWorkThreadCommand(input);
+      if (command.kind === "update-work-settings") {
+        const current = this.#currentSettings();
+        if (current.version !== command.expectedVersion) {
+          throw this.#failure("stale", "Work settings changed; reload and retry.");
+        }
+        const settings = decodeWorkSettings({
+          ...(command.defaultProviderInstanceId === undefined
+            ? {}
+            : {
+                defaultProviderInstanceId: command.defaultProviderInstanceId,
+                defaultModelId: command.defaultModelId,
+              }),
+          defaultAccess: command.defaultAccess,
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "work-settings", aggregateId: WORK_SETTINGS_AGGREGATE_ID },
+          expectedVersion: command.expectedVersion,
+          events: [
+            {
+              eventId: decodeEventId(this.#uuid()),
+              eventName: "work.settings-updated@1",
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(this.#uuid()),
+              actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+              occurredAt: decodeTimestamp(this.#clock()),
+              payload: { kind: "settings-updated", settings },
+            },
+          ],
+        });
+        this.#projection.applySettings({ kind: "settings-updated", settings });
+        return { kind: "settings-updated", settings };
+      }
       if (command.kind === "create-work-thread") {
         if (command.hostId !== "local") {
           throw this.#failure("unauthorized", "Work thread host is not authorized.");
@@ -382,6 +423,9 @@ export class WorkThreadService {
             : { modelOptionValues: command.modelOptionValues }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
+          // The host decides the access from its own settings; nothing the
+          // renderer sends can raise it.
+          access: this.#currentSettings().defaultAccess,
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -843,6 +887,17 @@ export class WorkThreadService {
     } catch {
       return { executing: false, awaitingInput: false };
     }
+  }
+
+  /** Work's defaults, or ask-first and no default model before any were saved. */
+  #currentSettings(): WorkSettings {
+    return (
+      this.#projection.settings() ?? {
+        defaultAccess: DEFAULT_WORK_ACCESS,
+        version: 0 as AggregateVersion,
+        updatedAt: decodeTimestamp(this.#clock()),
+      }
+    );
   }
 
   #append(

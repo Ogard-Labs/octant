@@ -2,6 +2,9 @@ import {
   WorkThreadCreated as WorkThreadCreatedSchema,
   WorkThreadUpdated as WorkThreadUpdatedSchema,
   WorkThreadCompletionConfirmed as WorkThreadCompletionConfirmedSchema,
+  decodeWorkSettingsUpdated,
+  type WorkSettings,
+  type WorkSettingsUpdated,
   type WorkThread,
   type WorkThreadCompletionConfirmed,
   type WorkThreadCreated,
@@ -22,6 +25,18 @@ const decodeWorkThreadCompletionConfirmed = Schema.decodeUnknownSync(
 export class WorkThreadProjection {
   readonly #threads = new Map<WorkThreadId, WorkThread>();
   readonly #lifecycleFacts: Array<WorkflowThreadLifecycleFact> = [];
+  #settings: WorkSettings | undefined;
+
+  /** Work's defaults for new threads, as last journaled; undefined until first saved. */
+  settings(): WorkSettings | undefined {
+    return this.#settings;
+  }
+
+  applySettings(event: WorkSettingsUpdated): void {
+    const settings = decodeWorkSettingsUpdated(event).settings;
+    if (this.#settings !== undefined && settings.version <= this.#settings.version) return;
+    this.#settings = settings;
+  }
 
   apply(event: WorkThreadCreated | WorkThreadUpdated | WorkThreadCompletionConfirmed): void {
     const thread =
@@ -106,6 +121,33 @@ export function hydrateWorkThreadProjectionFromJournal(input: {
               ? decodeWorkThreadUpdated(envelope.payload)
               : decodeWorkThreadCompletionConfirmed(envelope.payload),
         );
+      } catch {
+        // Ignore malformed historical records during best-effort hydration.
+      }
+    },
+  });
+}
+
+/** Rebuilds Work's defaults from their own journal aggregate. */
+export function hydrateWorkSettingsFromJournal(input: {
+  readonly replay: Parameters<typeof hydrateWorkThreadProjectionFromJournal>[0]["replay"];
+  readonly projection: WorkThreadProjection;
+  readonly maxScan?: number;
+}): "ok" | "snapshot-required" {
+  return hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: "work-settings",
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (envelope) => {
+      if (
+        (envelope.aggregateType !== undefined && envelope.aggregateType !== "work-settings") ||
+        envelope.eventVersion !== 1 ||
+        envelope.eventName !== "work.settings-updated@1"
+      ) {
+        return;
+      }
+      try {
+        input.projection.applySettings(decodeWorkSettingsUpdated(envelope.payload));
       } catch {
         // Ignore malformed historical records during best-effort hydration.
       }

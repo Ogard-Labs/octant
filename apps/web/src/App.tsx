@@ -12,6 +12,7 @@ import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import { useWorkSettings } from "./work/useWorkSettings";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -1249,6 +1250,7 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
+  const workSettings = useWorkSettings(workThreadClient);
   const chatController = useChatController({
     client: chatClient,
     navigationRefreshMs: 0,
@@ -2547,6 +2549,7 @@ function LaunchedShell(
     workProviderChoices,
     draftProviderInstanceId,
     draftModelId,
+    workSettings.settings,
   );
   const draftProviderGroups =
     activeMode === "chat"
@@ -5137,6 +5140,7 @@ function LaunchedShell(
         : { typography: themeController.draft?.typography ?? props.typography })}
       {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
       chatController={chatController}
+      workSettings={workSettings}
       codeController={codeController}
       discoveryController={discoveryController}
       extensionClient={extensionClient}

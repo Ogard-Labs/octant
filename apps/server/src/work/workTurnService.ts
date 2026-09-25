@@ -21,6 +21,7 @@ import {
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
   type WorkAttachmentReference,
+  type WorkAccess,
   type WorkThread,
   type WorkThreadId,
   type WorkThreadTranscript,
@@ -298,6 +299,8 @@ export interface WorkTurnServiceDependencies {
 }
 
 export class WorkTurnService {
+  /** Turns a caller asked to run ask-first; read once, when the turn starts. */
+  readonly #askFirstRequests = new Set<string>();
   readonly #resolveSelectedSkillContext: SelectedSkillContextResolver | undefined;
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
@@ -380,9 +383,17 @@ export class WorkTurnService {
   async startFirstTurn(
     authenticatedWindowId: WindowId,
     input: unknown,
+    options?: {
+      /**
+       * Run this turn ask-first whatever the thread's access, for a caller
+       * whose own authority is narrower than the thread's (a goal loop round).
+       */
+      readonly holdAskFirst?: boolean;
+    },
   ): Promise<WorkTurnLookupResult> {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
+    if (options?.holdAskFirst === true) this.#askFirstRequests.add(String(command.requestId));
     const existing = this.#projection.lookup(command.requestId);
     if (existing !== undefined) {
       return this.#lookupMatching(command, existing);
@@ -852,6 +863,12 @@ export class WorkTurnService {
     });
   }
 
+  /** The access a turn runs with: the thread's, unless its caller held it ask-first. */
+  #turnAccess(requestId: string, thread: WorkThread): WorkAccess {
+    if (this.#askFirstRequests.delete(requestId)) return "ask-first";
+    return thread.access;
+  }
+
   async #runTurn(input: {
     readonly command: ReturnType<typeof decodeStartWorkThreadTurnCommand>;
     readonly thread?: WorkThread;
@@ -987,6 +1004,9 @@ export class WorkTurnService {
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
+      ...(input.thread === undefined
+        ? {}
+        : { access: this.#turnAccess(String(input.command.requestId), input.thread) }),
       ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
       ...(input.driver.conversationOwnership !== "provider"
         ? {}

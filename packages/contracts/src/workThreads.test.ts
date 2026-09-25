@@ -38,7 +38,12 @@ describe("work thread contracts", () => {
   });
 
   it("decodes WorkThread with required projectId and rejects excess fields", () => {
-    expect(decodeWorkThread(threadFixture)).toEqual(threadFixture);
+    // A thread journaled before access existed reads as ask-first.
+    expect(decodeWorkThread(threadFixture)).toEqual({ ...threadFixture, access: "ask-first" });
+    expect(decodeWorkThread({ ...threadFixture, access: "auto-accept-edits" }).access).toBe(
+      "auto-accept-edits",
+    );
+    expect(() => decodeWorkThread({ ...threadFixture, access: "full-access" })).toThrow();
     expect(
       decodeWorkThread({
         ...threadFixture,
@@ -55,7 +60,7 @@ describe("work thread contracts", () => {
         threads: [threadFixture],
         runtime: [],
       }),
-    ).toEqual({ threads: [threadFixture], runtime: [] });
+    ).toEqual({ threads: [{ ...threadFixture, access: "ask-first" }], runtime: [] });
     expect(() => decodeWorkThreadNavigation({ threads: [threadFixture] })).toThrow();
   });
 

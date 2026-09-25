@@ -43,6 +43,15 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+## Work settings
+
+**Settings › Work** sets what a new Work thread starts with:
+
+- **Default model** is the provider and model a new thread starts on, unless you pick another in the composer. If that model is no longer available, the first available one is used.
+- **Access** is what the agent may do to files in the Project folder without asking. **Ask first** (the default) asks before every change. **Auto-accept edits** lets edits inside the Project folder happen without a prompt; anything outside the folder is still refused, and everything else works as before. Some providers have no auto-accept path and keep asking.
+
+A thread keeps the access it started with, so changing the setting never changes a thread that already exists. A goal loop only auto-accepts edits when its own limits allow it too.
+
 ## Sending while a response is running
 
 The composer stays open while a response is streaming. Press Enter and the

@@ -288,6 +288,27 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "work",
+      label: "Work",
+      scope: "host",
+      keywords:
+        "work defaults provider model access ask first auto-accept edits approvals files project folder new threads",
+      settings: [
+        {
+          id: settingId("work-default-model"),
+          label: "Default Work model",
+          scope: "host",
+          keywords: "work default provider model new threads",
+        },
+        {
+          id: settingId("work-default-access"),
+          label: "Work access",
+          scope: "host",
+          keywords: "work access ask first auto-accept accept edits approvals files permissions",
+        },
+      ],
+    },
+    {
       id: "code",
       label: "Code",
       scope: "app",

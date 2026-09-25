@@ -10,6 +10,7 @@ import {
   type ProviderSessionId,
   type ProviderResumeCursor,
   type StartWorkThreadTurnCommand,
+  type WorkAccess,
   type WorkTurnFailure,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -52,6 +53,8 @@ export interface WorkTurnRuntimePort {
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly modelOptionValues?: ProviderModelOptionValues;
+    /** The thread's access; absent reads as ask-first, which Work always was. */
+    readonly access?: WorkAccess;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
@@ -92,6 +95,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly modelOptionValues?: ProviderModelOptionValues;
+    /** The thread's access; absent reads as ask-first, which Work always was. */
+    readonly access?: WorkAccess;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
@@ -146,6 +151,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
       readonly context?: ReadonlyArray<ProviderContextBlock>;
       readonly modelOptionValues?: ProviderModelOptionValues;
+      readonly access?: WorkAccess;
       readonly appManagedTools?: AppManagedToolSet;
       readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
       readonly onDelta?: (response: string) => void;
@@ -192,7 +198,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         ...(input.modelOptionValues === undefined
           ? {}
           : { modelOptionValues: input.modelOptionValues }),
-        executionPolicy: "approval-gated" as const,
+        // Auto-accept lets the provider's edits inside the confined root land
+        // without a prompt; every driver checks the root before it allows one,
+        // and one without an auto-accept path keeps asking.
+        executionPolicy:
+          input.access === "auto-accept-edits"
+            ? ("auto-accept-edits" as const)
+            : ("approval-gated" as const),
         tools: input.appManagedTools?.definitions ?? [],
       };
       const handle = yield* input.resumeCursor === undefined

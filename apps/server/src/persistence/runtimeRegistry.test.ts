@@ -550,9 +550,16 @@ describe("createPhase1RuntimeRegistries", () => {
       updatedAt: now,
     } as const;
 
+    // A thread journaled before access existed decodes as ask-first.
     expect(registry.decode("work.thread-created@1", 1, { kind: "thread-created", thread })).toEqual(
-      { kind: "thread-created", thread },
+      { kind: "thread-created", thread: { ...thread, access: "ask-first" } },
     );
+    expect(
+      registry.decode("work.settings-updated@1", 1, {
+        kind: "settings-updated",
+        settings: { defaultAccess: "auto-accept-edits", version: 1, updatedAt: now },
+      }),
+    ).toMatchObject({ settings: { defaultAccess: "auto-accept-edits" } });
     expect(
       registry.decode("work.thread-updated@1", 1, {
         kind: "thread-updated",
@@ -560,7 +567,7 @@ describe("createPhase1RuntimeRegistries", () => {
       }),
     ).toEqual({
       kind: "thread-updated",
-      thread: { ...thread, version: 2, title: "Work registry revised" },
+      thread: { ...thread, access: "ask-first", version: 2, title: "Work registry revised" },
     });
     expect(() =>
       registry.decode("work.thread-created@1", 1, {

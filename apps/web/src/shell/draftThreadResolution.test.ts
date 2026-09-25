@@ -27,6 +27,43 @@ describe("resolveWorkProviderChoice", () => {
   });
 });
 
+describe("resolveWorkProviderChoice with Work's default", () => {
+  const first = {
+    instanceId: "90000000-0000-4000-8000-000000000001" as never,
+    modelId: "gpt-5" as never,
+    label: "First",
+  };
+  const preferred = {
+    instanceId: "90000000-0000-4000-8000-000000000002" as never,
+    modelId: "sonnet" as never,
+    label: "Preferred",
+  };
+
+  it("starts a new Work thread on the default from Settings when nothing was picked", () => {
+    expect(
+      resolveWorkProviderChoice([first, preferred], undefined, undefined, {
+        defaultProviderInstanceId: preferred.instanceId,
+        defaultModelId: preferred.modelId,
+      }),
+    ).toEqual(preferred);
+  });
+
+  it("keeps the composer's own pick over the default, and skips a default nothing serves", () => {
+    expect(
+      resolveWorkProviderChoice([first, preferred], first.instanceId, first.modelId, {
+        defaultProviderInstanceId: preferred.instanceId,
+        defaultModelId: preferred.modelId,
+      }),
+    ).toEqual(first);
+    expect(
+      resolveWorkProviderChoice([first], undefined, undefined, {
+        defaultProviderInstanceId: preferred.instanceId,
+        defaultModelId: preferred.modelId,
+      }),
+    ).toEqual(first);
+  });
+});
+
 describe("resolveDraftProject", () => {
   /**
    * An explicitly chosen Project is authoritative. A draft whose Project was

@@ -15,6 +15,7 @@ export const SETTINGS_SECTION_IDS = [
   "appearance",
   "keybindings",
   "chat",
+  "work",
   "code",
   "providers",
   "harness",
@@ -62,7 +63,6 @@ const RetiredSettingsSectionId = Schema.transformLiterals(
   ["advanced", "host"],
   ["agents", "harness"],
   ["profiles", "providers"],
-  ["work", "general"],
 );
 
 export const SettingsDeepLink = Schema.Struct({

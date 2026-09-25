@@ -598,6 +598,72 @@ describe("WorkTurnRuntime", () => {
     });
   });
 
+  it("starts the provider auto-accepting edits only for a thread whose access allows it", async () => {
+    const started: Array<{ readonly executionPolicy?: string }> = [];
+    const events: ProviderRuntimeEvent[] = [
+      {
+        instanceId: ids.provider,
+        sequence: 1,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        kind: "completed",
+        sessionId: ids.session as never,
+      },
+    ];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: (input: { readonly executionPolicy?: string }) => {
+            started.push(input);
+            return Effect.void;
+          },
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const turn = (access?: "ask-first" | "auto-accept-edits") =>
+      new WorkTurnRuntime().run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Tidy the brief",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver,
+        ...(access === undefined ? {} : { access }),
+        signal: new AbortController().signal,
+      });
+
+    await turn();
+    await turn("ask-first");
+    await turn("auto-accept-edits");
+    expect(started.map((input) => input.executionPolicy)).toEqual([
+      "approval-gated",
+      "approval-gated",
+      "auto-accept-edits",
+    ]);
+  });
+
   it("hands the provider the prior Work transcript as follow-up context", async () => {
     const sent: unknown[] = [];
     const events: ProviderRuntimeEvent[] = [

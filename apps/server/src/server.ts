@@ -119,6 +119,7 @@ import { WorkMutationService } from "./work/workMutationService";
 import { WorkResolutionService } from "./work/workResolutionService";
 import {
   WorkThreadProjection,
+  hydrateWorkSettingsFromJournal,
   hydrateWorkThreadProjectionFromJournal,
 } from "./work/workThreadProjection";
 import { WorkThreadService } from "./work/workThreadService";
@@ -2607,6 +2608,20 @@ export function startOctantServer(
         projection: workThreadProjection,
       }),
       "Work thread",
+    );
+    requireJournalHydration(
+      hydrateWorkSettingsFromJournal({
+        replay: (cursor) =>
+          persistence.journal.replayAggregateType({
+            ...Schema.decodeUnknownSync(ReplayCursor)({
+              afterSequence: cursor.afterSequence,
+              limit: cursor.limit,
+            }),
+            aggregateType: cursor.aggregateType ?? "work-settings",
+          }),
+        projection: workThreadProjection,
+      }),
+      "Work settings",
     );
     const shellService = new ShellService({
       persistence,
@@ -5852,7 +5867,9 @@ export function startOctantServer(
     // by the domain and journaled here.
     // What a Work turn is fixed at, stated once. Work denies shell, Git, and
     // reach outside the Project by construction rather than by asking, so this
-    // is a fact about the mode and not a grant anyone can change.
+    // is a fact about the mode and not a grant anyone can change; only file
+    // edits inside the Project may be auto-accepted, when the thread's access
+    // says so (see workTurnPosture).
     const WORK_TURN_POSTURE = {
       filesystem: true,
       shell: false,
@@ -5863,6 +5880,17 @@ export function startOctantServer(
       executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
     } as const;
+    const workTurnPosture = (threadId: string) => {
+      const thread = workThreadProjection.read(threadId as never);
+      if (thread === undefined || thread.lifecycle !== "active") return undefined;
+      return {
+        ...WORK_TURN_POSTURE,
+        executionPolicy:
+          thread.access === "auto-accept-edits"
+            ? ("auto-accept-edits" as const)
+            : ("approval-gated" as const),
+      };
+    };
     /** Any registered local window; the ordinary turn path rechecks Project access. */
     const firstRegisteredWindowId = (): WindowId | undefined => {
       for (const windowId of windowAuthorityStore.listWindowIds()) return windowId;
@@ -5899,19 +5927,16 @@ export function startOctantServer(
         });
       },
       threadAuthority: (threadId) => {
-        let thread;
         try {
-          thread = workThreadProjection.read(threadId as never);
+          return workTurnPosture(threadId);
         } catch {
           return undefined;
         }
-        if (thread === undefined || thread.lifecycle !== "active") return undefined;
-        return WORK_TURN_POSTURE;
       },
       // What a Work turn is fixed at. There is no per-turn grant to narrow, so
       // a ceiling asking for less than this is refused when the loop starts
       // rather than quietly ignored on every round.
-      modePosture: () => WORK_TURN_POSTURE,
+      modePosture: (threadId) => workTurnPosture(threadId) ?? WORK_TURN_POSTURE,
       // Work has no approval queue of its own: its posture denies shell, Git,
       // and reach outside the Project outright rather than asking. Saying so
       // here is honest; inventing a source would make the pause untestable.

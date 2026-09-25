@@ -66,7 +66,12 @@ export function createNativeHarnessAuthority(
     resolveLiveFacts: ({ threadId, mode }) => {
       const code =
         mode === "code" ? options.persistence.readCodeThread(threadId as never) : undefined;
-      const executionPolicy = code?.executionPolicy ?? "approval-gated";
+      // A Work thread's access is its own; auto-accept lets the harness write
+      // project files without asking, as it does for a Code thread.
+      const work = mode === "work" ? options.workThreads.read(threadId as never) : undefined;
+      const executionPolicy =
+        code?.executionPolicy ??
+        (work?.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated");
       return {
         // The harness is only composed for a provider that runs app-managed
         // tools; a provider that cannot never reaches this service.

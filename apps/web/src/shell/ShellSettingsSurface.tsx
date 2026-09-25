@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import type { WorkSettingsController } from "../work/useWorkSettings";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
@@ -36,6 +37,7 @@ export interface ShellSettingsSurfaceProps {
   readonly typography?: ThemeTypography;
   readonly theme?: ThemeController["draft"];
   readonly chatController: ChatController;
+  readonly workSettings?: WorkSettingsController;
   readonly codeController: CodeController;
   readonly discoveryController: DiscoveryController;
   readonly pickLocalPluginFolder?: () => Promise<
@@ -95,6 +97,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
         >
           <LazySettingsView
             chatController={props.chatController}
+            {...(props.workSettings === undefined ? {} : { workSettings: props.workSettings })}
             codeController={props.codeController}
             discoveryController={props.discoveryController}
             extensionClient={props.extensionClient}
