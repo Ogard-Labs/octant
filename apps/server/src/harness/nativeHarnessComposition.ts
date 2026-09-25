@@ -42,7 +42,11 @@ export interface NativeHarnessCompositionOptions {
   readonly plans?: Pick<PlanService, "read" | "execute">;
   /** Code only: the sandboxed shell. */
   readonly shell?: NativeHarnessShellPort;
-  readonly webSearch?: NativeHarnessToolPorts["webSearch"];
+  /**
+   * The web search a turn may use, resolved each time a turn's tools are
+   * composed: its backing endpoint is a live setting, not a startup fact.
+   */
+  readonly resolveWebSearch?: () => NativeHarnessToolPorts["webSearch"];
   readonly webFetch?: NativeHarnessToolPorts["webFetch"];
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
   /** Delegation for a lead thread; absent on a host that cannot admit children. */
@@ -119,6 +123,10 @@ export function createNativeHarnessComposition(
             return undefined;
           }
         };
+  const webSearchPort = (): Pick<NativeHarnessToolPorts, "webSearch"> => {
+    const webSearch = options.resolveWebSearch?.();
+    return webSearch === undefined ? {} : { webSearch };
+  };
   const shared = (threadId: string): NativeHarnessToolPorts => ({
     ...(options.webFetch === undefined ? {} : { webFetch: options.webFetch }),
     ...(options.plans === undefined
@@ -226,9 +234,7 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
           }),
           // Research is the user's grant for a Chat thread to reach the web.
-          ...(thread.researchEnabled && options.webSearch !== undefined
-            ? { webSearch: options.webSearch }
-            : {}),
+          ...(thread.researchEnabled ? webSearchPort() : {}),
           ...(contextRemaining === undefined
             ? {}
             : {
@@ -262,7 +268,7 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
           }),
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
-          ...(options.webSearch === undefined ? {} : { webSearch: options.webSearch }),
+          ...webSearchPort(),
         },
       });
     },
@@ -289,7 +295,7 @@ export function createNativeHarnessComposition(
           }),
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
           ...(options.shell === undefined ? {} : { shell: options.shell }),
-          ...(options.webSearch === undefined ? {} : { webSearch: options.webSearch }),
+          ...webSearchPort(),
         },
       });
     },
@@ -338,9 +344,7 @@ export function createNativeHarnessComposition(
           ...(authority.network && options.webFetch !== undefined
             ? { webFetch: options.webFetch }
             : {}),
-          ...(authority.network && options.webSearch !== undefined
-            ? { webSearch: options.webSearch }
-            : {}),
+          ...(authority.network ? webSearchPort() : {}),
         },
         uuid: options.uuid,
       });
