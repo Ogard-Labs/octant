@@ -4934,7 +4934,10 @@ function LaunchedShell(
         rows: 30,
       });
       if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
-      await zen.pinProjectTerminal({ projectId, terminalId });
+      if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
+      // No card means no way back to this shell: a Project terminal has no
+      // thread or listing to reopen it from, so it stops rather than run unseen.
+      await projectTerminalClient.execute({ kind: "stop", projectId, terminalId });
     } catch {
       // The Add panel stays usable; the card that does not arrive is the answer.
     }

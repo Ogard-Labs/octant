@@ -171,6 +171,29 @@ describe("useZenController", () => {
     );
   });
 
+  it("tells the caller whether a Project terminal card was written", async () => {
+    const refused = createClient();
+    const { result } = renderHook(() =>
+      useZenController({ client: refused, windowId, storage: window.sessionStorage }),
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    const request = {
+      projectId: "00000000-0000-4000-8000-000000000931" as never,
+      terminalId: "00000000-0000-4000-8000-000000000932" as never,
+    };
+
+    let pinned: boolean | undefined;
+    await act(async () => {
+      pinned = await result.current.pinProjectTerminal(request);
+    });
+
+    // The default client refuses every Project terminal pin, so the card was
+    // not written and the caller must stop the shell it started.
+    expect(pinned).toBe(false);
+  });
+
   it("keeps Zen open when the server committed presentation before the response failed", async () => {
     const initial = makeSpace();
     const committed = makeSpace({ version: 2 as AggregateVersion, active: true });

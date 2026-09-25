@@ -106,11 +106,11 @@ class FakeTerminals {
   #exitCode: number | undefined;
   readonly #listeners = new Set<(emission: TerminalOutputEmission) => void>();
 
-  async launch(request: TerminalLaunchRequest): Promise<TerminalSnapshot> {
+  launch = async (request: TerminalLaunchRequest): Promise<TerminalSnapshot> => {
     this.launches.push(request);
     this.#status = "running";
     return this.#snapshot(request.terminalId);
-  }
+  };
   observe(_terminalId: string, listener: (emission: TerminalOutputEmission) => void) {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -317,6 +317,27 @@ describe("Project terminals", () => {
     expect(refusal(result)).toBe("unavailable");
     expect(terminals.launches).toEqual([]);
     expect(events()).toEqual([]);
+  });
+
+  it("ends a shell whose Project was archived while it was starting", async () => {
+    const { service, terminals, projects, events } = harness();
+    const launch = terminals.launch.bind(terminals);
+    terminals.launch = async (request) => {
+      const snapshot = await launch(request);
+      // The archive commits and settles the Project before the shell has an owner.
+      projects.set(ids.project, project({ lifecycle: "archived" }));
+      await service.settleProject(projectId);
+      return snapshot;
+    };
+
+    const result = await service.execute(windowId, "local-window", start());
+
+    expect(refusal(result)).toBe("authority-revoked");
+    expect(terminals.terminated).toEqual([ids.terminal]);
+    expect(events().map((event) => event.payload)).toEqual([
+      expect.objectContaining({ kind: "project-terminal-started" }),
+      expect.objectContaining({ kind: "project-terminal-ended", reason: "authority-revoked" }),
+    ]);
   });
 
   it("lets only the window that opened the shell attach to it or type into it", async () => {
