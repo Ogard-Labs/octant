@@ -126,6 +126,17 @@ floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
 never cards.
 
+The window frame is the one place cards carry the layout. The sidebar and the
+gutters around the workspace are a single back surface painted in the sidebar's
+material (glass, or the opaque sidebar colour when glass is off or unavailable),
+and the primary workspace, the right dock, the bottom panel, and the Settings
+page sit on it as cards: the card radius, one hairline, no shadow, 8px apart,
+all in the workspace colour. Reader pages inside a card use that colour too,
+so every card reads the same. A pane header and the dock head share the 38px
+title rail, and the card draws the one hairline under both. Below 681px the
+workspace sidebar is an overlay drawer and the frame stays flat; Settings keeps
+its own narrow layout, a drawer with a flat page, below 960px.
+
 ### Page shell
 
 Every list, board, reader, and preference page is a `Surface`:
@@ -142,7 +153,12 @@ Surface (reading measure 880px, or wide for boards)
 Leaving a reader route is always the ghost "Back to workspace" control in the
 header. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
-draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
+draws no hairline between groups. The groups are Personal (how Octant looks and
+behaves for you), Modes (each mode's defaults), Models (which provider or model
+answers each job), Agents (what a running agent may do), Integrations, and
+System (the running host, its data, remote access, and usage). A setting lives
+on the page of the thing it changes, and a moved setting keeps answering links
+to its old page. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
 
 ### Content tabs

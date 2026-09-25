@@ -249,10 +249,13 @@ export function SettingsDisclosure(props: {
   readonly children: ReactNode;
   readonly variant?: "section" | "inline";
   readonly className?: string;
+  /** Opens on mount, for a deep link that lands on a control inside. */
+  readonly defaultOpen?: boolean;
 }) {
   const variant = props.variant ?? "section";
   return (
     <details
+      {...(props.defaultOpen === true ? { open: true } : {})}
       className={[
         "settings-disclosure",
         variant === "section" ? "settings-disclosure--section" : "settings-disclosure--inline",

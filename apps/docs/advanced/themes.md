@@ -12,15 +12,16 @@ not own a second core palette.
 
 ## Settings → Appearance
 
-The **Appearance** section covers sidebar width, the mode switcher, the
-project view switcher, the translucent sidebar switch, sidebar background and
-vibrancy, theme mode and preset, UI/editor/terminal typography, theme
-accessibility, and theme import and export.
+The **Appearance** page covers the color scheme and presets, UI/editor/terminal
+typography, theme accessibility, and theme import and export, then **Window**
+(Glass), **Background**, **Sidebar** (width, destinations, the More row, the
+mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
+(transcript text size and width).
 
-**Project view switcher** chooses how the Code sidebar offers saved project
-views: a dropdown, or one icon button per view that shows the view name on
-hover. Each project view can be given its own icon and color when you create or
-edit it.
+**Project view switcher** lives in **Settings → Code**. It chooses how the Code
+sidebar offers saved project views: a dropdown, or one icon button per view
+that shows the view name on hover. Each project view can be given its own icon
+and color when you create or edit it.
 
 ### Sidebar destinations
 
@@ -58,7 +59,7 @@ with a red accent. Every preset clears the same text and control
 contrast bars.
 Semantic token roles cover foundation, surface, control, border, text,
 focus, accent, status, and diff colors with contrast validation and safe
-fallback. Theme density is **comfortable** or **compact**.
+fallback.
 
 You can import a bounded subset of VS Code color-theme JSON
 (`octant-theme` format). Themes can never contain scripts, extensions, or
@@ -78,25 +79,22 @@ at 12px. Transcript text starts at 13px; the existing small, medium, and
 large transcript choices remain available. The platform face remains available
 from the font picker as System interface.
 
-### Translucent sidebar
+### Glass
 
-The **Translucent sidebar** switch uses the system sidebar material when
-available. When the material resolves to opaque — for accessibility or
+**Glass** is the frosted material behind the sidebar and around the workspace
+cards: **Off** paints it solid, **Subtle** or **Strong** uses the system
+material at that strength. **Glass cards** lets the glass show through the
+cards as well. When the material resolves to opaque — for accessibility or
 performance reasons — the interface says so honestly. **Reduced
 Transparency** and **Increased Contrast** resolve the sidebar to opaque.
 
-### Sidebar background and vibrancy
+### Sidebar background
 
-The sidebar can use a built-in preset, a custom uploaded image, or no
-background, with overlay color and opacity plus a vibrancy mode of **Off**,
-**Subtle**, or **Strong**. Presets cover gradients, shapes, dev-inspired
-patterns, and subtle ambient textures — all static in V1.
-
-Custom uploads accept PNG, JPEG, and WebP only (magic-byte validated), up to
-8 MiB and 4096×4096 pixels. **Reduced Transparency** disables the background
-and vibrancy entirely; **Increased Contrast** clamps overlay opacity to at
-least 80%. Vibrancy is native to the Electron app; web hides the control and
-forces it off.
+Under **Background**, the sidebar can use a built-in preset or no background,
+with overlay color and opacity. Presets cover gradients, shapes, dev-inspired
+patterns, and subtle ambient textures — all static in V1. **Reduced
+Transparency** disables the background entirely; **Increased Contrast** clamps
+overlay opacity to at least 80%.
 
 ### Background
 

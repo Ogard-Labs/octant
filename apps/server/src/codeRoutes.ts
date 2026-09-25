@@ -40,6 +40,8 @@ import {
   decodeCodeOperationResult,
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
+  decodeProjectTerminalCommand,
+  decodeProjectTerminalResult,
   decodeCodeConversationPage,
   MAX_CODE_SEARCH_QUERY_LENGTH,
   decodeCodeFileChangeNotice,
@@ -94,6 +96,7 @@ import {
   type CodeOperationResult,
   type CodeTerminalInspection,
   type CodeTerminalInspectionRequest,
+  type ProjectTerminalCommand,
   type CodeConversationPage,
   type CodeFileChangeNotice,
   type CodeSearchResult,
@@ -112,6 +115,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { FileIdentity } from "./code/fileOperationPort";
+import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -409,6 +413,8 @@ export interface CodeRouteService {
 
 export interface CodeRouteDependencies {
   readonly service: CodeRouteService;
+  /** Terminals a Code Project owns without a thread; absent on a host without them. */
+  readonly projectTerminals?: Pick<ProjectTerminalService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -451,6 +457,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // stays gated as an agent and cannot skip a Code approval by reaching the
     // route directly.
     let operationInitiator: "user" | "agent";
+    let callerKind: "local-window" | "remote-device";
     try {
       if (url.searchParams.has("windowId")) {
         throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
@@ -461,7 +468,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         now: now(),
       });
       authenticatedWindowId = principalContext.scopeId;
-      operationInitiator = principalContext.principal.kind === "local-window" ? "user" : "agent";
+      callerKind = principalContext.principal.kind;
+      operationInitiator = callerKind === "local-window" ? "user" : "agent";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse(
@@ -545,6 +553,39 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             throw new CodeRouteRejected("Code operation response is unavailable.", 503);
           }
           return jsonResponse(operationResult, 200, origin);
+        }
+        case "project-terminals": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.projectTerminals === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Project terminals are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
+            throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
+          }
+          let command: ProjectTerminalCommand;
+          try {
+            command = decodeProjectTerminalCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Project terminal command is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeProjectTerminalResult(
+              await dependencies.projectTerminals.execute(
+                authenticatedWindowId,
+                callerKind,
+                command,
+              ),
+            ),
+            200,
+            origin,
+          );
         }
         case "terminal-inspection": {
           requireMethodAndEmptyQuery(request, url, "POST");
@@ -1402,6 +1443,7 @@ type MatchedRoute =
         | "navigation"
         | "commands"
         | "terminal-inspection"
+        | "project-terminals"
         | "file-save"
         | "file-open"
         | "git-history"
@@ -1529,6 +1571,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/navigation") return { kind: "navigation" };
   if (pathname === "/api/code/commands") return { kind: "commands" };
   if (pathname === "/api/code/terminals/inspect") return { kind: "terminal-inspection" };
+  if (pathname === "/api/code/project-terminals") return { kind: "project-terminals" };
   if (pathname === "/api/code/board") return { kind: "board" };
   if (pathname === "/api/code/planner/commands") return { kind: "planner-commands" };
   if (pathname === "/api/code/planner/proposals/commands") {

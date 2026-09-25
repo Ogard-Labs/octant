@@ -141,6 +141,14 @@ restarted from the card; that stays with the Code thread. A pinned shell
 spends the same live-card budget a pinned conversation does, so it pauses on
 the same terms and picks the shell back up where it is when you return.
 
+You can also open a terminal for the Code Project itself, with no thread:
+**Add** → **Terminal in this Project** starts your own shell in the Project's
+folder and pins it. It is confined to that folder like a thread's terminal,
+and no agent can see or type into it. Only this Mac's window can open or use
+it; a paired phone cannot. Archiving the Project or pointing it at another
+folder ends the shell, and so does restarting Octant. **Stop** in the card's
+**…** menu ends it yourself.
+
 When Zen state cannot be decoded, a **Recover Zen** path restores the main
 workspace instead of trapping you. Zen rebuilds from the event journal after
 a restart or reconnect.

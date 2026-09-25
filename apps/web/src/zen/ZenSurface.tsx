@@ -54,6 +54,7 @@ import {
   getZenBuiltinBackground,
 } from "@octant/contracts/zen";
 import type { SettingsDeepLink } from "@octant/contracts";
+import type { ProjectId } from "@octant/contracts/projects";
 import {
   UNSUPPORTED_NAVIGATOR_ASSISTANT,
   type NavigatorAssistantController,
@@ -104,6 +105,14 @@ export interface ZenSurfaceProps {
   readonly onAddBrowser?: (sourceContext: ZenSourceContext) => void;
   /** Reads the thread catalog without opening the Threads panel. */
   readonly onLoadThreads?: () => void;
+  /**
+   * The Code Project this window holds, offered as "This Project" for a
+   * terminal with no thread. Absent when the window holds no Code Project or
+   * the host cannot open Project terminals.
+   */
+  readonly projectTerminalTarget?: { readonly projectId: ProjectId; readonly name: string };
+  /** Starts a terminal at that Project's root and pins its card. */
+  readonly onAddProjectTerminal?: (projectId: ProjectId) => void;
   readonly onExpandBar: () => void;
   readonly onHideBar: () => void;
   readonly onCreateWidget?: (kind: "notes" | "checklist") => void;
@@ -181,6 +190,15 @@ export interface ZenSurfaceProps {
    */
   readonly renderTerminal?: (input: {
     readonly element: Extract<ZenElementPayload, { kind: "terminal" }>;
+    readonly activity: ZenLiveCardActivity;
+  }) => ReactNode | undefined;
+  /**
+   * Builds the surface for one pinned Project terminal, or returns undefined
+   * when this window cannot open one. The card names a Project and a shell and
+   * nothing else; the host decides what that shell may still do.
+   */
+  readonly renderProjectTerminal?: (input: {
+    readonly element: Extract<ZenElementPayload, { kind: "project-terminal" }>;
     readonly activity: ZenLiveCardActivity;
   }) => ReactNode | undefined;
   /**
@@ -371,6 +389,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
   );
   const focusedThreadContext =
     focusedElement?.kind === "thread" ? focusedElement.sourceContext : undefined;
+  // The Project this window holds, when it can take a terminal of its own.
+  // Offered first in the terminal picker, before any thread.
+  const projectTerminal =
+    props.onAddProjectTerminal === undefined ? undefined : props.projectTerminalTarget;
   // The threads a terminal or browser can open in, the focused card's first.
   const toolCandidates = (props.threadEntries ?? [])
     .filter((entry) =>
@@ -489,6 +511,14 @@ export function ZenSurface(props: ZenSurfaceProps) {
     const activity = threadCardActivity.get(String(element.elementId));
     if (props.renderTerminal === undefined || activity === undefined) return undefined;
     return props.renderTerminal({ element, activity });
+  }
+
+  function renderProjectTerminalCard(
+    element: Extract<ZenElementPayload, { kind: "project-terminal" }>,
+  ): ReactNode | undefined {
+    const activity = threadCardActivity.get(String(element.elementId));
+    if (props.renderProjectTerminal === undefined || activity === undefined) return undefined;
+    return props.renderProjectTerminal({ element, activity });
   }
 
   const resolvedBackground = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
@@ -738,7 +768,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
         {laidOut.map((element) => {
           const threadCard = element.kind === "thread" ? resolveThreadCard(element) : undefined;
           const title =
-            element.kind === "terminal"
+            element.kind === "terminal" || element.kind === "project-terminal"
               ? `Terminal · ${element.title ?? "Terminal"}`
               : "title" in element && typeof element.title === "string"
                 ? element.title
@@ -889,6 +919,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       (renderTerminalCard(element) ?? (
                         <p role="status">This window cannot open a terminal.</p>
                       ))
+                    ) : element.kind === "project-terminal" ? (
+                      (renderProjectTerminalCard(element) ?? (
+                        <p role="status">This window cannot open a terminal.</p>
+                      ))
                     ) : element.kind === "canvas" ? (
                       (props.renderCanvas?.({ element }) ?? (
                         <p role="status">This window cannot read a canvas.</p>
@@ -1020,7 +1054,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     text="Thread"
                   />
                   <AddTile
-                    disabled={props.onAddTerminal === undefined}
+                    disabled={props.onAddTerminal === undefined && projectTerminal === undefined}
                     expanded={toolTarget === "terminal"}
                     icon={SquareTerminal}
                     label="Add terminal"
@@ -1050,10 +1084,30 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     className="zen-add-targets"
                     role="group"
                   >
+                    {/* The Project itself comes first: a terminal at its root,
+                        with no thread's authority. */}
+                    {toolTarget === "terminal" && projectTerminal !== undefined ? (
+                      <OctantButton
+                        aria-label={`Add terminal for this Project, ${projectTerminal.name}`}
+                        className="zen-add-target"
+                        onClick={() => {
+                          props.onAddProjectTerminal?.(projectTerminal.projectId);
+                          setToolTarget(null);
+                          setManualPanel(null);
+                        }}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <span className="zen-add-target__title">This Project</span>
+                        <span className="zen-add-target__detail">
+                          {projectTerminal.name} · a terminal at its root
+                        </span>
+                      </OctantButton>
+                    ) : null}
                     <p className="zen-add-picker__hint">
                       {toolTarget === "terminal"
-                        ? "The terminal opens in this thread's checkout."
-                        : "The browser opens in this thread's browsing context."}
+                        ? "Or open it in a thread's checkout."
+                        : "Or open it in a thread's browsing context."}
                     </p>
                     {toolCandidates.length === 0 ? (
                       <p className="zen-add-picker__hint" role="status">

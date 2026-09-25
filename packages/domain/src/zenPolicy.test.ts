@@ -234,6 +234,46 @@ describe("addElement", () => {
     ).toThrow(ZenPolicyRejected);
   });
 
+  it("refuses a Project terminal card naming a shell on some other host, and keeps its Project fixed", () => {
+    const card = {
+      elementId: makeId("6a6a6a6a") as ZenElementId,
+      kind: "project-terminal",
+      hostId: localHostId,
+      projectId: makeId("6b6b6b6b"),
+      terminalId: makeId("6c6c6c6c"),
+      geometry: { x: 100, y: 100, width: 520, height: 320 },
+      zIndex: 1,
+      minimized: false,
+      locked: false,
+    } as unknown as Extract<ZenElementPayload, { kind: "project-terminal" }>;
+    expect(() =>
+      addElement(
+        makeSpace(),
+        { ...card, hostId: makeId("99999999") } as ZenElementPayload,
+        0,
+        localHostId,
+      ),
+    ).toThrow(ZenPolicyRejected);
+
+    const pinned = addElement(makeSpace(), card, 0, localHostId);
+    expect(() =>
+      updateElement(
+        pinned,
+        { ...card, projectId: makeId("6d6d6d6d") } as ZenElementPayload,
+        pinned.version,
+        localHostId,
+      ),
+    ).toThrow(ZenPolicyRejected);
+    expect(
+      updateElement(
+        pinned,
+        { ...card, geometry: { ...card.geometry, x: 140 } },
+        pinned.version,
+        localHostId,
+      ).elements[0]?.geometry.x,
+    ).toBe(140);
+  });
+
   it("rejects stale version", () => {
     const space = makeSpace(5);
     expect(() => addElement(space, makeNotesElement(), 3, localHostId)).toThrow(ZenPolicyRejected);

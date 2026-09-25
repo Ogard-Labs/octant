@@ -91,6 +91,14 @@ describe("theme contracts", () => {
     expect(settings.darkPresetId).toBe("octant-dark");
   });
 
+  it("replays settings written with the retired density and translucency fields, and no longer writes them", () => {
+    expect(decodeThemeSettings(validSettings).density).toBe("comfortable");
+    const { density: _density, translucency: _translucency, ...current } = validSettings;
+    expect(decodeThemeSettings(current)).not.toHaveProperty("density");
+    expect(DEFAULT_THEME_SETTINGS).not.toHaveProperty("density");
+    expect(DEFAULT_THEME_SETTINGS).not.toHaveProperty("translucency");
+  });
+
   it("rejects unknown theme mode and density", () => {
     expect(() => decodeThemeSettings({ ...validSettings, mode: "auto" })).toThrow();
     expect(() => decodeThemeSettings({ ...validSettings, density: "dense" })).toThrow();

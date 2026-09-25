@@ -107,7 +107,6 @@ import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
-  enforceAccessibilitySettings,
   enforceSidebarBackgroundAccessibility,
   resolveEffectiveSidebarBackground,
   resolveAppBackground,
@@ -317,6 +316,7 @@ import {
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,
+  ZenProjectTerminalCard,
   ZenResearchDock,
   ZenSurface,
   ZenTerminalCard,
@@ -668,9 +668,7 @@ function LaunchedShell(
     () =>
       themeController.draft === undefined
         ? undefined
-        : enforceSidebarBackgroundAccessibility(
-            enforceAccessibilitySettings(themeController.draft),
-          ),
+        : enforceSidebarBackgroundAccessibility(themeController.draft),
     [themeController.draft],
   );
   const presentedShellSettings = useMemo(
@@ -1198,6 +1196,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    projectTerminalClient,
     hostControlClient,
     imageGenerationClient,
     speechClient,
@@ -4916,6 +4915,52 @@ function LaunchedShell(
     await zen.pinTerminal({ ...target, terminalId });
   }
 
+  /**
+   * Opens the person's own shell at the root of the Code Project this window
+   * holds, with no thread, and pins it. The host decides the root and whether
+   * this window may open it; a refusal leaves the space as it was.
+   */
+  async function addZenProjectTerminal(projectId: ProjectId): Promise<void> {
+    const terminalId = decodeCodeTerminalId(crypto.randomUUID());
+    // No card means no way back to a shell: a Project terminal has no thread
+    // or listing to reopen it from, so one without a card stops rather than
+    // run unseen. Stopping a shell the host never started is refused harmlessly.
+    const stop = () =>
+      projectTerminalClient
+        .execute({ kind: "stop", projectId, terminalId })
+        .then(() => undefined)
+        .catch(() => undefined);
+    let started;
+    try {
+      started = await projectTerminalClient.execute({
+        kind: "start",
+        projectId,
+        terminalId,
+        columns: 100,
+        rows: 30,
+      });
+    } catch {
+      // The reply was lost, not necessarily the start.
+      await stop();
+      return;
+    }
+    if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
+    if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
+    await stop();
+  }
+
+  const zenProjectTerminalTarget = (() => {
+    const projectId = controller.workspace?.contextByMode.code.projectId ?? undefined;
+    if (projectId === undefined) return undefined;
+    const project = projectController.allProjects.find(
+      (candidate) =>
+        String(candidate.id) === String(projectId) &&
+        candidate.type === "code" &&
+        candidate.lifecycle === "active",
+    );
+    return project === undefined ? undefined : { projectId: project.id, name: project.name };
+  })();
+
   function canAddZenTerminal(
     sourceContext: import("@octant/contracts/zen").ZenSourceContext,
   ): boolean {
@@ -5110,7 +5155,6 @@ function LaunchedShell(
       usageClient={usageClient}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}
-      visibleSettings={controller.visibleSettings}
       backgroundImageLibrary={backgroundImageLibrary}
       announcement={controller.announcement}
       announcementSequence={controller.announcementSequence}
@@ -5231,6 +5275,20 @@ function LaunchedShell(
               onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
               onAddBrowser={addZenBrowser}
               onLoadThreads={() => void zen.refreshThreads("")}
+              {...(zenProjectTerminalTarget === undefined
+                ? {}
+                : { projectTerminalTarget: zenProjectTerminalTarget })}
+              onAddProjectTerminal={(projectId) => void addZenProjectTerminal(projectId)}
+              renderProjectTerminal={({ element, activity }) => (
+                <Suspense fallback={null}>
+                  <ZenProjectTerminalCard
+                    client={projectTerminalClient}
+                    live={activity.activity === "live"}
+                    projectId={element.projectId}
+                    terminalId={element.terminalId}
+                  />
+                </Suspense>
+              )}
               onAddTerminal={(sourceContext) => {
                 void addZenTerminal(sourceContext);
               }}

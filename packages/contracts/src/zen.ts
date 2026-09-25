@@ -139,6 +139,7 @@ export type ZenViewport = typeof ZenViewport.Type;
 export const ZenElementKind = Schema.Literal(
   "thread",
   "terminal",
+  "project-terminal",
   "canvas",
   "notes",
   "checklist",
@@ -198,6 +199,30 @@ export const ZenTerminalElementPayload = Schema.Struct({
   .pipe(Schema.filter((element) => element.sourceContext.threadKind === "code"))
   .annotations(strict);
 export type ZenTerminalElementPayload = typeof ZenTerminalElementPayload.Type;
+
+/**
+ * A terminal a Code Project owns without a thread, pinned where the person can
+ * watch it.
+ *
+ * Addressed like a thread's terminal and granting as little: the card names
+ * the Project and the shell, and every keystroke is authorized by the host
+ * against the window and Project that opened it. It carries no thread,
+ * because there is none, and so nothing an agent does can reach it through
+ * the card.
+ */
+export const ZenProjectTerminalElementPayload = Schema.Struct({
+  elementId: ZenElementId,
+  kind: Schema.Literal("project-terminal"),
+  hostId: HostId,
+  projectId: ProjectId,
+  terminalId: CodeTerminalId,
+  geometry: ZenGeometry,
+  zIndex: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(1000)),
+  minimized: Schema.Boolean,
+  locked: Schema.Boolean,
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+export type ZenProjectTerminalElementPayload = typeof ZenProjectTerminalElementPayload.Type;
 
 /**
  * A canvas this window may already open, pinned where the user can watch it.
@@ -391,6 +416,7 @@ export type ZenRecipeElementPayload = typeof ZenRecipeElementPayload.Type;
 export const ZenElementPayload = Schema.Union(
   ZenThreadElementPayload,
   ZenTerminalElementPayload,
+  ZenProjectTerminalElementPayload,
   ZenCanvasElementPayload,
   ZenNotesElementPayload,
   ZenChecklistElementPayload,
@@ -1010,6 +1036,21 @@ export const ZenTerminalPinResult = Schema.Struct({
   space: ZenSpace,
 }).annotations(strict);
 export type ZenTerminalPinResult = typeof ZenTerminalPinResult.Type;
+
+/**
+ * Pin a terminal this window opened for a Code Project.
+ *
+ * Named, never described: the server asks the Project terminal owner whether
+ * this window owns the shell and writes the card itself.
+ */
+export const ZenProjectTerminalPinRequest = Schema.Struct({
+  projectId: ProjectId,
+  terminalId: CodeTerminalId,
+  expectedVersion: AggregateVersion,
+  geometry: Schema.optional(ZenGeometry),
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+export type ZenProjectTerminalPinRequest = typeof ZenProjectTerminalPinRequest.Type;
 
 /**
  * Dock a research browser onto a Work or Code thread this window may see.
@@ -1749,6 +1790,9 @@ export const decodeZenCanvasPinRequest = Schema.decodeUnknownSync(ZenCanvasPinRe
 export const decodeZenCanvasPinResult = Schema.decodeUnknownSync(ZenCanvasPinResult);
 export const decodeZenTerminalPinRequest = Schema.decodeUnknownSync(ZenTerminalPinRequest);
 export const decodeZenTerminalPinResult = Schema.decodeUnknownSync(ZenTerminalPinResult);
+export const decodeZenProjectTerminalPinRequest = Schema.decodeUnknownSync(
+  ZenProjectTerminalPinRequest,
+);
 export const decodeZenThreadContinuationTarget = Schema.decodeUnknownSync(
   ZenThreadContinuationTarget,
 );

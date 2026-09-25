@@ -32,7 +32,6 @@ describe("ShellSettingsSurface", () => {
         sidebarVibrancySupported={false}
         themeController={{ draft: undefined, settings: undefined } as never}
         usageClient={{} as never}
-        visibleSettings={["enable-chat"]}
       />,
     );
 

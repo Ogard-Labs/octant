@@ -160,10 +160,12 @@
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--oct-space-4);
 }
-/* Keep wrapped labels from lowering their values relative to neighboring totals. */
+/* Keep wrapped labels from lowering their values relative to neighboring totals.
+   A total carries up to four rows (label, value, detail, partial coverage);
+   at three, Cache savings stacked its coverage line on top of its detail. */
 .provider-history__totals > div {
   display: grid;
-  grid-row: span 3;
+  grid-row: span 4;
   grid-template-rows: subgrid;
   align-content: start;
   gap: var(--oct-space-1);

@@ -366,6 +366,7 @@ import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
+import { ProjectTerminalService } from "./code/projectTerminalService";
 import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
 import { WorkProjectStatusReader, listWorkFolderTopLevel } from "./work/workProjectStatusReader";
 import { DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER, effectiveDefaultFolder } from "./defaultFolder";
@@ -610,6 +611,7 @@ import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
+import { searxngHarnessWebSearch } from "./harness/nativeHarnessWebSearch";
 import {
   ServerBrowserAuthorityResolver,
   deriveToolHostId,
@@ -4657,8 +4659,55 @@ export function startOctantServer(
       }
       await appleRuntimeStore.persistReceipts([]);
     });
+    // A person's own shell at a Code Project's root, with no thread. It
+    // shares the Code runtime's terminals, so one receipt store, reconcile,
+    // and shutdown cover it; the journal records its start and end.
+    const sharedTerminals = codeOperationRuntime?.terminals;
+    const projectTerminals =
+      sharedTerminals === undefined
+        ? undefined
+        : new ProjectTerminalService({
+            terminals: sharedTerminals,
+            readProject: persistence.readProject,
+            canAccessProject: canAccessCodeProject,
+            resolveRoot: async (project) => {
+              try {
+                const binding = await projectRootPort.validate(
+                  "code",
+                  project.binding.canonicalRoot,
+                );
+                if (binding.canonicalRoot !== project.binding.canonicalRoot) return undefined;
+                const details = await lstat(binding.canonicalRoot);
+                return details.isDirectory() && !details.isSymbolicLink()
+                  ? binding.canonicalRoot
+                  : undefined;
+              } catch {
+                return undefined;
+              }
+            },
+            readRunning: persistence.readRunningProjectTerminals,
+            journal: persistence.journal,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            uuid: randomUUID,
+            clock: () => new Date().toISOString(),
+          });
+    projectTerminals?.reconcile();
+    const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (projectTerminals === undefined) return;
+      for (const event of append.events) {
+        if (
+          event.aggregateType === "project" &&
+          (event.eventName === "project.lifecycle-changed@1" ||
+            event.eventName === "project.binding-relinked@1")
+        ) {
+          void projectTerminals.settleProject(decodeProjectId(event.aggregateId));
+        }
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectTerminalAuthority));
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
+      ...(projectTerminals === undefined ? {} : { projectTerminals }),
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxFileBodySize: MAX_CODE_FILE_BODY_SIZE,
@@ -4967,21 +5016,10 @@ export function startOctantServer(
         process: harnessProcessPort,
         scriptDirectory: harnessWorkDirectory,
       }),
-      webSearch:
-        persistence.readChatSettings()?.settings.searxngBaseUrl === undefined
-          ? undefined
-          : async (input) => {
-              const settings = persistence.readChatSettings()?.settings;
-              if (settings?.searxngBaseUrl === undefined) return [];
-              const found = await new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(
-                input,
-              );
-              return found.results.map((result) => ({
-                title: result.title,
-                url: result.url,
-                snippet: result.snippet,
-              }));
-            },
+      resolveWebSearch: () =>
+        searxngHarnessWebSearch({
+          readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
+        }),
       webFetch: async (input) => {
         try {
           return await fetchPublicUrl(input);
@@ -5944,6 +5982,17 @@ export function startOctantServer(
         : {
             codeTerminals: {
               read: (windowId, request) => codeOperationRuntime.inspectTerminal(windowId, request),
+            },
+          }),
+      ...(projectTerminals === undefined
+        ? {}
+        : {
+            projectTerminals: {
+              read: (windowId, projectId, terminalId) => {
+                if (!projectTerminals.owns(windowId, projectId, terminalId)) return undefined;
+                const project = persistence.readProject(projectId);
+                return project === undefined ? undefined : { title: project.name };
+              },
             },
           }),
       // Pinning a canvas asks Canvas whether this window may read it, the same

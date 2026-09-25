@@ -3049,20 +3049,6 @@ describe("useShellController", () => {
     expect(result.current.presentedLayout?.kind).toBe("pane");
     expect(result.current.workspace!.layouts.code.kind).toBe("split");
 
-    for (const query of [
-      "material",
-      "translucent",
-      "sidebar",
-      "appearance",
-      "  translucent   sidebar  ",
-    ]) {
-      act(() => result.current.setSettingsSearch(query));
-      expect(result.current.visibleSettings).toContain("sidebar-material");
-    }
-    for (const query of ["mode", "dropdown", "navigation"]) {
-      act(() => result.current.setSettingsSearch(query));
-      expect(result.current.visibleSettings).toContain("mode-switcher");
-    }
     await act(async () => result.current.resetNativeBounds());
     expect(nativeHost.resetBounds).toHaveBeenCalledOnce();
     expect(result.current.announcement).toMatch(/window bounds reset/i);

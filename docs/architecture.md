@@ -467,7 +467,7 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Settings → Host exposes a read-only, server-authoritative data
+  the port. Settings → Data & privacy exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
@@ -955,6 +955,45 @@ mechanisms are:
   path outside the bound checkout. These capabilities are offered whenever the
   driver reports `acpClientCapabilities`, independently of whether the
   app-managed HTTP MCP bridge was negotiated.
+- **Project terminals.** A person may open a terminal for a Code Project with
+  no thread. It is the person's shell, not an agent's: no provider, tool call,
+  AgentRun, or thread can address it, read its output, or type into it, and
+  nothing it prints enters a prompt. Only an active Code Project has one. A
+  Work Project has no shell authority, so it has no Project terminal and Work
+  never gains a shell this way; Chat has no root. The shell runs at the
+  Project's bound root at its current binding revision (the Project's own
+  folder, never a thread's managed worktree) through the same confinement a
+  Code thread's terminal gets, with its own shell state and no credential
+  references. Only the person at a local window whose workspace holds that
+  Code Project may start, attach to, type into, resize, or stop it. That is the
+  user-initiated terminal the Code policy already lets a local person open in
+  an approval-gated thread without a prompt, so it asks for none and reaches no
+  further than that thread's terminal. A paired device is refused outright:
+  a remote Code terminal is gated as an agent, and a Project terminal has no
+  thread to hold that approval. The shell runs under the posture a new thread
+  in the Project starts with, approval-gated or Full access where the Project
+  remembers it; Plan never applies, because nothing plans in it. The owning
+  window, Project, and binding revision are checked before every command, and
+  another window cannot attach. Its lifecycle is journaled on its own
+  `project-terminal` aggregate (`code.project-terminal-started@1`,
+  `code.project-terminal-ended@1`); its output stays in the host's bounded
+  in-memory transcript and is never journaled, because it belongs to no
+  thread's record. Archiving the Project or relinking its root ends every one of
+  its terminals as `authority-revoked` at once, and a command that finds the
+  Project inactive or rebound ends the terminal the same way. A host restart
+  ends a terminal still recorded as running as `host-restarted`, since its
+  process did not survive.
+- **Project browsing contexts.** A person may open a browser for a Work or Code
+  Project with no thread, under the same separation: it is the person's
+  browser, never an agent's. Its context is its own isolated, ephemeral
+  profile, shared with no thread's browsing context, so a sign-in there never
+  becomes something an agent can act in and no thread's origin approval
+  carries into it. The window's workspace must hold that Project for its mode
+  at the current binding revision; archive or relink stops the context as
+  `authority-revoked`. Like a thread's browsing context it is not journaled,
+  and a paired device may watch it but never create, navigate, or type in it.
+  This context is designed and not yet built: the browser automation service
+  still derives every context's authority from a thread and its provider.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent
@@ -981,6 +1020,8 @@ mechanisms are:
   and Station launch paths are wired and revalidated.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
+  Each adapter turns its provider's own subagent feature off, because a child
+  the provider starts itself runs outside the journal and the approval path.
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route

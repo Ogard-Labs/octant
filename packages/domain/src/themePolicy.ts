@@ -19,13 +19,6 @@ export function resolveTypographyFallback(
   return resolveTypographyProjection(typography, availableFonts).typography;
 }
 
-export function enforceAccessibilitySettings(settings: ThemeSettings): ThemeSettings {
-  if (settings.reducedTransparency && settings.translucency === "translucent") {
-    return { ...settings, translucency: "opaque" };
-  }
-  return settings;
-}
-
 import type { SidebarBackground } from "@octant/contracts/theme";
 import {
   resolveSidebarBackground,

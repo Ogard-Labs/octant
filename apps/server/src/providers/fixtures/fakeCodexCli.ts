@@ -66,7 +66,7 @@ if (process.argv.slice(2).join(" ") === "--version") {
   }
 } else {
   const args = process.argv.slice(2);
-  if (args.join(" ") !== "app-server --listen stdio://") {
+  if (!args.join(" ").startsWith("app-server --listen stdio://")) {
     console.error("invalid invocation");
     process.exit(64);
   }

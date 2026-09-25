@@ -15,7 +15,7 @@ function baseSettings(
 }
 
 function posture() {
-  return screen.getByRole("combobox", { name: "Subagent creation" });
+  return screen.getByRole("combobox", { name: "Let the model start helper agents" });
 }
 
 describe("AgentRunSettingsPanel", () => {
@@ -25,8 +25,8 @@ describe("AgentRunSettingsPanel", () => {
       update: vi.fn(),
     };
     render(<AgentRunSettingsPanel client={client} />);
-    await waitFor(() => expect(posture()).toHaveTextContent("Automatic"));
-    expect(screen.getByText(/without a separate confirmation step/)).toBeVisible();
+    await waitFor(() => expect(posture()).toHaveTextContent("Automatically"));
+    expect(screen.getByText(/can start helpers on its own/)).toBeVisible();
   });
 
   it("updates the posture with the expected version and reflects the server's response", async () => {
@@ -37,13 +37,13 @@ describe("AgentRunSettingsPanel", () => {
       update,
     };
     render(<AgentRunSettingsPanel client={client} />);
-    await waitFor(() => expect(posture()).toHaveTextContent("Ask"));
+    await waitFor(() => expect(posture()).toHaveTextContent("Only when I start them"));
 
     await user.click(posture());
-    await user.click(await screen.findByRole("option", { name: "Automatic" }));
+    await user.click(await screen.findByRole("option", { name: "Automatically" }));
 
     expect(update).toHaveBeenCalledWith({ creationPosture: "automatic", expectedVersion: 1 });
-    await waitFor(() => expect(posture()).toHaveTextContent("Automatic"));
+    await waitFor(() => expect(posture()).toHaveTextContent("Automatically"));
   });
 
   it("reloads the authoritative policy after a concurrent-change conflict", async () => {
@@ -57,13 +57,19 @@ describe("AgentRunSettingsPanel", () => {
       .mockRejectedValueOnce(new AgentRunSettingsClientFailure("conflict", "stale"));
     const client = { current, update };
     render(<AgentRunSettingsPanel client={client} />);
-    await waitFor(() => expect(posture()).toHaveTextContent("Ask"));
+    await waitFor(() => expect(posture()).toHaveTextContent("Only when I start them"));
 
     await user.click(posture());
-    await user.click(await screen.findByRole("option", { name: "Automatic" }));
+    await user.click(await screen.findByRole("option", { name: "Automatically" }));
 
     await waitFor(() => expect(posture()).toHaveTextContent("Off"));
     expect(screen.getByText(/changed elsewhere/i)).toBeInTheDocument();
+  });
+
+  it("lands a link to the setting on its control", async () => {
+    const client = { current: vi.fn(async () => baseSettings()), update: vi.fn() };
+    render(<AgentRunSettingsPanel client={client} focused />);
+    await waitFor(() => expect(posture()).toHaveFocus());
   });
 
   it("shows an alert when the initial load fails", async () => {

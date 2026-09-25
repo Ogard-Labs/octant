@@ -174,6 +174,16 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("refuses a paired device a Project terminal before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    const response = await product(handoff("/api/code/project-terminals", "POST"));
+
+    expect(response?.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("allows only cataloged remote chat turns", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

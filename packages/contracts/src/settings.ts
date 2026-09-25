@@ -15,23 +15,20 @@ export const SETTINGS_SECTION_IDS = [
   "appearance",
   "keybindings",
   "chat",
-  "work",
   "code",
+  "providers",
+  "harness",
   "navigator-assistant",
   "voice",
   "image-generation",
   "computer-use",
-  "providers",
-  "profiles",
-  "agents",
-  "harness",
   "skills",
-  "usage",
-  "remote-access",
-  "host",
   "github",
   "linear",
-  "advanced",
+  "host",
+  "data",
+  "remote-access",
+  "usage",
 ] as const;
 
 export const SettingsSectionId = Schema.Literal(...SETTINGS_SECTION_IDS);
@@ -55,8 +52,21 @@ export type SettingsSettingId = typeof SettingsSettingId.Type;
  * that section. Other app surfaces (empty states, provider/model errors, etc.)
  * use this to open the exact Settings destination.
  */
+/**
+ * Sections earlier builds linked to, read as the section that holds their
+ * settings now. A host or client from before the regrouping still sends
+ * them, and a link it sends must land on the control rather than fail to
+ * decode. Encoding always writes the current identifier.
+ */
+const RetiredSettingsSectionId = Schema.transformLiterals(
+  ["advanced", "host"],
+  ["agents", "harness"],
+  ["profiles", "providers"],
+  ["work", "general"],
+);
+
 export const SettingsDeepLink = Schema.Struct({
-  section: SettingsSectionId,
+  section: Schema.Union(SettingsSectionId, RetiredSettingsSectionId),
   setting: Schema.optional(SettingsSettingId),
 }).annotations(strict);
 export type SettingsDeepLink = typeof SettingsDeepLink.Type;

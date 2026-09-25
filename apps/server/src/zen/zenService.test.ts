@@ -1855,6 +1855,58 @@ describe("ZenService terminal cards", () => {
     await expect(service.pinTerminal(ids.window, request)).rejects.toThrow(/missing-capability/);
     expect(current.elements).toEqual([]);
   });
+
+  function projectTerminalFixture(options: { readonly owned?: boolean } = {}) {
+    let current = space();
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
+      current = { ...next, version: (expectedVersion + 1) as AggregateVersion };
+      return current;
+    });
+    const read = vi.fn(() => (options.owned === false ? undefined : { title: "Octant" }));
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      projectTerminals: { read },
+      uuid: () => ids.element,
+    });
+    return { append, read, service };
+  }
+
+  const projectRequest = {
+    projectId: ids.project,
+    terminalId: terminal,
+    expectedVersion: 2 as AggregateVersion,
+  };
+
+  it("pins a Project terminal as a card that names the Project and no thread", async () => {
+    const { append, read, service } = projectTerminalFixture();
+
+    const result = await service.pinProjectTerminal(ids.window, projectRequest);
+
+    expect(read).toHaveBeenCalledWith(ids.window, ids.project, terminal);
+    expect(result.result).toBe("terminal-pinned");
+    const card = append.mock.calls[0]?.[0].elements[0];
+    expect(card).toMatchObject({
+      kind: "project-terminal",
+      hostId: LOCAL_HOST_ID,
+      projectId: ids.project,
+      terminalId: terminal,
+      title: "Octant",
+    });
+    expect(card).not.toHaveProperty("sourceContext");
+  });
+
+  it("refuses to pin a Project terminal this window did not open", async () => {
+    const { append, service } = projectTerminalFixture({ owned: false });
+
+    await expect(service.pinProjectTerminal(ids.window, projectRequest)).rejects.toThrow(
+      /unavailable-source/,
+    );
+    expect(append).not.toHaveBeenCalled();
+  });
 });
 
 describe("ZenService research dock", () => {

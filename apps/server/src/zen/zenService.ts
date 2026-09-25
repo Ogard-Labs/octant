@@ -24,6 +24,7 @@ import {
   type ZenCanvasPinResult,
   type ZenTerminalPinRequest,
   type ZenTerminalPinResult,
+  type ZenProjectTerminalPinRequest,
   decodeZenThreadCatalogRef,
   type ZenThreadCatalogEntry,
   type ZenThreadContinuationTarget,
@@ -46,6 +47,7 @@ import type { ChatThread, ChatThreadId, ChatThreadView } from "@octant/contracts
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { WindowId, HostId } from "@octant/contracts/shell";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import {
   createZenSpace,
@@ -102,6 +104,19 @@ export interface ZenCodeTerminalPort {
   ) => Promise<unknown>;
 }
 
+/**
+ * Whether a terminal is one this window opened for a Code Project, and what
+ * to call its card. Zen pins a shell it can name; whether the caller may reach
+ * it stays the Project terminal owner's decision.
+ */
+export interface ZenProjectTerminalPort {
+  readonly read: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    terminalId: CodeTerminalId,
+  ) => { readonly title: string } | undefined;
+}
+
 function focusZoneReason(code: ZenFocusZoneRejectionCode): ZenFailureReason {
   switch (code) {
     case "stale-version":
@@ -143,6 +158,8 @@ export interface ZenServiceDependencies {
    * it can name; whether the caller may reach it stays Code's decision.
    */
   readonly codeTerminals?: ZenCodeTerminalPort;
+  /** Whether a terminal is one this window opened for a Code Project. */
+  readonly projectTerminals?: ZenProjectTerminalPort;
   /**
    * Whether a canvas is one this window may read. Without it there is nothing
    * to authorize a card against, so Zen refuses to pin rather than assuming.
@@ -464,6 +481,77 @@ export class ZenService {
       minimized: false,
       locked: false,
       title: request.title ?? entry.title,
+    };
+    try {
+      const updated = processZenCommand(
+        space,
+        {
+          command: "add-element",
+          spaceId: space.spaceId,
+          element,
+          expectedVersion: request.expectedVersion,
+        },
+        this.deps.localHostId,
+      );
+      return {
+        result: "terminal-pinned",
+        elementId,
+        space: this.deps.eventStore.append(updated, request.expectedVersion),
+      };
+    } catch (error) {
+      if (error instanceof ZenPolicyRejected) {
+        throw new ZenError({ reason: error.code, spaceId: space.spaceId });
+      }
+      if (this.deps.eventStore.isConcurrencyConflict(error)) {
+        throw new ZenError({ reason: "stale-version", spaceId: space.spaceId });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Pin a terminal this window opened for a Code Project.
+   *
+   * The card is written from the owner's answer, never from the request: the
+   * caller names a Project and a shell, the Project terminal owner says whether
+   * this window holds that shell, and the card carries no thread because the
+   * shell has none.
+   */
+  async pinProjectTerminal(
+    windowId: WindowId,
+    request: ZenProjectTerminalPinRequest,
+    signal?: AbortSignal,
+  ): Promise<ZenTerminalPinResult> {
+    const space = this.#activeSpace(windowId);
+    if (space === null) throw new ZenError({ reason: "unknown-space" });
+    if (space.windowId !== windowId) {
+      throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });
+    }
+    if (this.deps.projectTerminals === undefined || this.deps.uuid === undefined) {
+      throw new ZenError({ reason: "missing-capability", spaceId: space.spaceId });
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    const owned = this.deps.projectTerminals.read(windowId, request.projectId, request.terminalId);
+    if (owned === undefined) {
+      throw new ZenError({ reason: "unavailable-source", spaceId: space.spaceId });
+    }
+    const elementId = decodeZenElementId(this.deps.uuid());
+    const element = {
+      elementId,
+      kind: "project-terminal" as const,
+      hostId: this.deps.localHostId,
+      projectId: request.projectId,
+      terminalId: request.terminalId,
+      geometry: request.geometry ?? {
+        x: 64 + space.elements.length * 32,
+        y: 96 + space.elements.length * 32,
+        width: 520,
+        height: 320,
+      },
+      zIndex: Math.max(0, ...space.elements.map((existing) => existing.zIndex)) + 1,
+      minimized: false,
+      locked: false,
+      title: request.title ?? owned.title,
     };
     try {
       const updated = processZenCommand(
@@ -974,7 +1062,11 @@ export class ZenService {
         message: `Element ${command.element.elementId} not found`,
       };
     }
-    if (existing.kind !== "thread" && existing.kind !== "terminal") {
+    if (
+      existing.kind !== "thread" &&
+      existing.kind !== "terminal" &&
+      existing.kind !== "project-terminal"
+    ) {
       throw new ZenError({ reason: "unsupported-action", spaceId: command.spaceId });
     }
     const requested = command.element;
@@ -984,10 +1076,11 @@ export class ZenService {
       zIndex: requested.zIndex,
       minimized: requested.minimized,
       locked: requested.locked,
-      ...(existing.kind === "terminal" &&
-      requested.kind === "terminal" &&
-      requested.title !== undefined
-        ? { title: requested.title }
+      ...((existing.kind === "terminal" && requested.kind === "terminal") ||
+      (existing.kind === "project-terminal" && requested.kind === "project-terminal")
+        ? requested.title === undefined
+          ? {}
+          : { title: requested.title }
         : {}),
     };
     return this.handleCommand({ ...command, element }, windowId);

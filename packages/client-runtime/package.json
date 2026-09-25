@@ -44,6 +44,7 @@
     "./work-overview-client": "./src/workOverviewClient.ts",
     "./work-research-client": "./src/workResearchClient.ts",
     "./goal-client": "./src/goalClient.ts",
+    "./project-terminal-client": "./src/projectTerminalClient.ts",
     "./goal-loop-client": "./src/goalLoopClient.ts",
     "./native-harness-client": "./src/nativeHarnessClient.ts",
     "./mobile-native-harness-client": "./src/mobileNativeHarnessClient.ts",

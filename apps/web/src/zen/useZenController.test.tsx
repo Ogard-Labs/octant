@@ -10,6 +10,7 @@ import type {
   ZenResearchDockRequest,
   ZenResearchDockResult,
   ZenTerminalPinRequest,
+  ZenProjectTerminalPinRequest,
   ZenTerminalPinResult,
   ZenResult,
   ZenSpace,
@@ -71,6 +72,12 @@ function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
         overrides.pinTerminal !== undefined
           ? await overrides.pinTerminal(request)
           : Promise.reject(new Error("This window pins no terminals.")),
+    ),
+    pinProjectTerminal: vi.fn(
+      async (request: ZenProjectTerminalPinRequest): Promise<ZenTerminalPinResult> =>
+        overrides.pinProjectTerminal !== undefined
+          ? await overrides.pinProjectTerminal(request)
+          : Promise.reject(new Error("This window pins no Project terminals.")),
     ),
     pinCanvas: vi.fn(
       async (request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult> =>
@@ -162,6 +169,88 @@ describe("useZenController", () => {
     expect(window.sessionStorage.getItem(`${ZEN_PRESENTATION_STORAGE_PREFIX}${windowId}`)).toBe(
       "active",
     );
+  });
+
+  it("tells the caller whether a Project terminal card was written", async () => {
+    const refused = createClient();
+    const { result } = renderHook(() =>
+      useZenController({ client: refused, windowId, storage: window.sessionStorage }),
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    const request = {
+      projectId: "00000000-0000-4000-8000-000000000931" as never,
+      terminalId: "00000000-0000-4000-8000-000000000932" as never,
+    };
+
+    let pinned: boolean | undefined;
+    await act(async () => {
+      pinned = await result.current.pinProjectTerminal(request);
+    });
+
+    // The default client refuses every Project terminal pin, so the card was
+    // not written and the caller must stop the shell it started.
+    expect(pinned).toBe(false);
+  });
+
+  it("treats a pin whose reply was lost as pinned when the space holds the card", async () => {
+    let written: ZenSpace | null = null;
+    const lost = createClient({
+      pinProjectTerminal: async () => {
+        throw new Error("The connection dropped.");
+      },
+    });
+    const bootstrap = lost.bootstrap;
+    let refusedReads = 0;
+    lost.bootstrap = vi.fn(async () => {
+      const response = await bootstrap();
+      if (written === null) return response;
+      // The first read after the lost reply fails as well; the second answers.
+      if (refusedReads === 0) {
+        refusedReads += 1;
+        throw new Error("The connection dropped again.");
+      }
+      return { ...response, space: written };
+    });
+    const { result } = renderHook(() =>
+      useZenController({ client: lost, windowId, storage: window.sessionStorage }),
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    const current = result.current.space;
+    if (current === null) throw new Error("Zen did not open a space");
+    const terminalId = "00000000-0000-4000-8000-000000000942" as never;
+    written = {
+      ...current,
+      version: (current.version + 1) as AggregateVersion,
+      elements: [
+        {
+          elementId: "00000000-0000-4000-8000-000000000943" as never,
+          kind: "project-terminal",
+          hostId: "local" as never,
+          projectId: "00000000-0000-4000-8000-000000000941" as never,
+          terminalId,
+          geometry: { x: 0, y: 0, width: 520, height: 320 },
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+        },
+      ],
+    };
+
+    let pinned: boolean | undefined;
+    await act(async () => {
+      pinned = await result.current.pinProjectTerminal({
+        projectId: "00000000-0000-4000-8000-000000000941" as never,
+        terminalId,
+      });
+    });
+
+    // The server wrote the card; stopping the shell would strand it.
+    expect(pinned).toBe(true);
+    expect(result.current.space?.elements).toHaveLength(1);
   });
 
   it("keeps Zen open when the server committed presentation before the response failed", async () => {
