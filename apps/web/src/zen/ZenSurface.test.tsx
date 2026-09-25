@@ -1080,6 +1080,47 @@ describe("ZenSurface", () => {
     }
   });
 
+  it("tries again to settle a never-arranged space after a write fails", async () => {
+    const restore = withSurfaceSize(1200, 800);
+    try {
+      const onSetLayout = vi.fn();
+      const onUpdateElement = vi
+        .fn<(element: ZenElementPayload) => Promise<void>>()
+        .mockRejectedValueOnce(new Error("The host refused the move."))
+        .mockResolvedValue(undefined);
+      const note = {
+        elementId,
+        kind: "notes" as const,
+        widgetVersion: 0 as AggregateVersion,
+        content: "Focus note",
+        geometry: { x: 40, y: 40, width: 240, height: 160 },
+        zIndex: 1,
+        minimized: false,
+        locked: false,
+        title: "Focus note",
+      };
+      const props = {
+        barCollapsed: false,
+        onExit: () => undefined,
+        onHideBar: () => undefined,
+        onSetLayout,
+        onUpdateElement,
+        onUpdateViewport: () => undefined,
+        onExpandBar: () => undefined,
+      };
+      const { rerender } = render(<ZenSurface {...props} space={makeSpace([note], "wall")} />);
+      await waitFor(() => expect(onUpdateElement).toHaveBeenCalledOnce());
+      expect(onSetLayout).not.toHaveBeenCalled();
+
+      // The space arrives again (the host answered the failure with a fresh
+      // read), and this time the settle goes through.
+      rerender(<ZenSurface {...props} space={makeSpace([{ ...note }], "wall")} />);
+      await waitFor(() => expect(onSetLayout).toHaveBeenCalledWith("arrange"));
+    } finally {
+      restore();
+    }
+  });
+
   it("tidies every window into a grid on request", async () => {
     const restore = withSurfaceSize(1200, 800);
     try {

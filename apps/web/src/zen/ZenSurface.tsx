@@ -436,10 +436,17 @@ export function ZenSurface(props: ZenSurfaceProps) {
     settledSpace.current = spaceId;
     const tiles = laidOut;
     void (async () => {
-      for (const element of tiles) {
-        await onUpdateElement(element);
+      try {
+        for (const element of tiles) {
+          await onUpdateElement(element);
+        }
+        onSetLayout("arrange");
+      } catch {
+        // A write that failed leaves the space on the wall, where nothing
+        // moves. Forget that it was settled so the next render tries again
+        // rather than stranding it for the session.
+        if (settledSpace.current === spaceId) settledSpace.current = undefined;
       }
-      onSetLayout("arrange");
     })();
   }, [laidOut, onSetLayout, onUpdateElement, props.space.spaceId, surfaceSize, wall]);
 
