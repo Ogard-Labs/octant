@@ -121,7 +121,16 @@ export function createComputerUseToolService(options: {
     admissionRefusal(owner, approved) === undefined;
   const runtime = createComputerUseRuntime({
     destination: { status: "available", kind: "macos-host" },
-    approvalScope: "application-session",
+    // Once the thread has ingested external content no standing grant carries
+    // an action (see `requiresApproval` below), so the offer is for this one
+    // action: saying five minutes there promised a grant the next action
+    // would not honour.
+    approvalScope: (request) => {
+      const action = pending.get(String(request.actionId));
+      return action !== undefined && options.externalContentIngested(action.owner)
+        ? undefined
+        : "application-session";
+    },
     // Both surfaces and the approval summary say five minutes; the runtime's
     // own default is one. An offer that dies while still reading as a
     // five-minute grant turns a late click into a silent no-op that the agent
@@ -129,6 +138,9 @@ export function createComputerUseToolService(options: {
     approvalTtlMs: 5 * 60_000,
     approvalSummary: (request) => {
       const action = pending.get(String(request.actionId));
+      if (action !== undefined && options.externalContentIngested(action.owner)) {
+        return `Allow this one action in ${action.appId} for "${options.threadTitle(action.owner).slice(0, 100)}".`;
+      }
       return `Allow control of ${action?.appId ?? "this application"} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.`;
     },
     uuid: randomUUID,

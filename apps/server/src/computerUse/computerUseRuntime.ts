@@ -147,7 +147,14 @@ export function createComputerUseRuntime(_options: {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly approvalTtlMs?: number;
-  readonly approvalScope?: "application-session";
+  /**
+   * The grant an approval offers. A function lets the caller answer per
+   * request: a request that will only ever be approved once (see the tool
+   * service's taint rule) must not read as a five-minute grant.
+   */
+  readonly approvalScope?:
+    | "application-session"
+    | ((request: ComputerUseActionRequest) => "application-session" | undefined);
   readonly approvalSummary?: (request: ComputerUseActionRequest) => string;
 }): ComputerUseRuntime {
   const options = _options;
@@ -463,6 +470,10 @@ export function createComputerUseRuntime(_options: {
         (entry.targetApp === undefined || entry.targetApp === session.observation.targetApp),
     );
     if (allowlistEntry?.requiresApproval === true) {
+      const approvalScope =
+        typeof options.approvalScope === "function"
+          ? options.approvalScope(input.request)
+          : options.approvalScope;
       session.state = "waiting-for-approval";
       session.pendingApproval = {
         approvalId,
@@ -470,10 +481,10 @@ export function createComputerUseRuntime(_options: {
         expiresAt: new Date(Date.parse(options.clock()) + approvalTtlMs).toISOString(),
         summary:
           options.approvalSummary?.(input.request) ??
-          (options.approvalScope === "application-session"
+          (approvalScope === "application-session"
             ? `Allow control of ${session.observation.targetApp} for this task for 5 minutes.`
             : `${input.request.kind} in ${session.observation.targetApp}`),
-        ...(options.approvalScope === undefined ? {} : { scope: options.approvalScope }),
+        ...(approvalScope === undefined ? {} : { scope: approvalScope }),
       };
       await append(session, "approval-requested", "One-time approval is required.");
       return view(session);

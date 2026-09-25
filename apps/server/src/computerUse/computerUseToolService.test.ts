@@ -157,6 +157,27 @@ describe("Computer use through a provider tool", () => {
       await f.service.close();
     }
   });
+  it("offers a one-time approval, not a five-minute grant, once the thread has read external content", async () => {
+    const f = fixture();
+    try {
+      f.taint();
+      void f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const pending = f.service.runtime.list(owner.windowId)[0]?.pendingApproval;
+      expect(pending?.scope).toBeUndefined();
+      expect(pending?.summary).toContain("this one action");
+      expect(pending?.summary).not.toContain("5 minutes");
+      await f.tools.close?.();
+    } finally {
+      await f.service.close();
+    }
+  });
+
   it("keeps the approved app session available to the same task on its next turn", async () => {
     const f = fixture();
     try {
