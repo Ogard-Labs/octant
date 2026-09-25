@@ -2426,7 +2426,9 @@ function boundProviderText(text: string, maxBytes: number, suffix: string): stri
 const boundProviderFailureMessage = (text: string): string | undefined =>
   boundProviderText(text, MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES, FAILURE_MESSAGE_SUFFIX);
 
-// A tool input larger than the summary bound failed the whole turn.
+// Tool inputs, approval descriptions, and task text are provider-sized (an
+// ACP terminal command can carry a whole heredoc); the journal only keeps the
+// head of one that will not fit, never the turn's failure.
 function boundProviderSummary(text: string): string | undefined {
   return boundProviderText(text, MAX_CODE_OPERATION_SUMMARY_BYTES, SUMMARY_SUFFIX);
 }
