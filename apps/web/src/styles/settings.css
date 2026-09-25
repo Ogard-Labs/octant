@@ -76,6 +76,64 @@
   min-height: 44px;
 }
 
+/* Settings takes the workspace's card shape (see the card rule in
+   shell.css): the navigation rail and the gutters are one back surface in
+   the sidebar's material, and the page is a card on it in the same colour as
+   every other card. The titlebar drops to the title rail the workspace's pane
+   header uses, so leaving Settings does not shift the first line. The narrow
+   layout stacks the rail over the page and keeps the flat shape. */
+@media (min-width: 681px) {
+  .settings-view:not(.settings-view--narrow) {
+    background: var(--octant-sidebar-opaque);
+  }
+
+  .shell--material-translucent .settings-view:not(.settings-view--narrow) {
+    background: var(--octant-sidebar-translucent);
+  }
+
+  .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"]
+    .settings-view:not(.settings-view--narrow) {
+    background: var(--octant-sidebar-translucent-subtle);
+  }
+
+  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"]
+    .settings-view:not(.settings-view--narrow) {
+    background: var(--octant-sidebar-translucent-strong);
+  }
+
+  .settings-view:not(.settings-view--narrow) > .settings-view__sidebar {
+    background: transparent;
+    border-right: 0;
+    backdrop-filter: none;
+  }
+
+  .settings-view:not(.settings-view--narrow) > .settings-view__workspace {
+    grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
+    margin: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) 0;
+    background: var(--oct-bg);
+    border: 1px solid var(--octant-border);
+    border-radius: var(--oct-radius-md);
+  }
+
+  .settings-view:not(.settings-view--narrow) .settings-view__workspace-titlebar {
+    height: var(--oct-title-rail-h);
+    min-height: var(--oct-title-rail-h);
+    border-bottom-color: var(--oct-border);
+  }
+
+  /* The page title lands where a reader page's title does, one rail and a
+     step below the card's top edge, so moving between Settings and Board
+     does not jump the first line. The rail takes the workspace sidebar's
+     inset, so its rows share the sidebar's edges. */
+  .settings-view:not(.settings-view--narrow) .settings-view__content-inner {
+    padding-top: var(--oct-space-6);
+  }
+
+  .settings-view:not(.settings-view--narrow) .settings-view__sidebar-content {
+    padding-inline: var(--oct-space-2);
+  }
+}
+
 .settings-view__sidebar-titlebar {
   display: flex;
   align-items: stretch;
@@ -792,16 +850,35 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 5px 8px;
 }
 
-/* Header feedback uses the heading's existing separation instead of adding
-   a blank section before Appearance and Host. Errors keep the same footprint. */
-.settings-theme-editor > .settings-feedback-slot:first-child {
-  height: 32px;
-  margin-block: -32px -16px;
+/* A reader page centres its empty state in the room a list would take.
+   Settings reads down one left edge, and a centred block with page-sized
+   padding there looked like a second page title (Image generation). Here it
+   is a status line in the column. */
+.settings-view__content-inner .surface-empty:not([data-tone="lane"]) {
+  justify-items: start;
+  padding: 0;
+  text-align: start;
 }
 
-.host-settings > .settings-feedback-slot:first-child {
+/* Header feedback uses the heading's existing separation instead of adding
+   a blank section before Appearance, Host, and Providers. Errors keep the same
+   footprint. Negative margins could not do this in a grid: a track never
+   shrinks below zero, so the stack's gap still opened a blank row above the
+   first section. Taken out of flow, the slot occupies no track at all. */
+.settings-theme-editor,
+.host-settings,
+.settings-view .provider-settings {
+  position: relative;
+}
+
+.settings-theme-editor > .settings-feedback-slot:first-child,
+.host-settings > .settings-feedback-slot:first-child,
+.settings-view .provider-settings > .provider-settings__message-slot:first-child {
+  position: absolute;
+  top: -32px;
+  right: 0;
+  left: 0;
   height: 32px;
-  margin-block: -32px -20px;
 }
 
 .provider-settings__message-slot:empty {
@@ -1399,9 +1476,11 @@ textarea.settings-view__text-input {
 
 /* Appearance's blocks are sections of the same page as General's, so they take
    the same rhythm between them rather than a tighter one of their own. */
+/* The editor's sections are Settings sections, so they keep the page's
+   28px rhythm; at 16px Appearance read as one crowded section. */
 .settings-theme-editor {
   display: grid;
-  gap: 16px;
+  gap: 28px;
   padding: 0;
   margin: 0;
 }
@@ -1892,6 +1971,12 @@ textarea.settings-view__text-input {
   .shell--material-translucent[data-octant-sidebar-vibrancy="strong"] .settings-view__sidebar {
     background: var(--octant-sidebar-opaque);
     backdrop-filter: none;
+  }
+
+  .shell--material-translucent .settings-view:not(.settings-view--narrow),
+  .shell--material-translucent[data-octant-sidebar-vibrancy]
+    .settings-view:not(.settings-view--narrow) {
+    background: var(--octant-sidebar-opaque);
   }
 
   .shell--material-translucent .settings-view__effective-note {

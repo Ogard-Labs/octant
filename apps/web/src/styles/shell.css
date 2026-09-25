@@ -1445,6 +1445,130 @@ html[data-octant-native-host="true"]
   background: var(--oct-bg);
 }
 
+/* Cards on a back layer. The sidebar and the gutters around the workspace are
+   one surface painted with the sidebar's own material, so the glass (or the
+   opaque sidebar colour) reads as the window's back and the primary
+   workspace, the dock, and the bottom panel sit on it as cards. The material
+   class is already resolved against the host's vibrancy, contrast, and
+   reduced-transparency gates, so an opaque back is what an unfrosted window
+   gets — never a transparent one showing the desktop sharp. A narrow window
+   keeps the flat layout: its sidebar is an overlay drawer, not a back. */
+@media (min-width: 681px) {
+  .shell.shell-frame {
+    --octant-card-gutter: var(--oct-space-2);
+  }
+
+  .shell--material-translucent.shell-frame > .sidebar {
+    border-right: 0;
+  }
+
+  .shell-frame__sidebar-resize::before {
+    background: transparent;
+  }
+
+  .shell-frame > .workspace-layer {
+    gap: var(--octant-card-gutter);
+    padding: var(--octant-card-gutter) var(--octant-card-gutter) var(--octant-card-gutter) 0;
+    background: var(--octant-sidebar-opaque);
+  }
+
+  .shell--sidebar-collapsed.shell-frame > .workspace-layer {
+    padding-left: var(--octant-card-gutter);
+  }
+
+  .shell--material-translucent.shell-frame > .workspace-layer {
+    background: var(--octant-sidebar-translucent);
+  }
+
+  .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+    > .workspace-layer {
+    background: var(--octant-sidebar-translucent-subtle);
+  }
+
+  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+    > .workspace-layer {
+    background: var(--octant-sidebar-translucent-strong);
+  }
+
+  .shell-frame
+    > .workspace-layer
+    > :is(.primary-workspace-layer, .right-utility-dock, .bottom-utility-panel) {
+    border: 1px solid var(--octant-border);
+    border-radius: var(--oct-radius-md);
+    background: var(--oct-bg);
+  }
+
+  /* Translucent workspace (0047) now means a glass card rather than a glass
+     column, and the application ground under the whole shell shows through
+     the card the way it showed through the column. */
+  .shell--workspace-material-translucent.shell-frame > .workspace-layer > .primary-workspace-layer {
+    background: var(--octant-workspace-translucent);
+  }
+
+  .shell--app-backdrop.shell-frame > .workspace-layer > .primary-workspace-layer {
+    background: transparent;
+  }
+
+  /* Reader pages painted the darker page ground so they stood apart from the
+     flat workspace. On a card that reads as a second card colour; the card
+     is the separation now. */
+  .shell-frame:not(.shell--app-backdrop) .surface {
+    background: var(--oct-bg);
+  }
+
+  /* The window controls float over the card's first rail. A reader page's
+     title and its Back to workspace action started inside that rail and
+     crowded the controls, so the page starts below it. */
+  .shell-frame .primary-workspace-layer .surface__inner {
+    padding-top: calc(var(--oct-title-rail-h) + var(--oct-space-6));
+  }
+
+  /* The gutter is the separation now; a resize hairline beside it would draw
+     a second edge. The handle keeps its accent ink while grabbed. */
+  .shell-frame .right-utility-dock__resize:not(:hover, :focus-visible)::before,
+  .shell-frame .bottom-utility-panel__resize:not(:hover, :focus-visible)::before {
+    background: transparent;
+  }
+
+  /* The window chrome floats over the workspace's title row, so it moves in
+     with the card, past the card's edge; otherwise its controls sit a gutter
+     above and outside the pane header they belong to. */
+  .shell-frame > .window-chrome {
+    margin-top: calc(var(--octant-card-gutter) + 1px);
+    margin-right: calc(var(--octant-card-gutter) + 1px);
+  }
+
+  .shell--sidebar-collapsed.shell-frame > .window-chrome {
+    margin-left: calc(var(--octant-card-gutter) + 1px);
+  }
+
+  /* Inside a card the pane header no longer shares the traffic lights'
+     compact centreline, so it takes the title rail the dock head already
+     uses and the two heads close on one line. The line is drawn by the card,
+     not the header: the header stops short of the window controls by a
+     margin, and a border on it would stop there too. */
+  .shell-frame .workspace-pane__header {
+    min-height: var(--oct-title-rail-h);
+  }
+
+  .shell-frame .workspace-pane:not([data-header="false"])::after,
+  .shell-frame .right-utility-dock:has(.right-utility-dock__toolbar)::after {
+    position: absolute;
+    z-index: 3;
+    top: var(--oct-title-rail-h);
+    right: 0;
+    left: 0;
+    height: 1px;
+    background: var(--oct-border);
+    content: "";
+    pointer-events: none;
+  }
+
+  .shell-frame .right-utility-dock {
+    position: relative;
+  }
+}
+
 @media (min-width: 1100px) {
   .shell.shell-frame.shell--wide-context-open {
     --octant-wide-primary-min: 560px;
@@ -1550,6 +1674,11 @@ html[data-octant-native-host="true"]
 
   .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
     content: none;
+  }
+
+  .shell--material-translucent.shell-frame > .workspace-layer,
+  .shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame > .workspace-layer {
+    background: var(--octant-sidebar-opaque);
   }
 
   .shell--workspace-material-translucent.shell-frame > .workspace-layer,
