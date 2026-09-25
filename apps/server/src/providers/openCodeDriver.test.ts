@@ -685,7 +685,7 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("refuses shell outright in a Work session while edits still ask", async () => {
+  it("refuses shell and task delegation outright in a Work session while edits still ask", async () => {
     const fixture = driverFixture();
     await Effect.runPromise(
       Effect.scoped(
@@ -700,6 +700,7 @@ describe("OpenCode driver", () => {
     );
     const rules = fixture.createdPermissions[0]!;
     expect(evaluatePermission(rules, "bash")).toBe("deny");
+    expect(evaluatePermission(rules, "task")).toBe("deny");
     expect(evaluatePermission(rules, "edit")).toBe("ask");
     expect(evaluatePermission(rules, "external_directory")).toBe("deny");
   });

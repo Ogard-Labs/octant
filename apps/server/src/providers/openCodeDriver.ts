@@ -1498,10 +1498,16 @@ function permissionRules(
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
   }
-  // Work has no shell or Git authority: its bash is refused outright rather
-  // than asked about, since approving a command would grant the thread more
-  // than its mode holds. OpenCode applies the last matching rule.
-  if (mode === "work") rules.push({ permission: "bash", pattern: "*", action: "deny" });
+  // Work has no shell, Git, or provider-owned subagents: bash and task are
+  // refused outright rather than asked about, since approving either would
+  // grant the thread more than its mode holds, and a task child runs outside
+  // Octant's journal. OpenCode applies the last matching rule.
+  if (mode === "work") {
+    rules.push(
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "task", pattern: "*", action: "deny" },
+    );
+  }
   rules.push(
     { permission: "*_*", pattern: "*", action: "deny" },
     { permission: "skill", pattern: "*", action: "deny" },

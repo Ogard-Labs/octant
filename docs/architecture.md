@@ -334,10 +334,10 @@ thread authority its mode does not hold. Every Work turn records that posture
 (`shell: "denied"`, `git: "denied"`). Each provider driver enforces it for a
 session acquired in Work mode, since a provider's own shell tool is outside
 anything the host can gate after the fact. Claude and Pi start without their
-shell tool. OpenCode's session rules deny `bash`. Codex threads start and
-resume with `features.shell_tool` and `features.unified_exec` off, because a
-Codex command that only reads runs under its read-only sandbox without
-escalating; a `command` or sandbox-widening `permissions` request that still
+shell tool. OpenCode's session rules deny `bash` and its `task` delegation.
+Codex threads start and resume with `features.shell_tool` and
+`features.unified_exec` off, because a Codex command that only reads runs under
+its read-only sandbox without escalating; a `command` or sandbox-widening `permissions` request that still
 arrives is declined at the agent. An ACP agent's `execute` permission request
 is refused at the agent. The declared kind is all Octant sees of an ACP call,
 and `other` also covers Octant's own managed MCP tools, so an agent that labels
