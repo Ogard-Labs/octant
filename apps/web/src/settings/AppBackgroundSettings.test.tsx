@@ -282,7 +282,7 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoDithered: false }));
   });
 
-  it("disables the pattern dials while the pattern is off, keeps their values, and says when they apply", async () => {
+  it("shows the pattern dials only while the pattern is drawn, and keeps their values", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const saved = {
@@ -296,22 +296,9 @@ describe("AppBackgroundSettings", () => {
     };
     render(<AppBackgroundSettings background={saved} library={library()} onChange={onChange} />);
 
-    const opacity = screen.getByRole("slider", { name: "Pattern opacity" });
-    const speed = screen.getByRole("slider", { name: "Pattern speed" });
-    const intensity = screen.getByRole("slider", { name: "Pattern intensity" });
-    expect(opacity).toBeDisabled();
-    expect(speed).toBeDisabled();
-    expect(intensity).toBeDisabled();
-    expect(opacity).toHaveValue("20");
-    expect(speed).toHaveValue("80");
-    expect(intensity).toHaveValue("100");
-
-    const hint = screen.getByText(
-      "Pattern opacity, speed, and intensity apply when Show pattern is on.",
-    );
-    expect(opacity).toHaveAttribute("aria-describedby", hint.id);
-    expect(speed).toHaveAttribute("aria-describedby", hint.id);
-    expect(intensity).toHaveAttribute("aria-describedby", hint.id);
+    expect(screen.queryByRole("slider", { name: "Pattern opacity" })).toBeNull();
+    expect(screen.queryByRole("slider", { name: "Pattern speed" })).toBeNull();
+    expect(screen.queryByRole("slider", { name: "Pattern intensity" })).toBeNull();
 
     await user.click(screen.getByRole("switch", { name: "Show pattern" }));
     expect(onChange).toHaveBeenLastCalledWith(
@@ -323,6 +310,27 @@ describe("AppBackgroundSettings", () => {
       }),
     );
     expect(screen.getByRole("slider", { name: "Photo opacity" })).not.toBeDisabled();
+  });
+
+  it("folds the built-in pictures behind the chosen one until asked to change it", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppBackgroundSettings
+        background={{
+          ...DEFAULT_APP_BACKGROUND,
+          kind: "builtin",
+          presetId: "warm-walnut-planks" as never,
+        }}
+        library={library()}
+        onChange={vi.fn()}
+      />,
+    );
+    const catalog = document.querySelector("details.settings-app-background__catalog");
+    expect(catalog?.querySelector("summary")).toHaveTextContent("Warm walnut");
+    expect(catalog).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Change"));
+    expect(catalog).toHaveAttribute("open");
+    expect(screen.getByRole("radio", { name: "Warm walnut" })).toBeChecked();
   });
 
   it("leaves the pattern dials usable while the pattern is on", () => {
@@ -337,9 +345,6 @@ describe("AppBackgroundSettings", () => {
     expect(screen.getByRole("slider", { name: "Pattern opacity" })).not.toBeDisabled();
     expect(screen.getByRole("slider", { name: "Pattern speed" })).not.toBeDisabled();
     expect(screen.getByRole("slider", { name: "Pattern intensity" })).not.toBeDisabled();
-    expect(
-      screen.queryByText("Pattern opacity, speed, and intensity apply when Show pattern is on."),
-    ).not.toBeInTheDocument();
   });
 
   it("offers the sidebar only once the ground is behind everything", async () => {

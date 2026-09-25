@@ -2400,6 +2400,45 @@ textarea.settings-view__text-input {
   border-top: 1px solid var(--oct-hairline);
 }
 
+/* Folded, the catalog is one row: the current picture, its name, and the
+   action that opens the rest. */
+.settings-app-background__catalog-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-app-background__catalog-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-app-background__catalog[open] > .settings-app-background__catalog-summary {
+  margin-bottom: var(--oct-space-3);
+}
+
+.settings-app-background__catalog-current {
+  width: 64px;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--oct-radius-sm);
+  object-fit: cover;
+}
+
+.settings-app-background__catalog-summary > .settings-app-background__catalog-title {
+  flex: 1;
+  padding: 0;
+}
+
+.settings-app-background__catalog-action {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+.settings-app-background__catalog-summary:hover .settings-app-background__catalog-action {
+  color: var(--oct-fg);
+}
+
 .settings-app-background__catalog-title {
   margin: 0;
   padding: 0 0 10px;
@@ -2760,4 +2799,51 @@ textarea.settings-view__text-input {
   .provider-card__discovery {
     grid-template-columns: 1fr;
   }
+}
+
+/* Thread-row details: a detail per row, a sidebar list per column. The label
+   column takes the room; each list column is only as wide as its heading. */
+.sidebar-row-details {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sidebar-row-details th,
+.sidebar-row-details td {
+  padding: var(--oct-space-2) 0;
+  border-bottom: 1px solid var(--oct-border-soft);
+  font-weight: var(--oct-weight-regular);
+}
+
+.sidebar-row-details thead th {
+  padding-top: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-align: center;
+}
+
+.sidebar-row-details thead th:first-child,
+.sidebar-row-details tbody th {
+  text-align: left;
+}
+
+.sidebar-row-details thead th:not(:first-child),
+.sidebar-row-details td {
+  width: 88px;
+  text-align: center;
+}
+
+.sidebar-row-details tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.sidebar-row-details__label {
+  display: block;
+  font-size: var(--oct-text-sm);
+}
+
+.sidebar-row-details__hint {
+  display: block;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }

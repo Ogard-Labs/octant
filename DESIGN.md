@@ -158,8 +158,15 @@ behaves for you), Modes (each mode's defaults), Models (which provider or model
 answers each job), Agents (what a running agent may do), Integrations, and
 System (the running host, its data, remote access, and usage). A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
-to its old page. Rows in Settings are `SettingRow`; rows everywhere else are
-`surface-row`. Both draw the same hairline.
+to its old page. Personal holds Appearance (theme, window glass, background,
+text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
+background, and a thread-row grid of detail by list); Appearance had grown to
+twelve sections. A page names its scope once, under its title, and a row names
+its own only when it differs. Settings folds long choices it does not need
+open: the built-in background pictures sit behind the current one and a
+Change action, and the pattern dials appear only while the pattern is drawn.
+Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
+draw the same hairline.
 
 ### Content tabs
 
@@ -651,7 +658,7 @@ Project; Work and Code call it Recents. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
-view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
+view's own choice, edited in Settings › Sidebar › Thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
 rather than left as a gap. The Project tree and the Activity feed draw the same
 row: the provider mark in the icon column every navigation row uses, the title

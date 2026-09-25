@@ -74,7 +74,14 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
-import { SettingGroup, SettingRow, SettingsSection } from "../settings/primitives";
+import {
+  ScopeIndicator,
+  SettingGroup,
+  SettingRow,
+  SettingsPageScope,
+  SettingsSection,
+} from "../settings/primitives";
+import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
 import {
   AppBackgroundSettings,
   type BackgroundImageLibrary,
@@ -169,6 +176,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   general: "Choose app-wide defaults, updates, and network behavior.",
   profile: "Choose how you appear inside Octant. Everything is optional and kept on this Mac.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
+  sidebar: "How the sidebar is laid out and what each thread row in it shows.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
   code: "Defaults for Code threads and delivery.",
@@ -188,6 +196,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
 
 const APPEARANCE_SECTION = (): SettingsSectionEntry =>
   findSection(octantSettingsRegistry, "appearance")!;
+const SIDEBAR_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "sidebar")!;
 const HOST_SECTION = (): SettingsSectionEntry => findSection(octantSettingsRegistry, "host")!;
 
 /**
@@ -204,6 +213,23 @@ const MOVED_SETTINGS: ReadonlyArray<{
   { from: "general", setting: "marketplace-fetches", to: "skills" },
   { from: "appearance", setting: "stream-replies", to: "chat" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
+  ...[
+    "sidebar-width",
+    "sidebar-destinations",
+    "sidebar-more",
+    "mode-switcher",
+    "thread-provider-icons",
+    "sidebar-background",
+    "sidebar-projects-branch",
+    "sidebar-projects-pull-request",
+    "sidebar-projects-last-updated",
+    "sidebar-projects-status",
+    "sidebar-activity-project",
+    "sidebar-activity-branch",
+    "sidebar-activity-pull-request",
+    "sidebar-activity-last-updated",
+    "sidebar-activity-status",
+  ].map((setting) => ({ from: "appearance" as const, setting, to: "sidebar" as const })),
   { from: "host", setting: "data-map", to: "data" },
   { from: "host", setting: "thread-retention", to: "data" },
 ];
@@ -291,6 +317,11 @@ export function SettingsView(props: SettingsViewProps) {
     route.applyDeepLink(link);
     props.onSearchChange("");
   };
+  // A page says once which scope it applies to; its rows then only name a
+  // scope that differs (see SettingsPageScope).
+  const activeSectionScope = availableSections.find(
+    (section) => section.id === route.activeSection,
+  )?.scope;
   const currentSectionLabel = hasQuery
     ? "Search settings"
     : (SECTION_LABELS[route.activeSection] ?? "Settings");
@@ -390,7 +421,12 @@ export function SettingsView(props: SettingsViewProps) {
                 {currentSectionLabel}
               </h1>
               {!hasQuery && SECTION_DESCRIPTIONS[route.activeSection] !== undefined ? (
-                <p className="oct-subtitle">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
+                <p className="oct-subtitle">
+                  {SECTION_DESCRIPTIONS[route.activeSection]}{" "}
+                  {activeSectionScope === undefined ? null : (
+                    <ScopeIndicator scope={activeSectionScope} />
+                  )}
+                </p>
               ) : null}
             </header>
             {hasQuery ? (
@@ -402,14 +438,16 @@ export function SettingsView(props: SettingsViewProps) {
                 onEscape={() => props.onSearchChange("")}
               />
             ) : (
-              <ActiveSectionContent
-                activeSection={route.activeSection}
-                capabilities={capabilities}
-                focusedSetting={route.focusedSetting}
-                onOpenSection={route.openSection}
-                pluginSettingsEntryPoints={pluginSettingsEntryPoints}
-                props={props}
-              />
+              <SettingsPageScope.Provider value={activeSectionScope}>
+                <ActiveSectionContent
+                  activeSection={route.activeSection}
+                  capabilities={capabilities}
+                  focusedSetting={route.focusedSetting}
+                  onOpenSection={route.openSection}
+                  pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                  props={props}
+                />
+              </SettingsPageScope.Provider>
             )}
             {!hasQuery && availableSections.length === 0 ? (
               <p className="settings-view__empty" role="status">
@@ -530,6 +568,10 @@ function ActiveSectionContent({
           focusedSetting={focusedSetting}
           props={props}
         />
+      );
+    case "sidebar":
+      return (
+        <SidebarSection capabilities={capabilities} focusedSetting={focusedSetting} props={props} />
       );
     case "keybindings":
       return <KeybindingsSection focusedSetting={focusedSetting} />;
@@ -1127,12 +1169,6 @@ interface AppearanceSectionProps extends SectionProps {
 }
 
 function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSectionProps) {
-  const theme = props.themeController?.draft ?? props.themeController?.settings;
-  const resolvedBackground = theme === undefined ? undefined : resolveAppBackground(theme);
-  const sidebarDecorationSuspended =
-    resolvedBackground !== undefined &&
-    resolvedBackground.kind !== "none" &&
-    resolvedBackground.coversSidebar;
   const isAvailable = (id: string) =>
     isSettingAvailable(findSetting(APPEARANCE_SECTION(), settingId(id))!, capabilities);
   const sidebarBackground =
@@ -1141,138 +1177,219 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
   // Vibrancy mode select that read and wrote the same material.
   const glass: SidebarVibrancyMode =
     props.settings.sidebarMaterial === "system" ? sidebarBackground.vibrancyMode : "off";
+  const windowSection = (
+    <SettingsSection title="Window">
+      <div className="setgroup">
+        {isAvailable("sidebar-material") ? (
+          <SettingRow
+            description="The frosted material behind the sidebar and around the cards. Off paints it solid."
+            focused={focusedSetting === settingId("sidebar-material")}
+            label="Glass"
+            scope="app"
+            settingId="sidebar-material"
+          >
+            <OctantToggleGroup<SidebarVibrancyMode>
+              aria-label="Glass"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected === undefined) return;
+                props.onSettingsChange({
+                  sidebarMaterial: selected === "off" ? "opaque" : "system",
+                });
+                if (selected === sidebarBackground.vibrancyMode) return;
+                const next = { ...sidebarBackground, vibrancyMode: selected };
+                if (props.themeController !== undefined) {
+                  void props.themeController.applyPatch({ sidebarBackground: next });
+                } else {
+                  props.onSettingsChange({ sidebarBackground: next });
+                }
+              }}
+              value={[glass]}
+            >
+              <OctantToggleGroupItem value="off">Off</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="subtle">Subtle</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="strong">Strong</OctantToggleGroupItem>
+            </OctantToggleGroup>
+            {props.settings.sidebarMaterial === "system" ? (
+              <p
+                className="settings-view__effective-note"
+                data-visible-when-material="opaque"
+                id="translucent-sidebar-effective-note"
+              >
+                Translucency is unavailable, so Octant is using an opaque sidebar.
+              </p>
+            ) : null}
+          </SettingRow>
+        ) : null}
+        {isAvailable("workspace-material") ? (
+          <SettingRow
+            description="Let the glass show through the cards as well."
+            focused={focusedSetting === settingId("workspace-material")}
+            label="Glass cards"
+            scope="app"
+            settingId="workspace-material"
+          >
+            <OctantSwitch
+              checked={props.settings.workspaceMaterial === "system" && glass !== "off"}
+              describedBy="workspace-material-description"
+              disabled={glass === "off"}
+              label="Glass cards"
+              onCheckedChange={(checked) => {
+                props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
+              }}
+            />
+            {glass === "off" ? (
+              <p className="settings-view__effective-note" id="workspace-material-effective-note">
+                Turn on Glass first.
+              </p>
+            ) : null}
+          </SettingRow>
+        ) : null}
+      </div>
+    </SettingsSection>
+  );
+  const readingSection = (
+    <SettingsSection title="Reading">
+      <div className="setgroup">
+        {isAvailable("transcript-text-size") ? (
+          <SettingRow
+            description="Conversation text in Chat, Work, and Code threads."
+            focused={focusedSetting === settingId("transcript-text-size")}
+            label="Transcript text size"
+            scope="app"
+            settingId="transcript-text-size"
+          >
+            <OctantToggleGroup<ShellSettings["transcriptTextSize"]>
+              aria-label="Transcript text size"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined)
+                  props.onSettingsChange({ transcriptTextSize: selected });
+              }}
+              value={[props.settings.transcriptTextSize]}
+            >
+              <OctantToggleGroupItem value="small">Small</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="large">Large</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
+        ) : null}
+        {isAvailable("transcript-width") ? (
+          <SettingRow
+            description="Maximum width of transcript and composer columns."
+            focused={focusedSetting === settingId("transcript-width")}
+            label="Transcript width"
+            scope="app"
+            settingId="transcript-width"
+          >
+            <OctantToggleGroup<ShellSettings["transcriptWidth"]>
+              aria-label="Transcript width"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSettingsChange({ transcriptWidth: selected });
+              }}
+              value={[props.settings.transcriptWidth]}
+            >
+              <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
+        ) : null}
+      </div>
+    </SettingsSection>
+  );
   return (
     <section aria-label="Appearance" className="settings-section-stack" id="settings-appearance">
       {props.themeController !== undefined ? (
         <ThemeAppearanceEditor
+          afterScheme={
+            <>
+              {windowSection}
+              {isAvailable("app-background") && props.themeController !== undefined ? (
+                <SettingsSection className="settings-app-background" title="Background">
+                  {isAvailable("app-background") && props.themeController !== undefined ? (
+                    <>
+                      <AppBackgroundSettings
+                        background={
+                          (props.themeController.draft ?? props.themeController.settings)
+                            ?.appBackground ?? DEFAULT_APP_BACKGROUND
+                        }
+                        focused={focusedSetting === settingId("app-background")}
+                        increasedContrast={
+                          (props.themeController.draft ?? props.themeController.settings)
+                            ?.increasedContrast === true
+                        }
+                        library={props.backgroundImageLibrary}
+                        onChange={(appBackground) => {
+                          void props.themeController?.applyPatch({ appBackground });
+                        }}
+                      />
+                    </>
+                  ) : null}
+                </SettingsSection>
+              ) : null}
+            </>
+          }
+          afterTypography={readingSection}
           controller={props.themeController}
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
-      ) : null}
-      <SettingsSection title="Window">
-        <div className="setgroup">
-          {isAvailable("sidebar-material") ? (
-            <SettingRow
-              description="The frosted material behind the sidebar and around the cards. Off paints it solid."
-              focused={focusedSetting === settingId("sidebar-material")}
-              label="Glass"
-              scope="app"
-              settingId="sidebar-material"
-            >
-              <OctantToggleGroup<SidebarVibrancyMode>
-                aria-label="Glass"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected === undefined) return;
-                  props.onSettingsChange({
-                    sidebarMaterial: selected === "off" ? "opaque" : "system",
-                  });
-                  if (selected === sidebarBackground.vibrancyMode) return;
-                  const next = { ...sidebarBackground, vibrancyMode: selected };
-                  if (props.themeController !== undefined) {
-                    void props.themeController.applyPatch({ sidebarBackground: next });
-                  } else {
-                    props.onSettingsChange({ sidebarBackground: next });
-                  }
-                }}
-                value={[glass]}
-              >
-                <OctantToggleGroupItem value="off">Off</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="subtle">Subtle</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="strong">Strong</OctantToggleGroupItem>
-              </OctantToggleGroup>
-              {props.settings.sidebarMaterial === "system" ? (
-                <p
-                  className="settings-view__effective-note"
-                  data-visible-when-material="opaque"
-                  id="translucent-sidebar-effective-note"
-                >
-                  Translucency is unavailable, so Octant is using an opaque sidebar.
-                </p>
-              ) : null}
-            </SettingRow>
-          ) : null}
-          {isAvailable("workspace-material") ? (
-            <SettingRow
-              description="Let the glass show through the cards as well."
-              focused={focusedSetting === settingId("workspace-material")}
-              label="Glass cards"
-              scope="app"
-              settingId="workspace-material"
-            >
-              <OctantSwitch
-                checked={props.settings.workspaceMaterial === "system" && glass !== "off"}
-                describedBy="workspace-material-description"
-                disabled={glass === "off"}
-                label="Glass cards"
-                onCheckedChange={(checked) => {
-                  props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
-                }}
-              />
-              {glass === "off" ? (
-                <p className="settings-view__effective-note" id="workspace-material-effective-note">
-                  Turn on Glass first.
-                </p>
-              ) : null}
-            </SettingRow>
-          ) : null}
-        </div>
-      </SettingsSection>
-      {isAvailable("app-background") || isAvailable("sidebar-background") ? (
-        <SettingsSection className="settings-app-background" title="Background">
-          {isAvailable("app-background") && props.themeController !== undefined ? (
-            <>
-              <AppBackgroundSettings
-                background={
-                  (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
-                  DEFAULT_APP_BACKGROUND
-                }
-                focused={focusedSetting === settingId("app-background")}
-                increasedContrast={
-                  (props.themeController.draft ?? props.themeController.settings)
-                    ?.increasedContrast === true
-                }
-                library={props.backgroundImageLibrary}
-                onChange={(appBackground) => {
-                  void props.themeController?.applyPatch({ appBackground });
-                }}
-              />
-            </>
-          ) : null}
+      ) : (
+        <>
+          {windowSection}
+          {readingSection}
+        </>
+      )}
+      {props.themeController === undefined ? null : (
+        <SettingsSection
+          description="Return every appearance setting to its default."
+          title="Reset"
+        >
           <div className="setgroup">
-            {isAvailable("sidebar-background") ? (
-              <SettingRow
-                description="A preset gradient behind the sidebar, or none. Adjust the overlay color and opacity for readability."
-                focused={focusedSetting === settingId("sidebar-background")}
-                label="Sidebar background"
-                scope="app"
-                settingId="sidebar-background"
+            {/* The section says Reset and its note says what returns to its
+                default, so the row and its button each said "Reset appearance"
+                a second and third time. */}
+            <SettingRow
+              focused={focusedSetting === settingId("reset-appearance")}
+              label="Appearance"
+              scope="app"
+              settingId="reset-appearance"
+            >
+              <OctantButton
+                className="settings-view__action"
+                onClick={() => void props.themeController?.reset()}
+                size="sm"
+                type="button"
+                variant="secondary"
               >
-                <SidebarBackgroundSettings
-                  suspended={sidebarDecorationSuspended}
-                  background={
-                    props.themeController?.draft?.sidebarBackground ??
-                    props.settings.sidebarBackground
-                  }
-                  onSettingsChange={(patch) => {
-                    if (
-                      patch.sidebarBackground !== undefined &&
-                      props.themeController !== undefined
-                    ) {
-                      void props.themeController.applyPatch({
-                        sidebarBackground: patch.sidebarBackground,
-                      });
-                    } else {
-                      props.onSettingsChange(patch);
-                    }
-                  }}
-                />
-              </SettingRow>
-            ) : null}
+                Reset
+              </OctantButton>
+            </SettingRow>
           </div>
         </SettingsSection>
-      ) : null}
-      <SettingsSection title="Sidebar">
+      )}
+    </section>
+  );
+}
+
+/**
+ * How the sidebar is laid out and what its rows say. Split from Appearance,
+ * whose page had grown to twelve sections: this one is about one surface and
+ * the choices people make about it once.
+ */
+function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSectionProps) {
+  const theme = props.themeController?.draft ?? props.themeController?.settings;
+  const resolvedBackground = theme === undefined ? undefined : resolveAppBackground(theme);
+  const sidebarDecorationSuspended =
+    resolvedBackground !== undefined &&
+    resolvedBackground.kind !== "none" &&
+    resolvedBackground.coversSidebar;
+  const isAvailable = (id: string) =>
+    isSettingAvailable(findSetting(SIDEBAR_SECTION(), settingId(id))!, capabilities);
+  return (
+    <section aria-label="Sidebar" className="settings-section-stack" id="settings-sidebar">
+      <SettingsSection title="Layout">
         <div className="setgroup">
           {isAvailable("sidebar-width") ? (
             <SettingRow
@@ -1369,302 +1486,49 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
         </div>
       </SettingsSection>
-      <SettingsSection
-        description="Choose which facts a thread row in the sidebar shows. A hidden property is omitted rather than left as a gap."
-        title="Sidebar thread rows"
-      >
-        <SettingGroup label="Projects rows">
-          {isAvailable("sidebar-projects-branch") ? (
-            <SettingRow
-              description="Show the branch or worktree a thread works in."
-              focused={focusedSetting === settingId("sidebar-projects-branch")}
-              label="Branch"
-              scope="app"
-              settingId="sidebar-projects-branch"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.projects.branch}
-                label="Branch on Projects rows"
-                onCheckedChange={(branch) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      projects: { ...props.settings.sidebarRowProperties.projects, branch },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-projects-pull-request") ? (
-            <SettingRow
-              description="Show the number and state of a thread's linked pull request."
-              focused={focusedSetting === settingId("sidebar-projects-pull-request")}
-              label="Pull request"
-              scope="app"
-              settingId="sidebar-projects-pull-request"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.projects.pullRequest}
-                label="Pull request on Projects rows"
-                onCheckedChange={(pullRequest) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      projects: {
-                        ...props.settings.sidebarRowProperties.projects,
-                        pullRequest,
-                      },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-projects-last-updated") ? (
-            <SettingRow
-              description="Show how long ago a thread last moved."
-              focused={focusedSetting === settingId("sidebar-projects-last-updated")}
-              label="Last updated"
-              scope="app"
-              settingId="sidebar-projects-last-updated"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.projects.lastUpdated}
-                label="Last updated on Projects rows"
-                onCheckedChange={(lastUpdated) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      projects: {
-                        ...props.settings.sidebarRowProperties.projects,
-                        lastUpdated,
-                      },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-projects-status") ? (
-            <SettingRow
-              description="Show a thread's working, waiting, or unread mark."
-              focused={focusedSetting === settingId("sidebar-projects-status")}
-              label="Status"
-              scope="app"
-              settingId="sidebar-projects-status"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.projects.status}
-                label="Status on Projects rows"
-                onCheckedChange={(status) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      projects: { ...props.settings.sidebarRowProperties.projects, status },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-        </SettingGroup>
-        <SettingGroup label="Activity rows">
-          {isAvailable("sidebar-activity-project") ? (
-            <SettingRow
-              description="Show the Project a thread belongs to."
-              focused={focusedSetting === settingId("sidebar-activity-project")}
-              label="Project"
-              scope="app"
-              settingId="sidebar-activity-project"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.activity.project}
-                label="Project on Activity rows"
-                onCheckedChange={(project) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      activity: { ...props.settings.sidebarRowProperties.activity, project },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-activity-branch") ? (
-            <SettingRow
-              description="Show the branch or worktree a thread works in."
-              focused={focusedSetting === settingId("sidebar-activity-branch")}
-              label="Branch"
-              scope="app"
-              settingId="sidebar-activity-branch"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.activity.branch}
-                label="Branch on Activity rows"
-                onCheckedChange={(branch) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      activity: { ...props.settings.sidebarRowProperties.activity, branch },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-activity-pull-request") ? (
-            <SettingRow
-              description="Show the number and state of a thread's linked pull request."
-              focused={focusedSetting === settingId("sidebar-activity-pull-request")}
-              label="Pull request"
-              scope="app"
-              settingId="sidebar-activity-pull-request"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.activity.pullRequest}
-                label="Pull request on Activity rows"
-                onCheckedChange={(pullRequest) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      activity: {
-                        ...props.settings.sidebarRowProperties.activity,
-                        pullRequest,
-                      },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-activity-last-updated") ? (
-            <SettingRow
-              description="Show how long ago a thread last moved."
-              focused={focusedSetting === settingId("sidebar-activity-last-updated")}
-              label="Last updated"
-              scope="app"
-              settingId="sidebar-activity-last-updated"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.activity.lastUpdated}
-                label="Last updated on Activity rows"
-                onCheckedChange={(lastUpdated) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      activity: {
-                        ...props.settings.sidebarRowProperties.activity,
-                        lastUpdated,
-                      },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-          {isAvailable("sidebar-activity-status") ? (
-            <SettingRow
-              description="Show a thread's working, waiting, or unread mark."
-              focused={focusedSetting === settingId("sidebar-activity-status")}
-              label="Status"
-              scope="app"
-              settingId="sidebar-activity-status"
-            >
-              <OctantSwitch
-                checked={props.settings.sidebarRowProperties.activity.status}
-                label="Status on Activity rows"
-                onCheckedChange={(status) =>
-                  props.onSettingsChange({
-                    sidebarRowProperties: {
-                      ...props.settings.sidebarRowProperties,
-                      activity: { ...props.settings.sidebarRowProperties.activity, status },
-                    },
-                  })
-                }
-              />
-            </SettingRow>
-          ) : null}
-        </SettingGroup>
-      </SettingsSection>
-      <SettingsSection title="Reading">
+      <SettingsSection title="Background">
         <div className="setgroup">
-          {isAvailable("transcript-text-size") ? (
+          {isAvailable("sidebar-background") ? (
             <SettingRow
-              description="Conversation text in Chat, Work, and Code threads."
-              focused={focusedSetting === settingId("transcript-text-size")}
-              label="Transcript text size"
+              description="A preset gradient behind the sidebar, or none. Adjust the overlay color and opacity for readability."
+              focused={focusedSetting === settingId("sidebar-background")}
+              label="Sidebar background"
               scope="app"
-              settingId="transcript-text-size"
+              settingId="sidebar-background"
             >
-              <OctantToggleGroup<ShellSettings["transcriptTextSize"]>
-                aria-label="Transcript text size"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected !== undefined)
-                    props.onSettingsChange({ transcriptTextSize: selected });
+              <SidebarBackgroundSettings
+                suspended={sidebarDecorationSuspended}
+                background={
+                  props.themeController?.draft?.sidebarBackground ??
+                  props.settings.sidebarBackground
+                }
+                onSettingsChange={(patch) => {
+                  if (
+                    patch.sidebarBackground !== undefined &&
+                    props.themeController !== undefined
+                  ) {
+                    void props.themeController.applyPatch({
+                      sidebarBackground: patch.sidebarBackground,
+                    });
+                  } else {
+                    props.onSettingsChange(patch);
+                  }
                 }}
-                value={[props.settings.transcriptTextSize]}
-              >
-                <OctantToggleGroupItem value="small">Small</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="large">Large</OctantToggleGroupItem>
-              </OctantToggleGroup>
-            </SettingRow>
-          ) : null}
-          {isAvailable("transcript-width") ? (
-            <SettingRow
-              description="Maximum width of transcript and composer columns."
-              focused={focusedSetting === settingId("transcript-width")}
-              label="Transcript width"
-              scope="app"
-              settingId="transcript-width"
-            >
-              <OctantToggleGroup<ShellSettings["transcriptWidth"]>
-                aria-label="Transcript width"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected !== undefined) props.onSettingsChange({ transcriptWidth: selected });
-                }}
-                value={[props.settings.transcriptWidth]}
-              >
-                <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
-              </OctantToggleGroup>
+              />
             </SettingRow>
           ) : null}
         </div>
       </SettingsSection>
-      {props.themeController === undefined ? null : (
-        <SettingsSection
-          description="Return every appearance setting to its default."
-          title="Reset"
-        >
-          <div className="setgroup">
-            {/* The section says Reset and its note says what returns to its
-                default, so the row and its button each said "Reset appearance"
-                a second and third time. */}
-            <SettingRow
-              focused={focusedSetting === settingId("reset-appearance")}
-              label="Appearance"
-              scope="app"
-              settingId="reset-appearance"
-            >
-              <OctantButton
-                className="settings-view__action"
-                onClick={() => void props.themeController?.reset()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Reset
-              </OctantButton>
-            </SettingRow>
-          </div>
-        </SettingsSection>
-      )}
+      <SettingsSection
+        description="What a thread row in each sidebar list shows. A hidden detail is left out, not left as a gap."
+        title="Thread rows"
+      >
+        <SidebarRowDetailsSettings
+          focusedSetting={focusedSetting}
+          onChange={(sidebarRowProperties) => props.onSettingsChange({ sidebarRowProperties })}
+          value={props.settings.sidebarRowProperties}
+        />
+      </SettingsSection>
     </section>
   );
 }

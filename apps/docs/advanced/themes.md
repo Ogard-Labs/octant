@@ -28,7 +28,7 @@ and color when you create or edit it.
 **Sidebar destinations** controls where navigation destinations live: as a
 sidebar row, under the sidebar's More row, in the account menu, or nowhere.
 Open **Customize sidebar** from the More row or the account menu, or use
-**Settings → Appearance → Sidebar destinations**. Use the visibility control to
+**Settings → Sidebar → Sidebar destinations**. Use the visibility control to
 choose **Always show**, **Menu only** where the destination offers that
 placement, or **Don't show**, and use the chevrons to move it up or down.
 **Reset sidebar destinations** restores the untouched placement and order.
@@ -158,8 +158,9 @@ Type-scale variables travel with the export.
 
 ## Keyboard and navigation
 
-Appearance and layout choices, including the mode switcher presentation, are
-keyboard-navigable. See [Keyboard workflows](/advanced/keyboard-workflows)
+Appearance and Sidebar choices, including the mode switcher presentation, are
+keyboard-navigable. The sidebar's width, destinations, More row, mode switcher,
+provider icons, background, and thread-row details live on **Settings → Sidebar**. See [Keyboard workflows](/advanced/keyboard-workflows)
 for navigation and the Zen focus surface.
 
 ## Current status

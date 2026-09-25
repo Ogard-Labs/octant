@@ -5,7 +5,7 @@ import type {
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { Check, Image as ImageIcon, Images, Upload } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -90,11 +90,12 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const background = props.background;
   const selectedId = background.kind === "photo" ? String(background.backgroundId) : null;
   const selectedPresetId = background.kind === "builtin" ? background.presetId : null;
+  const selectedPreset = ZEN_BUILTIN_BACKGROUNDS.find((preset) => preset.id === selectedPresetId);
+  const [catalogOpen, setCatalogOpen] = useState(selectedPresetId === null);
   const showPhoto = choice === "photo" || selectedId !== null;
   const showBuiltin = choice === "builtin" || selectedPresetId !== null;
   const showDials = background.kind !== "none";
   const patternDialsActive = background.patternEnabled;
-  const patternDialsHintId = useId();
 
   useEffect(() => {
     setChoice(background.kind);
@@ -199,8 +200,31 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
         </SettingRow>
       </div>
       {showBuiltin ? (
-        <fieldset className="settings-app-background__catalog">
-          <legend className="settings-app-background__catalog-title">Built-in backgrounds</legend>
+        <details
+          className="settings-app-background__catalog"
+          onToggle={(event) => setCatalogOpen(event.currentTarget.open)}
+          open={catalogOpen}
+        >
+          {/* Twenty pictures in four groups were the tallest thing in
+              Settings, open on every visit. The current one stands for the
+              set until the person asks to change it. */}
+          <summary className="settings-app-background__catalog-summary">
+            {selectedPreset === undefined ? null : (
+              <img
+                alt=""
+                className="settings-app-background__catalog-current"
+                src={"stillSrc" in selectedPreset ? selectedPreset.stillSrc : selectedPreset.src}
+              />
+            )}
+            <span className="settings-app-background__catalog-title">
+              {selectedPreset === undefined
+                ? "Built-in backgrounds"
+                : presetName(selectedPreset.title)}
+            </span>
+            <span className="settings-app-background__catalog-action">
+              {catalogOpen ? "Done" : "Change"}
+            </span>
+          </summary>
           {CATALOG_GROUPS.map((group) => {
             const presets = ZEN_BUILTIN_BACKGROUNDS.filter((preset) => preset.group === group);
             return (
@@ -247,7 +271,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               </div>
             );
           })}
-        </fieldset>
+        </details>
       ) : null}
       {showPhoto ? (
         <div className="setgroup">
@@ -398,68 +422,64 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               }
             />
           </SettingRow>
-          {patternDialsActive ? null : (
-            <p className="settings-app-background__note" id={patternDialsHintId}>
-              Pattern opacity, speed, and intensity apply when Show pattern is on.
-            </p>
-          )}
-          <SettingRow
-            description="How strongly the cloud draws over the ground."
-            label="Pattern opacity"
-            scope="app"
-            settingId="app-background-pattern-opacity"
-          >
-            <SliderField
-              {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
-              aria-label="Pattern opacity"
-              className="settings-view__range"
-              disabled={!patternDialsActive}
-              max={100}
-              min={0}
-              onChange={(event) => dial("patternOpacity", Number(event.currentTarget.value))}
-              step={1}
-              format={(value) => `${String(value)}%`}
-              value={background.patternOpacity}
-            />
-          </SettingRow>
-          <SettingRow
-            description="How fast the cloud drifts."
-            label="Pattern speed"
-            scope="app"
-            settingId="app-background-pattern-speed"
-          >
-            <SliderField
-              {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
-              aria-label="Pattern speed"
-              className="settings-view__range"
-              disabled={!patternDialsActive}
-              max={100}
-              min={0}
-              onChange={(event) => dial("patternSpeed", Number(event.currentTarget.value))}
-              step={1}
-              format={(value) => `${String(value)}%`}
-              value={background.patternSpeed}
-            />
-          </SettingRow>
-          <SettingRow
-            description="How dense the cloud is."
-            label="Pattern intensity"
-            scope="app"
-            settingId="app-background-pattern-intensity"
-          >
-            <SliderField
-              {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
-              aria-label="Pattern intensity"
-              className="settings-view__range"
-              disabled={!patternDialsActive}
-              max={100}
-              min={0}
-              onChange={(event) => dial("patternIntensity", Number(event.currentTarget.value))}
-              step={1}
-              format={(value) => `${String(value)}%`}
-              value={background.patternIntensity}
-            />
-          </SettingRow>
+          {/* The dials only mean something while the cloud is drawn, so they
+              appear with it rather than sitting greyed out beneath the switch.
+              Their values are kept either way. */}
+          {patternDialsActive ? (
+            <>
+              <SettingRow
+                description="How strongly the cloud draws over the ground."
+                label="Pattern opacity"
+                scope="app"
+                settingId="app-background-pattern-opacity"
+              >
+                <SliderField
+                  aria-label="Pattern opacity"
+                  className="settings-view__range"
+                  max={100}
+                  min={0}
+                  onChange={(event) => dial("patternOpacity", Number(event.currentTarget.value))}
+                  step={1}
+                  format={(value) => `${String(value)}%`}
+                  value={background.patternOpacity}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How fast the cloud drifts."
+                label="Pattern speed"
+                scope="app"
+                settingId="app-background-pattern-speed"
+              >
+                <SliderField
+                  aria-label="Pattern speed"
+                  className="settings-view__range"
+                  max={100}
+                  min={0}
+                  onChange={(event) => dial("patternSpeed", Number(event.currentTarget.value))}
+                  step={1}
+                  format={(value) => `${String(value)}%`}
+                  value={background.patternSpeed}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How dense the cloud is."
+                label="Pattern intensity"
+                scope="app"
+                settingId="app-background-pattern-intensity"
+              >
+                <SliderField
+                  aria-label="Pattern intensity"
+                  className="settings-view__range"
+                  max={100}
+                  min={0}
+                  onChange={(event) => dial("patternIntensity", Number(event.currentTarget.value))}
+                  step={1}
+                  format={(value) => `${String(value)}%`}
+                  value={background.patternIntensity}
+                />
+              </SettingRow>
+            </>
+          ) : null}
         </div>
       ) : null}
       {props.increasedContrast === true ? (

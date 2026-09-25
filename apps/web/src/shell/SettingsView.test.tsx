@@ -300,12 +300,14 @@ describe("SettingsView", () => {
     expect(search).toHaveFocus();
   });
 
-  it("shows a scope indicator on each relevant control", () => {
+  it("says a page's scope once under its title, not on every row that shares it", () => {
     renderSettings();
 
+    const header = screen.getByRole("heading", { level: 1, name: "General" }).closest("header")!;
+    expect(within(header).getByLabelText("Scope: This app")).toBeInTheDocument();
     const general = screen.getByRole("heading", { name: "General" }).closest("section")!;
     const firstRow = within(general).getAllByTestId("setting-row")[0]!;
-    expect(within(firstRow).getByText("This app")).toBeInTheDocument();
+    expect(within(firstRow).queryByText("This app")).toBeNull();
   });
 
   it("scans once when the Providers section opens", async () => {
@@ -535,7 +537,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
-    navigateTo("Appearance");
+    navigateTo("Sidebar");
 
     const control = screen.getByRole("switch", { name: "More row in the sidebar" });
     expect(control).toHaveAttribute("aria-checked", "true");
@@ -580,55 +582,37 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
-    navigateTo("Appearance");
+    navigateTo("Sidebar");
 
-    expect(screen.getByRole("heading", { name: "Sidebar thread rows" })).toBeVisible();
-    expect(screen.getByRole("group", { name: "Projects rows" })).toBeVisible();
-    expect(screen.getByRole("group", { name: "Activity rows" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Thread rows" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Projects" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Activity" })).toBeVisible();
 
     // Each view starts with what its rows already carried: the tree shows
     // branch, pull request, age, and status; the feed shows the Project name
     // and status alone.
-    expect(screen.getByRole("switch", { name: "Branch on Projects rows" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByRole("switch", { name: "Pull request on Projects rows" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByRole("switch", { name: "Last updated on Projects rows" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByRole("switch", { name: "Status on Projects rows" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByRole("switch", { name: "Project on Activity rows" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getByRole("switch", { name: "Branch on Activity rows" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    expect(screen.getByRole("switch", { name: "Pull request on Activity rows" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    expect(screen.getByRole("switch", { name: "Last updated on Activity rows" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    expect(screen.getByRole("switch", { name: "Status on Activity rows" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(screen.getAllByText("Show the branch or worktree a thread works in.")).toHaveLength(2);
+    for (const name of [
+      "Branch on Projects rows",
+      "Pull request on Projects rows",
+      "Last updated on Projects rows",
+      "Status on Projects rows",
+      "Project on Activity rows",
+      "Status on Activity rows",
+    ]) {
+      expect(screen.getByRole("checkbox", { name })).toBeChecked();
+    }
+    for (const name of [
+      "Branch on Activity rows",
+      "Pull request on Activity rows",
+      "Last updated on Activity rows",
+    ]) {
+      expect(screen.getByRole("checkbox", { name })).not.toBeChecked();
+    }
+    // A Projects row sits under its Project, so it offers no Project detail.
+    expect(screen.queryByRole("checkbox", { name: "Project on Projects rows" })).toBeNull();
 
     // Turning the Projects branch off leaves every Activity value as it was.
-    await user.click(screen.getByRole("switch", { name: "Branch on Projects rows" }));
+    await user.click(screen.getByRole("checkbox", { name: "Branch on Projects rows" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       sidebarRowProperties: {
         projects: {
@@ -649,7 +633,7 @@ describe("SettingsView", () => {
     });
 
     // Turning the Activity age on says nothing about the Projects rows.
-    await user.click(screen.getByRole("switch", { name: "Last updated on Activity rows" }));
+    await user.click(screen.getByRole("checkbox", { name: "Last updated on Activity rows" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       sidebarRowProperties: {
         projects: {
@@ -772,7 +756,7 @@ describe("SettingsView", () => {
         applyPatch,
       } as never,
     });
-    navigateTo("Appearance");
+    navigateTo("Sidebar");
     expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeDisabled();
     expect(screen.getByLabelText("Sidebar overlay color")).toBeDisabled();
     expect(screen.getByRole("slider", { name: "Sidebar overlay opacity" })).toBeDisabled();
@@ -798,7 +782,7 @@ describe("SettingsView", () => {
           applyPatch: vi.fn(async () => true),
         } as never,
       });
-      navigateTo("Appearance");
+      navigateTo("Sidebar");
       expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeEnabled();
       expect(screen.queryByText(/Workspace background covers the sidebar/)).not.toBeInTheDocument();
     },
@@ -949,14 +933,23 @@ describe("SettingsView", () => {
   });
 
   it("applies an initial deep link on mount to open a section and focus a setting", () => {
+    // Mode switcher moved from Appearance to Sidebar; its old link still lands.
     renderSettings({ initialDeepLink: { section: "appearance", setting: "mode-switcher" } });
 
-    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Sidebar" })).toBeInTheDocument();
     expect(
       within(screen.getByRole("group", { name: "Mode switcher" })).getByRole("button", {
         name: "Buttons",
       }),
     ).toHaveFocus();
+  });
+
+  it("lands an old Appearance link to one thread-row detail on its checkbox in the Sidebar grid", () => {
+    renderSettings({
+      initialDeepLink: { section: "appearance", setting: "sidebar-activity-branch" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Sidebar" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Branch on Activity rows" })).toHaveFocus();
   });
 
   it("deep-links search results into the theme editor and to Reset appearance", () => {
@@ -1386,7 +1379,7 @@ describe("SettingsView", () => {
 
   it("shows the sidebar width as whole pixels, however it was dragged", () => {
     renderSettings({ settings: { ...defaultShellSettings(), sidebarWidth: 357.890625 } });
-    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sidebar" }));
 
     // Dragging the sidebar's edge saves a fractional width, and the row used to
     // print all of it.
@@ -1420,10 +1413,11 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("switch", { name: "Enable Chat" })).toHaveClass("octant-switch");
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    expect(screen.getByRole("switch", { name: "Glass cards" })).toHaveClass("octant-switch");
+    fireEvent.click(screen.getByRole("button", { name: "Sidebar" }));
     expect(screen.getByRole("slider", { name: "Sidebar width" })).toHaveClass(
       "settings-view__range",
     );
-    expect(screen.getByRole("switch", { name: "Glass cards" })).toHaveClass("octant-switch");
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
     expect(within(modeSwitcher).getByRole("button", { name: "Dropdown" })).toHaveAttribute(
       "aria-pressed",
