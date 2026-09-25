@@ -17,7 +17,7 @@ import {
   type ZenThreadPinRequest,
   type ZenThreadPinResult,
   DEFAULT_ZEN_RESEARCH_DOCK_WIDTH,
-  type ZenResearchDock,
+  type ZenDockedResearch,
   type ZenResearchDockRequest,
   type ZenResearchDockResult,
   type ZenCanvasPinRequest,
@@ -117,6 +117,18 @@ export interface ZenProjectTerminalPort {
   ) => { readonly title: string } | undefined;
 }
 
+/**
+ * Which mode a Project's own browser would open in for this window, or
+ * undefined when the window does not hold that Work or Code Project. Zen docks
+ * a Project browser only where the Project browser owner would open one.
+ */
+export interface ZenProjectBrowserPort {
+  readonly resolve: (
+    windowId: WindowId,
+    projectId: ProjectId,
+  ) => { readonly mode: "work" | "code" } | undefined;
+}
+
 function focusZoneReason(code: ZenFocusZoneRejectionCode): ZenFailureReason {
   switch (code) {
     case "stale-version":
@@ -160,6 +172,8 @@ export interface ZenServiceDependencies {
   readonly codeTerminals?: ZenCodeTerminalPort;
   /** Whether a terminal is one this window opened for a Code Project. */
   readonly projectTerminals?: ZenProjectTerminalPort;
+  /** Whether this window may show a Project's own browser. */
+  readonly projectBrowsers?: ZenProjectBrowserPort;
   /**
    * Whether a canvas is one this window may read. Without it there is nothing
    * to authorize a card against, so Zen refuses to pin rather than assuming.
@@ -597,8 +611,25 @@ export class ZenService {
       throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });
     }
     if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
-    let research: ZenResearchDock | null = null;
-    if (request.thread !== null) {
+    let research: ZenDockedResearch | null = null;
+    if (request.project !== undefined) {
+      if (this.deps.projectBrowsers === undefined) {
+        throw new ZenError({ reason: "missing-capability", spaceId: space.spaceId });
+      }
+      const project = this.deps.projectBrowsers.resolve(windowId, request.project.projectId);
+      if (project === undefined) {
+        throw new ZenError({ reason: "unavailable-source", spaceId: space.spaceId });
+      }
+      research = {
+        project: {
+          hostId: this.deps.localHostId,
+          projectId: request.project.projectId,
+          mode: project.mode,
+        },
+        width: request.width ?? DEFAULT_ZEN_RESEARCH_DOCK_WIDTH,
+        collapsed: request.collapsed ?? false,
+      };
+    } else if (request.thread !== null) {
       if (this.deps.threadCatalog === undefined) {
         throw new ZenError({ reason: "missing-capability", spaceId: space.spaceId });
       }

@@ -367,6 +367,7 @@ import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
+import { ProjectBrowserService } from "./browser/projectBrowserService";
 import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
 import { WorkProjectStatusReader, listWorkFolderTopLevel } from "./work/workProjectStatusReader";
 import { DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER, effectiveDefaultFolder } from "./defaultFolder";
@@ -1688,6 +1689,7 @@ export function startOctantServer(
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    let projectBrowserService: ProjectBrowserService | undefined;
     const browserModelBindings = new Map<string, BrowserModelBinding>();
     const requireBrowserAutomationService = (): BrowserAutomationService => {
       const service = browserAutomationService;
@@ -1719,6 +1721,7 @@ export function startOctantServer(
         codeSessionAuthority.revokeWindow(windowId);
         activeCodeService?.revokeWindow?.(windowId);
         void browserAutomationService?.revokeWindow(windowId);
+        void projectBrowserService?.revokeWindow(windowId);
         void activeComputerUseRuntime?.revokeWindow(windowId);
         void activeComputerUseTools?.revokeWindow(windowId);
       },
@@ -3704,6 +3707,42 @@ export function startOctantServer(
             headless: headlessBrowserRuntime,
           }));
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
+    // A person's own browser for a Work or Code Project, with no thread. It
+    // shares the runtime, so shutdown closes its pages too, but it lives apart
+    // from the thread-owned automation service so no agent tool can reach it.
+    const windowHoldsProject = (
+      windowId: WindowId,
+      projectId: ProjectId,
+      mode: "work" | "code",
+    ): boolean => {
+      const context = persistence.readWindowWorkspace(windowId)?.workspace.contextByMode[mode];
+      return (
+        context !== undefined &&
+        context.mode === mode &&
+        String(context.host) === String(LOCAL_HOST_ID) &&
+        String(context.projectId) === String(projectId)
+      );
+    };
+    const liveProjectBrowsers = new ProjectBrowserService({
+      runtime: browserRuntime,
+      readProject: persistence.readProject,
+      canAccessProject: windowHoldsProject,
+      uuid: randomUUID,
+      now: Date.now,
+    });
+    projectBrowserService = liveProjectBrowsers;
+    const unsubscribeProjectBrowserAuthority = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) {
+        if (
+          event.aggregateType === "project" &&
+          (event.eventName === "project.lifecycle-changed@1" ||
+            event.eventName === "project.binding-relinked@1")
+        ) {
+          void liveProjectBrowsers.settleProject(decodeProjectId(event.aggregateId));
+        }
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectBrowserAuthority));
     browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
       authority: browserAuthority,
@@ -5994,6 +6033,19 @@ export function startOctantServer(
               read: (windowId, request) => codeOperationRuntime.inspectTerminal(windowId, request),
             },
           }),
+      // Docking a Project's browser asks the same question its owner asks
+      // before opening a page: does this window hold that Work or Code Project.
+      projectBrowsers: {
+        resolve: (windowId, projectId) => {
+          const project = persistence.readProject(projectId);
+          if (project === undefined || project.type === "chat" || project.lifecycle !== "active") {
+            return undefined;
+          }
+          return windowHoldsProject(windowId, projectId, project.type)
+            ? { mode: project.type }
+            : undefined;
+        },
+      },
       ...(projectTerminals === undefined
         ? {}
         : {
@@ -6181,6 +6233,7 @@ export function startOctantServer(
     });
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
+      projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
       windowAuthorityStore,
@@ -8254,6 +8307,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            projectBrowserService?.close();
             await browserAutomationService?.close();
           } catch (error) {
             shutdownFailure ??= error;

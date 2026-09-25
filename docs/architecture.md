@@ -985,15 +985,23 @@ mechanisms are:
   process did not survive.
 - **Project browsing contexts.** A person may open a browser for a Work or Code
   Project with no thread, under the same separation: it is the person's
-  browser, never an agent's. Its context is its own isolated, ephemeral
-  profile, shared with no thread's browsing context, so a sign-in there never
-  becomes something an agent can act in and no thread's origin approval
-  carries into it. The window's workspace must hold that Project for its mode
-  at the current binding revision; archive or relink stops the context as
-  `authority-revoked`. Like a thread's browsing context it is not journaled,
-  and a paired device may watch it but never create, navigate, or type in it.
-  This context is designed and not yet built: the browser automation service
-  still derives every context's authority from a thread and its provider.
+  browser, never an agent's. Its page lives in its own isolated, ephemeral
+  context, registered with the browser runtime under an owner id derived from
+  the Project (never a thread id), so no thread's surface can attach to it and
+  no thread's origin approval carries into it. A separate Project browser
+  service owns these contexts; the agent's browser tools resolve contexts only
+  through the thread-owned automation service, which never sees them, and the
+  runtime is handed only the page action, never an authority. Only the person
+  at a local window whose workspace holds that Project for its mode may open,
+  read, or close it; a paired device is refused outright, because creating a
+  browsing context is already local-only and a Project page has no thread
+  whose approval could stand in. It opens only http and https addresses; a
+  page on the same site takes a new address in place, and another site starts
+  a fresh context whose allowlist is that site. It carries the host's usual
+  session ceiling and is not journaled, like a thread's browsing context.
+  Archiving the Project, relinking its root, or the window's authority ending
+  closes it. On the desktop app the page is a live native view; elsewhere the
+  host drives a headless page and shows its picture.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

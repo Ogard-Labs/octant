@@ -1969,6 +1969,48 @@ describe("ZenService research dock", () => {
     });
   });
 
+  it("docks a Project's own browser naming the Project and no thread", async () => {
+    let current = space();
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
+      current = { ...next, version: (expectedVersion + 1) as AggregateVersion };
+      return current;
+    });
+    const resolve = vi.fn((_windowId: unknown, projectId: unknown) =>
+      String(projectId) === String(ids.project) ? { mode: "work" as const } : undefined,
+    );
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      projectBrowsers: { resolve },
+      uuid: () => ids.element,
+    });
+
+    await service.dockResearch(ids.window, {
+      thread: null,
+      project: { projectId: ids.project },
+      expectedVersion: 2 as AggregateVersion,
+    });
+
+    expect(resolve).toHaveBeenCalledWith(ids.window, ids.project);
+    expect(append.mock.calls[0]?.[0].research).toEqual({
+      project: { hostId: LOCAL_HOST_ID, projectId: ids.project, mode: "work" },
+      width: 480,
+      collapsed: false,
+    });
+
+    await expect(
+      service.dockResearch(ids.window, {
+        thread: null,
+        project: { projectId: ids.window as never },
+        expectedVersion: 3 as AggregateVersion,
+      }),
+    ).rejects.toThrow(/unavailable-source/);
+    expect(append).toHaveBeenCalledOnce();
+  });
+
   it("refuses to dock onto a thread this window cannot see", async () => {
     const { append, service } = dockFixture({ resolves: false });
 

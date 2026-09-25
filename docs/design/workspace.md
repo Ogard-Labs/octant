@@ -233,9 +233,10 @@ a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card
 naming a terminal this window does not own is refused. Authority, lifecycle,
 and the journal record follow the
-[Project terminal rule](../architecture.md#security-and-authority). A Project
-browser in Zen follows the Project browsing context rule there and is not built
-yet, so Add browser still lists Work and Code threads only.
+[Project terminal rule](../architecture.md#security-and-authority). Add browser
+likewise offers the window's Work or Code Project as "This Project": the dock
+names the Project, never a thread, and shows that Project's own page under the
+Project browsing context rule in the same section.
 
 ## Local-server ownership
 

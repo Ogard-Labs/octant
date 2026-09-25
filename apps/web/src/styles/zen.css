@@ -799,6 +799,17 @@
   height: 100%;
 }
 
+.zen-research__address-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.zen-research__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .zen-research__empty {
   display: flex;
   flex-direction: column;

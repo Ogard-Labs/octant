@@ -20,6 +20,11 @@ const ZenResearchDock = lazy(() =>
 const ZenTerminalCard = lazy(() =>
   import("../zen/ZenTerminalCard").then((module) => ({ default: module.ZenTerminalCard })),
 );
+const ZenProjectResearchDock = lazy(() =>
+  import("../zen/ZenProjectResearchDock").then((module) => ({
+    default: module.ZenProjectResearchDock,
+  })),
+);
 const ZenProjectTerminalCard = lazy(() =>
   import("../zen/ZenProjectTerminalCard").then((module) => ({
     default: module.ZenProjectTerminalCard,
@@ -30,6 +35,7 @@ export {
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,
+  ZenProjectResearchDock,
   ZenProjectTerminalCard,
   ZenResearchDock,
   ZenSurface,
