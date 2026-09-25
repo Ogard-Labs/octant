@@ -4927,22 +4927,31 @@ function LaunchedShell(
    */
   async function addZenProjectTerminal(projectId: ProjectId): Promise<void> {
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
+    // No card means no way back to a shell: a Project terminal has no thread
+    // or listing to reopen it from, so one without a card stops rather than
+    // run unseen. Stopping a shell the host never started is refused harmlessly.
+    const stop = () =>
+      projectTerminalClient
+        .execute({ kind: "stop", projectId, terminalId })
+        .then(() => undefined)
+        .catch(() => undefined);
+    let started;
     try {
-      const started = await projectTerminalClient.execute({
+      started = await projectTerminalClient.execute({
         kind: "start",
         projectId,
         terminalId,
         columns: 100,
         rows: 30,
       });
-      if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
-      if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
-      // No card means no way back to this shell: a Project terminal has no
-      // thread or listing to reopen it from, so it stops rather than run unseen.
-      await projectTerminalClient.execute({ kind: "stop", projectId, terminalId });
     } catch {
-      // The Add panel stays usable; the card that does not arrive is the answer.
+      // The reply was lost, not necessarily the start.
+      await stop();
+      return;
     }
+    if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
+    if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
+    await stop();
   }
 
   // The Project a browser opens for: the one the active mode holds when that

@@ -194,6 +194,58 @@ describe("useZenController", () => {
     expect(pinned).toBe(false);
   });
 
+  it("treats a pin whose reply was lost as pinned when the space holds the card", async () => {
+    let written: ZenSpace | null = null;
+    const lost = createClient({
+      pinProjectTerminal: async () => {
+        throw new Error("The connection dropped.");
+      },
+    });
+    const bootstrap = lost.bootstrap;
+    lost.bootstrap = vi.fn(async () => {
+      const response = await bootstrap();
+      return written === null ? response : { ...response, space: written };
+    });
+    const { result } = renderHook(() =>
+      useZenController({ client: lost, windowId, storage: window.sessionStorage }),
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    const current = result.current.space;
+    if (current === null) throw new Error("Zen did not open a space");
+    const terminalId = "00000000-0000-4000-8000-000000000942" as never;
+    written = {
+      ...current,
+      version: (current.version + 1) as AggregateVersion,
+      elements: [
+        {
+          elementId: "00000000-0000-4000-8000-000000000943" as never,
+          kind: "project-terminal",
+          hostId: "local" as never,
+          projectId: "00000000-0000-4000-8000-000000000941" as never,
+          terminalId,
+          geometry: { x: 0, y: 0, width: 520, height: 320 },
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+        },
+      ],
+    };
+
+    let pinned: boolean | undefined;
+    await act(async () => {
+      pinned = await result.current.pinProjectTerminal({
+        projectId: "00000000-0000-4000-8000-000000000941" as never,
+        terminalId,
+      });
+    });
+
+    // The server wrote the card; stopping the shell would strand it.
+    expect(pinned).toBe(true);
+    expect(result.current.space?.elements).toHaveLength(1);
+  });
+
   it("keeps Zen open when the server committed presentation before the response failed", async () => {
     const initial = makeSpace();
     const committed = makeSpace({ version: 2 as AggregateVersion, active: true });
