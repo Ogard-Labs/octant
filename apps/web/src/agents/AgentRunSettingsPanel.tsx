@@ -44,7 +44,11 @@ const POSTURES: ReadonlyArray<{
  * `AgentRunSettingsClient`; there is no local override or cache that could
  * drift from the server's own event-sourced state.
  */
-export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettingsClient }) {
+export function AgentRunSettingsPanel(props: {
+  readonly client: AgentRunSettingsClient;
+  /** A search result or link named this setting: land on its control. */
+  readonly focused?: boolean;
+}) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [settings, setSettings] = useState<AgentRunPolicySettings>();
   const [message, setMessage] = useState<string>();
@@ -121,6 +125,7 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
           <SettingRow
             description={current?.description}
             label="Let the model start helper agents"
+            focused={props.focused === true}
             scope="app"
             settingId="subagent-creation-posture"
           >

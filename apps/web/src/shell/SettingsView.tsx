@@ -685,7 +685,10 @@ function ActiveSectionContent({
             </>
           )}
           {props.agentRunSettingsClient === undefined ? null : (
-            <AgentRunSettingsPanel client={props.agentRunSettingsClient} />
+            <AgentRunSettingsPanel
+              client={props.agentRunSettingsClient}
+              focused={focusedSetting === settingId("subagent-creation-posture")}
+            />
           )}
         </div>
       );

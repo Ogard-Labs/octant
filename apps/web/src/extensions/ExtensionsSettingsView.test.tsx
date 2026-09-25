@@ -524,6 +524,20 @@ describe("ExtensionsSettingsView", () => {
     );
   });
 
+  it("says why a skill switched on is not running when the host prohibits it", async () => {
+    const c = client({
+      snapshot: standaloneSkillSnapshot({
+        desiredEnabled: true,
+        effectiveState: { kind: "blocked", reason: "host-prohibited" },
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    const toggle = await screen.findByRole("switch", { name: "Enable Review helper" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/Host prohibited/)).toBeVisible();
+  });
+
   it("shows an honest blocked state and reason when a component is not effective", async () => {
     const snapshot = installedSnapshot();
     const c = client({ snapshot });

@@ -66,6 +66,12 @@ describe("AgentRunSettingsPanel", () => {
     expect(screen.getByText(/changed elsewhere/i)).toBeInTheDocument();
   });
 
+  it("lands a link to the setting on its control", async () => {
+    const client = { current: vi.fn(async () => baseSettings()), update: vi.fn() };
+    render(<AgentRunSettingsPanel client={client} focused />);
+    await waitFor(() => expect(posture()).toHaveFocus());
+  });
+
   it("shows an alert when the initial load fails", async () => {
     const client = {
       current: vi.fn(async () => {

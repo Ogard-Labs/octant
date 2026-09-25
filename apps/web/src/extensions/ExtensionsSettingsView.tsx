@@ -1455,7 +1455,11 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
   // before it, so a row offers only the next step it is waiting on, and the
   // rest (revoke, the qualified id, the load failure) waits in Details. Six
   // controls on every row read as clutter across seventy-five skills.
-  const unavailable = !skill.skill.available || runtimeBlocked;
+  // A skill the person switched on but that is blocked for another reason
+  // (the host prohibits it, it is incompatible) says so on the row: the
+  // switch still reads on, and only Details used to tell them it is not.
+  const blockedWhileWanted = skill.desiredEnabled && blocked && !needsReview;
+  const unavailable = !skill.skill.available || runtimeBlocked || blockedWhileWanted;
   const problem =
     skill.effectiveState.kind === "blocked" && !needsReview
       ? BLOCK_REASON_LABELS[skill.effectiveState.reason]

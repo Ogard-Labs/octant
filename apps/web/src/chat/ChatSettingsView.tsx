@@ -36,40 +36,44 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
     const before = draftFrom(previousSettings);
     const next = draftFrom(props.settings);
     setPreviousSettings(props.settings);
-    setDraft((current) => ({
-      defaultProviderInstanceId:
-        current.defaultProviderInstanceId === before.defaultProviderInstanceId
-          ? next.defaultProviderInstanceId
-          : current.defaultProviderInstanceId,
-      defaultModelId:
-        current.defaultModelId === before.defaultModelId
-          ? next.defaultModelId
-          : current.defaultModelId,
-      defaultResearchEnabled:
-        current.defaultResearchEnabled === before.defaultResearchEnabled
-          ? next.defaultResearchEnabled
-          : current.defaultResearchEnabled,
-      defaultResearchRouting:
-        current.defaultResearchRouting === before.defaultResearchRouting
-          ? next.defaultResearchRouting
-          : current.defaultResearchRouting,
-      searxngBaseUrl:
-        current.searxngBaseUrl === before.searxngBaseUrl
-          ? next.searxngBaseUrl
-          : current.searxngBaseUrl,
-      defaultPersonalityInstructions:
-        current.defaultPersonalityInstructions === before.defaultPersonalityInstructions
-          ? next.defaultPersonalityInstructions
-          : current.defaultPersonalityInstructions,
-      fallbackProviderInstanceId:
-        current.fallbackProviderInstanceId === before.fallbackProviderInstanceId
+    setDraft((current) => {
+      // The fallback is one choice, a provider and one of its models. Taken
+      // field by field, an unsaved provider could meet a newly saved model
+      // and make a pair nobody picked, which the provider may not even serve.
+      const fallbackUntouched =
+        current.fallbackProviderInstanceId === before.fallbackProviderInstanceId &&
+        current.fallbackModelId === before.fallbackModelId;
+      return {
+        defaultProviderInstanceId:
+          current.defaultProviderInstanceId === before.defaultProviderInstanceId
+            ? next.defaultProviderInstanceId
+            : current.defaultProviderInstanceId,
+        defaultModelId:
+          current.defaultModelId === before.defaultModelId
+            ? next.defaultModelId
+            : current.defaultModelId,
+        defaultResearchEnabled:
+          current.defaultResearchEnabled === before.defaultResearchEnabled
+            ? next.defaultResearchEnabled
+            : current.defaultResearchEnabled,
+        defaultResearchRouting:
+          current.defaultResearchRouting === before.defaultResearchRouting
+            ? next.defaultResearchRouting
+            : current.defaultResearchRouting,
+        searxngBaseUrl:
+          current.searxngBaseUrl === before.searxngBaseUrl
+            ? next.searxngBaseUrl
+            : current.searxngBaseUrl,
+        defaultPersonalityInstructions:
+          current.defaultPersonalityInstructions === before.defaultPersonalityInstructions
+            ? next.defaultPersonalityInstructions
+            : current.defaultPersonalityInstructions,
+        fallbackProviderInstanceId: fallbackUntouched
           ? next.fallbackProviderInstanceId
           : current.fallbackProviderInstanceId,
-      fallbackModelId:
-        current.fallbackModelId === before.fallbackModelId
-          ? next.fallbackModelId
-          : current.fallbackModelId,
-    }));
+        fallbackModelId: fallbackUntouched ? next.fallbackModelId : current.fallbackModelId,
+      };
+    });
   }
   const [endpointError, setEndpointError] = useState<string>();
   const [formError, setFormError] = useState<string>();
