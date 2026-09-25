@@ -8,6 +8,7 @@ import { Effect, Either, Exit, Fiber, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  codexAppServerArgs,
   codexProcessEnvironment,
   makeCodexProcessLive,
   probeCodexBinary,
@@ -314,6 +315,43 @@ describe("probeCodexBinary", () => {
   });
 });
 
+describe("codexAppServerArgs", () => {
+  it("turns off Codex's own subagents from the command line on every supported version", () => {
+    const featureOverrides = [
+      "-c",
+      "features.multi_agent=false",
+      "-c",
+      "features.multi_agent_v2=false",
+    ];
+    // Before 0.145.0 the feature flags alone decide; `[agents]` holds role
+    // tables there, so `agents.enabled` would parse as a role and fail startup.
+    expect(codexAppServerArgs("0.144.6")).toEqual([
+      "app-server",
+      "--listen",
+      "stdio://",
+      ...featureOverrides,
+    ]);
+    expect(codexAppServerArgs("0.145.0-alpha.1")).toEqual([
+      "app-server",
+      "--listen",
+      "stdio://",
+      ...featureOverrides,
+    ]);
+    // From 0.145.0 a model's catalog entry turns subagents on by itself, and
+    // only `agents.enabled = false` outranks it.
+    for (const version of ["0.145.0", "0.155.1", "1.0.0+build.7"]) {
+      expect(codexAppServerArgs(version)).toEqual([
+        "app-server",
+        "--listen",
+        "stdio://",
+        ...featureOverrides,
+        "-c",
+        "agents.enabled=false",
+      ]);
+    }
+  });
+});
+
 describe("CodexProcessPort", () => {
   it("spawns stdio app-server and completes the stable handshake exactly once", async () => {
     const target = fixture();
@@ -341,7 +379,15 @@ describe("CodexProcessPort", () => {
     expect(connection.pid).toBeGreaterThan(0);
     const observed = records(target.root);
     expect(observed.find((record) => record.kind === "spawn")).toMatchObject({
-      args: ["app-server", "--listen", "stdio://"],
+      args: [
+        "app-server",
+        "--listen",
+        "stdio://",
+        "-c",
+        "features.multi_agent=false",
+        "-c",
+        "features.multi_agent_v2=false",
+      ],
       environment: {
         openaiApiKey: true,
         octantKey: false,
