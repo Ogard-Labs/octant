@@ -758,7 +758,10 @@ function ActiveSectionContent({
     }
     case "data":
       return props.hostControlClient !== undefined ? (
-        <HostDataSettingsSection client={props.hostControlClient} />
+        <HostDataSettingsSection
+          client={props.hostControlClient}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
+        />
       ) : (
         <section aria-label="Data & privacy" id="settings-data">
           <p>Backup, recovery, and retention controls are available on the host machine only.</p>

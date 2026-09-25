@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type {
@@ -175,6 +175,9 @@ export function HostSettingsSection({
     return (
       <section aria-label="Host" className="host-settings" id="settings-host">
         <SettingsState kind="loading">Loading host status…</SettingsState>
+        {/* A status read that never settles is itself a sign of a host in
+            trouble, when reset and diagnostics are most wanted. */}
+        {maintenance}
       </section>
     );
   }
@@ -386,8 +389,27 @@ export function HostSettingsSection({
  * running process, because the two answer different questions and together
  * made one seventeen-section page.
  */
-export function HostDataSettingsSection({ client }: { readonly client: HostControlClient }) {
+export function HostDataSettingsSection({
+  client,
+  focusedSetting,
+}: {
+  readonly client: HostControlClient;
+  readonly focusedSetting?: string | undefined;
+}) {
   const backupLabelId = useId();
+  const retentionRef = useRef<HTMLDivElement>(null);
+
+  // Search and moved links land on retention; its panel has no SettingRow to
+  // focus itself, so the section reveals it and moves focus to its first
+  // control, as a row does.
+  useEffect(() => {
+    if (focusedSetting !== "thread-retention" || retentionRef.current === null) return;
+    const control = retentionRef.current.querySelector<HTMLElement>(
+      ':is(button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])):not(:disabled)',
+    );
+    control?.focus();
+    retentionRef.current.scrollIntoView?.({ block: "start" });
+  }, [focusedSetting]);
   const [dataMapState, setDataMapState] = useState<DataMapState>({ kind: "loading" });
   const [backupLabel, setBackupLabel] = useState("");
   const [backupState, setBackupState] = useState<BackupState>({ kind: "idle" });
@@ -448,7 +470,9 @@ export function HostDataSettingsSection({ client }: { readonly client: HostContr
     <section aria-label="Data & privacy" className="host-settings" id="settings-data">
       <DataMapPanel state={dataMapState} />
 
-      <ThreadRetentionPanel client={client} />
+      <div ref={retentionRef}>
+        <ThreadRetentionPanel client={client} />
+      </div>
 
       <section aria-label="Backup" className="settings-card-section settings-card-section--open">
         <h2>Backup</h2>

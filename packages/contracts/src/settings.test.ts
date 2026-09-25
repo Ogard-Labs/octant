@@ -64,6 +64,16 @@ describe("SettingsDeepLink", () => {
     ).toEqual({ section: "appearance", setting: "sidebar-width" });
   });
 
+  it("reads a link to a retired section as the section that holds its settings now", () => {
+    const decode = Schema.decodeUnknownSync(SettingsDeepLink);
+    expect(decode({ section: "advanced", setting: "reset-layout" })).toEqual({
+      section: "host",
+      setting: "reset-layout",
+    });
+    expect(decode({ section: "agents" })).toEqual({ section: "harness" });
+    expect(Schema.encodeSync(SettingsDeepLink)({ section: "host" })).toEqual({ section: "host" });
+  });
+
   it("rejects a deep link without a section", () => {
     expect(() =>
       Schema.decodeUnknownSync(SettingsDeepLink)({ setting: "sidebar-width" }),

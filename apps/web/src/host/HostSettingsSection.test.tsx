@@ -147,6 +147,23 @@ describe("HostSettingsSection", () => {
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeVisible();
   });
 
+  it("keeps layout resets and diagnostics reachable while host status is still loading", () => {
+    render(
+      <HostSettingsSection
+        client={makeClient({ status: () => new Promise<HostControlStatus>(() => undefined) })}
+        maintenance={<button type="button">Reset active mode layout</button>}
+      />,
+    );
+    expect(screen.getByText("Loading host status…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeVisible();
+  });
+
+  it("lands a link to thread retention on the retention controls", async () => {
+    render(<HostDataSettingsSection client={makeClient()} focusedSetting="thread-retention" />);
+    const retention = await screen.findByRole("region", { name: "Thread retention" });
+    await waitFor(() => expect(retention).toContainElement(document.activeElement as HTMLElement));
+  });
+
   it("shows the data inventory openly on Data & privacy, beside retention and backup", async () => {
     render(<HostDataSettingsSection client={makeClient()} />);
     expect(await screen.findByRole("region", { name: "Thread retention" })).toHaveClass(
