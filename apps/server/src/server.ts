@@ -610,6 +610,7 @@ import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
+import { searxngHarnessWebSearch } from "./harness/nativeHarnessWebSearch";
 import {
   ServerBrowserAuthorityResolver,
   deriveToolHostId,
@@ -4967,21 +4968,10 @@ export function startOctantServer(
         process: harnessProcessPort,
         scriptDirectory: harnessWorkDirectory,
       }),
-      webSearch:
-        persistence.readChatSettings()?.settings.searxngBaseUrl === undefined
-          ? undefined
-          : async (input) => {
-              const settings = persistence.readChatSettings()?.settings;
-              if (settings?.searxngBaseUrl === undefined) return [];
-              const found = await new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(
-                input,
-              );
-              return found.results.map((result) => ({
-                title: result.title,
-                url: result.url,
-                snippet: result.snippet,
-              }));
-            },
+      resolveWebSearch: () =>
+        searxngHarnessWebSearch({
+          readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
+        }),
       webFetch: async (input) => {
         try {
           return await fetchPublicUrl(input);
