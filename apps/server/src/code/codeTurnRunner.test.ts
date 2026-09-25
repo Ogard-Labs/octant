@@ -930,6 +930,46 @@ describe("CodeTurnRunner", () => {
     expect(provider.acquire).not.toHaveBeenCalled();
   });
 
+  it("journals the interrupted outcome when the provider confirms the cancellation while the outcome is still being written", async () => {
+    // Observed with Vibe: the provider answers `session/cancel` with its own
+    // interrupted event within milliseconds, while the outcome write is still
+    // awaiting the checkout capture. Losing that race must not lose the frame.
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const controller = new AbortController();
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      send: vi.fn(() => Queue.offer(queue, event({ kind: "text-delta", text: "partial" }))),
+      interrupt: vi.fn(() =>
+        Queue.offer(queue, event({ kind: "interrupted", message: "Vibe turn was interrupted." })),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+    const fiber = Effect.runFork(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            signal: controller.signal,
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) =>
+              Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 30))).pipe(
+                Effect.andThen(Effect.sync(() => outcomes.push(next))),
+              ),
+          }),
+        ),
+      ),
+    );
+    await vi.waitFor(() => expect(observed.some((next) => next.category === "message")).toBe(true));
+
+    controller.abort();
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+
+    expect(exit._tag).toBe("Failure");
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+    expect(outcomes).toEqual(["interrupted"]);
+  });
+
   it("cleans up without starting or sending when cancellation arrives during acquisition", async () => {
     const controller = new AbortController();
     const acquired = Effect.runSync(Deferred.make<void>());

@@ -318,6 +318,21 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("keeps an interrupted turn's reason out of the callout once the transcript carries it", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "interrupted",
+          turnError: "The provider turn was interrupted.",
+          turnErrorInTranscript: true,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps a refused send's reason visible when no failed turn reached the transcript", () => {
     // A send the host refuses before any turn exists adds no transcript row,
     // so this callout is the only place its reason is ever read.
