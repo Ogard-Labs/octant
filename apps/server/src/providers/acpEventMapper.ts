@@ -41,6 +41,8 @@ export type AcpMappedPermission =
       readonly kind: "approval";
       readonly requestId: string;
       readonly providerRequestId: string | number;
+      /** The ACP tool kind the agent declared, or `tool` when it named none. */
+      readonly toolKind: string;
       readonly allowOptionId: string;
       readonly rejectOptionId: string;
       readonly event: ProviderRuntimeEvent;
@@ -333,6 +335,7 @@ export function mapAcpPermissionRequest(
     kind: "approval",
     requestId,
     providerRequestId: request.id,
+    toolKind,
     allowOptionId: allow.optionId,
     rejectOptionId: reject.optionId,
     event: mappedEvent(context, {
