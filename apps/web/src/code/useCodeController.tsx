@@ -2034,8 +2034,9 @@ export function useCodeController(options: CodeControllerOptions) {
             status === "waiting" ? "waiting" : status === "interrupted" ? "interrupted" : "failed",
           );
           if (status !== "waiting") setProviderRequests([]);
-          // The same sentence lands on this turn's assistant row below.
-          setTurnError(message, { inTranscript: true });
+          // The same sentence lands on this turn's assistant row below when
+          // the provider did not already leave a partial reply.
+          setTurnError(message, { inTranscript: assistantText.trim().length === 0 });
           restoreFailedPrompt();
           setConversation((current) =>
             current.map((entry) =>
