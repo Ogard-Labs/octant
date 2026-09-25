@@ -929,9 +929,14 @@ export function useZenController(options: UseZenControllerOptions) {
         return true;
       } catch (error) {
         // A failed request is not proof the card is missing: the server may
-        // have written it and lost the reply. The space is read again, and
-        // only a space without the card answers "not pinned".
-        const refreshed = await client.bootstrap().catch(() => null);
+        // have written it and lost the reply. The space is read again, twice
+        // if the first read fails too. If neither read answers, the card is
+        // treated as missing: the caller then stops the shell, and a card
+        // left naming a stopped shell says so, while a running shell with no
+        // card could never be found again.
+        const refreshed =
+          (await client.bootstrap().catch(() => null)) ??
+          (await client.bootstrap().catch(() => null));
         const pinned = refreshed?.space?.elements.some(
           (element) =>
             element.kind === "project-terminal" &&
