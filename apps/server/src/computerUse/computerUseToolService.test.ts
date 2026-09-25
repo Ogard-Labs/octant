@@ -398,6 +398,42 @@ describe("Computer use through a provider tool", () => {
     }
   });
 
+  it("returns the explicit reason when the person denies a computer-use action", async () => {
+    const f = fixture();
+    try {
+      const result = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "denied",
+      });
+
+      expect(await result).toMatchObject({
+        isError: true,
+        result: {
+          kind: "refused",
+          reason: "not-approved",
+          message: "User denied the proposed action.",
+        },
+      });
+    } finally {
+      await f.service.close();
+    }
+  });
+
   it("names the desktop failure when an approved action crashes instead of reading as a denial", async () => {
     const f = fixture();
     f.execute.mockImplementation(async () => {

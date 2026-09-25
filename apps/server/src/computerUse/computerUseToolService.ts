@@ -316,14 +316,22 @@ export function createComputerUseToolService(options: {
       const result = pending.get(actionId)?.result;
       if (view.state !== "completed" || result === undefined) {
         await options.desktop.release(owner);
-        // The failure sentence is the newest session-failed event; cleanup
-        // appends after it, so the last event alone would say "cleaned up"
-        // and hide the reason an approved action never completed.
-        const failure = view.events.findLast((event) => event.kind === "session-failed");
+        const failure = view.events.findLast(
+          (event) =>
+            event.kind === "session-failed" ||
+            event.kind === "approval-denied" ||
+            event.kind === "session-interrupted",
+        );
+        const refusalCode =
+          failure?.kind === "session-interrupted"
+            ? "cancelled"
+            : failure?.kind === "session-failed" || failure?.kind === "approval-denied"
+              ? "not-approved"
+              : undefined;
         return (
           result ??
           refused(
-            "not-approved",
+            refusalCode ?? "not-approved",
             failure?.detail ?? "Computer use was denied, expired, or interrupted.",
           )
         );
