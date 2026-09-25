@@ -1509,6 +1509,65 @@ html[data-octant-native-host="true"]
     background: transparent;
   }
 
+  /* Over the application ground the back is laid only in the gutters. Painted
+     across the whole workspace layer, its tint sat under the see-through
+     primary card too, so the ground inside the card read through a 60% dark
+     film and the dither's cells washed out. The ring below is the layer's
+     padding box minus its content box: exactly the gutters, which follow the
+     padding when the sidebar collapses. The masks read alpha only, so
+     currentColor stands in for "keep". */
+  .shell--app-backdrop.shell-frame > .workspace-layer,
+  .shell--app-backdrop.shell-frame[data-octant-sidebar-vibrancy] > .workspace-layer {
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+  }
+
+  .shell--app-backdrop.shell-frame > .workspace-layer::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    box-sizing: border-box;
+    padding: inherit;
+    background: var(--octant-sidebar-opaque);
+    pointer-events: none;
+    -webkit-mask:
+      linear-gradient(currentColor 0 0) content-box,
+      linear-gradient(currentColor 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(currentColor 0 0) content-box,
+      linear-gradient(currentColor 0 0);
+    mask-composite: exclude;
+  }
+
+  /* When the ground runs under an opaque sidebar too, the gutters take the
+     same wash the sidebar does (surface.css), so the back stays one piece. */
+  .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame
+    > .workspace-layer::before {
+    background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);
+  }
+
+  .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before {
+    background: var(--octant-sidebar-translucent);
+    backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+  }
+
+  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+    > .workspace-layer::before {
+    --octant-glass-blur: 16px;
+    --octant-glass-saturate: 120%;
+    background: var(--octant-sidebar-translucent-subtle);
+  }
+
+  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+    > .workspace-layer::before {
+    --octant-glass-blur: 34px;
+    --octant-glass-saturate: 165%;
+    background: var(--octant-sidebar-translucent-strong);
+  }
+
   /* Reader pages painted the darker page ground so they stood apart from the
      flat workspace. On a card that reads as a second card colour; the card
      is the separation now. */
@@ -1725,6 +1784,13 @@ html[data-octant-native-host="true"]
     > .workspace-layer
     > :is(.primary-workspace-layer, .right-utility-dock, .bottom-utility-panel) {
     background: var(--oct-bg);
+    backdrop-filter: none;
+  }
+
+  .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before,
+  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
+    > .workspace-layer::before {
+    background: var(--octant-sidebar-opaque);
     backdrop-filter: none;
   }
 }
