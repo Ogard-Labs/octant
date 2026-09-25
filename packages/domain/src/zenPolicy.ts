@@ -166,10 +166,14 @@ function sameSourceContext(left: ZenSourceContext, right: ZenSourceContext): boo
 }
 
 export function validateLocalHostSource(ctx: ZenSourceContext, localHostId: HostId): void {
-  if (ctx.hostId !== localHostId) {
+  validateLocalHost(ctx.hostId, localHostId);
+}
+
+function validateLocalHost(hostId: HostId, localHostId: HostId): void {
+  if (hostId !== localHostId) {
     reject(
       "cross-host",
-      `Source context references host ${ctx.hostId}; first slice is local-host only`,
+      `Source context references host ${hostId}; first slice is local-host only`,
     );
   }
 }
@@ -342,6 +346,9 @@ export function addElement(
     case "terminal":
       validateLocalHostSource(element.sourceContext, localHostId);
       break;
+    case "project-terminal":
+      validateLocalHost(element.hostId, localHostId);
+      break;
     case "notes":
       validateNotesContent(element.content);
       break;
@@ -421,6 +428,15 @@ export function updateElement(
     reject("unsupported-kind", "Terminal authority cannot change during an update");
   }
   if (
+    existing.kind === "project-terminal" &&
+    element.kind === "project-terminal" &&
+    (String(existing.hostId) !== String(element.hostId) ||
+      String(existing.projectId) !== String(element.projectId) ||
+      String(existing.terminalId) !== String(element.terminalId))
+  ) {
+    reject("unsupported-kind", "Terminal authority cannot change during an update");
+  }
+  if (
     existing.kind === "checklist" &&
     element.kind === "checklist" &&
     (existing.widgetVersion !== element.widgetVersion ||
@@ -452,6 +468,9 @@ export function updateElement(
     case "thread":
     case "terminal":
       validateLocalHostSource(element.sourceContext, localHostId);
+      break;
+    case "project-terminal":
+      validateLocalHost(element.hostId, localHostId);
       break;
     case "notes":
       validateNotesContent(element.content);
@@ -1196,7 +1215,10 @@ export function resolveZenLiveCardActivity(
 ): ReadonlyArray<ZenLiveCardActivity> {
   const budget = Math.max(0, input.budget ?? MAX_LIVE_ZEN_CARDS);
   const cards = input.elements.filter(
-    (element) => element.kind === "thread" || element.kind === "terminal",
+    (element) =>
+      element.kind === "thread" ||
+      element.kind === "terminal" ||
+      element.kind === "project-terminal",
   );
   const frozen = new Map<ZenElementId, ZenLiveCardFrozenReason>();
   const eligible: Array<{ readonly element: ZenElementPayload; readonly order: number }> = [];

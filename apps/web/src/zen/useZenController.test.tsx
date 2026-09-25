@@ -10,6 +10,7 @@ import type {
   ZenResearchDockRequest,
   ZenResearchDockResult,
   ZenTerminalPinRequest,
+  ZenProjectTerminalPinRequest,
   ZenTerminalPinResult,
   ZenResult,
   ZenSpace,
@@ -71,6 +72,12 @@ function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
         overrides.pinTerminal !== undefined
           ? await overrides.pinTerminal(request)
           : Promise.reject(new Error("This window pins no terminals.")),
+    ),
+    pinProjectTerminal: vi.fn(
+      async (request: ZenProjectTerminalPinRequest): Promise<ZenTerminalPinResult> =>
+        overrides.pinProjectTerminal !== undefined
+          ? await overrides.pinProjectTerminal(request)
+          : Promise.reject(new Error("This window pins no Project terminals.")),
     ),
     pinCanvas: vi.fn(
       async (request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult> =>

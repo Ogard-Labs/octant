@@ -216,6 +216,35 @@ export class TerminalService {
     return this.#snapshot(this.#require(terminalId));
   }
 
+  /**
+   * What the terminal printed after an absolute offset, for a reader that
+   * polls instead of observing. It leaves the observer's position alone, so a
+   * terminal can have one of each without either skipping output.
+   */
+  readSince(
+    terminalId: string,
+    afterCharacters: number,
+  ): {
+    readonly text: string;
+    readonly replace: boolean;
+    readonly characters: number;
+    readonly snapshot: TerminalSnapshot;
+  } {
+    const record = this.#require(terminalId);
+    const end = publishableEnd(record);
+    const replace = afterCharacters < record.transcript.retainedFrom() || afterCharacters > end;
+    const behind = end - afterCharacters > MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS;
+    return {
+      text:
+        replace || behind
+          ? liveWindow(record, end)
+          : record.transcript.textBetween(afterCharacters, end),
+      replace: replace || behind,
+      characters: end,
+      snapshot: this.#snapshot(record),
+    };
+  }
+
   observe(
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,

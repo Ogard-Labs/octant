@@ -7,6 +7,7 @@ import {
   decodeZenResearchDockRequest,
   decodeZenResearchDockResult,
   decodeZenTerminalPinRequest,
+  decodeZenProjectTerminalPinRequest,
   decodeZenTerminalPinResult,
   decodeZenThreadPinRequest,
   decodeZenThreadPinResult,
@@ -25,6 +26,7 @@ import {
   type ZenResearchDockRequest,
   type ZenResearchDockResult,
   type ZenTerminalPinRequest,
+  type ZenProjectTerminalPinRequest,
   type ZenTerminalPinResult,
   type ZenThreadPinRequest,
   type ZenThreadPinResult,
@@ -61,6 +63,7 @@ export interface ZenClient {
    * the terminal; the card itself is written by the server.
    */
   pinTerminal(request: ZenTerminalPinRequest): Promise<ZenTerminalPinResult>;
+  pinProjectTerminal(request: ZenProjectTerminalPinRequest): Promise<ZenTerminalPinResult>;
   pinCanvas(request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult>;
   dockResearch(request: ZenResearchDockRequest): Promise<ZenResearchDockResult>;
   continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget>;
@@ -173,6 +176,17 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
     async pinTerminal(request: ZenTerminalPinRequest): Promise<ZenTerminalPinResult> {
       const input = decodeZenTerminalPinRequest(request);
       const url = new URL("/api/zen/terminals/pin", options.baseUrl);
+      const body = await zenRequest(fetch, url, options.windowCapability, {
+        method: "POST",
+        body: JSON.stringify(input),
+        contentType: true,
+      });
+      return decodeZenTerminalPinResult(body);
+    },
+
+    async pinProjectTerminal(request: ZenProjectTerminalPinRequest): Promise<ZenTerminalPinResult> {
+      const input = decodeZenProjectTerminalPinRequest(request);
+      const url = new URL("/api/zen/project-terminals/pin", options.baseUrl);
       const body = await zenRequest(fetch, url, options.windowCapability, {
         method: "POST",
         body: JSON.stringify(input),

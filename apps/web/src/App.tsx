@@ -317,6 +317,7 @@ import {
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,
+  ZenProjectTerminalCard,
   ZenResearchDock,
   ZenSurface,
   ZenTerminalCard,
@@ -1198,6 +1199,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    projectTerminalClient,
     hostControlClient,
     imageGenerationClient,
     speechClient,
@@ -4916,6 +4918,40 @@ function LaunchedShell(
     await zen.pinTerminal({ ...target, terminalId });
   }
 
+  /**
+   * Opens the person's own shell at the root of the Code Project this window
+   * holds, with no thread, and pins it. The host decides the root and whether
+   * this window may open it; a refusal leaves the space as it was.
+   */
+  async function addZenProjectTerminal(projectId: ProjectId): Promise<void> {
+    const terminalId = decodeCodeTerminalId(crypto.randomUUID());
+    try {
+      const started = await projectTerminalClient.execute({
+        kind: "start",
+        projectId,
+        terminalId,
+        columns: 100,
+        rows: 30,
+      });
+      if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
+      await zen.pinProjectTerminal({ projectId, terminalId });
+    } catch {
+      // The Add panel stays usable; the card that does not arrive is the answer.
+    }
+  }
+
+  const zenProjectTerminalTarget = (() => {
+    const projectId = controller.workspace?.contextByMode.code.projectId ?? undefined;
+    if (projectId === undefined) return undefined;
+    const project = projectController.allProjects.find(
+      (candidate) =>
+        String(candidate.id) === String(projectId) &&
+        candidate.type === "code" &&
+        candidate.lifecycle === "active",
+    );
+    return project === undefined ? undefined : { projectId: project.id, name: project.name };
+  })();
+
   function canAddZenTerminal(
     sourceContext: import("@octant/contracts/zen").ZenSourceContext,
   ): boolean {
@@ -5230,6 +5266,20 @@ function LaunchedShell(
               threadQuery={zen.threadQuery}
               onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
               onAddBrowser={addZenBrowser}
+              {...(zenProjectTerminalTarget === undefined
+                ? {}
+                : { projectTerminalTarget: zenProjectTerminalTarget })}
+              onAddProjectTerminal={(projectId) => void addZenProjectTerminal(projectId)}
+              renderProjectTerminal={({ element, activity }) => (
+                <Suspense fallback={null}>
+                  <ZenProjectTerminalCard
+                    client={projectTerminalClient}
+                    live={activity.activity === "live"}
+                    projectId={element.projectId}
+                    terminalId={element.terminalId}
+                  />
+                </Suspense>
+              )}
               onAddTerminal={(sourceContext) => {
                 void addZenTerminal(sourceContext);
               }}

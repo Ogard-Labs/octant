@@ -22,6 +22,7 @@ import { cycleZenSpace } from "@octant/domain";
 import type { WindowId } from "@octant/contracts/shell";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -899,6 +900,42 @@ export function useZenController(options: UseZenControllerOptions) {
   );
 
   /**
+   * Pin a terminal this window opened for a Code Project. The card names the
+   * Project and the shell; the server writes it once the owner confirms this
+   * window holds that shell.
+   */
+  const pinProjectTerminal = useCallback(
+    async (request: {
+      readonly projectId: ProjectId;
+      readonly terminalId: CodeTerminalId;
+      readonly title?: string;
+    }) => {
+      if (client === undefined || space === null) return;
+      setPanelBusy(true);
+      try {
+        const result = await client.pinProjectTerminal({
+          projectId: request.projectId,
+          terminalId: request.terminalId,
+          expectedVersion: space.version,
+          ...(request.title === undefined ? {} : { title: request.title }),
+        });
+        if (mounted.current) {
+          setSpace(result.space);
+          presentationSpace.current = result.space;
+          setMessage(undefined);
+        }
+      } catch (error) {
+        if (mounted.current) {
+          setMessage(error instanceof Error ? error.message : "That terminal could not be pinned.");
+        }
+      } finally {
+        if (mounted.current) setPanelBusy(false);
+      }
+    },
+    [client, space],
+  );
+
+  /**
    * Pin a canvas this window may already open.
    *
    * The request names the document; the card is written by the server after
@@ -1469,6 +1506,7 @@ export function useZenController(options: UseZenControllerOptions) {
     active,
     space,
     pinTerminal,
+    pinProjectTerminal,
     dockResearch,
     pinCanvas,
     focusZone,

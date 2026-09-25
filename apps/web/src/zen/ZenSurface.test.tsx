@@ -673,6 +673,81 @@ describe("ZenSurface", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/cannot add a terminal/i);
   });
 
+  it("offers a terminal for this Project with no thread, and hands over only the Project", () => {
+    const projectId = "00000000-0000-4000-8000-000000000917" as never;
+    const onAddProjectTerminal = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onAddProjectTerminal={onAddProjectTerminal}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        projectTerminalTarget={{ projectId, name: "Octant" }}
+        space={makeSpace([])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add terminal for this Project, Octant" }));
+
+    expect(onAddProjectTerminal).toHaveBeenCalledWith(projectId);
+    // The panel closes once the terminal is on its way, as the thread terminal does.
+    expect(screen.queryByRole("dialog", { name: "Add to this space" })).not.toBeInTheDocument();
+  });
+
+  it("offers no Project terminal to a window that holds no Code Project", () => {
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onAddProjectTerminal={vi.fn()}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace([])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(screen.queryByRole("button", { name: /terminal for this Project/i })).toBeNull();
+  });
+
+  it("labels a pinned Project terminal as a terminal", () => {
+    const terminal = {
+      elementId,
+      kind: "project-terminal" as const,
+      hostId: "local-host",
+      projectId: "00000000-0000-4000-8000-000000000917",
+      terminalId: "00000000-0000-4000-8000-000000000916",
+      geometry: { x: 40, y: 40, width: 360, height: 220 },
+      zIndex: 1,
+      minimized: false,
+      locked: false,
+      title: "Octant",
+    } as never;
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderProjectTerminal={() => <div role="region" aria-label="Project terminal" />}
+        space={makeSpace([terminal])}
+      />,
+    );
+
+    expect(screen.getByRole("group", { name: "Terminal · Octant" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Project terminal" })).toBeInTheDocument();
+  });
+
   it("labels a pinned terminal separately from the thread that owns it", () => {
     const terminal = {
       elementId,
