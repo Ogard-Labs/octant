@@ -157,6 +157,27 @@ describe("Computer use through a provider tool", () => {
       await f.service.close();
     }
   });
+  it("offers a one-time approval, not a five-minute grant, once the thread has read external content", async () => {
+    const f = fixture();
+    try {
+      f.taint();
+      void f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const pending = f.service.runtime.list(owner.windowId)[0]?.pendingApproval;
+      expect(pending?.scope).toBeUndefined();
+      expect(pending?.summary).toContain("this one action");
+      expect(pending?.summary).not.toContain("5 minutes");
+      await f.tools.close?.();
+    } finally {
+      await f.service.close();
+    }
+  });
+
   it("keeps the approved app session available to the same task on its next turn", async () => {
     const f = fixture();
     try {
@@ -391,6 +412,42 @@ describe("Computer use through a provider tool", () => {
           kind: "refused",
           reason: "accessibility-timeout",
           message: "The application did not respond to the accessibility probe.",
+        },
+      });
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("returns the explicit reason when the person denies a computer-use action", async () => {
+    const f = fixture();
+    try {
+      const result = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "denied",
+      });
+
+      expect(await result).toMatchObject({
+        isError: true,
+        result: {
+          kind: "refused",
+          reason: "not-approved",
+          message: "User denied the proposed action.",
         },
       });
     } finally {
