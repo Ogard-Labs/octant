@@ -6,6 +6,7 @@ import {
   ActorId,
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
+  MAX_CODE_OPERATION_SUMMARY_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeCodeCheckoutId,
   decodeCodeRepositoryTestDefinition,
@@ -882,7 +883,7 @@ describe("CodeOperationRuntime", () => {
         providerEvent({
           kind: "user-input-request",
           requestId: "question-2",
-          prompt: "Choose another",
+          prompt: "x".repeat(10_000),
           options: ["A", "B"],
         }),
       ),
@@ -894,6 +895,15 @@ describe("CodeOperationRuntime", () => {
       expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
       expect(frames.filter((frame) => frame.event.kind === "input-requested")).toHaveLength(2);
     });
+    const question = frames.find(
+      (frame): frame is OperationFrame & { event: { kind: "input-requested"; prompt: string } } =>
+        frame.event.kind === "input-requested" && frame.event.requestId === "question-2",
+    );
+    expect(question).toBeDefined();
+    expect(new TextEncoder().encode(question!.event.prompt).byteLength).toBeLessThanOrEqual(
+      8 * 1024,
+    );
+    expect(question!.event.prompt.length).toBeGreaterThan(2_048);
     fixture.setThread(
       decodeCodeThread({
         ...thread(),
@@ -1183,6 +1193,60 @@ describe("CodeOperationRuntime", () => {
         (frame) => frame.event.kind === "tool-activity" && frame.event.state === "completed",
       );
       expect(closed?.event).toMatchObject({ toolName: "Read", summary: "Tool completed." });
+    });
+    fixture.close();
+  });
+
+  it("journals a tool request whose input exceeds the summary bound as a truncated summary instead of failing the turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(22);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "large-tool-request",
+          toolName: "octant_acp_terminal_create",
+          inputJson: JSON.stringify({ command: "x".repeat(6_000) }),
+        }),
+      ),
+    );
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 30);
+      const started = frames.find(
+        (frame) =>
+          frame.event.kind === "tool-activity" &&
+          (frame.event.state === "started" || frame.event.state === "running"),
+      );
+      expect(started?.event.kind).toBe("tool-activity");
+      if (started?.event.kind !== "tool-activity") return;
+      expect(started.event.summary?.endsWith(" [truncated]")).toBe(true);
+      expect(new TextEncoder().encode(started.event.summary ?? "").byteLength).toBeLessThanOrEqual(
+        MAX_CODE_OPERATION_SUMMARY_BYTES,
+      );
+      expect(
+        frames.some(
+          (frame) => frame.event.kind === "operation-state" && frame.event.state === "completed",
+        ),
+      ).toBe(true);
+      expect(
+        frames.some(
+          (frame) => frame.event.kind === "operation-state" && frame.event.state === "failed",
+        ),
+      ).toBe(false);
     });
     fixture.close();
   });

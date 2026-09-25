@@ -59,6 +59,7 @@ const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =
 
 export const MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES = 64 * 1024;
 export const MAX_CODE_OPERATION_TEXT_BYTES = 64 * 1024;
+export const MAX_CODE_OPERATION_SUMMARY_BYTES = 2_048;
 export const MAX_CODE_OPERATION_PATHS = 10_000;
 export const MAX_CODE_OPERATION_REPLAY_LIMIT = 1_000;
 export const MAX_CODE_OPERATION_EVIDENCE_BYTES = 64 * 1024 * 1024;
@@ -1154,7 +1155,7 @@ const ToolEvent = Schema.Struct({
   toolCallId: ProviderRequestId,
   toolName: boundedNonEmptyText(255),
   state: Schema.Literal("started", "running", "completed", "failed"),
-  summary: Schema.optional(boundedNonEmptyText(2_048)),
+  summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
 }).annotations(strict);
 const ApprovalEvent = Schema.Struct({
   kind: Schema.Literal("approval-requested"),
@@ -1169,7 +1170,7 @@ const ApprovalEvent = Schema.Struct({
     "pull-request-create",
     "provider-tool",
   ),
-  summary: boundedNonEmptyText(2_048),
+  summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
 }).annotations(strict);
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
@@ -1203,7 +1204,7 @@ const TaskProgressEvent = Schema.Struct({
   kind: Schema.Literal("task-progress"),
   taskId: boundedNonEmptyText(255),
   state: Schema.Literal("pending", "running", "waiting", "completed", "failed"),
-  summary: boundedNonEmptyText(2_048),
+  summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
 }).annotations(strict);
 const UsageEvent = Schema.Struct({
   kind: Schema.Literal("usage"),
@@ -1244,7 +1245,7 @@ const ChildActivityEvent = Schema.Struct({
   kind: Schema.Literal("child-activity"),
   childId: boundedNonEmptyText(255),
   state: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
-  summary: boundedNonEmptyText(2_048),
+  summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
 }).annotations(strict);
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),
@@ -1326,7 +1327,7 @@ export const CodeConversationStep = Schema.Union(
     toolCallId: ProviderRequestId,
     toolName: boundedNonEmptyText(255),
     state: Schema.Literal("started", "running", "completed", "failed"),
-    summary: Schema.optional(boundedNonEmptyText(2_048)),
+    summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),

@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, sep } from "node:path";
 import {
   CodeApprovalId,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
+  MAX_CODE_OPERATION_SUMMARY_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationApprovalConfirmation,
@@ -2275,7 +2276,9 @@ function normalizedOperationEvent(
       kind: "approval-requested",
       approvalId,
       action: "provider-tool",
-      summary: event.text ?? "Provider approval requested.",
+      summary:
+        boundProviderSummary(event.text ?? "Provider approval requested.") ??
+        "Provider approval requested.",
     };
   }
   if (event.category === "question" && event.requestId !== undefined) {
@@ -2283,7 +2286,12 @@ function normalizedOperationEvent(
     return {
       kind: "input-requested",
       requestId: event.requestId,
-      prompt: event.text ?? "Provider input requested.",
+      prompt:
+        boundProviderText(
+          event.text ?? "Provider input requested.",
+          MAX_PROVIDER_INPUT_PROMPT_BYTES,
+          "",
+        ) ?? "Provider input requested.",
       options: [],
     };
   }
@@ -2314,12 +2322,13 @@ function normalizedOperationEvent(
     event.toolCallId !== undefined &&
     event.toolName !== undefined
   ) {
+    const summary = event.text === undefined ? undefined : boundProviderSummary(event.text);
     return {
       kind: "tool-activity",
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       state: event.providerKind === "tool-success" ? "completed" : "failed",
-      ...(event.text === undefined ? {} : { summary: event.text }),
+      ...(summary === undefined ? {} : { summary }),
     };
   }
   if (event.category === "usage")
@@ -2353,16 +2362,20 @@ function normalizedOperationEvent(
       kind: "task-progress",
       taskId: event.requestId ?? "provider-task",
       state: event.status === "in-progress" ? "running" : ((event.status ?? "waiting") as never),
-      summary: event.text ?? "Provider task progress.",
+      summary:
+        boundProviderSummary(event.text ?? "Provider task progress.") ?? "Provider task progress.",
     };
   if (event.category === "child-activity")
     return {
       kind: "child-activity",
       childId: event.requestId ?? "provider-child",
       state: (event.status ?? "waiting") as never,
-      summary: event.text ?? "Provider child activity.",
+      summary:
+        boundProviderSummary(event.text ?? "Provider child activity.") ??
+        "Provider child activity.",
     };
-  if (event.category === "tool")
+  if (event.category === "tool") {
+    const summary = event.text === undefined ? undefined : boundProviderSummary(event.text);
     return {
       kind: "tool-activity",
       toolCallId: event.toolCallId ?? event.requestId ?? "provider-tool",
@@ -2377,8 +2390,9 @@ function normalizedOperationEvent(
             : event.status === "started"
               ? "started"
               : "running",
-      ...(event.text === undefined ? {} : { summary: event.text }),
+      ...(summary === undefined ? {} : { summary }),
     };
+  }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
   if (event.category === "interruption") return { kind: "operation-state", state: "interrupted" };
@@ -2397,6 +2411,8 @@ function normalizedOperationEvent(
 }
 
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
+const SUMMARY_SUFFIX = " [truncated]";
+const MAX_PROVIDER_INPUT_PROMPT_BYTES = 8 * 1024;
 
 /**
  * `CodeOperationFailure` accepts at most
@@ -2406,19 +2422,29 @@ const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
  * reason it was carrying would never be journaled at all. Bounding it here
  * keeps the reason; only a message with nothing left to say is dropped.
  */
-function boundProviderFailureMessage(text: string): string | undefined {
+function boundProviderText(text: string, maxBytes: number, suffix: string): string | undefined {
   const trimmed = text.trim();
   if (trimmed === "") return undefined;
   const bytes = new TextEncoder().encode(trimmed);
-  if (bytes.byteLength <= MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES) return trimmed;
-  const suffixBytes = new TextEncoder().encode(FAILURE_MESSAGE_SUFFIX).byteLength;
+  if (bytes.byteLength <= maxBytes) return trimmed;
+  const suffixBytes = new TextEncoder().encode(suffix).byteLength;
   const head = new TextDecoder()
-    .decode(bytes.slice(0, MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES - suffixBytes))
+    .decode(bytes.slice(0, maxBytes - suffixBytes))
     // Slicing bytes can cut a multi-byte character in half; the decoder leaves
     // a replacement character behind that is wider than the bytes it replaced.
     .replace(/\uFFFD+$/, "")
     .trimEnd();
-  return head === "" ? undefined : `${head}${FAILURE_MESSAGE_SUFFIX}`;
+  return head === "" ? undefined : `${head}${suffix}`;
+}
+
+const boundProviderFailureMessage = (text: string): string | undefined =>
+  boundProviderText(text, MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES, FAILURE_MESSAGE_SUFFIX);
+
+// Tool inputs, approval descriptions, and task text are provider-sized (an
+// ACP terminal command can carry a whole heredoc); the journal only keeps the
+// head of one that will not fit, never the turn's failure.
+function boundProviderSummary(text: string): string | undefined {
+  return boundProviderText(text, MAX_CODE_OPERATION_SUMMARY_BYTES, SUMMARY_SUFFIX);
 }
 
 /**
