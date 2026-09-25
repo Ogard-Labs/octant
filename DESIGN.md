@@ -126,6 +126,17 @@ floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
 never cards.
 
+The window frame is the one place cards carry the layout. The sidebar and the
+gutters around the workspace are a single back surface painted in the sidebar's
+material (glass, or the opaque sidebar colour when glass is off or unavailable),
+and the primary workspace, the right dock, the bottom panel, and the Settings
+page sit on it as cards: the card radius, one hairline, no shadow, 8px apart,
+all in the workspace colour. Reader pages inside a card use that colour too,
+so every card reads the same. A pane header and the dock head share the 38px
+title rail, and the card draws the one hairline under both. Below 681px the
+workspace sidebar is an overlay drawer and the frame stays flat; Settings keeps
+its own narrow layout, a drawer with a flat page, below 960px.
+
 ### Page shell
 
 Every list, board, reader, and preference page is a `Surface`:

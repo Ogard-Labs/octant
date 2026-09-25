@@ -146,6 +146,7 @@ export function ThemeAppearanceEditor(props: {
             surface="ui"
             value={draft.typography.ui}
             onChange={(patch) => setTypography("ui", patch)}
+            hideLegend
           />
           <SettingsDisclosure
             title="Code typography"
