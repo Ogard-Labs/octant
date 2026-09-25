@@ -195,6 +195,9 @@
      dot that says something is live. */
   --oct-motion-spin: 900ms;
   --oct-motion-pulse: 1.6s;
+  /* The application ground breathing: slow enough to read as the picture
+     resting, not as a notification pulse. */
+  --oct-motion-breathe: 9s;
   --oct-ease-standard: ease;
 
   --oct-container-max: 1200px;

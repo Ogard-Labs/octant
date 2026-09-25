@@ -206,20 +206,25 @@ discrete stops, and filled range. Explicit model and reasoning choices are remem
 locally for new threads; reasoning is keyed by provider/model and restored only while
 supported. Existing thread selections remain authoritative.
 
-The screen sits on the application ground (0091, 0129): an ordered-dither cloud
-drawn from the theme's bounded pattern palette at one cell per three pixels, one of the
-first-party Zen backgrounds with its still-frame fallback, a person's photo
-printed through the same dither with the cloud over it, or the plain page.
-Behind a start screen the ground is masked away behind the composer and fades
-out below it, so the prompt and the recent-thread list read on the plain
-page. A person may instead put the ground behind everything, sidebar
-included. Conversations soften it beneath one continuous reading background
-so agent replies remain bare prose (0155). The pattern's opacity, speed, and
-intensity and a photo's opacity are dials on the same row. Most presets use the
-resolved accent alone; Pride carries a six-colour spectrum and Norway carries
-red, white, and blue. The semantic accent remains the first ink, so overrides
-still reach the ground. Increased contrast turns the ground off; reduced motion
-holds it still. It is chosen in Settings › Appearance › Background.
+The screen sits on the application ground (0091, 0129), set as three plain
+choices. What: the dot pattern (ordered dither in the theme's bounded pattern
+palette at one cell per three pixels), one of the first-party Zen pictures, a
+person's photo, or the plain page. Effect: a picture is shown as it is,
+pixelated, or dithered, at a chosen pixel size and colour count, and an
+animated picture is printed from its still frame. Motion: still, a slow pulse
+in which the ground breathes a little brighter and larger and back, or a wave
+of soft dither bands rolling across it on a shallow diagonal (the old cloud
+appeared and vanished in blotches; a wave reads as one calm movement). The
+pattern's dots stay whatever moves; over a picture they are the wave. Behind a
+start screen the ground is masked away behind the composer and fades out below
+it, so the prompt and the recent-thread list read on the plain page. A person
+may instead put the ground behind everything, sidebar included. Conversations
+soften it beneath one continuous reading background so agent replies remain
+bare prose (0155). Most presets use the resolved accent alone; Pride carries a
+six-colour spectrum and Norway carries red, white, and blue. The semantic accent
+remains the first ink, so overrides still reach the ground. Increased contrast
+turns the ground off; reduced motion holds it still, pulse included. It is
+chosen in Settings › Appearance › Background.
 
 ## Source of truth and CSS layers
 

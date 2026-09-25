@@ -253,13 +253,15 @@ describe("application background policy", () => {
     patternOpacity: 0.22,
     patternSpeed: 1,
     patternIntensity: 0.35,
-    photoDithered: true,
+    photoDithered: false,
     photoOpacity: 0.42,
     scope: "welcome",
     coversSidebar: false,
     backgroundUrl: null,
     backgroundStillUrl: null,
     backgroundAnimated: false,
+    effect: { kind: "none", cell: 3, levels: 8 },
+    pulse: false,
   };
 
   it("animates the theme pattern until reduced motion or a zero speed asks it to hold still", () => {
@@ -298,6 +300,9 @@ describe("application background policy", () => {
       animated: false,
       photoOpacity: 0.7,
       patternSpeed: 2,
+      // A photo saved before the effect choice keeps its original print.
+      photoDithered: true,
+      effect: { kind: "dither", cell: 2, levels: 4 },
     });
   });
 
@@ -345,6 +350,50 @@ describe("application background policy", () => {
       patternEnabled: false,
       photoDithered: false,
     });
+  });
+
+  it("prints a picture through the chosen effect, and moves it only as asked", () => {
+    const walnut: ThemeSettings = {
+      ...baseSettings,
+      appBackground: {
+        ...baseSettings.appBackground,
+        kind: "builtin",
+        presetId: "warm-walnut-planks",
+        effect: "pixelate",
+        effectCell: 6,
+        motion: "pulse",
+      },
+    };
+    const resolved = resolveAppBackground(walnut);
+    expect(resolved.effect).toEqual({ kind: "pixelate", cell: 6, levels: 8 });
+    // Pulse breathes the picture; the dither cloud is not drawn over it.
+    expect(resolved.pulse).toBe(true);
+    expect(resolved.patternEnabled).toBe(false);
+    expect(resolveAppBackground(walnut, true).pulse).toBe(false);
+
+    const still = resolveAppBackground({
+      ...walnut,
+      appBackground: { ...walnut.appBackground, motion: "still" },
+    });
+    expect(still).toMatchObject({ pulse: false, patternEnabled: false, animated: false });
+    const wave = resolveAppBackground({
+      ...walnut,
+      appBackground: { ...walnut.appBackground, motion: "wave" },
+    });
+    expect(wave).toMatchObject({ pulse: false, patternEnabled: true, animated: true });
+  });
+
+  it("holds the theme pattern's frame unless its motion is Wave", () => {
+    const pattern = (motion: "still" | "pulse" | "wave") =>
+      resolveAppBackground({
+        ...baseSettings,
+        appBackground: { ...baseSettings.appBackground, kind: "theme", motion },
+      });
+    expect(pattern("still")).toMatchObject({ patternEnabled: true, animated: false });
+    expect(pattern("pulse")).toMatchObject({ patternEnabled: true, animated: false, pulse: true });
+    expect(pattern("wave")).toMatchObject({ patternEnabled: true, animated: true });
+    // The pattern has no picture to print, so it takes no effect.
+    expect(pattern("wave").effect.kind).toBe("none");
   });
 
   it("runs under the sidebar only when the ground is everywhere and a person asked for it", () => {

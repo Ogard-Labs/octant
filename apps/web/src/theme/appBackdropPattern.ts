@@ -1,5 +1,5 @@
 /**
- * The welcome screen's ambient ground: an ordered-dither cloud in the theme's
+ * The welcome screen's ambient ground: ordered-dither bands in the theme's
  * bounded ink palette, drawn by the GPU at one cell per three CSS pixels and scaled up with
  * nearest-neighbour sampling so the cells stay crisp instead of blurring.
  *
@@ -96,11 +96,18 @@ float bayer8(ivec2 c) {
 void main() {
   vec2 px = gl_FragCoord.xy;
   vec2 uv = px / u_resolution.y;
-  float n = cloud(uv * 1.25, u_time);
+  // Soft bands of dots roll slowly across the ground on a shallow diagonal,
+  // one every few seconds. The noise only bends their edges, so the field
+  // reads as one calm wave rather than blotches appearing and vanishing at
+  // random, which is what a drifting cloud looked like.
+  float n = cloud(uv * 0.9, u_time * 0.35);
+  float phase = (uv.x * 0.8 + uv.y * 0.45) * 3.4 - u_time * 0.6 + n * 1.8;
+  float band = smoothstep(0.25, 1.0, 0.5 + 0.5 * sin(phase));
   float height = px.y / u_resolution.y;
-  // u_intensity caps the fill: below one the cloud always shows the grid, so
-  // it reads as print rather than as a lit panel.
-  float density = u_intensity * smoothstep(0.4, 0.95, n) * smoothstep(0.16, 0.8, height);
+  // u_intensity caps the fill: below one the bands always show the grid, so
+  // they read as print rather than as a lit panel. The lower third stays
+  // lighter, where the composer and recent threads need the plain page.
+  float density = u_intensity * band * mix(0.35, 1.0, smoothstep(0.1, 0.75, height));
   float on = step(bayer8(ivec2(px)), density);
   float ribbon = fract(uv.x * 0.72 + n * 0.2 + u_time * 0.012);
   float paletteIndex = ribbon * float(max(u_palette_size - 1, 0));

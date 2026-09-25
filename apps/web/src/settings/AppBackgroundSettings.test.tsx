@@ -18,6 +18,8 @@ const dials = {
   photoOpacity: DEFAULT_APP_BACKGROUND.photoOpacity,
   scope: DEFAULT_APP_BACKGROUND.scope,
   coversSidebar: DEFAULT_APP_BACKGROUND.coversSidebar,
+  effectCell: DEFAULT_APP_BACKGROUND.effectCell,
+  effectTones: DEFAULT_APP_BACKGROUND.effectTones,
 };
 
 function photo(id: string, displayName: string): SidebarBackgroundMetadata {
@@ -73,7 +75,7 @@ describe("AppBackgroundSettings", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Application background" }));
-    await user.click(await screen.findByRole("option", { name: "Photo" }));
+    await user.click(await screen.findByRole("option", { name: "Your photo" }));
 
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("img", { name: "No photo chosen" })).toBeInTheDocument();
@@ -97,7 +99,7 @@ describe("AppBackgroundSettings", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Application background" }));
-    await user.click(await screen.findByRole("option", { name: "Built-in" }));
+    await user.click(await screen.findByRole("option", { name: "Built-in picture" }));
 
     expect(screen.getByRole("radio", { name: preset.title })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: `${preset.title} preview` })).toHaveAttribute(
@@ -237,7 +239,7 @@ describe("AppBackgroundSettings", () => {
     });
   });
 
-  it("dials the pattern's opacity, speed, and intensity, and a photo's opacity", () => {
+  it("dials the wave's dots and speed, and a photo's strength", () => {
     const onChange = vi.fn();
     render(
       <AppBackgroundSettings
@@ -247,42 +249,71 @@ describe("AppBackgroundSettings", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("slider", { name: "Pattern opacity" }), {
+    fireEvent.change(screen.getByRole("slider", { name: "Dot strength" }), {
       target: { value: "20" },
     });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ patternOpacity: 20 }));
-    fireEvent.change(screen.getByRole("slider", { name: "Pattern speed" }), {
+    fireEvent.change(screen.getByRole("slider", { name: "Wave speed" }), {
       target: { value: "0" },
     });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ patternSpeed: 0 }));
-    fireEvent.change(screen.getByRole("slider", { name: "Pattern intensity" }), {
+    fireEvent.change(screen.getByRole("slider", { name: "Dot density" }), {
       target: { value: "100" },
     });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ patternIntensity: 100 }));
-    fireEvent.change(screen.getByRole("slider", { name: "Photo opacity" }), {
+    fireEvent.change(screen.getByRole("slider", { name: "Photo strength" }), {
       target: { value: "75" },
     });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoOpacity: 75 }));
   });
 
-  it("offers direct switches for a clean photo ground", async () => {
+  it("prints a picture without motion: an effect, its pixel size, and its colours", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
+    const walnut = {
+      ...DEFAULT_APP_BACKGROUND,
+      kind: "builtin" as const,
+      presetId: "warm-walnut-planks" as never,
+    };
+    const { rerender } = render(
+      <AppBackgroundSettings background={walnut} library={library()} onChange={onChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Still" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ motion: "still", patternEnabled: false }),
+    );
+    await user.click(screen.getByRole("button", { name: "Pixelate" }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ effect: "pixelate" }));
+
+    rerender(
       <AppBackgroundSettings
-        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        background={{ ...walnut, motion: "still", effect: "pixelate" }}
         library={library()}
         onChange={onChange}
       />,
     );
+    expect(screen.getByRole("slider", { name: "Pixel size" })).toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Colours" })).toBeNull();
+    // Nothing moves, so there are no dots to tune.
+    expect(screen.queryByRole("slider", { name: "Dot strength" })).toBeNull();
 
-    await user.click(screen.getByRole("switch", { name: "Show pattern" }));
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ patternEnabled: false }));
-    await user.click(screen.getByRole("switch", { name: "Dither photo" }));
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoDithered: false }));
+    rerender(
+      <AppBackgroundSettings
+        background={{ ...walnut, motion: "still", effect: "dither" }}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByRole("slider", { name: "Colours" }), {
+      target: { value: "5" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effect: "dither", effectTones: 5 }),
+    );
   });
 
-  it("shows the pattern dials only while the pattern is drawn, and keeps their values", async () => {
+  it("reads a photo saved before the effect choice as dithered, and lets the wave come back with its values", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const saved = {
@@ -296,20 +327,20 @@ describe("AppBackgroundSettings", () => {
     };
     render(<AppBackgroundSettings background={saved} library={library()} onChange={onChange} />);
 
-    expect(screen.queryByRole("slider", { name: "Pattern opacity" })).toBeNull();
-    expect(screen.queryByRole("slider", { name: "Pattern speed" })).toBeNull();
-    expect(screen.queryByRole("slider", { name: "Pattern intensity" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Dither" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Still" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("slider", { name: "Dot strength" })).toBeNull();
 
-    await user.click(screen.getByRole("switch", { name: "Show pattern" }));
+    await user.click(screen.getByRole("button", { name: "Wave" }));
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        motion: "wave",
         patternEnabled: true,
         patternOpacity: 20,
         patternSpeed: 80,
         patternIntensity: 100,
       }),
     );
-    expect(screen.getByRole("slider", { name: "Photo opacity" })).not.toBeDisabled();
   });
 
   it("folds the built-in pictures behind the chosen one until asked to change it", async () => {
@@ -333,7 +364,7 @@ describe("AppBackgroundSettings", () => {
     expect(screen.getByRole("radio", { name: "Warm walnut" })).toBeChecked();
   });
 
-  it("leaves the pattern dials usable while the pattern is on", () => {
+  it("offers the dot pattern its dots and wave, but no print effect", () => {
     render(
       <AppBackgroundSettings
         background={DEFAULT_APP_BACKGROUND}
@@ -342,9 +373,11 @@ describe("AppBackgroundSettings", () => {
       />,
     );
 
-    expect(screen.getByRole("slider", { name: "Pattern opacity" })).not.toBeDisabled();
-    expect(screen.getByRole("slider", { name: "Pattern speed" })).not.toBeDisabled();
-    expect(screen.getByRole("slider", { name: "Pattern intensity" })).not.toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Dot strength" })).not.toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Wave speed" })).not.toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Dot density" })).not.toBeDisabled();
+    // The dot pattern has no picture to print.
+    expect(screen.queryByRole("group", { name: "Background effect" })).toBeNull();
   });
 
   it("offers the sidebar only once the ground is behind everything", async () => {
@@ -358,7 +391,7 @@ describe("AppBackgroundSettings", () => {
       />,
     );
     expect(screen.queryByRole("switch", { name: "Cover the sidebar" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("slider", { name: "Photo opacity" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Photo strength" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("combobox", { name: "Where the background shows" }));
     await user.click(await screen.findByRole("option", { name: "Everything" }));
