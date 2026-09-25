@@ -316,6 +316,29 @@ describe("ZenAppearance", () => {
   it("rejects element opacity below 0.1", () => {
     expect(() => decodeAppearance({ ...DEFAULT_ZEN_APPEARANCE, elementOpacity: 0.05 })).toThrow();
   });
+
+  it("reads a space stored before the ground effect existed, and keeps one set since", () => {
+    expect(decodeAppearance(DEFAULT_ZEN_APPEARANCE).groundEffect).toBeUndefined();
+    const dithered = { kind: "dither", cell: 4, levels: 6 } as const;
+    expect(
+      decodeAppearance({ ...DEFAULT_ZEN_APPEARANCE, groundEffect: dithered }).groundEffect,
+    ).toEqual(dithered);
+  });
+
+  it("refuses a ground effect whose cells or tones are out of range", () => {
+    expect(() =>
+      decodeAppearance({
+        ...DEFAULT_ZEN_APPEARANCE,
+        groundEffect: { kind: "pixelate", cell: 1, levels: 8 },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeAppearance({
+        ...DEFAULT_ZEN_APPEARANCE,
+        groundEffect: { kind: "dither", cell: 4, levels: 17 },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("ZenSourceContext", () => {

@@ -65,6 +65,34 @@ const APP_GROUND: ResolvedAppBackground = {
   coversSidebar: false,
 };
 
+/** A window's resize handle for one edge; handles are pointer-only, and the
+    keyboard resizes with Alt and the arrows. */
+function resizeHandle(card: HTMLElement, edge = "se"): HTMLElement {
+  const handle = card.querySelector<HTMLElement>(`.zen-el-resize--${edge}`);
+  if (handle === null) throw new Error(`No ${edge} resize handle.`);
+  return handle;
+}
+
+/** Gives the surface a size, which jsdom never lays out, so a wall can plan. */
+function withSurfaceSize(width: number, height: number): () => void {
+  const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => width,
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => height,
+  });
+  return () => {
+    if (widthDescriptor !== undefined)
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", widthDescriptor);
+    if (heightDescriptor !== undefined)
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", heightDescriptor);
+  };
+}
+
 function makeSpace(
   elements: ZenElementPayload[] = [],
   layout: ZenSpace["layout"] = "arrange",
@@ -362,14 +390,15 @@ describe("ZenSurface", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
-    fireEvent.click(screen.getByRole("button", { name: "Nordic fjord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lofoten night" }));
     expect(onUpdateAppearance).toHaveBeenCalledWith({
       dimming: 0,
       elementOpacity: 1,
       background: {
         kind: "builtin",
-        presetId: "nordic-fjord-aurora",
-        overlay: 35,
+        presetId: "lofoten-night",
+        // Moving between pictures keeps the dimming the space already has.
+        overlay: 20,
         fill: "cover",
       },
     });
@@ -431,8 +460,9 @@ describe("ZenSurface", () => {
     expect(dialog.querySelector(".zen-appearance__preset-grid")).not.toBeNull();
     // A name nobody can read is not a choice: every built-in is still offered
     // by its full title, whatever the visible label had room to show.
+    // The app ground and the upload tile sit in the same grid as the pictures.
     expect(dialog.querySelectorAll(".zen-appearance__preset")).toHaveLength(
-      ZEN_BUILTIN_BACKGROUNDS.length,
+      ZEN_BUILTIN_BACKGROUNDS.length + 2,
     );
     for (const preset of ZEN_BUILTIN_BACKGROUNDS) {
       expect(within(dialog).getByRole("button", { name: preset.title })).toBeVisible();
@@ -588,89 +618,6 @@ describe("ZenSurface", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Add timer" }));
     expect(onAddTimer).toHaveBeenCalledWith(40 * 60 * 1000);
-  });
-
-  it("adds a terminal or browser for the focused thread without leaving Zen", () => {
-    const sourceContext = {
-      hostId: "local-host",
-      mode: "code" as const,
-      projectId: null,
-      threadKind: "code" as const,
-      threadId: "00000000-0000-4000-8000-000000000914",
-    } as never;
-    const onAddTerminal = vi.fn();
-    const onAddBrowser = vi.fn();
-    render(
-      <ZenSurface
-        barCollapsed={false}
-        onAddBrowser={onAddBrowser}
-        onAddTerminal={onAddTerminal}
-        onExit={() => undefined}
-        onExpandBar={() => undefined}
-        onHideBar={() => undefined}
-        onUpdateElement={() => undefined}
-        onUpdateViewport={() => undefined}
-        space={makeSpace([
-          {
-            elementId,
-            kind: "thread",
-            sourceContext,
-            geometry: { x: 40, y: 40, width: 360, height: 220 },
-            zIndex: 1,
-            minimized: false,
-            locked: false,
-          },
-        ])}
-      />,
-    );
-
-    fireEvent.focus(screen.getByRole("group", { name: "Thread" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add terminal" }));
-    expect(onAddTerminal).toHaveBeenCalledWith(sourceContext);
-
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add browser" }));
-    expect(onAddBrowser).toHaveBeenCalledWith(sourceContext);
-  });
-
-  it("keeps the terminal action disabled when Code says the thread cannot add one", () => {
-    const sourceContext = {
-      hostId: "local-host",
-      mode: "code" as const,
-      projectId: null,
-      threadKind: "code" as const,
-      threadId: "00000000-0000-4000-8000-000000000914",
-    } as never;
-    render(
-      <ZenSurface
-        barCollapsed={false}
-        canAddTerminal={() => false}
-        onAddTerminal={vi.fn()}
-        onExit={() => undefined}
-        onExpandBar={() => undefined}
-        onHideBar={() => undefined}
-        onUpdateElement={() => undefined}
-        onUpdateViewport={() => undefined}
-        space={makeSpace([
-          {
-            elementId,
-            kind: "thread",
-            sourceContext,
-            geometry: { x: 40, y: 40, width: 360, height: 220 },
-            zIndex: 1,
-            minimized: false,
-            locked: false,
-          },
-        ])}
-      />,
-    );
-
-    fireEvent.focus(screen.getByRole("group", { name: "Thread" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-
-    expect(screen.getByRole("button", { name: "Add terminal" })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent(/cannot add a terminal/i);
   });
 
   it("labels a pinned terminal separately from the thread that owns it", () => {
@@ -1006,44 +953,97 @@ describe("ZenSurface", () => {
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
   });
 
-  it("leaves the wall for a hand-made arrangement without touching a card", async () => {
-    const user = userEvent.setup();
-    const onSetLayout = vi.fn();
-    const onUpdateElement = vi.fn();
-    const space = makeSpace(
-      [
-        {
+  it("writes a never-arranged space's tiles down once, then lets its windows move", async () => {
+    const restore = withSurfaceSize(1200, 800);
+    try {
+      const onSetLayout = vi.fn();
+      const onUpdateElement = vi.fn(async () => undefined);
+      const space = makeSpace(
+        [
+          {
+            elementId,
+            kind: "notes",
+            widgetVersion: 0 as AggregateVersion,
+            content: "Focus note",
+            geometry: { x: 40, y: 40, width: 240, height: 160 },
+            zIndex: 1,
+            minimized: false,
+            locked: false,
+            title: "Focus note",
+          },
+        ],
+        "wall",
+      );
+
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onHideBar={() => undefined}
+          onSetLayout={onSetLayout}
+          onUpdateElement={onUpdateElement}
+          onUpdateViewport={() => undefined}
+          onExpandBar={() => undefined}
+          space={space}
+        />,
+      );
+
+      await waitFor(() => expect(onSetLayout).toHaveBeenCalledWith("arrange"));
+      // The tile the wall drew is what gets stored, so nothing jumps.
+      expect(onUpdateElement).toHaveBeenCalledWith(
+        expect.objectContaining({
           elementId,
-          kind: "notes",
-          widgetVersion: 0 as AggregateVersion,
-          content: "Focus note",
-          geometry: { x: 40, y: 40, width: 240, height: 160 },
-          zIndex: 1,
-          minimized: false,
-          locked: false,
-          title: "Focus note",
-        },
-      ],
-      "wall",
-    );
+          geometry: expect.not.objectContaining({ width: 240, height: 160 }),
+        }),
+      );
+      expect(onSetLayout).toHaveBeenCalledOnce();
+    } finally {
+      restore();
+    }
+  });
 
-    render(
-      <ZenSurface
-        barCollapsed={false}
-        onExit={() => undefined}
-        onHideBar={() => undefined}
-        onSetLayout={onSetLayout}
-        onUpdateElement={onUpdateElement}
-        onUpdateViewport={() => undefined}
-        onExpandBar={() => undefined}
-        space={space}
-      />,
-    );
+  it("tidies every window into a grid on request", async () => {
+    const restore = withSurfaceSize(1200, 800);
+    try {
+      const onUpdateElement = vi.fn(async () => undefined);
+      const note = (suffix: string, x: number) => ({
+        elementId: `00000000-0000-4000-8000-00000000090${suffix}` as never,
+        kind: "notes" as const,
+        widgetVersion: 0 as AggregateVersion,
+        content: suffix,
+        geometry: { x, y: 300, width: 220, height: 140 },
+        zIndex: 1,
+        minimized: false,
+        locked: false,
+        title: `Note ${suffix}`,
+      });
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={onUpdateElement}
+          onUpdateViewport={() => undefined}
+          onExpandBar={() => undefined}
+          space={makeSpace([note("1", 500), note("2", 40)])}
+        />,
+      );
 
-    await user.click(screen.getByRole("button", { name: "Arrange" }));
-    expect(onSetLayout).toHaveBeenCalledWith("arrange");
-    // The stored geometry is the arrangement; switching must not rewrite it.
-    expect(onUpdateElement).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Tidy windows" }));
+      await waitFor(() => expect(onUpdateElement).toHaveBeenCalledTimes(2));
+      const [first, second] = onUpdateElement.mock.calls.map(
+        (call) => (call as unknown as [ZenElementPayload])[0],
+      );
+      // Reading order: the window further left takes the first tile.
+      const titleOf = (element: ZenElementPayload | undefined) =>
+        element !== undefined && "title" in element ? element.title : undefined;
+      expect(titleOf(first)).toBe("Note 2");
+      expect(titleOf(second)).toBe("Note 1");
+      expect(first?.geometry.y).toBe(second?.geometry.y);
+      expect(first?.geometry.x ?? 0).toBeLessThan(second?.geometry.x ?? 0);
+    } finally {
+      restore();
+    }
   });
 
   it("renders elements and moves the focused element with arrow keys", () => {
@@ -1129,7 +1129,7 @@ describe("ZenSurface", () => {
       }),
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Resize Move me" }), {
+    fireEvent.pointerDown(resizeHandle(card), {
       clientX: 280,
       clientY: 200,
     });
@@ -1179,7 +1179,7 @@ describe("ZenSurface", () => {
     );
 
     const card = screen.getByRole("group", { name: "Resize without snapping" });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Resize Resize without snapping" }), {
+    fireEvent.pointerDown(resizeHandle(card), {
       clientX: 280,
       clientY: 200,
     });
@@ -1220,7 +1220,7 @@ describe("ZenSurface", () => {
     );
 
     const card = screen.getByRole("group", { name: "Refused resize" });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Resize Refused resize" }), {
+    fireEvent.pointerDown(resizeHandle(card), {
       clientX: 280,
       clientY: 200,
     });
@@ -1449,7 +1449,7 @@ describe("ZenSurface", () => {
     expect(screen.getByRole("button", { name: "Exit Zen" })).toBeInTheDocument();
   });
 
-  it("zooms to fit from the surface controls", () => {
+  it("offers no pan or zoom, because every window is on the desk", () => {
     const onUpdateViewport = vi.fn();
     const space = makeSpace([
       {
@@ -1477,10 +1477,10 @@ describe("ZenSurface", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Zoom to Fit" }));
-    expect(onUpdateViewport).toHaveBeenCalledWith(
-      expect.objectContaining({ scale: expect.any(Number) }),
-    );
+    // The desk is the window: nothing is off screen to pan to or zoom out for.
+    expect(screen.queryByRole("button", { name: "Zoom to Fit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+    expect(onUpdateViewport).not.toHaveBeenCalled();
   });
 
   it("exits from the background with Escape when no dialog owns focus", () => {
@@ -1715,7 +1715,8 @@ describe("ZenSurface live thread cards", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Resize Thread 1" })).toHaveStyle({ zIndex: "3" });
+    const card = screen.getByRole("group", { name: "Thread 1" });
+    expect(resizeHandle(card)).toHaveStyle({ zIndex: "4" });
   });
 
   it("streams each card's own thread and holds the rest at the live-card budget", () => {
@@ -1766,7 +1767,75 @@ describe("ZenSurface live thread cards", () => {
     expect(screen.queryByRole("button", { name: /Continue Thread 1/i })).not.toBeInTheDocument();
   });
 
-  it("targets the thread whose live composer receives focus", () => {
+  it("adds a terminal or browser in a chosen thread without focusing a card first", () => {
+    const code = threadElement(1, "code");
+    const onAddTerminal = vi.fn();
+    const onAddBrowser = vi.fn();
+    const onLoadThreads = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onAddBrowser={onAddBrowser}
+        onAddTerminal={onAddTerminal}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onLoadThreads={onLoadThreads}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace([])}
+        threadEntries={[catalogEntry(code)]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(onLoadThreads).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Add terminal" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Choose where the terminal runs" })).getByRole(
+        "button",
+        { name: /Thread 1/ },
+      ),
+    );
+    expect(onAddTerminal).toHaveBeenCalledWith(code.sourceContext);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add browser" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Choose a browser" })).getByRole("button", {
+        name: /Thread 1/,
+      }),
+    );
+    expect(onAddBrowser).toHaveBeenCalledWith(code.sourceContext);
+  });
+
+  it("offers no terminal in a thread Code says cannot open one, and says why", () => {
+    const code = threadElement(1, "code");
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        canAddTerminal={() => false}
+        onAddTerminal={vi.fn()}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace([])}
+        threadEntries={[catalogEntry(code)]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add terminal" }));
+    const group = screen.getByRole("group", { name: "Choose where the terminal runs" });
+    expect(within(group).queryByRole("button", { name: /Thread 1/ })).not.toBeInTheDocument();
+    expect(within(group).getByRole("status")).toHaveTextContent(
+      /No Code thread can open a terminal/,
+    );
+  });
+
+  it("offers the thread whose live composer has focus first", () => {
     const first = threadElement(1, "work");
     const second = threadElement(2, "work");
     const onAddBrowser = vi.fn();
@@ -1791,6 +1860,12 @@ describe("ZenSurface live thread cards", () => {
     fireEvent.focus(screen.getByRole("textbox", { name: "Composer Thread 2" }));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     fireEvent.click(screen.getByRole("button", { name: "Add browser" }));
+    const choices = within(screen.getByRole("group", { name: "Choose a browser" })).getAllByRole(
+      "button",
+    );
+    // The focused card's thread is offered first.
+    expect(choices[0]).toHaveTextContent("Thread 2");
+    fireEvent.click(choices[0]!);
 
     expect(onAddBrowser).toHaveBeenCalledWith(second.sourceContext);
   });

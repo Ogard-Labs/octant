@@ -48,7 +48,18 @@ type ResearchDrag = {
   readonly startY: number;
   readonly offsetX: number;
   readonly offsetY: number;
+  /** Which edges a resize moves; absent for a move. */
+  readonly edge?: "w" | "s" | "sw";
+  readonly width: number;
+  readonly height: number;
 };
+
+/* The browser is a window like the cards: it moves by its bar and sizes from
+   the edges away from the side it is anchored to. The size is this session's,
+   like the position; the thread's browser binding is unchanged by either. */
+const RESEARCH_MIN_WIDTH = 320;
+const RESEARCH_MAX_WIDTH = 1600;
+const RESEARCH_MIN_HEIGHT = 240;
 
 /**
  * A research browser docked to the edge of a focus zone space.
@@ -76,6 +87,10 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   const fallbackStop = useRef<Promise<void> | undefined>(undefined);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState<ResearchDrag>();
+  const [size, setSize] = useState<{ readonly width: number; readonly height?: number }>({
+    width: props.dock.width,
+  });
+  const rootRef = useRef<HTMLElement>(null);
   const context = snapshot?.context;
   const active = context?.state === "active";
   const threadId = String(props.dock.sourceContext.threadId);
@@ -130,14 +145,50 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
       startY: event.clientY,
       offsetX: dragOffset.x,
       offsetY: dragOffset.y,
+      width: size.width,
+      height: rootRef.current?.offsetHeight ?? size.height ?? 0,
+    });
+  }
+
+  function beginResize(event: PointerEvent<HTMLElement>, edge: "w" | "s" | "sw"): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // See beginMove.
+    }
+    setDrag({
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: dragOffset.x,
+      offsetY: dragOffset.y,
+      edge,
+      width: size.width,
+      height: rootRef.current?.offsetHeight ?? size.height ?? RESEARCH_MIN_HEIGHT,
     });
   }
 
   function move(event: PointerEvent<HTMLElement>): void {
     if (drag === undefined) return;
-    setDragOffset({
-      x: drag.offsetX + event.clientX - drag.startX,
-      y: drag.offsetY + event.clientY - drag.startY,
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (drag.edge === undefined) {
+      setDragOffset({ x: drag.offsetX + dx, y: drag.offsetY + dy });
+      return;
+    }
+    // Anchored at its right edge, the window grows leftward as its left edge
+    // is pulled, so only the width changes.
+    setSize({
+      width: drag.edge.includes("w")
+        ? Math.min(RESEARCH_MAX_WIDTH, Math.max(RESEARCH_MIN_WIDTH, drag.width - dx))
+        : drag.width,
+      ...(drag.edge.includes("s")
+        ? { height: Math.max(RESEARCH_MIN_HEIGHT, drag.height + dy) }
+        : size.height === undefined
+          ? {}
+          : { height: size.height }),
     });
   }
 
@@ -286,12 +337,32 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     <aside
       aria-label="Research browser"
       className="zen-research"
+      data-interacting={
+        drag === undefined ? undefined : drag.edge === undefined ? "move" : "resize"
+      }
+      ref={rootRef}
       style={{
-        width: props.dock.width,
+        width: size.width,
+        ...(size.height === undefined ? {} : { height: size.height }),
         transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
       }}
       {...movementHandlers}
     >
+      <span
+        aria-hidden="true"
+        className="zen-research__resize zen-research__resize--w"
+        onPointerDown={(event) => beginResize(event, "w")}
+      />
+      <span
+        aria-hidden="true"
+        className="zen-research__resize zen-research__resize--s"
+        onPointerDown={(event) => beginResize(event, "s")}
+      />
+      <span
+        aria-hidden="true"
+        className="zen-research__resize zen-research__resize--sw"
+        onPointerDown={(event) => beginResize(event, "sw")}
+      />
       <header className="zen-research__header" onPointerDown={beginMove}>
         <span className="zen-research__title">Research</span>
         <OctantButton
