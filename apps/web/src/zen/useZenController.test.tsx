@@ -202,9 +202,16 @@ describe("useZenController", () => {
       },
     });
     const bootstrap = lost.bootstrap;
+    let refusedReads = 0;
     lost.bootstrap = vi.fn(async () => {
       const response = await bootstrap();
-      return written === null ? response : { ...response, space: written };
+      if (written === null) return response;
+      // The first read after the lost reply fails as well; the second answers.
+      if (refusedReads === 0) {
+        refusedReads += 1;
+        throw new Error("The connection dropped again.");
+      }
+      return { ...response, space: written };
     });
     const { result } = renderHook(() =>
       useZenController({ client: lost, windowId, storage: window.sessionStorage }),
