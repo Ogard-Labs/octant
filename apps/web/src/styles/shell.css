@@ -1471,12 +1471,11 @@ html[data-octant-native-host="true"]
 
   .shell-frame > .workspace-layer {
     gap: var(--octant-card-gutter);
-    padding: var(--octant-card-gutter) var(--octant-card-gutter) var(--octant-card-gutter) 0;
+    /* A gutter on every side, the sidebar's too: the card floats on the back
+       rather than sitting against the sidebar's edge, so the sidebar reads as
+       part of the back and not as a second column. */
+    padding: var(--octant-card-gutter);
     background: var(--octant-sidebar-opaque);
-  }
-
-  .shell--sidebar-collapsed.shell-frame > .workspace-layer {
-    padding-left: var(--octant-card-gutter);
   }
 
   .shell--material-translucent.shell-frame > .workspace-layer {
@@ -1536,14 +1535,16 @@ html[data-octant-native-host="true"]
     background: var(--octant-sidebar-opaque);
     pointer-events: none;
     -webkit-mask:
-      var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-x, 0px)
+      var(--octant-primary-card-hole) no-repeat
+        var(--octant-primary-card-x, var(--octant-card-gutter))
         var(--octant-primary-card-y, var(--octant-card-gutter)) /
         var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
         var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
       linear-gradient(currentColor 0 0);
     -webkit-mask-composite: xor;
     mask:
-      var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-x, 0px)
+      var(--octant-primary-card-hole) no-repeat
+        var(--octant-primary-card-x, var(--octant-card-gutter))
         var(--octant-primary-card-y, var(--octant-card-gutter)) /
         var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
         var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),

@@ -130,7 +130,8 @@ The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
 material (glass, or the opaque sidebar colour when glass is off or unavailable),
 and the primary workspace, the right dock, the bottom panel, and the Settings
-page sit on it as cards: the card radius, one hairline, no shadow, 8px apart,
+page sit on it as cards: the card radius, one hairline, no shadow, 8px apart
+and 8px from every edge, the sidebar's included,
 all in the workspace colour. Reader pages inside a card use that colour too,
 so every card reads the same. Over an application ground the back is laid only
 in the gutters, so the primary card shows the ground clear, dither and all,
