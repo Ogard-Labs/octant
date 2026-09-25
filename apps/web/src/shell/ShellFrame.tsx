@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -66,7 +66,37 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
   );
 }
 
+/**
+ * Over an application ground the frosted back must not lie under the primary
+ * card, which shows the ground clear. The card's rectangle depends on the
+ * dock and bottom panel tracks (clamped, resizable), so it is measured rather
+ * than re-derived in CSS, and handed to the mask as custom properties on the
+ * layer. Only the rectangle is written: no React state, no re-render.
+ */
+function usePrimaryCardHole(layer: HTMLDivElement | null, active: boolean): void {
+  useEffect(() => {
+    if (!active || layer === null || typeof ResizeObserver === "undefined") return;
+    const card = layer.querySelector<HTMLElement>(":scope > .primary-workspace-layer");
+    if (card === null) return;
+    const write = () => {
+      const outer = layer.getBoundingClientRect();
+      const inner = card.getBoundingClientRect();
+      layer.style.setProperty("--octant-primary-card-x", `${String(inner.left - outer.left)}px`);
+      layer.style.setProperty("--octant-primary-card-y", `${String(inner.top - outer.top)}px`);
+      layer.style.setProperty("--octant-primary-card-w", `${String(inner.width)}px`);
+      layer.style.setProperty("--octant-primary-card-h", `${String(inner.height)}px`);
+    };
+    write();
+    const observer = new ResizeObserver(write);
+    observer.observe(layer);
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [active, layer]);
+}
+
 export function ShellFrame(props: ShellFrameProps) {
+  const [workspaceLayer, setWorkspaceLayer] = useState<HTMLDivElement | null>(null);
+  usePrimaryCardHole(workspaceLayer, props.backdrop !== undefined);
   if (props.standaloneSurface !== undefined) {
     return (
       <ShellThemeRoot
@@ -137,6 +167,7 @@ export function ShellFrame(props: ShellFrameProps) {
             />
           ) : null}
           <div
+            ref={setWorkspaceLayer}
             className={`workspace-layer${
               props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
             }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}

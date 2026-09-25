@@ -1456,6 +1456,9 @@ html[data-octant-native-host="true"]
 @media (min-width: 681px) {
   .shell.shell-frame {
     --octant-card-gutter: var(--oct-space-2);
+    /* A rounded rectangle at whatever size the mask is drawn: the primary
+       card's own shape, so the frost reaches into its corners too. */
+    --octant-primary-card-hole: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' rx='16'/%3E%3C/svg%3E");
   }
 
   .shell--material-translucent.shell-frame > .sidebar {
@@ -1512,10 +1515,12 @@ html[data-octant-native-host="true"]
   /* Over the application ground the back is laid only in the gutters. Painted
      across the whole workspace layer, its tint sat under the see-through
      primary card too, so the ground inside the card read through a 60% dark
-     film and the dither's cells washed out. The ring below is the layer's
-     padding box minus its content box: exactly the gutters, which follow the
-     padding when the sidebar collapses. The masks read alpha only, so
-     currentColor stands in for "keep". */
+     film and the dither's cells washed out. The layer below is frosted
+     everywhere except a rounded hole the size of the primary card, measured by
+     ShellFrame, so the outer gutters and the gaps beside the dock and bottom
+     panel frost alike. Before the first measurement the hole falls back to the
+     card's usual place. The masks read alpha only, so currentColor stands in
+     for "keep". */
   .shell--app-backdrop.shell-frame > .workspace-layer,
   .shell--app-backdrop.shell-frame[data-octant-sidebar-vibrancy] > .workspace-layer {
     position: relative;
@@ -1528,16 +1533,20 @@ html[data-octant-native-host="true"]
     position: absolute;
     inset: 0;
     z-index: -1;
-    box-sizing: border-box;
-    padding: inherit;
     background: var(--octant-sidebar-opaque);
     pointer-events: none;
     -webkit-mask:
-      linear-gradient(currentColor 0 0) content-box,
+      var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-x, 0px)
+        var(--octant-primary-card-y, var(--octant-card-gutter)) /
+        var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
+        var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
       linear-gradient(currentColor 0 0);
     -webkit-mask-composite: xor;
     mask:
-      linear-gradient(currentColor 0 0) content-box,
+      var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-x, 0px)
+        var(--octant-primary-card-y, var(--octant-card-gutter)) /
+        var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
+        var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
       linear-gradient(currentColor 0 0);
     mask-composite: exclude;
   }
@@ -1789,6 +1798,17 @@ html[data-octant-native-host="true"]
 
   .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before,
   .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
+    > .workspace-layer::before {
+    background: var(--octant-sidebar-opaque);
+    backdrop-filter: none;
+  }
+}
+
+/* The same fallback when Reduce transparency is the app's own setting rather
+   than the system's: the theme provider marks the root, not the media query. */
+@media (min-width: 681px) {
+  html[data-octant-reduced-transparency="true"]
+    .shell--app-backdrop.shell--material-translucent.shell-frame
     > .workspace-layer::before {
     background: var(--octant-sidebar-opaque);
     backdrop-filter: none;
