@@ -999,8 +999,8 @@ mechanisms are:
   page on the same site takes a new address in place, and another site starts
   a fresh context whose allowlist is that site. It carries the host's usual
   session ceiling and is not journaled, like a thread's browsing context.
-  Archiving the Project, relinking its root, or the window's authority ending
-  closes it. On the desktop app the page is a live native view; elsewhere the
+  Archiving the Project, relinking its root, turning its mode off, the window
+  moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor

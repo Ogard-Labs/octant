@@ -45,6 +45,12 @@ export interface ProjectBrowserServiceOptions {
     projectId: ProjectId,
     mode: ProjectBrowserMode,
   ) => boolean;
+  /**
+   * Whether the Project's mode is on in this host's settings. A window keeps
+   * its Work context when Work is turned off, so the workspace alone would
+   * still say the window holds a Work Project.
+   */
+  readonly isModeEnabled: (mode: ProjectBrowserMode) => boolean;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly schedule?: (delayMs: number, callback: () => void) => () => void;
@@ -164,19 +170,21 @@ export class ProjectBrowserService {
   }
 
   /**
-   * Close every page of a Project that is no longer what it was opened
-   * against: archived, or relinked to another root.
+   * Close every page whose window no longer has it: its Project was archived
+   * or relinked, its mode was turned off, or the window moved to another
+   * Project. Called whenever the journal commits one of those changes, so an
+   * attached page does not stay on screen after its authority ended.
    */
-  async settleProject(projectId: ProjectId): Promise<void> {
-    const project = this.#options.readProject(projectId);
-    const current =
-      project !== undefined && project.type !== "chat" && project.lifecycle === "active"
-        ? project.bindingHistory.at(-1)?.revisionId
-        : undefined;
+  async settle(): Promise<void> {
     const closing: Array<Promise<void>> = [];
     for (const owned of this.#pages.values()) {
-      if (String(owned.projectId) !== String(projectId)) continue;
-      if (current !== undefined && String(current) === String(owned.bindingRevisionId)) continue;
+      const authority = this.#authority(owned.windowId, owned.projectId);
+      if (
+        authority.kind === "allowed" &&
+        String(authority.bindingRevisionId) === String(owned.bindingRevisionId)
+      ) {
+        continue;
+      }
       closing.push(this.#close(owned, "stopped"));
     }
     await Promise.allSettled(closing);
@@ -328,6 +336,13 @@ export class ProjectBrowserService {
         kind: "refused",
         reason: "authority-revoked",
         message: "This Project is archived, so its page closed.",
+      };
+    }
+    if (!this.#options.isModeEnabled(project.type)) {
+      return {
+        kind: "refused",
+        reason: "authority-revoked",
+        message: `${project.type === "work" ? "Work" : "Code"} is turned off, so this Project's page closed.`,
       };
     }
     if (!this.#options.canAccessProject(windowId, projectId, project.type)) {

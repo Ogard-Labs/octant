@@ -112,6 +112,7 @@ function harness(
   options: {
     readonly projects?: Map<string, Project>;
     readonly access?: (window: string, project: string, mode: string) => boolean;
+    readonly modesOn?: () => ReadonlyArray<string>;
   } = {},
 ) {
   const projects = options.projects ?? new Map([[ids.project, project()]]);
@@ -124,6 +125,7 @@ function harness(
     canAccessProject: (window, id, mode) =>
       options.access?.(String(window), String(id), mode) ??
       (String(window) === ids.window && String(id) === ids.project),
+    isModeEnabled: (mode) => (options.modesOn?.() ?? ["chat", "work", "code"]).includes(mode),
     uuid: () => `b0000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     now: () => clock,
     schedule: () => () => undefined,
@@ -246,11 +248,11 @@ describe("Project browsers", () => {
     const { service, runtime, projects } = harness();
     await service.execute(windowId, "local-window", open());
 
-    await service.settleProject(projectId);
+    await service.settle();
     expect(runtime.closed).toEqual([]);
 
     projects.set(ids.project, project({ revisionId: ids.relinked }));
-    await service.settleProject(projectId);
+    await service.settle();
     expect(runtime.closed).toHaveLength(1);
 
     await service.execute(windowId, "local-window", open());
@@ -258,6 +260,33 @@ describe("Project browsers", () => {
     const current = await service.execute(windowId, "local-window", { kind: "current", projectId });
     expect(refusal(current)).toBe("authority-revoked");
     expect(runtime.closed).toHaveLength(2);
+  });
+
+  it("closes the page when Work is turned off, even though the window kept its Work context", async () => {
+    let modes: ReadonlyArray<string> = ["chat", "work", "code"];
+    const { service, runtime } = harness({ modesOn: () => modes });
+    await service.execute(windowId, "local-window", open());
+
+    modes = ["chat", "code"];
+    await service.settle();
+
+    expect(runtime.closed).toHaveLength(1);
+    const again = await service.execute(windowId, "local-window", open());
+    expect(refusal(again)).toBe("authority-revoked");
+    expect(runtime.created).toHaveLength(1);
+  });
+
+  it("closes the page when its window moves to another Project", async () => {
+    let bound: string = ids.project;
+    const { service, runtime } = harness({
+      access: (window, id) => window === ids.window && id === bound,
+    });
+    await service.execute(windowId, "local-window", open());
+
+    bound = ids.chat;
+    await service.settle();
+
+    expect(runtime.closed).toHaveLength(1);
   });
 
   it("closes a window's pages when the window's authority ends", async () => {

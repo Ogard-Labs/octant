@@ -683,6 +683,7 @@ import {
   isAndroidEmulatorInputKind,
   androidActionOpensInputGrant,
   defaultShellSettings,
+  enabledModes,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
   isImageProfileDriverKind,
@@ -3727,19 +3728,28 @@ export function startOctantServer(
       runtime: browserRuntime,
       readProject: persistence.readProject,
       canAccessProject: windowHoldsProject,
+      isModeEnabled: (mode) =>
+        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          mode,
+        ),
       uuid: randomUUID,
       now: Date.now,
     });
     projectBrowserService = liveProjectBrowsers;
+    // Every change that can take a page away from its window: the Project's
+    // lifecycle or binding, the window moving to another Project, or its mode
+    // being turned off.
     const unsubscribeProjectBrowserAuthority = persistence.journal.subscribeCommitted((append) => {
-      for (const event of append.events) {
-        if (
-          event.aggregateType === "project" &&
-          (event.eventName === "project.lifecycle-changed@1" ||
-            event.eventName === "project.binding-relinked@1")
-        ) {
-          void liveProjectBrowsers.settleProject(decodeProjectId(event.aggregateId));
-        }
+      if (
+        append.events.some(
+          (event) =>
+            event.eventName === "project.lifecycle-changed@1" ||
+            event.eventName === "project.binding-relinked@1" ||
+            event.eventName === "workspace.layout-replaced" ||
+            event.eventName === "shell.settings-replaced",
+        )
+      ) {
+        void liveProjectBrowsers.settle();
       }
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectBrowserAuthority));
