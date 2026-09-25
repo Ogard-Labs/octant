@@ -51,7 +51,7 @@ const codeFacts: AgentRunControlResolvedFacts = {
 describe("AgentRunCreateForm", () => {
   it("renders an explanatory status instead of fields when posture is Off", () => {
     render(<AgentRunCreateForm posture="off" onSubmit={vi.fn()} />);
-    expect(screen.getByRole("status")).toHaveTextContent(/posture is Off/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/Helper agents are off/i);
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
   });
 

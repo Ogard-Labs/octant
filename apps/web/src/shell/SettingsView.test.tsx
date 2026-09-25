@@ -1,6 +1,7 @@
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import type { SettingsDeepLink } from "@octant/contracts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -70,18 +71,6 @@ function renderSettings(overrides: Partial<SettingsViewProps> = {}) {
     search: "",
     settings: defaultShellSettings(),
     sidebarVibrancySupported: true,
-    visibleSettings: [
-      "enable-chat",
-      "enable-work",
-      "sidebar-width",
-      "sidebar-material",
-      "workspace-material",
-      "sidebar-background",
-      "mode-switcher",
-      "project-view-switcher",
-      "reset-layout",
-      "reset-window-bounds",
-    ],
     ...overrides,
   };
   return { props, ...render(<SettingsView {...props} />) };
@@ -124,33 +113,22 @@ function defaultProps(): SettingsViewProps {
     search: "",
     settings: defaultShellSettings(),
     sidebarVibrancySupported: true,
-    visibleSettings: [
-      "enable-chat",
-      "enable-work",
-      "sidebar-width",
-      "sidebar-material",
-      "workspace-material",
-      "sidebar-background",
-      "mode-switcher",
-      "project-view-switcher",
-      "reset-layout",
-      "reset-window-bounds",
-    ],
   };
 }
 
 describe("SettingsView", () => {
-  it("lets the reader choose to wait for finished replies", async () => {
+  it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
-    navigateTo("Appearance");
+    navigateTo("Chat");
     const control = screen.getByRole("switch", { name: "Stream replies" });
     expect(control).toHaveAttribute("aria-checked", "true");
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ streamReplies: false });
   });
   it("falls back to General for a retired execution-profile link and offers no profile page", async () => {
-    renderSettings({ initialDeepLink: { section: "profiles" } });
+    // A link written before the retired section left the contract.
+    renderSettings({ initialDeepLink: { section: "profiles" } as unknown as SettingsDeepLink });
     expect(await screen.findByRole("button", { name: "General" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -158,7 +136,7 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("button", { name: "Execution profiles" })).not.toBeInTheDocument();
   });
 
-  it("mounts the Agents settings panel when an AgentRunSettingsClient is supplied", async () => {
+  it("puts the helper-agent posture on the Octant Harness page and offers no Agents page", async () => {
     const agentRunSettingsClient = {
       current: vi.fn(async () => ({
         creationPosture: "ask" as const,
@@ -169,17 +147,23 @@ describe("SettingsView", () => {
     };
     renderSettings({
       agentRunSettingsClient,
-      initialDeepLink: { section: "agents" },
+      initialDeepLink: { section: "harness" },
     });
-    expect(await screen.findByRole("combobox", { name: "Subagent creation" })).toHaveTextContent(
-      "Ask",
+    expect(
+      await screen.findByRole("combobox", { name: "Let the model start helper agents" }),
+    ).toHaveTextContent("Only when I start them");
+    expect(screen.getByRole("button", { name: "Octant Harness" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
-    expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
   });
 
-  it("does not render the Agents panel without an AgentRunSettingsClient", () => {
-    renderSettings({ initialDeepLink: { section: "agents" } });
-    expect(screen.queryByRole("combobox", { name: "Subagent creation" })).not.toBeInTheDocument();
+  it("does not render the helper-agent posture without an AgentRunSettingsClient", () => {
+    renderSettings({ initialDeepLink: { section: "harness" } });
+    expect(
+      screen.queryByRole("combobox", { name: "Let the model start helper agents" }),
+    ).not.toBeInTheDocument();
   });
 
   it("offers the completed-thread archive window in General and reports Never as off", async () => {
@@ -513,20 +497,19 @@ describe("SettingsView", () => {
     expect(screen.getByRole("switch", { name: "Threads without a Project" })).toHaveFocus();
   });
 
-  it("maps the saved sidebar material to the direct translucency switch", async () => {
+  it("sets Glass from one control: Off paints the sidebar solid, a level turns glass back on", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
     const { rerender } = renderSettings({ onSettingsChange });
     navigateTo("Appearance");
 
-    const control = screen.getByRole("switch", { name: "Translucent sidebar" });
-    expect(control).toHaveAttribute("aria-checked", "true");
-    expect(control).toHaveAttribute("aria-describedby", "sidebar-material-description");
-    expect(document.getElementById("sidebar-material-description")).toHaveTextContent(
-      "Use the system sidebar material when available.",
+    const glass = screen.getByRole("group", { name: "Glass" });
+    expect(within(glass).getByRole("button", { name: "Subtle" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    await user.click(control);
-    expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMaterial: "opaque" });
+    await user.click(within(glass).getByRole("button", { name: "Off" }));
+    expect(onSettingsChange).toHaveBeenCalledWith({ sidebarMaterial: "opaque" });
 
     rerender(
       <SettingsView
@@ -538,16 +521,16 @@ describe("SettingsView", () => {
         search=""
         settings={{ ...defaultShellSettings(), sidebarMaterial: "opaque" }}
         sidebarVibrancySupported={false}
-        visibleSettings={["sidebar-material"]}
       />,
     );
-    const disabledTranslucency = screen.getByRole("switch", { name: "Translucent sidebar" });
-    expect(disabledTranslucency).toHaveAttribute("aria-checked", "false");
-    disabledTranslucency.focus();
-    await user.keyboard(" ");
+    const solid = screen.getByRole("group", { name: "Glass" });
+    expect(within(solid).getByRole("button", { name: "Off" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(solid).getByRole("button", { name: "Subtle" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMaterial: "system" });
   });
-
   it("toggles the sidebar's More row and says what it holds", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
@@ -564,7 +547,7 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
   });
 
-  it("selects subtle native vibrancy when translucency is enabled", async () => {
+  it("writes the chosen glass level to the theme's vibrancy", async () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);
     renderSettings({
@@ -582,16 +565,17 @@ describe("SettingsView", () => {
     });
     navigateTo("Appearance");
 
-    await user.click(screen.getByRole("switch", { name: "Translucent sidebar" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Strong" }),
+    );
 
     expect(applyPatch).toHaveBeenCalledWith({
       sidebarBackground: {
         ...DEFAULT_THEME_SETTINGS.sidebarBackground,
-        vibrancyMode: "subtle",
+        vibrancyMode: "strong",
       },
     });
   });
-
   it("writes each view's sidebar thread-row properties through the shell settings patch", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
@@ -686,14 +670,13 @@ describe("SettingsView", () => {
     });
   });
 
-  it("keeps saved On while exposing the generic effective opaque fallback note", () => {
-    const { container, rerender } = renderSettings({ visibleSettings: ["sidebar-material"] });
+  it("keeps a saved glass level while exposing the generic effective opaque fallback note", () => {
+    const { rerender } = renderSettings();
     navigateTo("Appearance");
 
-    expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(
+      within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Subtle" }),
+    ).toHaveAttribute("aria-pressed", "true");
     const note = screen.getByText(
       "Translucency is unavailable, so Octant is using an opaque sidebar.",
     );
@@ -710,47 +693,42 @@ describe("SettingsView", () => {
         search=""
         settings={{ ...defaultShellSettings(), sidebarMaterial: "opaque" }}
         sidebarVibrancySupported={false}
-        visibleSettings={["sidebar-material"]}
       />,
     );
     expect(
       screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
     ).not.toBeInTheDocument();
-    void container;
   });
-
-  it("only enables the workspace translucency switch once the sidebar itself is translucent", async () => {
+  it("only enables Glass cards once the glass itself is on", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();
     renderSettings({
       onSettingsChange,
       settings: { ...defaultShellSettings(), workspaceMaterial: "opaque" },
-      visibleSettings: ["sidebar-material", "workspace-material"],
     });
     navigateTo("Appearance");
 
-    const control = screen.getByRole("switch", { name: "Translucent workspace" });
+    const control = screen.getByRole("switch", { name: "Glass cards" });
     expect(control).toHaveAttribute("aria-checked", "false");
     expect(control).not.toHaveAttribute("aria-disabled", "true");
     await user.click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ workspaceMaterial: "system" });
   });
 
-  it("disables the workspace translucency switch and explains why when the sidebar is opaque", () => {
+  it("disables Glass cards and explains why when the glass is off", () => {
     renderSettings({
       settings: {
         ...defaultShellSettings(),
         sidebarMaterial: "opaque",
         workspaceMaterial: "system",
       },
-      visibleSettings: ["sidebar-material", "workspace-material"],
     });
     navigateTo("Appearance");
 
-    const control = screen.getByRole("switch", { name: "Translucent workspace" });
+    const control = screen.getByRole("switch", { name: "Glass cards" });
     expect(control).toHaveAttribute("aria-disabled", "true");
     expect(control).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Turn on Translucent sidebar first.")).toBeInTheDocument();
+    expect(screen.getByText("Turn on Glass first.")).toBeInTheDocument();
   });
 
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
@@ -938,9 +916,9 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("group", { name: "Mode switcher" })).not.toBeInTheDocument();
   });
 
-  it("changes the project view switcher presentation", () => {
+  it("changes the project view switcher presentation from Code settings", () => {
     const { props } = renderSettings();
-    navigateTo("Appearance");
+    navigateTo("Code");
 
     fireEvent.click(
       within(screen.getByRole("group", { name: "Project view switcher" })).getByRole("button", {
@@ -981,6 +959,35 @@ describe("SettingsView", () => {
     ).toHaveFocus();
   });
 
+  it("deep-links search results into the theme editor and to Reset appearance", () => {
+    const themeController = {
+      draft: DEFAULT_THEME_SETTINGS,
+      applyPatch: vi.fn(async () => true),
+      reset: vi.fn(async () => true),
+    } as never;
+    const { unmount } = renderSettings({
+      initialDeepLink: { section: "appearance", setting: "appearance.scheme.light-preset" },
+      themeController,
+    });
+    expect(screen.getByRole("combobox", { name: "Light preset" })).toHaveFocus();
+    unmount();
+
+    renderSettings({
+      initialDeepLink: { section: "appearance", setting: "reset-appearance" },
+      themeController,
+    });
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveFocus();
+  });
+
+  it("sends a link to a setting's old page to the page it moved to", () => {
+    renderSettings({ initialDeepLink: { section: "general", setting: "marketplace-fetches" } });
+    expect(screen.getByRole("button", { name: "Skills & Extensions" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("switch", { name: /marketplace/i })).toHaveFocus();
+  });
+
   it("deep-links to the Background setting and focuses its source control", () => {
     renderSettings({
       initialDeepLink: { section: "appearance", setting: "app-background" },
@@ -1006,14 +1013,13 @@ describe("SettingsView", () => {
         onSearchChange={vi.fn()}
         onSettingsChange={vi.fn()}
         onDeepLinkApplied={onDeepLinkApplied}
-        pendingDeepLink={{ section: "advanced", setting: "reset-layout" }}
+        pendingDeepLink={{ section: "host", setting: "reset-layout" }}
         search=""
         settings={defaultShellSettings()}
         sidebarVibrancySupported
-        visibleSettings={["reset-layout"]}
       />,
     );
-    expect(screen.getByRole("heading", { name: "Advanced" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Host" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
     expect(
       screen.getByText(/Restores the current mode's pane arrangement.*Threads and data are kept/i),
@@ -1023,7 +1029,7 @@ describe("SettingsView", () => {
 
   it("hides native-only controls in browser mode and shows them in native mode", () => {
     const { rerender } = renderSettings({ nativeBoundsAvailable: false });
-    navigateTo("Advanced");
+    navigateTo("Host");
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Reset native window bounds" }),
@@ -1039,10 +1045,9 @@ describe("SettingsView", () => {
         search=""
         settings={defaultShellSettings()}
         sidebarVibrancySupported
-        visibleSettings={["reset-layout", "reset-window-bounds"]}
       />,
     );
-    navigateTo("Advanced");
+    navigateTo("Host");
     expect(screen.getByRole("button", { name: "Reset native window bounds" })).toBeInTheDocument();
   });
 
@@ -1192,13 +1197,13 @@ describe("SettingsView", () => {
     expect(providerUsageLimitsClient.list).toHaveBeenCalledOnce();
   });
 
-  it("hides the diagnostics export control in Advanced when no client is provided", () => {
+  it("hides the diagnostics export control on Host when no client is provided", () => {
     renderSettings();
-    navigateTo("Advanced");
+    navigateTo("Host");
     expect(screen.queryByRole("button", { name: /export diagnostics/i })).not.toBeInTheDocument();
   });
 
-  it("exports diagnostics from the Advanced section when a client is provided", async () => {
+  it("exports diagnostics from the Host page when a client is provided", async () => {
     const diagnosticsExportClient = {
       exportEvidence: vi.fn(async () => ({
         kind: "exported" as const,
@@ -1233,7 +1238,7 @@ describe("SettingsView", () => {
       })),
     };
     renderSettings({ diagnosticsExportClient: diagnosticsExportClient as never });
-    navigateTo("Advanced");
+    navigateTo("Host");
     const exportButton = screen.getByRole("button", { name: /export diagnostics/i });
     expect(exportButton).toBeDisabled();
 
@@ -1402,15 +1407,6 @@ describe("SettingsView", () => {
         search=""
         settings={settingsPastFirstRun()}
         sidebarVibrancySupported={false}
-        visibleSettings={[
-          "enable-chat",
-          "enable-work",
-          "sidebar-width",
-          "sidebar-material",
-          "mode-switcher",
-          "reset-layout",
-          "reset-window-bounds",
-        ]}
       />,
     );
 
@@ -1427,9 +1423,7 @@ describe("SettingsView", () => {
     expect(screen.getByRole("slider", { name: "Sidebar width" })).toHaveClass(
       "settings-view__range",
     );
-    expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveClass(
-      "octant-switch",
-    );
+    expect(screen.getByRole("switch", { name: "Glass cards" })).toHaveClass("octant-switch");
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
     expect(within(modeSwitcher).getByRole("button", { name: "Dropdown" })).toHaveAttribute(
       "aria-pressed",
@@ -1437,7 +1431,7 @@ describe("SettingsView", () => {
     );
     fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
     expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "buttons" });
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(screen.getByRole("button", { name: "Host" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
       "settings-view__action",
     );
@@ -1446,7 +1440,7 @@ describe("SettingsView", () => {
     );
   });
 
-  it("resets the active mode layout from Advanced settings", async () => {
+  it("resets the active mode layout from Host settings", async () => {
     const user = userEvent.setup();
     const onResetLayout = vi.fn();
     render(
@@ -1459,10 +1453,9 @@ describe("SettingsView", () => {
         search=""
         settings={settingsPastFirstRun()}
         sidebarVibrancySupported={false}
-        visibleSettings={["reset-layout"]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(screen.getByRole("button", { name: "Host" }));
     await user.click(screen.getByRole("button", { name: "Reset active mode layout" }));
     expect(onResetLayout).toHaveBeenCalledOnce();
   });

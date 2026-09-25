@@ -46,7 +46,7 @@ const JOB_LABELS: Readonly<Record<NativeHarnessJob, string>> = {
 };
 
 /**
- * Settings → Agents → Model slots. A slot is an ordered list of models; jobs
+ * Settings → Octant Harness → Model slots. A slot is an ordered list of models; jobs
  * map onto slots. Every edit round-trips through the host with the version it
  * was read at, so two editors cannot silently overwrite each other.
  */

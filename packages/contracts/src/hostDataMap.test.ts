@@ -66,7 +66,7 @@ const populated = {
     ],
   },
   related: [
-    { kind: "thread-retention", settings: { section: "host", setting: "thread-retention" } },
+    { kind: "thread-retention", settings: { section: "data", setting: "thread-retention" } },
     {
       kind: "thread-export",
       guidance: "Export a thread from that thread's menu. This map does not export or purge.",

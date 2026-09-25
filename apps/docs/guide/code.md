@@ -210,7 +210,7 @@ the thread a message. A thread that is waiting on you cannot be snoozed.
 Completed threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive completed
 threads**. Archiving keeps every thread and its history; only a confirmed purge
-in **Settings › Host** deletes anything.
+in **Settings › Data & privacy** deletes anything.
 
 ## Next steps
 

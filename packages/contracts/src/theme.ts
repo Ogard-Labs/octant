@@ -249,10 +249,13 @@ export const ThemeSettings = Schema.Struct({
   mode: ThemeMode,
   lightPresetId: Schema.optional(ThemePresetId),
   darkPresetId: Schema.optional(ThemePresetId),
-  density: ThemeDensity,
-  translucency: ThemeTranslucency,
-  fontSmoothing: ThemeFontSmoothing,
-  timestampFormat: ThemeTimestampFormat,
+  // Retired: nothing ever read these four. They stay optional so journal
+  // events and projection rows written while they existed still replay, and
+  // new settings no longer carry them.
+  density: Schema.optional(ThemeDensity),
+  translucency: Schema.optional(ThemeTranslucency),
+  fontSmoothing: Schema.optional(ThemeFontSmoothing),
+  timestampFormat: Schema.optional(ThemeTimestampFormat),
   typography: ThemeTypography,
   semanticOverrides: ThemeSemanticOverrides,
   sidebarBackground: SidebarBackground,
@@ -269,10 +272,6 @@ export type ThemeSettings = typeof ThemeSettings.Type;
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",
-  density: "comfortable",
-  translucency: "translucent",
-  fontSmoothing: "auto",
-  timestampFormat: "24h",
   typography: {
     ui: {
       family:
@@ -405,10 +404,6 @@ export const DeleteSidebarBackground = Schema.Struct({
 export type DeleteSidebarBackground = typeof DeleteSidebarBackground.Type;
 
 export const decodeThemeMode = Schema.decodeUnknownSync(ThemeMode);
-export const decodeThemeDensity = Schema.decodeUnknownSync(ThemeDensity);
-export const decodeThemeTranslucency = Schema.decodeUnknownSync(ThemeTranslucency);
-export const decodeThemeTimestampFormat = Schema.decodeUnknownSync(ThemeTimestampFormat);
-export const decodeThemeFontSmoothing = Schema.decodeUnknownSync(ThemeFontSmoothing);
 export const decodeThemePresetId = Schema.decodeUnknownSync(ThemePresetId);
 export const decodeThemeTokenRole = Schema.decodeUnknownSync(ThemeTokenRole);
 export const decodeThemeHexColor = Schema.decodeUnknownSync(ThemeHexColor);

@@ -77,7 +77,7 @@ party who must be able to answer ordinary controller questions about:
 | Diagnostics export            | Local redacted evidence packet; not an upload channel                                          |
 | Thread export                 | Host-authoritative `octant.thread-bundle/1` cut of one thread the caller may already open      |
 | Thread retention and purge    | Explicit, confirmed erasure of named threads, including journal events and derived projections |
-| Settings → Host data map      | Read-only map of what this host stores and where                                               |
+| Data map (Data & privacy)     | Read-only map of what this host stores and where                                               |
 
 Audit for collaboration is the journal itself: mutations carry a
 principal-bearing actor. Layer 2 requires those actors to name a principal
@@ -105,7 +105,7 @@ a tombstone. A remote principal cannot set a window or purge. SQLite free
 pages may retain bytes until vacuum; that residual is reported. See
 decision 0035.
 
-**Data map.** Settings → Host shows a read-only map of journal, projections,
+**Data map.** Settings → Data & privacy shows a read-only map of journal, projections,
 artifacts, credential references (never values), caches, and outbound
 categories. It does not purge or export; those actions stay on retention
 and thread export.

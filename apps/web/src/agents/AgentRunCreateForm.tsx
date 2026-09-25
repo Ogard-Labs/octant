@@ -53,8 +53,8 @@ export function AgentRunCreateForm(props: {
   if (props.posture === "off") {
     return (
       <p className="agent-run-create-form__disabled" role="status">
-        Subagent creation posture is Off. Turn on Ask or Automatic in Settings → Agents to create a
-        child.
+        Helper agents are off. Choose another option under Settings → Octant Harness → Helper agents
+        to create a child.
       </p>
     );
   }

@@ -124,7 +124,7 @@ the package. An empty query is not sent.
 Those requests disclose the query you typed, the IP address, and ordinary
 HTTP metadata. They do not send the journal, credentials, or thread
 contents. Turn marketplace fetches off in
-**Settings → General → Marketplace**; off means no request is made and
+**Settings → Skills & Extensions → Marketplace**; off means no request is made and
 catalog search stays with the in-memory curated entries.
 
 Local disk imports and `.agents/skills/` discovery do not contact a

@@ -396,8 +396,10 @@ describe("ExtensionsSettingsView", () => {
 
     await waitFor(() => expect(screen.getByText("Project review")).toBeInTheDocument());
     expect(screen.getByText("Global review")).toBeInTheDocument();
-    expect(screen.getByText("Project skill")).toBeInTheDocument();
-    expect(screen.getByText("User skill")).toBeInTheDocument();
+    // The row's second line says where it came from and the one step it is
+    // waiting on, instead of a separate status column.
+    expect(screen.getByText("Project skill · Needs review")).toBeInTheDocument();
+    expect(screen.getByText("User skill · Needs review")).toBeInTheDocument();
     expect(screen.queryByText("Project skills · parent 1")).toBeNull();
     expect(screen.queryByText("User-global · ~/.agents/skills")).toBeNull();
     expect(screen.queryByText(String(projectSkillId))).toBeNull();
@@ -405,10 +407,6 @@ describe("ExtensionsSettingsView", () => {
     expect(screen.getByRole("status", { name: "Standalone skill summary" })).toHaveTextContent(
       "2 need review",
     );
-    for (const state of screen.getAllByText("Needs review")) {
-      expect(state).toHaveClass("extensions-settings__state-label");
-      expect(state).not.toHaveClass("sr-only");
-    }
     expect(screen.queryByText("Blocked — Untrusted")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show details for Project review" }));
     expect(screen.getByText("Project skills · parent 1")).toBeVisible();
@@ -496,8 +494,9 @@ describe("ExtensionsSettingsView", () => {
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
 
-    const enable = await screen.findByRole("button", { name: "Enable Review helper" });
-    expect(enable).toBeDisabled();
+    const enable = await screen.findByRole("switch", { name: "Enable Review helper" });
+    expect(enable).toHaveAttribute("aria-checked", "false");
+    expect(enable).toHaveAttribute("data-disabled");
     fireEvent.click(enable);
     expect(c.calls.some((command) => command.kind === "set-skill-desired")).toBe(false);
   });
@@ -512,8 +511,9 @@ describe("ExtensionsSettingsView", () => {
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
 
-    const disable = await screen.findByRole("button", { name: "Disable Review helper" });
-    expect(disable).not.toBeDisabled();
+    const disable = await screen.findByRole("switch", { name: "Enable Review helper" });
+    expect(disable).toHaveAttribute("aria-checked", "true");
+    expect(disable).not.toHaveAttribute("data-disabled");
     fireEvent.click(disable);
     await waitFor(() =>
       expect(
@@ -522,6 +522,20 @@ describe("ExtensionsSettingsView", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it("says why a skill switched on is not running when the host prohibits it", async () => {
+    const c = client({
+      snapshot: standaloneSkillSnapshot({
+        desiredEnabled: true,
+        effectiveState: { kind: "blocked", reason: "host-prohibited" },
+      }),
+    });
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    const toggle = await screen.findByRole("switch", { name: "Enable Review helper" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/Host prohibited/)).toBeVisible();
   });
 
   it("shows an honest blocked state and reason when a component is not effective", async () => {
@@ -1732,7 +1746,9 @@ describe("ExtensionsSettingsView", () => {
     render(<ExtensionsSettingsView client={c} marketplaceFetchesEnabled={false} scope={scope} />);
     fireEvent.click(await findViewButton(/marketplace/i));
     expect(
-      screen.getByText(/Marketplace fetches are off in Settings → General → Marketplace/i),
+      screen.getByText(
+        /Marketplace fetches are off in Settings → Skills & Extensions → Marketplace/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /search skills/i })).toBeDisabled();
     expect(c.calls.map((command) => command.kind)).not.toContain("search-skills");

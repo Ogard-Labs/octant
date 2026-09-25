@@ -4,9 +4,10 @@ import { createSettingsRegistry, settingId, type SettingsRegistry } from "./regi
  * Durable Octant Settings registry.
  *
  * Only sections with working content are registered — there is no placeholder
- * scaffolding for future sections (Work remains absent until it has real
- * authoritative behavior). Section ids match the {@link SettingsSectionId}
- * information architecture in `@octant/contracts`.
+ * scaffolding for future sections, so a mode with nothing of its own to
+ * configure (Work) has no page. Section ids match the {@link SettingsSectionId}
+ * information architecture in `@octant/contracts`, and the order here is the
+ * order the navigation lists them in within each group.
  *
  * Opaque sections (Chat, Code, Providers & Models) carry section-level search
  * keywords but no individual settings, because their content is composed as an
@@ -56,13 +57,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
-        {
-          id: settingId("marketplace-fetches"),
-          label: "Marketplace fetches",
-          scope: "host",
-          keywords:
-            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
-        },
       ],
     },
     {
@@ -84,14 +78,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Appearance",
       scope: "app",
       keywords:
-        "appearance theme sidebar translucency layout width material background mode switcher",
+        "appearance theme sidebar glass translucency layout width material background mode switcher reading transcript",
       settings: [
-        {
-          id: settingId("stream-replies"),
-          label: "Stream replies",
-          scope: "app",
-          keywords: "stream streaming answer response finished partial",
-        },
         {
           id: settingId("sidebar-width"),
           label: "Sidebar width",
@@ -112,13 +100,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("sidebar-material"),
-          label: "Translucent sidebar",
+          label: "Glass",
           scope: "app",
-          keywords: "translucent sidebar material vibrancy system opaque",
+          keywords:
+            "glass translucent translucency sidebar material vibrancy subtle strong frosted system opaque",
         },
         {
           id: settingId("workspace-material"),
-          label: "Translucent workspace",
+          label: "Glass cards",
           scope: "app",
           keywords: "translucent workspace window material vibrancy glass system opaque",
         },
@@ -127,12 +116,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Mode switcher",
           scope: "app",
           keywords: "mode switcher compact buttons dropdown sidebar navigation",
-        },
-        {
-          id: settingId("project-view-switcher"),
-          label: "Project view switcher",
-          scope: "app",
-          keywords: "project view switcher icons dropdown sidebar code",
         },
         {
           id: settingId("transcript-text-size"),
@@ -216,8 +199,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("sidebar-background"),
           label: "Sidebar background",
           scope: "app",
-          keywords:
-            "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
+          keywords: "sidebar background preset gradient overlay color opacity",
         },
         {
           id: settingId("app-background"),
@@ -227,46 +209,52 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
         },
         {
-          id: settingId("theme-mode"),
-          label: "Theme mode",
+          id: settingId("appearance.scheme.light-preset"),
+          label: "Light preset",
           scope: "app",
-          keywords: "system light dark theme preset octant",
+          keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
-          id: settingId("theme-preset"),
-          label: "Theme preset",
+          id: settingId("appearance.scheme.dark-preset"),
+          label: "Dark preset",
           scope: "app",
-          keywords: "preset octant palette",
+          keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
-          id: settingId("ui-typography"),
-          label: "UI typography",
+          id: settingId("appearance.typography.ui.family"),
+          label: "Interface font",
           scope: "app",
-          keywords: "font family size prose interface",
+          keywords: "interface typography font family size prose ui",
         },
         {
-          id: settingId("editor-typography"),
-          label: "Editor typography",
+          id: settingId("appearance.typography.editor.family"),
+          label: "Code font",
           scope: "app",
-          keywords: "editor font code line height ligatures",
+          keywords: "code editor typography font line height ligatures",
         },
         {
-          id: settingId("terminal-typography"),
-          label: "Terminal typography",
+          id: settingId("appearance.typography.terminal.family"),
+          label: "Terminal font",
           scope: "app",
-          keywords: "terminal font code line height ligatures",
+          keywords: "terminal typography font line height ligatures",
         },
         {
-          id: settingId("theme-accessibility"),
-          label: "Theme accessibility",
+          id: settingId("appearance.accessibility.increased-contrast"),
+          label: "Accessibility",
           scope: "app",
-          keywords: "contrast motion transparency accessibility",
+          keywords: "accessibility increased contrast reduced motion reduced transparency",
         },
         {
-          id: settingId("theme-import-export"),
-          label: "Theme import and export",
+          id: settingId("appearance.theme-import-export"),
+          label: "Import or export theme",
           scope: "app",
-          keywords: "import export json vscode safe",
+          keywords: "theme json import export vscode safe",
+        },
+        {
+          id: settingId("reset-appearance"),
+          label: "Reset appearance",
+          scope: "app",
+          keywords: "reset appearance defaults theme restore",
         },
       ],
     },
@@ -289,15 +277,22 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Chat",
       scope: "app",
       keywords:
-        "chat defaults provider model web research backend routing searxng base url personality instructions new threads",
-      settings: [],
+        "chat defaults provider model fallback backup web research backend routing searxng base url personality instructions new threads",
+      settings: [
+        {
+          id: settingId("stream-replies"),
+          label: "Stream replies",
+          scope: "app",
+          keywords: "stream streaming answer response finished partial",
+        },
+      ],
     },
     {
       id: "code",
       label: "Code",
       scope: "app",
       keywords:
-        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads",
+        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed",
       settings: [
         {
           id: settingId("code-default-folder-threads"),
@@ -306,10 +301,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "default folder projectless no project git repository",
         },
         {
-          id: settingId("open-in-applications"),
-          label: "Open in applications",
+          id: settingId("project-view-switcher"),
+          label: "Project view switcher",
           scope: "app",
-          keywords: "open in vscode cursor zed finder terminal ghostty xcode detected installed",
+          keywords: "project view switcher icons dropdown sidebar code",
+        },
+      ],
+    },
+    {
+      id: "providers",
+      label: "Providers & Models",
+      scope: "app",
+      keywords:
+        "providers models provider type opencode codex kimi code acp login claude agent sdk subscription anthropic openai-compatible http api-key api key base url endpoint authentication bearer protocol preference manual model ids permissions permission persistence runtime capabilities connection azure ai foundry deployment",
+      settings: [],
+    },
+    {
+      id: "harness",
+      label: "Octant Harness",
+      scope: "app",
+      keywords:
+        "octant harness native agent loop model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips endpoint openai-compatible anthropic-compatible ollama azure agents subagents helper child creation posture off ask automatic bounded hierarchy",
+      settings: [
+        {
+          id: settingId("subagent-creation-posture"),
+          label: "Helper agents",
+          scope: "app",
+          keywords:
+            "helper agents subagents child runs creation posture off ask automatic delegate add agent dock",
         },
       ],
     },
@@ -403,99 +422,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "providers",
-      label: "Providers & Models",
-      scope: "app",
-      keywords:
-        "providers models provider type opencode codex kimi code acp login claude agent sdk subscription anthropic openai-compatible http api-key api key base url endpoint authentication bearer protocol preference manual model ids permissions permission persistence runtime capabilities connection azure ai foundry deployment",
-      settings: [],
-    },
-    {
-      id: "agents",
-      label: "Agents",
-      scope: "app",
-      keywords:
-        "agents subagents child creation posture off ask automatic bounded hierarchy cancel authority",
-      settings: [],
-    },
-    {
-      id: "harness",
-      label: "Octant Harness",
-      scope: "app",
-      keywords:
-        "octant harness native agent loop model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips endpoint openai-compatible anthropic-compatible ollama azure",
-      settings: [],
-    },
-    {
       id: "skills",
       label: "Skills & Extensions",
       scope: "host",
       keywords:
         "skills extensions marketplace installed plugin package trust enable component desired effective provenance compatibility quarantine draining broken unavailable interrupted waiting offline failure mcp skill",
-      settings: [],
-    },
-    {
-      id: "usage",
-      label: "Usage",
-      scope: "host",
-      keywords:
-        "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
-      settings: [],
-    },
-    {
-      id: "remote-access",
-      label: "Remote access",
-      scope: "host",
-      keywords:
-        "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device browser phone revoke rename origin port exposure",
       settings: [
         {
-          id: settingId("remote-listener"),
-          label: "Remote listener",
+          id: settingId("marketplace-fetches"),
+          label: "Marketplace fetches",
           scope: "host",
           keywords:
-            "remote listener enable disable restart hostname port origin certificate tls https lan tailscale exposure",
-        },
-        {
-          id: settingId("remote-pairing"),
-          label: "Pair a device",
-          scope: "host",
-          keywords: "pair pairing link code ticket approve deny comparison browser phone request",
-        },
-        {
-          id: settingId("remote-devices"),
-          label: "Paired devices",
-          scope: "host",
-          keywords: "paired devices inventory rename revoke revoke all browser phone",
-        },
-      ],
-    },
-    {
-      id: "host",
-      label: "Host",
-      scope: "host",
-      keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities backup recovery restore snapshot diagnostics headless automation notifications push waiting approval failure completion apns fcm retention purge thread journal data map privacy location projections artifacts credentials keychain caches",
-      settings: [
-        {
-          id: settingId("data-map"),
-          label: "Data map",
-          scope: "host",
-          keywords:
-            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
-        },
-        {
-          id: settingId("automation-notifications"),
-          label: "Automation notifications",
-          scope: "host",
-          keywords:
-            "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
-        },
-        {
-          id: settingId("thread-retention"),
-          label: "Thread retention",
-          scope: "host",
-          keywords: "thread retention window purge journal erase delete history",
+            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
         },
       ],
     },
@@ -516,11 +454,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [],
     },
     {
-      id: "advanced",
-      label: "Advanced",
-      scope: "app",
-      keywords: "advanced recovery reset diagnostics workspace layout window bounds",
+      id: "host",
+      label: "Host",
+      scope: "host",
+      keywords:
+        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
       settings: [
+        {
+          id: settingId("host-automation-notifications"),
+          label: "Automation notifications",
+          scope: "host",
+          keywords:
+            "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
+        },
         {
           id: settingId("reset-layout"),
           label: "Reset active mode layout",
@@ -542,6 +488,58 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
         },
       ],
+    },
+    {
+      id: "data",
+      label: "Data & privacy",
+      scope: "host",
+      keywords:
+        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
+      settings: [
+        {
+          id: settingId("data-map"),
+          label: "Data map",
+          scope: "host",
+          keywords:
+            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
+        },
+        {
+          id: settingId("thread-retention"),
+          label: "Thread retention",
+          scope: "host",
+          keywords: "thread retention window purge journal erase delete history",
+        },
+      ],
+    },
+    {
+      id: "remote-access",
+      label: "Remote access",
+      scope: "host",
+      keywords:
+        "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
+      settings: [
+        {
+          id: settingId("remote-listener"),
+          label: "Remote listener",
+          scope: "host",
+          keywords:
+            "remote listener enable disable restart hostname port origin certificate tls https lan tailscale exposure",
+        },
+        {
+          id: settingId("remote-pairing"),
+          label: "Pair a device",
+          scope: "host",
+          keywords: "pair pairing link code ticket approve deny comparison browser phone request",
+        },
+      ],
+    },
+    {
+      id: "usage",
+      label: "Usage",
+      scope: "host",
+      keywords:
+        "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
+      settings: [],
     },
   ],
 });
