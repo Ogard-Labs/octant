@@ -93,7 +93,7 @@ export type { CodeConversationMessage, CodeProviderRequest, CodeReadCursorStore 
 export { createCodeReadCursorStore };
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
-export type CodeTurnStatus = "idle" | "sending" | "running" | "waiting" | "failed";
+export type CodeTurnStatus = "idle" | "sending" | "running" | "waiting" | "interrupted" | "failed";
 
 /** What completing, reopening, snoozing, or waking a thread answered. */
 export type CodeThreadRestOutcome =
@@ -1040,7 +1040,13 @@ export function useCodeController(options: CodeControllerOptions) {
                         setTurnError(undefined);
                       }
                     } else {
-                      setTurnStatus(terminalState === "waiting" ? "waiting" : "failed");
+                      setTurnStatus(
+                        terminalState === "waiting"
+                          ? "waiting"
+                          : terminalState === "interrupted"
+                            ? "interrupted"
+                            : "failed",
+                      );
                       // The reloaded transcript already carries this turn's
                       // row, so the callout above it would only repeat it.
                       setTurnError(
@@ -2024,10 +2030,13 @@ export function useCodeController(options: CodeControllerOptions) {
           status: "waiting" | "interrupted" | "failed",
           message: string,
         ) => {
-          setTurnStatus(status === "waiting" ? "waiting" : "failed");
+          setTurnStatus(
+            status === "waiting" ? "waiting" : status === "interrupted" ? "interrupted" : "failed",
+          );
           if (status !== "waiting") setProviderRequests([]);
-          // The same sentence lands on this turn's assistant row below.
-          setTurnError(message, { inTranscript: true });
+          // The same sentence lands on this turn's assistant row below when
+          // the provider did not already leave a partial reply.
+          setTurnError(message, { inTranscript: assistantText.trim().length === 0 });
           restoreFailedPrompt();
           setConversation((current) =>
             current.map((entry) =>

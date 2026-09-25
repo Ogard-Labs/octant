@@ -2043,12 +2043,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ),
     )
       .catch(async (error: unknown) => {
-        if (active.state !== "running") return;
+        // A cancelled turn already reads `interrupted` here, but the runner
+        // may still have died without journaling that: a turn with no
+        // terminal frame stays Working in every client forever.
+        if (active.state !== "running" && active.lastPersistedState !== undefined) return;
+        const outcome = active.state === "interrupted" ? "interrupted" : "failed";
         await this.#recordChangedFiles(active);
         try {
-          this.#persistOutcome(active, "failed", evidenceCapacityFailure(error));
+          this.#persistOutcome(
+            active,
+            outcome,
+            outcome === "interrupted"
+              ? { category: "failed", message: "Code turn was cancelled." }
+              : evidenceCapacityFailure(error),
+          );
         } catch {
-          active.state = "failed";
+          active.state = outcome;
         }
       })
       .finally(() => {

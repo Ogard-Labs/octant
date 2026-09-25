@@ -190,12 +190,19 @@ export class CodeTurnRunner {
       let responseText = "";
       const answeredToolRequestIds = new Set<string>();
 
+      // The outcome write must survive losing the settlement race: after a
+      // cancel, the abort path and the provider's own interrupted event both
+      // reach here within milliseconds, and the one that claims `outcome`
+      // first is the loser that `raceFirst` interrupts. If its write can be
+      // interrupted, the turn ends without a terminal frame.
       const persistOutcome = (next: CodeTurnOutcome, failure?: CodeTurnFailure) =>
-        Effect.gen(function* () {
-          if (outcome === next) return;
-          outcome = next;
-          yield* input.persistOutcome(next, failure);
-        });
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            if (outcome === next) return;
+            outcome = next;
+            yield* input.persistOutcome(next, failure);
+          }),
+        );
 
       const fail = (next: Exclude<CodeTurnOutcome, "completed">, message: string) =>
         Effect.gen(function* () {
