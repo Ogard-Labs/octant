@@ -1705,6 +1705,30 @@ html[data-octant-native-host="true"]
   }
 }
 
+/* On the card layout the workspace layer is the back, not the workspace.
+   The translucent-workspace fallback above paints it the card colour, which
+   erased the gutters between the cards; there the back keeps the opaque
+   sidebar colour and the cards take the workspace fill. */
+@media (prefers-reduced-transparency: reduce) and (min-width: 681px) {
+  .shell--workspace-material-translucent.shell-frame > .workspace-layer,
+  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+    > .workspace-layer,
+  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+    > .workspace-layer,
+  html[data-octant-native-host="true"]
+    .shell-frame.shell--workspace-material-translucent
+    > .workspace-layer {
+    background: var(--octant-sidebar-opaque);
+  }
+
+  .shell--workspace-material-translucent.shell-frame
+    > .workspace-layer
+    > :is(.primary-workspace-layer, .right-utility-dock, .bottom-utility-panel) {
+    background: var(--oct-bg);
+    backdrop-filter: none;
+  }
+}
+
 @media (prefers-contrast: more) {
   .shell-frame > .window-chrome,
   .shell-frame > .sidebar {
