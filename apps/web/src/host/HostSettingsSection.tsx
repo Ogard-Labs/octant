@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type {
@@ -177,7 +177,7 @@ export function HostSettingsSection({
         <SettingsState kind="loading">Loading host status…</SettingsState>
         {/* A status read that never settles is itself a sign of a host in
             trouble, when reset and diagnostics are most wanted. */}
-        {maintenance}
+        <Fragment key="maintenance">{maintenance}</Fragment>
       </section>
     );
   }
@@ -198,7 +198,7 @@ export function HostSettingsSection({
         </OctantButton>
         {/* Resetting a layout or exporting diagnostics is most wanted when the
             host is misbehaving, so an unreachable host must not hide them. */}
-        {maintenance}
+        <Fragment key="maintenance">{maintenance}</Fragment>
       </section>
     );
   }
@@ -378,7 +378,11 @@ export function HostSettingsSection({
         <FederatedHostsLifecyclePanel lifecycle={hostFederationLifecycle} />
       )}
 
-      {maintenance}
+      {/* Keyed so the same controls survive the page moving between loading,
+          error, and loaded: unkeyed, they sat at a different position in each
+          and were remounted, so a click that landed as status arrived went to
+          a button that was already gone. */}
+      <Fragment key="maintenance">{maintenance}</Fragment>
     </section>
   );
 }
