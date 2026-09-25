@@ -981,6 +981,8 @@ mechanisms are:
   and Station launch paths are wired and revalidated.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
+  Each adapter turns its provider's own subagent feature off, because a child
+  the provider starts itself runs outside the journal and the approval path.
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route

@@ -52,6 +52,12 @@ provider/model/reasoning. Mixed-vendor routing is **opt-in and disabled by
 default**; enabling it opens role-card setup for Research, Implementation,
 and Review, with advanced rules behind an **Advanced** disclosure.
 
+A provider's own subagent feature stays off inside Octant, because a child it
+starts itself would run where Octant cannot show it or answer its approvals.
+Claude, OpenCode, and Devin turn theirs off through their own settings. Codex
+starts with its multi-agent features and `agents.enabled` switched off for
+that run only; your `CODEX_HOME` and `config.toml` are left as they are.
+
 ## Posture and clamps
 
 Creation postures are **Off**, **Ask** (the default), and **Automatic within

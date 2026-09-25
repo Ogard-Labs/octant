@@ -230,6 +230,46 @@ function parseCodexVersion(output: string): string | undefined {
   return candidate === undefined ? undefined : parseSemVer(candidate);
 }
 
+/** A release, not its prereleases: `0.145.0-alpha.1` predates `0.145.0`. */
+function isAtLeastRelease(version: string, floor: readonly [number, number, number]): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)(-)?/.exec(version);
+  if (match === null) return false;
+  const core = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (const [index, part] of core.entries()) {
+    const floorPart = floor[index] ?? 0;
+    if (part !== floorPart) return part > floorPart;
+  }
+  return match[4] === undefined;
+}
+
+/**
+ * Octant keeps provider-native subagents off: a Codex child runs on its own
+ * thread, which the driver neither shows nor answers approvals for, so a child
+ * waiting on one would hang the turn out of sight. The overrides ride on the
+ * command line so the user's `CODEX_HOME` and `config.toml` stay untouched and
+ * every thread this process starts or resumes inherits them.
+ *
+ * Measured against codex-cli 0.155.1: the model catalog declares a
+ * multi-agent version per model, and that turns the collaboration tools on
+ * even with both feature flags off. Only `agents.enabled = false` outranks it,
+ * and only while `multi_agent_v2` stays off, since that feature outranks
+ * `agents.enabled` in turn. Before 0.145.0 the feature flags alone decided,
+ * and `[agents]` was a table of role definitions there, so `agents.enabled`
+ * would parse as a role and refuse the whole config.
+ */
+export function codexAppServerArgs(version: string): readonly string[] {
+  return [
+    "app-server",
+    "--listen",
+    "stdio://",
+    "-c",
+    "features.multi_agent=false",
+    "-c",
+    "features.multi_agent_v2=false",
+    ...(isAtLeastRelease(version, [0, 145, 0]) ? ["-c", "agents.enabled=false"] : []),
+  ];
+}
+
 export function sanitizeCodexEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(environment).filter(
@@ -472,7 +512,7 @@ function acquireCodexAppServer(
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedCodexConnection, ProviderFailure> {
   return Effect.async<ManagedCodexConnection, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, ["app-server", "--listen", "stdio://"], {
+    const child = spawn(binaryPath, codexAppServerArgs(version), {
       detached: process.platform !== "win32",
       env: codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
       stdio: ["pipe", "pipe", "pipe"],
