@@ -2287,8 +2287,11 @@ function normalizedOperationEvent(
       kind: "input-requested",
       requestId: event.requestId,
       prompt:
-        boundProviderSummary(event.text ?? "Provider input requested.") ??
-        "Provider input requested.",
+        boundProviderText(
+          event.text ?? "Provider input requested.",
+          MAX_PROVIDER_INPUT_PROMPT_BYTES,
+          "",
+        ) ?? "Provider input requested.",
       options: [],
     };
   }
@@ -2409,6 +2412,7 @@ function normalizedOperationEvent(
 
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
 const SUMMARY_SUFFIX = " [truncated]";
+const MAX_PROVIDER_INPUT_PROMPT_BYTES = 8 * 1024;
 
 /**
  * `CodeOperationFailure` accepts at most

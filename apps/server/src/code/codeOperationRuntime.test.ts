@@ -883,7 +883,7 @@ describe("CodeOperationRuntime", () => {
         providerEvent({
           kind: "user-input-request",
           requestId: "question-2",
-          prompt: "Choose another",
+          prompt: "x".repeat(10_000),
           options: ["A", "B"],
         }),
       ),
@@ -895,6 +895,15 @@ describe("CodeOperationRuntime", () => {
       expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
       expect(frames.filter((frame) => frame.event.kind === "input-requested")).toHaveLength(2);
     });
+    const question = frames.find(
+      (frame): frame is OperationFrame & { event: { kind: "input-requested"; prompt: string } } =>
+        frame.event.kind === "input-requested" && frame.event.requestId === "question-2",
+    );
+    expect(question).toBeDefined();
+    expect(new TextEncoder().encode(question!.event.prompt).byteLength).toBeLessThanOrEqual(
+      8 * 1024,
+    );
+    expect(question!.event.prompt.length).toBeGreaterThan(2_048);
     fixture.setThread(
       decodeCodeThread({
         ...thread(),
