@@ -5322,6 +5322,7 @@ function LaunchedShell(
               threadQuery={zen.threadQuery}
               onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
               onAddBrowser={addZenBrowser}
+              onLoadThreads={() => void zen.refreshThreads("")}
               {...(zenProjectTerminalTarget === undefined
                 ? {}
                 : { projectTerminalTarget: zenProjectTerminalTarget })}

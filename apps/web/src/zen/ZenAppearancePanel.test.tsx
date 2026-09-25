@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import type { ZenAppearance } from "@octant/contracts/zen";
@@ -49,5 +49,58 @@ describe("the Zen appearance panel", () => {
     const disclosure = screen.getByText("Custom fill").closest("details");
     expect(disclosure).not.toBeNull();
     expect(disclosure).not.toHaveAttribute("open");
+  });
+
+  it("prints a picture ground through the chosen effect, keeping its dials", () => {
+    const onUpdateAppearance = vi.fn();
+    render(
+      <ZenAppearancePanel
+        appearance={{
+          ...appearance,
+          elementOpacity: 1,
+          background: { kind: "builtin", presetId: "lofoten-night", overlay: 20, fill: "cover" },
+        }}
+        onUpdateAppearance={onUpdateAppearance}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dither" }));
+    expect(onUpdateAppearance).toHaveBeenLastCalledWith({
+      dimming: 0,
+      elementOpacity: 1,
+      groundEffect: { kind: "dither", cell: 3, levels: 8 },
+    });
+  });
+
+  it("offers no effect on a ground that is not a picture, and says why", () => {
+    render(<ZenAppearancePanel appearance={{ ...appearance, background: { kind: "theme" } }} />);
+    expect(screen.getByRole("group", { name: "Zen ground effect" })).toHaveAttribute(
+      "data-disabled",
+    );
+    expect(screen.getByText(/has its own dither in Settings/)).toBeVisible();
+    expect(screen.queryByRole("slider", { name: "Zen effect pixel size" })).toBeNull();
+  });
+
+  it("darkens a picture with one dial that writes both the dimming and the overlay", () => {
+    const onUpdateAppearance = vi.fn();
+    const background = {
+      kind: "builtin",
+      presetId: "lofoten-night",
+      overlay: 20,
+      fill: "cover",
+    } as const;
+    render(
+      <ZenAppearancePanel
+        appearance={{ ...appearance, elementOpacity: 1, background }}
+        onUpdateAppearance={onUpdateAppearance}
+      />,
+    );
+    const dim = screen.getByRole("slider", { name: "Zen dimming" });
+    expect(dim).toHaveValue("20");
+    fireEvent.change(dim, { target: { value: "45" } });
+    expect(onUpdateAppearance).toHaveBeenLastCalledWith({
+      dimming: 45,
+      elementOpacity: 1,
+      background: { ...background, overlay: 45 },
+    });
   });
 });
