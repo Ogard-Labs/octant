@@ -1062,8 +1062,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
+      {/* Outside the desktop app the one row says this copy never updates
+          itself, so a heading promising how it updates contradicted it. */}
       <SettingsSection
-        description="Octant updates itself only when you ask it to, and never while work is running."
+        {...(props.hostBridge?.checkForAppUpdate === undefined
+          ? {}
+          : {
+              description:
+                "Octant updates itself only when you ask it to, and never while work is running.",
+            })}
         title="Updates"
       >
         <div className="setgroup">

@@ -5,12 +5,12 @@ import { joinDefaultFolderDisplayPath } from "./defaultFolderDisplay";
 import { DefaultFolderSettings } from "./DefaultFolderSettings";
 
 describe("DefaultFolderSettings", () => {
-  it("shows the host-reported folder, including a POSIX slash path", () => {
+  it("shows the host-reported folder from home so its own name fits, with the full path on hover", () => {
     render(
       <DefaultFolderSettings folder="/Users/ada/Documents/Octant" onFolderChange={() => true} />,
     );
 
-    const path = screen.getByText("/Users/ada/Documents/Octant");
+    const path = screen.getByText("~/Documents/Octant");
     expect(path).toBeVisible();
     expect(path).toHaveAttribute("title", "/Users/ada/Documents/Octant");
   });
