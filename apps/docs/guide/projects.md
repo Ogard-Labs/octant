@@ -39,7 +39,7 @@ Projects support the following operations:
 - **Search**: filter the current mode's sidebar threads by title or by their
   Project, Recents, or Unfiled label.
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
-- **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation; `octant project access <name> approval-gated` returns to the default.
+- **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation, or raise an existing thread to it; `octant project access <name> approval-gated` returns to the default.
 
 ## Project quick start
 

@@ -963,7 +963,8 @@ mechanisms are:
   decision with `octant project access <name> full-access` (journaled
   `project.code-access-changed@1`); a thread that asks for Full access for
   the Project's default then starts without a per-thread native
-  confirmation, while session-only Full access still needs one. A composer
+  confirmation, and an existing thread can be raised to it the same way,
+  while session-only Full access still needs one. A composer
   turn may
   request a narrower posture; the server clamps it to the thread's grant
   and records the posture the turn ran under. Compatible harnesses may

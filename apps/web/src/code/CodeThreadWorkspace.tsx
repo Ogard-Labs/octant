@@ -189,6 +189,12 @@ export interface CodeThreadWorkspaceProps {
     readonly expectedVersion: number;
     readonly permissionPersistence: "current-session" | "project-default";
   }) => Promise<CodeApprovalId | undefined>;
+  /**
+   * The Project's remembered Full-access decision, recorded on the host. Lets
+   * Full access be raised without the native confirmation, matching the
+   * server gate.
+   */
+  readonly projectRemembersFullAccess?: boolean;
   /** Positions the desktop-owned approval view beside this thread's composer. */
   readonly updateApprovalAnchor?: (bounds: {
     readonly x: number;
@@ -918,7 +924,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (next === thread.executionPolicy) return;
     setAccessMessage(undefined);
     let approvalId: CodeApprovalId | undefined;
-    if (next === "full-access") {
+    const remembered = next === "full-access" && props.projectRemembersFullAccess === true;
+    if (next === "full-access" && !remembered) {
       approvalId = await props.requestFullAccessApproval?.({
         kind: "change-thread-full-access",
         threadId: thread.id,
@@ -937,7 +944,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         threadId: thread.id,
         expectedVersion: thread.version,
         executionPolicy: next,
-        permissionPersistence: thread.permissionPersistence,
+        permissionPersistence: remembered ? "project-default" : thread.permissionPersistence,
         ...(approvalId === undefined ? {} : { approvalId }),
       });
     } finally {
@@ -1709,7 +1716,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {...(profileName === undefined ? {} : { profileName })}
               ceiling={thread.executionPolicy}
               disabled={accessChanging}
-              nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              nativeConfirmationAvailable={
+                props.requestFullAccessApproval !== undefined ||
+                props.projectRemembersFullAccess === true
+              }
               onRaiseThread={(next) => void changeAccess(next)}
               onSelect={setTurnAccessOverride}
               value={nextTurnAccess}
