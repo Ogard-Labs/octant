@@ -109,7 +109,6 @@ export function ThreadComposer(props: ThreadComposerProps) {
   const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
   const message = (
     <>
-      <ComposerSubagents />
       <ComposerFollowUpSuggestions />
       {props.chips}
       {props.label === undefined ? (
@@ -160,11 +159,13 @@ export function ThreadComposer(props: ThreadComposerProps) {
     props.ariaLabel === undefined ? (
       <div className={frameClassName}>
         {notice}
+        <ComposerSubagents />
         {body}
       </div>
     ) : (
       <section aria-label={props.ariaLabel} className={frameClassName}>
         {notice}
+        <ComposerSubagents />
         {body}
       </section>
     );

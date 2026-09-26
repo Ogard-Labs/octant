@@ -351,11 +351,35 @@
  * that is still running or waiting for review is part of what the person
  * does next — the strip it replaced hung over the transcript, detached.
  */
+/* The tray is its own card, tucked behind the composer's top edge: the
+   composer is where the person types, and the subagents sat inside it as rows
+   between the chips and the field, where they read as part of the message.
+   Out of the flow it lays over the transcript's last lines the way the
+   composer's notice does, and it rises from behind the composer on arrival. */
+.composer:has(> .composer-subagents) {
+  position: relative;
+  isolation: isolate;
+}
+
 .composer-subagents {
+  position: absolute;
+  z-index: -1;
+  right: var(--oct-space-3);
+  bottom: calc(100% - var(--oct-space-3));
+  left: var(--oct-space-3);
   display: grid;
   gap: var(--oct-space-1);
-  padding: var(--oct-space-2) var(--oct-space-3) 0;
+  padding: var(--oct-space-2) var(--oct-space-3) calc(var(--oct-space-3) + var(--oct-space-2));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
+  background: var(--octant-floating);
   animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
+}
+
+/* A cross-context notice takes the same place; it is brief and must be read,
+   so the tray yields to it and the Agents tool still lists every subagent. */
+.composer--has-notice > .composer-subagents {
+  display: none;
 }
 
 .composer-subagents__head {
