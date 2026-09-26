@@ -17,8 +17,11 @@ export function AssistantMessageBody(props: {
     () => resolveChatMessageParts({ role: "assistant", body: props.body }),
     [props.body],
   );
-  if (parts.every((part) => part.kind === "markdown"))
-    return hidePartialAnswer ? null : <ChatRichText body={props.body} />;
+  // The parts, not the raw body: the parser leaves out what a person should
+  // not read, such as a reply's follow-up suggestion block.
+  const prose = parts.flatMap((part) => (part.kind === "markdown" ? [part.text] : []));
+  if (prose.length === parts.length)
+    return hidePartialAnswer ? null : <ChatRichText body={prose.join("\n\n")} />;
   return (
     <div className="chat-transcript__parts">
       {parts.map((part, index) =>

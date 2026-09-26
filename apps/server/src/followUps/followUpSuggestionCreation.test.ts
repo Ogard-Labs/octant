@@ -1,31 +1,29 @@
 import { describe, expect, it } from "vitest";
-import type { NativeHarnessSessionView } from "@octant/contracts";
+import type { ThreadFollowUpSuggestions } from "@octant/contracts";
 import {
-  createNativeHarnessFollowUp,
-  type NativeHarnessFollowUpCreationDependencies,
-} from "./nativeHarnessFollowUpCreation";
+  createFollowUp,
+  previewFollowUpCreation,
+  type FollowUpCreationDependencies,
+} from "./followUpSuggestionCreation";
 
 const windowId = "00000000-0000-4000-8000-0000000000f0";
 const parentThreadId = "00000000-0000-4000-8000-000000000010";
 const projectId = "00000000-0000-4000-8000-0000000000bb";
 const lead = {
-  hostId: "00000000-0000-4000-8000-0000000000aa",
   providerInstanceId: "00000000-0000-4000-8000-000000000001",
   modelId: "frontier-large",
 };
 const now = "2026-09-05T12:00:00.000Z";
 
-function view(mode: "chat" | "work" | "code"): NativeHarnessSessionView {
-  return {
-    session: { threadId: parentThreadId, mode, projectId, lead },
-  } as never;
+function view(mode: "chat" | "work" | "code"): ThreadFollowUpSuggestions {
+  return { threadId: parentThreadId, mode, projectId, suggestedBy: lead } as never;
 }
 
 function dependencies(
-  overrides: Partial<NativeHarnessFollowUpCreationDependencies> & {
+  overrides: Partial<FollowUpCreationDependencies> & {
     readonly calls?: unknown[];
   },
-): NativeHarnessFollowUpCreationDependencies {
+): FollowUpCreationDependencies {
   const calls = overrides.calls ?? [];
   return {
     chat: {
@@ -56,10 +54,33 @@ function dependencies(
   };
 }
 
-describe("native harness follow-up creation", () => {
-  it("creates a Chat thread in the parent's Project under the lead's model and names it", async () => {
+describe("follow-up creation", () => {
+  it("offers a worktree only to a Code thread and keeps a new thread in the same mode and Project", () => {
+    const suggestion = (target: "new-thread" | "new-worktree") =>
+      ({
+        id: "00000000-0000-4000-8000-000000000041",
+        title: "Tests",
+        prompt: "Add tests.",
+        target,
+      }) as never;
+    expect(previewFollowUpCreation(view("work"), suggestion("new-worktree"))).toBeUndefined();
+    expect(previewFollowUpCreation(view("code"), suggestion("new-worktree"))).toEqual({
+      kind: "new-worktree",
+      mode: "code",
+      projectId,
+      title: "Tests",
+    });
+    expect(previewFollowUpCreation(view("chat"), suggestion("new-thread"))).toEqual({
+      kind: "new-thread",
+      mode: "chat",
+      projectId,
+      title: "Tests",
+    });
+  });
+
+  it("creates a Chat thread in the parent's Project under the suggesting model and names it", async () => {
     const calls: unknown[] = [];
-    const outcome = await createNativeHarnessFollowUp(dependencies({ calls }), {
+    const outcome = await createFollowUp(dependencies({ calls }), {
       windowId,
       view: view("chat"),
       creation: { kind: "new-thread", mode: "chat", projectId, title: "Add tests" } as never,
@@ -87,7 +108,7 @@ describe("native harness follow-up creation", () => {
       readProject: () =>
         ({ bindingHistory: [{ revisionId: "00000000-0000-4000-8000-0000000000c1" }] }) as never,
     });
-    const created = await createNativeHarnessFollowUp(deps, {
+    const created = await createFollowUp(deps, {
       windowId,
       view: view("work"),
       creation: { kind: "new-thread", mode: "work", projectId, title: "Draft the memo" } as never,
@@ -101,7 +122,7 @@ describe("native harness follow-up creation", () => {
         modelId: "frontier-large",
       },
     ]);
-    const refused = await createNativeHarnessFollowUp(deps, {
+    const refused = await createFollowUp(deps, {
       windowId,
       view: view("work"),
       creation: { kind: "new-thread", mode: "work", title: "Draft the memo" } as never,
@@ -157,7 +178,7 @@ describe("native harness follow-up creation", () => {
       projectId,
       title: "Fix the parser",
     } as never;
-    const refused = await createNativeHarnessFollowUp(deps, {
+    const refused = await createFollowUp(deps, {
       windowId,
       view: view("code"),
       creation,
@@ -165,7 +186,7 @@ describe("native harness follow-up creation", () => {
     expect(refused).toMatchObject({ kind: "refused", message: expect.stringContaining("branch") });
 
     head = { kind: "branch", name: "feature/parent", oid: "b".repeat(40) };
-    const created = await createNativeHarnessFollowUp(deps, {
+    const created = await createFollowUp(deps, {
       windowId,
       view: view("code"),
       creation,

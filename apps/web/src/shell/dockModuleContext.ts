@@ -2,7 +2,7 @@ import type { WorkFileOpenRequest } from "../work/WorkFilesPanel";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { CodeProjectPullRequestRow, NativeHarnessFollowUpCreation } from "@octant/contracts";
+import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -35,11 +35,6 @@ export interface ThreadUtilityDockContentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly nativeHarnessClient?: NativeHarnessClient;
-  /** A confirmed follow-up's thread exists; open it with the prompt ready to send. */
-  readonly onFollowUpCreated?: (input: {
-    readonly created: NativeHarnessFollowUpCreation;
-    readonly prompt: string;
-  }) => void;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly androidToolchainClient?: AndroidToolchainClient;

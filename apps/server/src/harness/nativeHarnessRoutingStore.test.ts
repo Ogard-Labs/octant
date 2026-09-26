@@ -164,7 +164,7 @@ describe("native harness routing store", () => {
 });
 
 describe("native harness session store", () => {
-  it("journals a session's routes and follow-ups and rebuilds them after a restart", () => {
+  it("journals a session's routes and pause and rebuilds them after a restart", () => {
     const connection = openConnection();
     const threadId = "00000000-0000-4000-8000-000000000020";
     const uuid = uuidFactory();
@@ -188,17 +188,6 @@ describe("native harness session store", () => {
       decidedAt: now as never,
       rejected: [],
     });
-    store.recordFollowUps(threadId, {
-      turnId: "00000000-0000-4000-8000-000000000031",
-      suggestions: [
-        {
-          id: "00000000-0000-4000-8000-000000000041",
-          title: "Add tests",
-          prompt: "Write tests for the new parser.",
-          target: "new-thread",
-        },
-      ],
-    } as never);
     store.pause(threadId, "paused-by-advisor", "The diff touches the release script.");
     const restarted = new NativeHarnessSessionStore({
       journal: journalFor(connection),
@@ -208,39 +197,9 @@ describe("native harness session store", () => {
     });
     const view = restarted.read(threadId);
     expect(view?.routes).toHaveLength(1);
-    expect(view?.followUps?.suggestions[0]?.title).toBe("Add tests");
     expect(view?.session.status).toBe("paused-by-advisor");
     expect(restarted.resume(threadId)).toBe(true);
     expect(restarted.read(threadId)?.session.status).toBe("idle");
-  });
-
-  it("activates a follow-up once and refuses the second activation", () => {
-    const threadId = "00000000-0000-4000-8000-000000000020";
-    const store = new NativeHarnessSessionStore({
-      journal: journalFor(openConnection()),
-      uuid: uuidFactory(),
-      actor,
-      clock: () => now,
-    });
-    store.ensure({
-      threadId,
-      mode: "chat",
-      leadSlotId: "default" as never,
-      lead: candidate("big") as never,
-    });
-    const suggestionId = "00000000-0000-4000-8000-000000000041" as never;
-    store.recordFollowUps(threadId, {
-      turnId: "00000000-0000-4000-8000-000000000031",
-      suggestions: [
-        { id: suggestionId, title: "Next", prompt: "Do the next thing.", target: "same-thread" },
-      ],
-    } as never);
-    const created = { kind: "same-thread", threadId } as const;
-    expect(store.activateFollowUp(threadId, suggestionId, created)).toBe("activated");
-    expect(store.activateFollowUp(threadId, suggestionId, created)).toBe("already-activated");
-    expect(
-      store.activateFollowUp(threadId, "00000000-0000-4000-8000-000000000099" as never, created),
-    ).toBe("suggestion-not-found");
   });
 
   it("keeps a lead's question pending until any surface answers it, then rebuilds it after a restart", async () => {

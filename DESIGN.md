@@ -171,6 +171,11 @@ stays quiet and separate, without a second provider pill or repeated project lab
 
 ### Welcome and composer
 
+A reply's suggested follow-ups sit as outline chips at the top of the
+thread composer, inside its surface, with a quiet "Next" label and a dismiss
+control. Choosing one swaps the row for an inline preview of what it would
+create and its prompt; nothing is created until **Start** (or **Use prompt**).
+
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
 matching project binding revision; missing metadata never borrows another root.

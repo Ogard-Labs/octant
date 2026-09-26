@@ -1,6 +1,10 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
+import {
+  FollowUpSuggestionContext,
+  type FollowUpSuggestionChipsProps,
+} from "../followUps/FollowUpSuggestionChips";
 import type {
   LayoutNodeId,
   PaneId,
@@ -302,6 +306,8 @@ export interface WorkspaceViewProps {
     readonly url: string;
   }) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
+  /** Offers each local thread pane's follow-up suggestions over its composer. */
+  readonly followUpSuggestions?: Pick<FollowUpSuggestionChipsProps, "client" | "onCreated">;
   /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
   readonly onSplitPane: (
     paneId: PaneId,
@@ -613,29 +619,33 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           renderSurface={(surface, paneId) => (
-            <ComposerNoticeProvider
-              value={paneId === activePaneId && inlineNotice ? contextNotice : null}
+            <FollowUpSuggestionContext
+              value={followUpSuggestionsFor(surface, props.followUpSuggestions)}
             >
-              <ComposerContextMeterGate
-                enabled={
-                  paneId === props.workspace.activePaneIds[props.mode] &&
-                  offersThreadComposer(surface)
-                }
+              <ComposerNoticeProvider
+                value={paneId === activePaneId && inlineNotice ? contextNotice : null}
               >
-                <SurfaceLinkActionsProvider
-                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                  {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
-                  paneId={paneId}
-                  surface={surface}
+                <ComposerContextMeterGate
+                  enabled={
+                    paneId === props.workspace.activePaneIds[props.mode] &&
+                    offersThreadComposer(surface)
+                  }
                 >
-                  {onWelcomeGround(
-                    surface,
-                    props.welcomeBackdrop,
-                    renderTab(surface, props, paneId, canvasContext),
-                  )}
-                </SurfaceLinkActionsProvider>
-              </ComposerContextMeterGate>
-            </ComposerNoticeProvider>
+                  <SurfaceLinkActionsProvider
+                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                    {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
+                    paneId={paneId}
+                    surface={surface}
+                  >
+                    {onWelcomeGround(
+                      surface,
+                      props.welcomeBackdrop,
+                      renderTab(surface, props, paneId, canvasContext),
+                    )}
+                  </SurfaceLinkActionsProvider>
+                </ComposerContextMeterGate>
+              </ComposerNoticeProvider>
+            </FollowUpSuggestionContext>
           )}
           {...(props.providerByThreadId === undefined
             ? {}
@@ -709,6 +719,20 @@ function SurfaceLinkActionsProvider(props: {
       {props.children}
     </MarkdownLinkActionsContext.Provider>
   );
+}
+
+/**
+ * A thread's suggestions come from the host that runs it; a pane showing a
+ * thread on another host has no local offer to show.
+ */
+function followUpSuggestionsFor(
+  surface: WorkspaceTab,
+  host: WorkspaceViewProps["followUpSuggestions"],
+): FollowUpSuggestionChipsProps | undefined {
+  if (host === undefined || !offersThreadComposer(surface)) return undefined;
+  if ("hostId" in surface && surface.hostId !== undefined) return undefined;
+  if (!("threadId" in surface)) return undefined;
+  return { ...host, threadId: String(surface.threadId), mode: surface.mode };
 }
 
 function offersThreadComposer(surface: WorkspaceTab): boolean {

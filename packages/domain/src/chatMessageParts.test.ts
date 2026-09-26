@@ -87,3 +87,24 @@ describe("parseChatMessageBody while streaming", () => {
     expect(parts).toEqual([{ kind: "markdown", text: "Just prose, still streaming." }]);
   });
 });
+
+describe("parseChatMessageBody with follow-up suggestions", () => {
+  const block =
+    '```octant-follow-ups\n{"suggestions":[{"title":"Tests","prompt":"Add tests.","target":"new-thread"}]}\n```';
+
+  it("leaves the suggestion block out of the reply a person reads", () => {
+    expect(parseChatMessageBody(`Done. The parser handles lists.\n\n${block}`)).toEqual([
+      { kind: "markdown", text: "Done. The parser handles lists." },
+    ]);
+  });
+
+  it("hides a suggestion block that is still streaming in", () => {
+    expect(parseChatMessageBody('Done.\n\n```octant-follow-ups\n{"suggestions":[{"ti')).toEqual([
+      { kind: "markdown", text: "Done." },
+    ]);
+  });
+
+  it("shows nothing rather than raw JSON when the block is the whole reply", () => {
+    expect(parseChatMessageBody(block)).toEqual([{ kind: "markdown", text: "" }]);
+  });
+});

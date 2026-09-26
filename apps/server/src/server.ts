@@ -604,9 +604,16 @@ import { NativeHarnessRoutingStore } from "./harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "./harness/nativeHarnessRoutingRoutes";
 import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
 import {
-  createNativeHarnessFollowUp,
-  type NativeHarnessFollowUpCreationDependencies,
-} from "./harness/nativeHarnessFollowUpCreation";
+  createFollowUp,
+  type FollowUpCreationDependencies,
+} from "./followUps/followUpSuggestionCreation";
+import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "./followUps/followUpSuggestionInstructions";
+import { parseFollowUpSuggestions } from "./followUps/followUpSuggestionParsing";
+import {
+  createFollowUpSuggestionRouteHandler,
+  type FollowUpSuggestionActionDependencies,
+} from "./followUps/followUpSuggestionRoutes";
+import { ThreadFollowUpSuggestionStore } from "./followUps/threadFollowUpSuggestionStore";
 import { NativeHarnessApprovalStore } from "./harness/nativeHarnessApprovals";
 import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
@@ -654,6 +661,7 @@ import {
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
   decodeImageGenerationScopeId,
+  decodeNativeHarnessTurnId,
   decodeMultiModelRoutingVendorId,
   type ChatThreadView,
   type CodeProjectPullRequestRow,
@@ -1752,18 +1760,45 @@ export function startOctantServer(
     let nativeHarnessSessions: NativeHarnessSessionStore | undefined;
     let nativeHarnessObserver: NativeHarnessTurnObserver | undefined;
     let nativeHarnessQuestions: NativeHarnessQuestionStore | undefined;
+    // Follow-up suggestions ride the same per-turn hooks as the harness, but
+    // on every provider: any model can end a reply with the block, and the
+    // chips it becomes are the thread's, not the harness session's.
+    const threadFollowUpSuggestions = new ThreadFollowUpSuggestionStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+    });
     const nativeHarnessHooks = {
       answerQuestion: (threadId: string, questionId: string, answer: string) => {
         nativeHarnessQuestions?.answer(threadId, questionId, answer);
       },
-      contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) =>
-        nativeHarnessObserver?.contextFor(scope) ?? [],
+      contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
+        ...(nativeHarnessObserver?.contextFor(scope) ?? []),
+        FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
+      ],
       admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
         nativeHarnessObserver?.admitTurn(scope) ?? { kind: "admitted" as const },
       turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
         nativeHarnessObserver?.turnStarted(scope),
-      turnCompleted: (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) =>
-        nativeHarnessObserver?.turnCompleted(input) ?? Promise.resolve(),
+      turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
+        try {
+          threadFollowUpSuggestions.recordReply({
+            threadId: input.threadId,
+            mode: input.mode,
+            projectId: input.projectId,
+            suggestedBy: { providerInstanceId: input.providerInstanceId, modelId: input.modelId },
+            followUps: parseFollowUpSuggestions({
+              text: input.text,
+              turnId: decodeNativeHarnessTurnId(randomUUID()),
+              uuid: randomUUID,
+            }),
+          });
+        } catch {
+          // A set the journal refused leaves the reply itself untouched.
+        }
+        await nativeHarnessObserver?.turnCompleted(input);
+      },
     };
     const agentRunSettingsStore = new AgentRunSettingsStore({
       journal: persistence.journal,
@@ -4928,19 +4963,55 @@ export function startOctantServer(
     });
     // The Chat, Work, and Code services a follow-up creates through are
     // composed after these routes; the creator is bound once they exist.
-    const nativeHarnessFollowUpCreation: {
-      current: NativeHarnessFollowUpCreationDependencies | undefined;
-    } = { current: undefined };
-    const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
-      windowAuthorityStore,
-      store: nativeHarnessSessionsLive,
+    const followUpCreation: { current: FollowUpCreationDependencies | undefined } = {
+      current: undefined,
+    };
+    const followUpActions: FollowUpSuggestionActionDependencies = {
+      store: threadFollowUpSuggestions,
       createFollowUp: (input) =>
-        nativeHarnessFollowUpCreation.current === undefined
+        followUpCreation.current === undefined
           ? Promise.resolve({
               kind: "refused" as const,
               message: "Follow-up creation is unavailable on this host.",
             })
-          : createNativeHarnessFollowUp(nativeHarnessFollowUpCreation.current, input),
+          : createFollowUp(followUpCreation.current, input),
+    };
+    const authorizeFollowUpThread = ({
+      threadId,
+      windowId,
+    }: {
+      readonly threadId: string;
+      readonly windowId: string;
+    }) =>
+      authorizeAgentRunParentThread({
+        persistence,
+        workThreadProjection,
+        parentThreadId: threadId as never,
+        windowId,
+      });
+    const followUpSuggestionRoutes = createFollowUpSuggestionRouteHandler({
+      ...followUpActions,
+      windowAuthorityStore,
+      authorizeThread: authorizeFollowUpThread,
+    });
+    const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore,
+      store: {
+        read: (threadId) => {
+          const view = nativeHarnessSessionsLive.read(threadId);
+          const suggestions = threadFollowUpSuggestions.read(threadId);
+          return view === undefined || suggestions === undefined
+            ? view
+            : {
+                ...view,
+                followUps: suggestions.followUps,
+                activatedFollowUpIds: suggestions.activatedFollowUpIds,
+              };
+        },
+        pause: (...args) => nativeHarnessSessionsLive.pause(...args),
+        resume: (...args) => nativeHarnessSessionsLive.resume(...args),
+      },
+      followUps: followUpActions,
       answerQuestion: ({ threadId, questionId, answer }) =>
         nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
       decideApproval: ({ threadId, approvalId, decision }) =>
@@ -4957,33 +5028,7 @@ export function startOctantServer(
           at: new Date().toISOString() as never,
         });
       },
-      authorizeThread: ({ threadId, windowId }) =>
-        authorizeAgentRunParentThread({
-          persistence,
-          workThreadProjection,
-          parentThreadId: threadId as never,
-          windowId,
-        }),
-      previewFollowUp: ({ view, suggestion }) => {
-        if (suggestion.target === "same-thread") {
-          return { kind: "same-thread", threadId: view.session.threadId };
-        }
-        if (suggestion.target === "new-thread") {
-          return {
-            kind: "new-thread",
-            mode: view.session.mode,
-            ...(view.session.projectId === undefined ? {} : { projectId: view.session.projectId }),
-            title: suggestion.title,
-          };
-        }
-        if (view.session.mode !== "code" || view.session.projectId === undefined) return undefined;
-        return {
-          kind: "new-worktree",
-          mode: "code",
-          projectId: view.session.projectId,
-          title: suggestion.title,
-        };
-      },
+      authorizeThread: authorizeFollowUpThread,
     });
     nativeHarnessObserver = new NativeHarnessTurnObserver({
       sessions: nativeHarnessSessionsLive,
@@ -5995,7 +6040,7 @@ export function startOctantServer(
       threads: workThreadService,
       workflows: workflowService,
     });
-    nativeHarnessFollowUpCreation.current = {
+    followUpCreation.current = {
       chat: chatService,
       work: workThreadServiceWithWorkflows,
       code: codeService,
@@ -7840,6 +7885,7 @@ export function startOctantServer(
       (await agentRunSettingsRoutes(request)) ??
       (await nativeHarnessRoutingRoutes(request)) ??
       (await nativeHarnessSessionRoutes(request)) ??
+      (await followUpSuggestionRoutes(request)) ??
       (await githubRoutes(request)) ??
       (await integrationRoutes(request)) ??
       (await githubCloneRoutes(request)) ??

@@ -1,19 +1,20 @@
 import {
+  FOLLOW_UP_BLOCK_LANGUAGE,
   MAX_NATIVE_HARNESS_FOLLOW_UPS,
   decodeNativeHarnessFollowUpSet,
   type NativeHarnessFollowUpSet,
   type NativeHarnessTurnId,
 } from "@octant/contracts";
 
-const FENCE = /```octant-follow-ups\s*\n([\s\S]*?)```/;
+const FENCE = new RegExp(`\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}\\s*\\n([\\s\\S]*?)\`\`\``);
 
 /**
- * The follow-ups a reply ends with, if any. The fenced block is the lead's
+ * The follow-ups a reply ends with, if any. The fenced block is the model's
  * only channel for them, so a reply that carries none suggests nothing; a
  * malformed block is ignored rather than guessed at, because a suggestion
  * the model did not clearly make must not become a button.
  */
-export function parseNativeHarnessFollowUps(input: {
+export function parseFollowUpSuggestions(input: {
   readonly text: string;
   readonly turnId: NativeHarnessTurnId;
   readonly uuid: () => string;
@@ -40,14 +41,10 @@ export function parseNativeHarnessFollowUps(input: {
       };
     })
     .filter((entry) => entry.title.length > 0 && entry.prompt.length > 0);
+  if (suggestions.length === 0) return undefined;
   try {
     return decodeNativeHarnessFollowUpSet({ turnId: input.turnId, suggestions });
   } catch {
     return undefined;
   }
-}
-
-/** The reply without its follow-up block, for surfaces that render chips separately. */
-export function stripNativeHarnessFollowUps(text: string): string {
-  return text.replace(FENCE, "").trimEnd();
 }

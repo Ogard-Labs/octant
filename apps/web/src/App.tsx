@@ -82,7 +82,12 @@ import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
 import { useMinuteTick } from "./polling/useMinuteTick";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
-import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
+import type {
+  CodeOperationId,
+  NativeHarnessFollowUpCreation,
+  ProviderInstance,
+  VoiceSettings,
+} from "@octant/contracts";
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
@@ -1199,6 +1204,7 @@ function LaunchedShell(
     hostClient,
     projectBrowserClient,
     projectTerminalClient,
+    followUpSuggestionClient,
     hostControlClient,
     imageGenerationClient,
     speechClient,
@@ -2687,6 +2693,51 @@ function LaunchedShell(
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
   );
+  // The prompt of a confirmed follow-up waits in the composer of the thread
+  // it belongs to; sending it is the person's move.
+  const openCreatedFollowUp = ({
+    mode,
+    created,
+    prompt,
+  }: {
+    readonly mode: "chat" | "work" | "code";
+    readonly created: NativeHarnessFollowUpCreation;
+    readonly prompt: string;
+  }) => {
+    const seed = (threadMode: "chat" | "work" | "code", threadId: string) =>
+      composerThreadDrafts.write(threadMode, threadId, {
+        text: prompt,
+        caretIndex: prompt.length,
+        stagedDropped: false,
+      });
+    if (created.kind === "same-thread") {
+      seed(mode, created.threadId);
+      return;
+    }
+    if (created.threadId === undefined) return;
+    seed(created.mode, created.threadId);
+    if (created.mode === "chat") {
+      void controller.openChatThread(
+        decodeChatThreadId(created.threadId),
+        created.title,
+        created.projectId,
+      );
+    } else if (created.mode === "work") {
+      void controller.openWorkThread(
+        decodeWorkThreadId(created.threadId),
+        created.title,
+        undefined,
+        created.projectId,
+      );
+    } else {
+      void controller.openCodeThread(
+        decodeCodeThreadId(created.threadId),
+        created.title,
+        undefined,
+        created.projectId,
+      );
+    }
+  };
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     // Each dock module owns its readiness: a terminal or file tool does not
@@ -2704,43 +2755,6 @@ function LaunchedShell(
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
         nativeHarnessClient={nativeHarnessClient}
-        onFollowUpCreated={({ created, prompt }) => {
-          // The prompt waits in the composer of the thread it belongs to;
-          // sending it is the person's move.
-          const seed = (mode: "chat" | "work" | "code", threadId: string) =>
-            composerThreadDrafts.write(mode, threadId, {
-              text: prompt,
-              caretIndex: prompt.length,
-              stagedDropped: false,
-            });
-          if (created.kind === "same-thread") {
-            seed(dockThread.mode, created.threadId);
-            return;
-          }
-          if (created.threadId === undefined) return;
-          seed(created.mode, created.threadId);
-          if (created.mode === "chat") {
-            void controller.openChatThread(
-              decodeChatThreadId(created.threadId),
-              created.title,
-              created.projectId,
-            );
-          } else if (created.mode === "work") {
-            void controller.openWorkThread(
-              decodeWorkThreadId(created.threadId),
-              created.title,
-              undefined,
-              created.projectId,
-            );
-          } else {
-            void controller.openCodeThread(
-              decodeCodeThreadId(created.threadId),
-              created.title,
-              undefined,
-              created.projectId,
-            );
-          }
-        }}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         androidToolchainClient={androidToolchainClient}
@@ -5960,6 +5974,10 @@ function LaunchedShell(
                   <ComposerContextMeterShortcut />
                   <WorkspaceView
                     {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                    followUpSuggestions={{
+                      client: followUpSuggestionClient,
+                      onCreated: openCreatedFollowUp,
+                    }}
                     greetingName={controller.settings?.userProfile.displayName}
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}

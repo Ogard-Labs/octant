@@ -1,4 +1,8 @@
-import type { ChatMessagePart, ChatToolPartStatus } from "@octant/contracts";
+import {
+  FOLLOW_UP_BLOCK_LANGUAGE,
+  type ChatMessagePart,
+  type ChatToolPartStatus,
+} from "@octant/contracts";
 
 /**
  * Distilled message-part resolution for Octant clients.
@@ -42,9 +46,12 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
  * Split a host message body into reasoning / tool / markdown parts.
  * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking>,
  * <reasoning>, and <think> tags — the closed pairs, plus an open tail at the end of a
- * body that is still streaming.
+ * body that is still streaming. A follow-up suggestion block is not prose: the
+ * host reads it and surfaces offer it as chips, so it is left out here, even
+ * while it is still streaming in.
  */
-export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePart> {
+export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessagePart> {
+  const body = withoutOpenFollowUpBlock(streamed);
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
 
   // Reasoning markers inside code samples are literal source, including an
@@ -60,7 +67,8 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
 
   const parts: ChatMessagePart[] = [];
   let cursor = 0;
-  const annotated: Array<{ start: number; end: number; part: ChatMessagePart }> = [];
+  // A part left undefined marks a span the reader never sees.
+  const annotated: Array<{ start: number; end: number; part: ChatMessagePart | undefined }> = [];
 
   for (const match of body.matchAll(THINKING_TAG)) {
     const start = match.index ?? 0;
@@ -102,6 +110,10 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
       });
       continue;
     }
+    if (lang === FOLLOW_UP_BLOCK_LANGUAGE) {
+      annotated.push({ start, end: start + match[0].length, part: undefined });
+      continue;
+    }
     if (lang === "tool") {
       const meta = parseToolMeta(info.slice(lang.length));
       annotated.push({
@@ -124,7 +136,10 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
       const text = body.slice(cursor, item.start).trim();
       if (text.length > 0) parts.push({ kind: "markdown", text });
     }
-    if (item.part.kind === "reasoning" && item.part.text.length === 0) {
+    if (
+      item.part === undefined ||
+      (item.part.kind === "reasoning" && item.part.text.length === 0)
+    ) {
       cursor = item.end;
       continue;
     }
@@ -160,8 +175,22 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
     const text = body.slice(cursor).trim();
     if (text.length > 0) parts.push({ kind: "markdown", text });
   }
-  if (parts.length === 0) return [{ kind: "markdown", text: body }];
+  if (parts.length === 0) {
+    const hidden = annotated.some((item) => item.part === undefined);
+    return [{ kind: "markdown", text: hidden ? "" : body }];
+  }
   return parts;
+}
+
+/** A reply cut at a follow-up block whose closing fence has not streamed in yet. */
+function withoutOpenFollowUpBlock(body: string): string {
+  const openers = Array.from(
+    body.matchAll(new RegExp(`^\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}[^\n]*$`, "gm")),
+  );
+  const last = openers.at(-1);
+  if (last === undefined) return body;
+  const closed = body.indexOf("```", last.index + last[0].length) !== -1;
+  return closed ? body : body.slice(0, last.index).trimEnd();
 }
 
 /** Prefer structured parts; otherwise derive from role + body text. */

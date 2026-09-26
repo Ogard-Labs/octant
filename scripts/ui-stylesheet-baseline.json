@@ -1,6 +1,6 @@
 {
   "font-size-scale": {
-    "apps/web/src/harness/native-harness.css": 6,
+    "apps/web/src/harness/native-harness.css": 5,
     "apps/web/src/styles.css": 1,
     "apps/web/src/styles/octant.css": 5
   },
