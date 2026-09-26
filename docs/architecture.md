@@ -1157,7 +1157,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap`, an unlocked
+  `octant web --dev` for Vite). Linux requires `bubblewrap`, Git 2.36 or
+  newer, an unlocked
   freedesktop Secret Service session, and the `secret-tool` client. Without
   those, the host fails closed. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session
