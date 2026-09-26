@@ -1379,6 +1379,8 @@ interface ActiveTurn {
   readonly harnessQuestions: Set<string>;
   connection?: ProviderConnection;
   cursor: number;
+  /** Provider tool requests the person denied; the third ends the turn. */
+  deniedApprovals: number;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   lastPersistedState?: CodeTurnOutcome;
   /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
@@ -1567,6 +1569,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       questions: new Set(),
       harnessQuestions: new Set(),
       cursor: 0,
+      deniedApprovals: 0,
       state: "running",
     };
     active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
@@ -1731,6 +1734,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         requestId: providerRequestId,
         approved: input.decision === "approved",
       }),
+    );
+    if (input.decision === "approved") return turnState(active.state);
+    active.deniedApprovals += 1;
+    if (active.deniedApprovals < 3 || (active.state !== "running" && active.state !== "waiting"))
+      return turnState(active.state);
+    // A provider that keeps asking after repeated refusals is looping on the
+    // person; end the turn the way a cancel does rather than let it continue.
+    this.#persistOutcome(active, "interrupted", {
+      category: "interrupted",
+      message: "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
+    });
+    active.abort.abort();
+    await Effect.runPromise(
+      active.connection
+        .interrupt(active.sessionId as never)
+        .pipe(Effect.catchAll(() => Effect.void)),
     );
     return turnState(active.state);
   }
