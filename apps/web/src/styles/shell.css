@@ -1552,6 +1552,24 @@ html[data-octant-native-host="true"]
     mask-composite: exclude;
   }
 
+  /* The ground's dither belongs to the card. Drawn under the whole shell, its
+     dots ran on through the gutters, the strip above the card, and the gap
+     beside the dock, so the start screen's card had no edge at all: the same
+     dotted picture inside and out. The pattern is cut to the primary card's
+     rounded rectangle, measured from the window by ShellFrame; outside it the
+     picture stays plain, under the frost. Before the first measurement the
+     pattern covers the window as before. */
+  .shell--app-backdrop.shell-frame
+    > .app-backdrop[data-placement="shell"]
+    > .app-backdrop__pattern {
+    -webkit-mask: var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 0)
+      var(--octant-primary-card-frame-y, 0) / var(--octant-primary-card-w, 100%)
+      var(--octant-primary-card-h, 100%);
+    mask: var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 0)
+      var(--octant-primary-card-frame-y, 0) / var(--octant-primary-card-w, 100%)
+      var(--octant-primary-card-h, 100%);
+  }
+
   /* When the ground runs under an opaque sidebar too, the gutters take the
      same wash the sidebar does (surface.css), so the back stays one piece. */
   .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame

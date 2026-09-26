@@ -71,26 +71,51 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
  * card, which shows the ground clear. The card's rectangle depends on the
  * dock and bottom panel tracks (clamped, resizable), so it is measured rather
  * than re-derived in CSS, and handed to the mask as custom properties on the
- * layer. Only the rectangle is written: no React state, no re-render.
+ * layer. The same rectangle, measured from the window frame, lets the ground's
+ * dither be drawn inside the card only: under the whole shell its dots ran on
+ * through the gutters and the strip above the card, so the card had no edge.
+ * Only the rectangle is written: no React state, no re-render.
  */
 function usePrimaryCardHole(layer: HTMLDivElement | null, active: boolean): void {
   useEffect(() => {
     if (!active || layer === null || typeof ResizeObserver === "undefined") return;
     const card = layer.querySelector<HTMLElement>(":scope > .primary-workspace-layer");
-    if (card === null) return;
+    const frame = layer.parentElement;
+    if (card === null || frame === null) return;
     const write = () => {
       const outer = layer.getBoundingClientRect();
+      const origin = frame.getBoundingClientRect();
       const inner = card.getBoundingClientRect();
       layer.style.setProperty("--octant-primary-card-x", `${String(inner.left - outer.left)}px`);
       layer.style.setProperty("--octant-primary-card-y", `${String(inner.top - outer.top)}px`);
       layer.style.setProperty("--octant-primary-card-w", `${String(inner.width)}px`);
       layer.style.setProperty("--octant-primary-card-h", `${String(inner.height)}px`);
+      frame.style.setProperty(
+        "--octant-primary-card-frame-x",
+        `${String(inner.left - origin.left)}px`,
+      );
+      frame.style.setProperty(
+        "--octant-primary-card-frame-y",
+        `${String(inner.top - origin.top)}px`,
+      );
+      frame.style.setProperty("--octant-primary-card-w", `${String(inner.width)}px`);
+      frame.style.setProperty("--octant-primary-card-h", `${String(inner.height)}px`);
     };
     write();
     const observer = new ResizeObserver(write);
     observer.observe(layer);
     observer.observe(card);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      for (const name of [
+        "--octant-primary-card-frame-x",
+        "--octant-primary-card-frame-y",
+        "--octant-primary-card-w",
+        "--octant-primary-card-h",
+      ]) {
+        frame.style.removeProperty(name);
+      }
+    };
   }, [active, layer]);
 }
 
