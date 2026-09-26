@@ -49,7 +49,6 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import {
   applyComposerCaret,
@@ -241,11 +240,6 @@ export interface WorkThreadWorkspaceProps {
   readonly browserAvailable?: boolean;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onThreadUpdated?: (thread: WorkThread) => void;
-  /**
-   * Compact live child-run chrome for this thread. Rendered in the thread
-   * header so it stays visible with the rest of the thread chrome.
-   */
-  readonly childRunStatus?: ReactNode;
   readonly draftStore?: ComposerThreadDraftStore;
 }
 
@@ -1229,9 +1223,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
       <h1 className="sr-only">{props.title}</h1>
-      {props.childRunStatus === undefined ? null : (
-        <header className="work-thread-workspace__header">{props.childRunStatus}</header>
-      )}
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
         <section aria-label="Mark this task complete" className="work-thread-workspace__completion">

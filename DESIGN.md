@@ -185,6 +185,16 @@ stays quiet and separate, without a second provider pill or repeated project lab
 
 ### Welcome and composer
 
+A thread's subagents sit in its composer, inside the surface and above the
+follow-up chips: a quiet "Subagents" label, then one row per subagent that is
+working or finished and not yet reviewed — status icon, the task on one line,
+and its state in words ("Working · 12s", "Done — review", "Failed"). Three
+rows show; the rest fold into "+N more". A row opens that subagent in the
+Agents tool; its one trailing action (Stop, or Mark reviewed) appears on hover
+or focus. Stopping one named subagent acts at once; Stop all asks first and
+names how many it reaches. Reviewed and settled subagents leave the tray, so a
+thread with none shows nothing there. There is no strip above the transcript.
+
 A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss
 control. Choosing one swaps the row for an inline preview of what it would

@@ -13,7 +13,6 @@ import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
 import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
-import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -25,8 +24,6 @@ type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
-  readonly agentRunClient?: AgentRunClient;
-  readonly onAddAgent?: () => void;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
@@ -133,8 +130,6 @@ export default function CodeWorkspaceTab(props: {
           })}
     >
       <CodeWorkspace
-        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}

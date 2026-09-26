@@ -1,84 +1,66 @@
-import { useId, useMemo, useState } from "react";
-import type { AgentRunConversationResponse } from "@octant/contracts";
+import { Plus } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { relativeTimeLabel } from "../lib/relativeTime";
+import { OctantButton } from "../ui/base/OctantButton";
 import {
   buildAgentHierarchyModel,
-  type AgentHierarchyFilter,
   type AgentHierarchyInputEntry,
+  type AgentHierarchyRow,
 } from "./buildAgentHierarchyModel";
-import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSelectField } from "../ui/base/OctantSelect";
+import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
 import "./agent-hierarchy.css";
 
+/**
+ * The Agents tool's list of one thread's subagents.
+ *
+ * It had been a filter, a search box, and rows that each unfolded a
+ * plain-text transcript and five controls in place — for a list that is a
+ * handful of rows. Now it is two sections, Working and Finished, of one-button
+ * rows; a row opens that subagent's own page, where its conversation and
+ * controls live.
+ */
 export function AgentHierarchyPanel(props: {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly creationPosture?: "off" | "ask" | "automatic";
-  readonly onAcknowledge?: (input: { runId: string; version: number }) => void;
-  readonly onCancel?: (input: { runId: string }) => void;
-  readonly onSteer?: (input: { runId: string; version: number; message: string }) => void;
-  readonly onRetry?: (input: { runId: string; version: number }) => void;
-  readonly onResume?: (input: { runId: string; version: number }) => void;
   readonly reconnecting?: boolean;
-  readonly conversation?: AgentRunConversationResponse;
-  readonly conversationReconnecting?: boolean;
-  readonly conversationLoading?: boolean;
-  readonly conversationError?: string;
-  readonly onInspectConversation?: (runId: string) => void;
+  readonly onOpen?: (runId: string) => void;
+  /**
+   * The New subagent form, where this surface may create one. It starts open
+   * on a thread with no subagents — there is nothing else to show — and folds
+   * behind New once there is a list to read.
+   */
+  readonly creation?: ReactNode;
 }) {
-  const [filter, setFilter] = useState<AgentHierarchyFilter>("active");
-  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(() => props.entries.length === 0);
   const model = useMemo(
     () =>
       buildAgentHierarchyModel({
         entries: props.entries,
-        filter,
-        query,
         ...(props.creationPosture === undefined ? {} : { creationPosture: props.creationPosture }),
       }),
-    [props.entries, props.creationPosture, filter, query],
+    [props.entries, props.creationPosture],
   );
 
   return (
     <section
-      aria-label="Agents hierarchy"
+      aria-label="Subagents"
       className={`agent-hierarchy ${props.reconnecting ? "agent-hierarchy--reconnecting" : ""}`}
     >
-      {/* One title and its counts. The head had carried an eyebrow, a
-          second title ("Active / History"), and a line of host vocabulary
-          ("Server-authored child runs only. Posture: ask") above a list that
-          was often empty. */}
       <header className="agent-hierarchy__header">
         <h2>Subagents</h2>
-        <p className="agent-hierarchy__counts" aria-live="polite">
-          {model.activeCount} active · {model.historyCount} done
-        </p>
+        {props.creation === undefined ? null : (
+          <OctantButton
+            aria-expanded={creating}
+            onClick={() => setCreating((current) => !current)}
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            <Plus aria-hidden="true" size={12} />
+            New
+          </OctantButton>
+        )}
       </header>
-
-      <div className="agent-hierarchy__controls">
-        <label>
-          Filter
-          <OctantSelectField
-            aria-label="Agent hierarchy filter"
-            className="agent-hierarchy__filter"
-            onValueChange={(value) => setFilter(value as AgentHierarchyFilter)}
-            options={[
-              { id: "active", label: "Active" },
-              { id: "history", label: "History" },
-              { id: "all", label: "All" },
-            ]}
-            value={filter}
-          />
-        </label>
-        <label>
-          Search
-          <OctantInput
-            aria-label="Search child agents"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search subagents"
-          />
-        </label>
-      </div>
 
       {props.reconnecting ? (
         <p className="agent-hierarchy__banner" role="status">
@@ -86,187 +68,71 @@ export function AgentHierarchyPanel(props: {
         </p>
       ) : null}
 
-      {model.emptyReason !== undefined ? (
+      {model.emptyReason === undefined ? null : (
         <p className="agent-hierarchy__empty" role="status">
           {model.emptyReason}
         </p>
-      ) : (
-        <ul className="agent-hierarchy__list">
-          {model.rows.map((row) => (
-            <li
-              key={row.runId}
-              className="agent-hierarchy__row"
-              style={{ paddingLeft: `${12 + row.depth * 16}px` }}
-            >
-              <div className="agent-hierarchy__row-main">
-                <strong>{row.task}</strong>
-                <span>
-                  {row.role} · {row.lifecycleStatus}
-                  {row.nativeReadOnly ? " · native read-only" : ""}
-                </span>
-              </div>
-              <div className="agent-hierarchy__row-meta">
-                <OctantButton
-                  type="button"
-                  aria-label={`View conversation for ${row.task}`}
-                  onClick={() => props.onInspectConversation?.(row.runId)}
-                  variant="ghost"
-                >
-                  {props.conversation?.runId === row.runId ? "Hide transcript" : "View transcript"}
-                </OctantButton>
-                {props.conversation?.runId === row.runId ? (
-                  <AgentConversation
-                    conversation={props.conversation}
-                    reconnecting={props.conversationReconnecting === true}
-                    loading={props.conversationLoading === true}
-                    {...(props.conversationError === undefined
-                      ? {}
-                      : { errorMessage: props.conversationError })}
-                  />
-                ) : null}
-                {row.routeLabel ? (
-                  <span className="agent-hierarchy__fact">{row.routeLabel}</span>
-                ) : null}
-                {row.routeReason ? (
-                  <span className="agent-hierarchy__fact">{row.routeReason}</span>
-                ) : null}
-                {row.recoveryReason ? (
-                  <span className="agent-hierarchy__fact">{row.recoveryReason}</span>
-                ) : null}
-                {row.needsAcknowledgement ? (
-                  <OctantButton
-                    type="button"
-                    onClick={() =>
-                      props.onAcknowledge?.({ runId: row.runId, version: row.version })
-                    }
-                    variant="secondary"
-                  >
-                    Acknowledge result
-                  </OctantButton>
-                ) : null}
-                {row.lifecycleStatus === "running" || row.lifecycleStatus === "waiting" ? (
-                  <SteerControl
-                    task={row.task}
-                    onSteer={(message) =>
-                      props.onSteer?.({ runId: row.runId, version: row.version, message })
-                    }
-                  />
-                ) : null}
-                {row.lifecycleStatus === "failed" || row.lifecycleStatus === "interrupted" ? (
-                  <OctantButton
-                    type="button"
-                    aria-label={`Retry ${row.task}`}
-                    onClick={() => props.onRetry?.({ runId: row.runId, version: row.version })}
-                    variant="secondary"
-                  >
-                    Retry
-                  </OctantButton>
-                ) : null}
-                {row.lifecycleStatus === "waiting" ||
-                (row.lifecycleStatus === "interrupted" &&
-                  row.recoveryReason !== "restart-without-resumable-execution") ? (
-                  <OctantButton
-                    type="button"
-                    aria-label={`Resume ${row.task}`}
-                    onClick={() => props.onResume?.({ runId: row.runId, version: row.version })}
-                    variant="secondary"
-                  >
-                    Resume
-                  </OctantButton>
-                ) : null}
-                {row.bucket === "active" ? (
-                  <OctantButton
-                    type="button"
-                    aria-label={`Cancel ${row.task}`}
-                    onClick={() => props.onCancel?.({ runId: row.runId })}
-                    variant="secondary"
-                  >
-                    Cancel
-                  </OctantButton>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
       )}
+
+      {creating ? props.creation : null}
+
+      <AgentHierarchySection label="Working" onOpen={props.onOpen} rows={model.working} />
+      <AgentHierarchySection label="Finished" onOpen={props.onOpen} rows={model.finished} />
     </section>
   );
 }
 
-function AgentConversation(props: {
-  readonly conversation: AgentRunConversationResponse;
-  readonly reconnecting: boolean;
-  readonly loading: boolean;
-  readonly errorMessage?: string;
+function AgentHierarchySection(props: {
+  readonly label: string;
+  readonly rows: ReadonlyArray<AgentHierarchyRow>;
+  readonly onOpen: ((runId: string) => void) | undefined;
 }) {
-  if (props.loading) return <span role="status">Connecting to live transcript…</span>;
-  if (props.conversation.status === "unavailable") {
-    return <span role="status">Live transcript is unavailable for this execution.</span>;
-  }
-  if (props.conversation.entries.length === 0) {
-    return (
-      <span role="status">
-        {props.conversation.status === "stale"
-          ? (props.conversation.staleReason ?? "The child session is stale.")
-          : "No visible response text yet."}
-      </span>
-    );
-  }
+  if (props.rows.length === 0) return null;
   return (
-    <span aria-label="Child conversation">
-      {props.conversation.entries.map((entry) => entry.text).join("\n")}
-      {props.conversation.truncated ? " (earlier text truncated)" : ""}
-      {props.reconnecting ? " Live transcript disconnected; reconnect to continue." : ""}
-      {props.errorMessage === undefined ? "" : ` ${props.errorMessage}`}
-    </span>
+    <section aria-label={props.label} className="agent-hierarchy__section">
+      <h3>
+        {props.label} · {props.rows.length}
+      </h3>
+      <ul className="agent-hierarchy__list">
+        {props.rows.map((row) => (
+          <li
+            className="agent-hierarchy__row"
+            key={row.runId}
+            // Nesting is whatever parent the host reported, capped at two
+            // levels by the model; the indent is the only place it shows.
+            style={{ paddingInlineStart: `${row.depth * 16}px` }}
+          >
+            <OctantButton
+              className="agent-hierarchy__open"
+              onClick={() => props.onOpen?.(row.runId)}
+              title={row.task}
+              type="button"
+              variant="ghost"
+            >
+              <SubagentStatusIcon lifecycleStatus={row.lifecycleStatus} />
+              <span className="agent-hierarchy__row-text">
+                <span className="agent-hierarchy__task">{row.task}</span>
+                <span className="agent-hierarchy__meta">{rowFacts(row)}</span>
+              </span>
+              {row.needsAcknowledgement ? (
+                <span className="agent-hierarchy__flag">Needs review</span>
+              ) : null}
+            </OctantButton>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
-function SteerControl(props: {
-  readonly task: string;
-  readonly onSteer: (message: string) => void;
-}) {
-  const fieldId = useId();
-  const [open, setOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  if (!open) {
-    return (
-      <OctantButton
-        type="button"
-        aria-label={`Steer ${props.task}`}
-        onClick={() => setOpen(true)}
-        variant="ghost"
-      >
-        Steer
-      </OctantButton>
-    );
-  }
-  return (
-    <form
-      aria-label={`Steer ${props.task}`}
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const next = message.trim();
-        if (next.length === 0) return;
-        props.onSteer(next);
-        setMessage("");
-        setOpen(false);
-      }}
-    >
-      <label htmlFor={fieldId}>
-        Steering instruction
-        <OctantInput
-          id={fieldId}
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          required
-        />
-      </label>
-      <OctantButton type="submit">Send steering</OctantButton>
-      <OctantButton type="button" onClick={() => setOpen(false)} variant="ghost">
-        Cancel steering
-      </OctantButton>
-    </form>
-  );
+/** "Done · Review · gpt-6-astra · 3m ago": state in words first, then what ran it. */
+function rowFacts(row: AgentHierarchyRow): string {
+  return [
+    subagentStatusWord(row.lifecycleStatus),
+    subagentRoleWord(row.role),
+    row.model,
+    relativeTimeLabel(row.updatedAt),
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
 }

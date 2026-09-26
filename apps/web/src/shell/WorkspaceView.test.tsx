@@ -969,7 +969,7 @@ describe("WorkspaceView concurrent Code threads", () => {
   });
 });
 
-describe("WorkspaceView child-run status chrome", () => {
+describe("WorkspaceView subagent tray", () => {
   function agentRunClient() {
     return {
       parentSummary: vi.fn(async (parentThreadId: string) => ({
@@ -979,7 +979,7 @@ describe("WorkspaceView child-run status chrome", () => {
             runId: "90000000-0000-4000-8000-000000000001",
             requestId: "90000000-0000-4000-8000-000000000002",
             parentThreadId,
-            role: "worker",
+            role: "research",
             task: "collect evidence",
             lifecycleStatus: "running",
             executionKind: "managed",
@@ -996,7 +996,65 @@ describe("WorkspaceView child-run status chrome", () => {
     } as never;
   }
 
-  it("mounts the chrome on a Chat thread", async () => {
+  /** The tray belongs to the composer: inside its frame, never a thread header. */
+  function expectTrayInComposer(tray: HTMLElement) {
+    expect(tray).toBeVisible();
+    expect(tray.closest(".composer")).not.toBeNull();
+    expect(tray.closest("header")).toBeNull();
+  }
+
+  it("shows a Chat thread's working subagent in its composer and asks to open it", async () => {
+    const user = userEvent.setup();
+    const now = "2026-07-28T16:00:00.000Z";
+    const providerId = "20000000-0000-4000-8000-000000000001";
+    const thread = {
+      id: ids.thread,
+      projectId: ids.project,
+      title: "Release plan",
+      lifecycle: "active" as const,
+      providerInstanceId: providerId,
+      modelId: "model-a",
+      researchEnabled: false,
+      researchRouting: "automatic" as const,
+      personalityInstructions: "Be concise.",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const chatClient = {
+      bootstrap: vi.fn(async () =>
+        decodeChatBootstrap({
+          settings: {
+            defaultProviderInstanceId: providerId,
+            defaultModelId: "model-a",
+            defaultResearchEnabled: false,
+            defaultResearchRouting: "automatic",
+            defaultPersonalityInstructions: "Be concise.",
+            version: 1,
+            updatedAt: now,
+          },
+          threads: [thread],
+        }),
+      ),
+      execute: vi.fn(),
+      search: vi.fn(async () => []),
+      subscribe: vi.fn(async function* () {}),
+      thread: vi.fn(async () =>
+        decodeChatThreadView({
+          thread,
+          turns: [],
+          lastSequence: 0,
+          contents: [],
+          attachments: [],
+          citations: [],
+          workItems: [],
+          workListVersion: 0,
+          followUpVersion: 0,
+        }),
+      ),
+      upload: vi.fn(),
+      discard: vi.fn(),
+    } as never;
     const tab = {
       id: ids.tab,
       kind: "chat-thread",
@@ -1004,15 +1062,7 @@ describe("WorkspaceView child-run status chrome", () => {
       threadId: ids.thread,
       title: "Release plan",
     } as WorkspaceTab;
-    const chatClient = {
-      bootstrap: vi.fn(() => new Promise(() => undefined)),
-      execute: vi.fn(),
-      search: vi.fn(async () => []),
-      subscribe: vi.fn(async function* () {}),
-      thread: vi.fn(() => new Promise(() => undefined)),
-      upload: vi.fn(),
-      discard: vi.fn(),
-    } as never;
+    const onOpenSubagent = vi.fn();
     render(
       <WorkspaceView
         {...propsFor(tab)}
@@ -1020,18 +1070,19 @@ describe("WorkspaceView child-run status chrome", () => {
         chatClient={chatClient}
         chatReadCursorStore={createChatReadCursorStore()}
         mode="chat"
+        onOpenSubagent={onOpenSubagent}
       />,
     );
-    const chrome = await screen.findByRole("region", { name: "Child run status" });
-    expect(chrome).toBeVisible();
-    expect(chrome.closest("header")).not.toBeNull();
-    // Chat keeps observability only. Whether Chat should be able to start a
-    // subagent is a product decision, so this surface must not acquire one by
-    // accident alongside the Code thread's creation affordance.
+
+    const tray = await screen.findByRole("group", { name: "Subagents" });
+    expectTrayInComposer(tray);
+    await user.click(within(tray).getByRole("button", { name: /^collect evidence\. Working/ }));
+    expect(onOpenSubagent).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000001");
+    // Chat keeps observability only; the tray never grows a way to start one.
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
   });
 
-  it("mounts the chrome on a Work thread", async () => {
+  it("shows a Work thread's working subagent in its composer", async () => {
     const tab = {
       id: ids.tab,
       kind: "work-thread",
@@ -1062,25 +1113,19 @@ describe("WorkspaceView child-run status chrome", () => {
         mode="work"
       />,
     );
-    const chrome = await screen.findByRole("region", { name: "Child run status" });
-    expect(chrome).toBeVisible();
-    expect(chrome.closest("header")).not.toBeNull();
+    expectTrayInComposer(await screen.findByRole("group", { name: "Subagents" }));
   });
 
-  it("mounts the chrome on a Code thread overview", async () => {
+  it("shows a Code thread's working subagent in its composer", async () => {
     render(
       <WorkspaceView
         {...propsFor(codeTab("code-overview", "Overview"))}
         agentRunClient={agentRunClient()}
       />,
     );
-    const chrome = await screen.findByRole(
-      "region",
-      { name: "Child run status" },
-      { timeout: 5_000 },
-    );
-    expect(chrome).toBeVisible();
-    expect(chrome.closest("header")).not.toBeNull();
+    const tray = await screen.findByRole("group", { name: "Subagents" }, { timeout: 5_000 });
+    expectTrayInComposer(tray);
+    expect(tray).toHaveTextContent("collect evidence");
   });
 });
 

@@ -1,5 +1,6 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import { useComposerNotice } from "./ComposerNotice";
+import { ComposerSubagents } from "./ComposerSubagents";
 import type { ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
@@ -108,6 +109,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
   const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
   const message = (
     <>
+      <ComposerSubagents />
       <ComposerFollowUpSuggestions />
       {props.chips}
       {props.label === undefined ? (
