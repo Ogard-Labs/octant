@@ -310,6 +310,15 @@ describe("SettingsView", () => {
     expect(within(firstRow).queryByText("This app")).toBeNull();
   });
 
+  it("names a page's scope under its title even when the page has no subtitle", () => {
+    renderSettings({ initialDeepLink: { section: "remote-access" } });
+
+    const header = screen
+      .getByRole("heading", { level: 1, name: "Remote access" })
+      .closest("header")!;
+    expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
+  });
+
   it("scans once when the Providers section opens", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();

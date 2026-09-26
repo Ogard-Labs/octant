@@ -422,9 +422,16 @@ export function SettingsView(props: SettingsViewProps) {
               <h1 className="oct-title" id="settings-heading">
                 {currentSectionLabel}
               </h1>
-              {!hasQuery && SECTION_DESCRIPTIONS[route.activeSection] !== undefined ? (
+              {/* The page scope stands in for every matching row's own mark, so
+                  it shows whether or not the page has a subtitle: Remote access
+                  has none, and its host-scoped rows had no scope at all. */}
+              {!hasQuery &&
+              (SECTION_DESCRIPTIONS[route.activeSection] !== undefined ||
+                activeSectionScope !== undefined) ? (
                 <p className="oct-subtitle">
-                  {SECTION_DESCRIPTIONS[route.activeSection]}{" "}
+                  {SECTION_DESCRIPTIONS[route.activeSection] === undefined
+                    ? null
+                    : `${SECTION_DESCRIPTIONS[route.activeSection]} `}
                   {activeSectionScope === undefined ? null : (
                     <ScopeIndicator scope={activeSectionScope} />
                   )}

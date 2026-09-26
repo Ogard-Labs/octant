@@ -133,6 +133,13 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const showDials = background.kind !== "none";
   const picture = background.kind === "builtin" || background.kind === "photo";
   const effect = currentEffect(background);
+  // A photo dithered before the effect choice existed prints at 2 px and 4
+  // colours. Moving one slider saves an explicit effect, which retires that
+  // legacy reading, so the untouched slider's value is saved with it rather
+  // than jumping to the decoded default.
+  const legacyPrint = background.effect === undefined && effect === "dither";
+  const printCell = legacyPrint ? 2 : background.effectCell;
+  const printTones = legacyPrint ? 4 : background.effectTones;
   const motion = currentMotion(background);
   // The theme pattern is the picture itself, so its dots are always there to
   // tune; over a picture they are the Wave.
@@ -476,12 +483,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     ...background,
                     effect,
                     effectCell: Number(event.currentTarget.value),
+                    effectTones: printTones,
                   })
                 }
                 step={1}
-                value={
-                  background.effect === undefined && effect === "dither" ? 2 : background.effectCell
-                }
+                value={printCell}
               />
             </SettingRow>
           ) : null}
@@ -502,11 +508,12 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   props.onChange({
                     ...background,
                     effect,
+                    effectCell: printCell,
                     effectTones: Number(event.currentTarget.value),
                   })
                 }
                 step={1}
-                value={background.effect === undefined ? 4 : background.effectTones}
+                value={printTones}
               />
             </SettingRow>
           ) : null}

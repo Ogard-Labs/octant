@@ -343,6 +343,30 @@ describe("AppBackgroundSettings", () => {
     );
   });
 
+  it("keeps an older dithered photo's other print value when one slider moves", () => {
+    const onChange = vi.fn();
+    const saved = {
+      ...DEFAULT_APP_BACKGROUND,
+      kind: "photo" as const,
+      backgroundId: PHOTO_ID as never,
+      photoDithered: true,
+    };
+    render(<AppBackgroundSettings background={saved} library={library()} onChange={onChange} />);
+
+    fireEvent.change(screen.getByRole("slider", { name: "Pixel size" }), {
+      target: { value: "5" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effect: "dither", effectCell: 5, effectTones: 4 }),
+    );
+    fireEvent.change(screen.getByRole("slider", { name: "Colours" }), {
+      target: { value: "6" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effect: "dither", effectCell: 2, effectTones: 6 }),
+    );
+  });
+
   it("folds the built-in pictures behind the chosen one until asked to change it", async () => {
     const user = userEvent.setup();
     render(
