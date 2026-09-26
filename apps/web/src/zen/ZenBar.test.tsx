@@ -24,8 +24,8 @@ describe("ZenBar", () => {
     expect(
       within(bar)
         .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Hide Navigator bar", "Threads", "Add", "Navigator", "Appearance", "Exit Zen"]);
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Threads", "Add", "Navigator", "Appearance", "Hide Navigator bar", "Exit Zen"]);
     // Asking lives in the Navigator panel, which has the same field and shows
     // the answer; the bar's copy meant asking in one place and reading in
     // another.

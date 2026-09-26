@@ -5865,11 +5865,12 @@ export function startOctantServer(
     // turn goes through, so it adds no place work happens and no authority the
     // thread did not already have; everything it may or may not do is decided
     // by the domain and journaled here.
-    // What a Work turn is fixed at, stated once. Work denies shell, Git, and
-    // reach outside the Project by construction rather than by asking, so this
-    // is a fact about the mode and not a grant anyone can change; only file
-    // edits inside the Project may be auto-accepted, when the thread's access
-    // says so (see workTurnPosture).
+    // What a Work turn is fixed at, stated once. Work has no shell, Git, or
+    // reach outside the Project: every provider driver withholds them from a
+    // Work session rather than asking. File writes inside the Project are
+    // approval-gated unless the thread's access auto-accepts edits (see
+    // workTurnPosture). This is a fact about the mode and not a grant anyone
+    // can change.
     const WORK_TURN_POSTURE = {
       filesystem: true,
       shell: false,
@@ -5937,9 +5938,10 @@ export function startOctantServer(
       // a ceiling asking for less than this is refused when the loop starts
       // rather than quietly ignored on every round.
       modePosture: (threadId) => workTurnPosture(threadId) ?? WORK_TURN_POSTURE,
-      // Work has no approval queue of its own: its posture denies shell, Git,
-      // and reach outside the Project outright rather than asking. Saying so
-      // here is honest; inventing a source would make the pause untestable.
+      // Between rounds a Work thread has nothing pending. Its approvals are
+      // asked inside a running turn, and a turn's open requests are
+      // interrupted when its provider session ends, so each round's requests
+      // end with that round. Shell and Git never ask in Work.
       pendingApproval: () => undefined,
       markCheckpoint: async (threadId) => {
         const windowId = firstRegisteredWindowId();

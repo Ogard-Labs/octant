@@ -97,8 +97,13 @@ behavior:
   focus, except while a text field has focus.
 - Bare **Escape** exits Zen when the Zen background or floating bar owns
   focus.
-- Inside Zen, **Arrow** keys move the active element and **Alt+Arrow**
-  resizes it.
+- Inside Zen, **Arrow** keys move the active window and **Alt+Arrow**
+  resizes it. With a pointer, drag a window by its title bar and resize it
+  from any edge or corner; **Tidy** at the top right lines every window up
+  in a grid.
+- **Add → Add terminal** and **Add → Add browser** list the Code (or Work)
+  threads they can open in, so you do not need to click a thread window
+  first.
 - **⌘/Ctrl+Alt+]** and **⌘/Ctrl+Alt+[** show the next and previous focus
   space, wrapping at both ends.
 

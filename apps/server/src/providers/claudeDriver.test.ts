@@ -314,10 +314,15 @@ function harness(
   };
 }
 
-async function acquire(driver: ReturnType<typeof makeClaudeDriver>) {
+async function acquire(
+  driver: ReturnType<typeof makeClaudeDriver>,
+  mode?: "chat" | "work" | "code",
+) {
   const scope = await Effect.runPromise(Scope.make());
   const connection = await Effect.runPromise(
-    driver.acquire({ instanceId, projectRoot }).pipe(Effect.provideService(Scope.Scope, scope)),
+    driver
+      .acquire({ instanceId, projectRoot, ...(mode === undefined ? {} : { mode }) })
+      .pipe(Effect.provideService(Scope.Scope, scope)),
   );
   return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
 }
@@ -403,6 +408,14 @@ describe("Claude execution policy", () => {
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"],
     });
+    expect(claudeExecutionOptions("approval-gated", false, "work").tools).toEqual([
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "AskUserQuestion",
+    ]);
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
@@ -973,6 +986,38 @@ describe("Claude execution policy", () => {
       acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
     );
     await expect(callback).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+
+  it("never offers a Work session a shell, and refuses one it asks for without raising an approval", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    expect(open.tools).not.toContain("Bash");
+    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Edit", "Write"]));
+    const approvals: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "approval-request") approvals.push(event);
+        }),
+      ),
+    );
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "git status", description: "Show working tree status" },
+        toolUseId: "work-bash",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    expect(approvals).toEqual([]);
+    await Effect.runPromise(Fiber.interrupt(subscription));
     await acquired.close();
   });
 

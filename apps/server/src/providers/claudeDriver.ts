@@ -21,7 +21,11 @@ import {
   type ProviderSessionId,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderAcquireInput,
+  ProviderConnection,
+  ProviderDriver,
+} from "@octant/provider-sdk/driver";
 import {
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
@@ -97,6 +101,20 @@ export interface ClaudeExecutionOptions {
 }
 
 export function claudeExecutionOptions(
+  policy: ProviderExecutionPolicy,
+  autoApprove?: boolean,
+  mode?: ProviderAcquireInput["mode"],
+): ClaudeExecutionOptions {
+  const options = claudePolicyOptions(policy, autoApprove);
+  // Work has no shell or Git authority, so Claude is never offered Bash there
+  // rather than offered it and asked about each call: a person approving a
+  // command would hand a Work thread authority its mode does not have.
+  return mode === "work"
+    ? { ...options, tools: options.tools.filter((tool) => tool !== "Bash") }
+    : options;
+}
+
+function claudePolicyOptions(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
 ): ClaudeExecutionOptions {
@@ -796,7 +814,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
     kind: "claude",
     conversationOwnership: "provider",
     probe: makeProbe(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot }) => {
+    acquire: ({ instanceId, projectRoot, mode }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -810,7 +828,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, environmentFactory, projectRoot, factories);
+      return makeConnection(options, environmentFactory, projectRoot, mode, factories);
     },
   };
 }
@@ -819,6 +837,7 @@ function makeConnection(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
   projectRoot: string,
+  mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -1187,7 +1206,11 @@ function makeConnection(
             throw failure("unauthenticated", "Claude authentication is required.");
           }
         }
-        const executionOptions = claudeExecutionOptions(input.executionPolicy, input.autoApprove);
+        const executionOptions = claudeExecutionOptions(
+          input.executionPolicy,
+          input.autoApprove,
+          mode,
+        );
         const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {

@@ -117,6 +117,7 @@ const SIDE_EFFECT_TOOLS = ["bash", "edit", "write"] as const;
 const ALL_TOOLS = "bash,edit,write,read,grep,find,ls";
 const BUILT_IN_TOOL_NAMES = new Set(ALL_TOOLS.split(","));
 const READ_TOOLS = "read,grep,find,ls";
+const WORK_TOOLS = "edit,write,read,grep,find,ls";
 const SAFE_ENVIRONMENT = new Set([
   "COLORTERM",
   "LANG",
@@ -320,12 +321,16 @@ export function piArguments(
   appToolNames: ReadonlyArray<string> = [],
   resumePath?: string,
 ): ReadonlyArray<string> {
+  // Work has no shell or Git authority, so Pi's bash is left out of a Work
+  // session rather than offered and asked about per call.
   const builtInTools =
     mode === "chat"
       ? []
       : executionPolicy === "plan"
         ? READ_TOOLS.split(",")
-        : ALL_TOOLS.split(",");
+        : mode === "work"
+          ? WORK_TOOLS.split(",")
+          : ALL_TOOLS.split(",");
   const selectedTools = [...builtInTools, ...appToolNames];
   const tools = selectedTools.length === 0 ? ["--no-tools"] : ["--tools", selectedTools.join(",")];
   return [

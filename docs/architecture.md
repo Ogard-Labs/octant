@@ -325,8 +325,26 @@ deletes its data.
 | Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                               |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                          |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
+
+Work's missing shell and Git are withheld, not approval-gated: a person is
+never asked to approve a command in Work, because approving one would give the
+thread authority its mode does not hold. Every Work turn records that posture
+(`shell: "denied"`, `git: "denied"`). Each provider driver enforces it for a
+session acquired in Work mode, since a provider's own shell tool is outside
+anything the host can gate after the fact. Claude and Pi start without their
+shell tool. OpenCode's session rules deny `bash` and its `task` delegation.
+Codex threads start and resume with `features.shell_tool` and
+`features.unified_exec` off, because a Codex command that only reads runs under
+its read-only sandbox without escalating; a `command` or sandbox-widening `permissions` request that still
+arrives is declined at the agent. An ACP agent's `execute` permission request
+is refused at the agent. The declared kind is all Octant sees of an ACP call,
+and `other` also covers Octant's own managed MCP tools, so an agent that labels
+a command `other` still reaches a person's approval rather than running unasked.
+Octant's own harness gives Work no shell port. File writes inside the Project
+remain approval-gated in every driver. Work that needs a shell or Git is
+promoted to Code (below).
 
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or

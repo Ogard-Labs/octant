@@ -256,10 +256,15 @@ function fixture(
   };
 }
 
-async function acquireConnection(driver: ReturnType<typeof makeCodexDriver>) {
+async function acquireConnection(
+  driver: ReturnType<typeof makeCodexDriver>,
+  mode?: "chat" | "work" | "code",
+) {
   const scope = await Effect.runPromise(Scope.make());
   const connection = await Effect.runPromise(
-    driver.acquire({ instanceId, projectRoot }).pipe(Effect.provideService(Scope.Scope, scope)),
+    driver
+      .acquire({ instanceId, projectRoot, ...(mode === undefined ? {} : { mode }) })
+      .pipe(Effect.provideService(Scope.Scope, scope)),
   );
   return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
 }
@@ -1237,6 +1242,36 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("switches Codex's shell off for a Work thread on start and again on every resume", async () => {
+    const shellOff = { "features.shell_tool": false, "features.unified_exec": false };
+    const f = fixture();
+    const work = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await startSession(work.connection);
+    await Effect.runPromise(
+      work.connection.resume({
+        sessionId: "session-resumed" as never,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      config: shellOff,
+    });
+    expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
+      threadId: "thread-existing",
+      config: shellOff,
+    });
+    await work.close();
+
+    const code = fixture();
+    const coding = await acquireConnection(makeCodexDriver(code.options()), "code");
+    await startSession(coding.connection);
+    expect(code.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty(
+      "config",
+    );
+    await coding.close();
+  });
+
   it("resumes only Codex cursors that exist under the exact Project root", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
@@ -2011,6 +2046,49 @@ describe("Codex execution authority and approvals", () => {
       await acquired.close();
     },
   );
+
+  it.each([
+    ["command", commandApproval(), { decision: "decline" }],
+    ["permissions", permissionsApproval(), { permissions: {}, scope: "turn" }],
+  ] as const)(
+    "declines a %s approval in a Work session without asking anyone",
+    async (_kind, requestMessage, result) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "work", attachments: [], tools: [] }),
+      );
+      f.emit(requestMessage);
+      await vi.waitFor(() =>
+        expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result });
+      const answer = await Effect.runPromise(
+        Effect.exit(
+          acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+        ),
+      );
+      expect(String(answer)).toContain("protocol");
+      await acquired.close();
+    },
+  );
+
+  it("still asks a person about a Project-confined file change in a Work session", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await startSession(acquired.connection);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "work edit", attachments: [], tools: [] }),
+    );
+    const event = takeEvents(acquired.connection, 1);
+    f.emit(fileApproval());
+    await expect(event).resolves.toMatchObject([
+      { kind: "approval-request", requestId: "request-1" },
+    ]);
+    expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+    await acquired.close();
+  });
 
   it.each([
     [commandApproval(), { decision: "decline" }],

@@ -906,7 +906,15 @@ function makeConnection(
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
       }
-      if (state.executionPolicy === "plan" && mapped.kind === "approval") {
+      // Work has no shell or Git authority, so a command is refused at the
+      // agent instead of asked about. The agent's declared kind is all Octant
+      // sees: `execute` is the ACP kind for running a command, while `other`
+      // also covers Octant's own managed MCP tools and cannot be refused
+      // wholesale without breaking them.
+      if (
+        mapped.kind === "approval" &&
+        (state.executionPolicy === "plan" || (mode === "work" && mapped.toolKind === "execute"))
+      ) {
         void state.client
           .respondPermission(mapped.providerRequestId, mapped.rejectOptionId)
           .catch(() => undefined);

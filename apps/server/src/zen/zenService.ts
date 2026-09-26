@@ -394,11 +394,13 @@ export class ZenService {
       elementId,
       kind: "thread" as const,
       sourceContext: entry.sourceContext,
+      // Big enough to read a reply above the composer: at 420 by 260 the
+      // composer covered the whole transcript and the card read as empty.
       geometry: request.geometry ?? {
         x: 64 + space.elements.length * 32,
         y: 96 + space.elements.length * 32,
-        width: 420,
-        height: 260,
+        width: 520,
+        height: 480,
       },
       zIndex,
       minimized: false,

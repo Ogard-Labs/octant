@@ -118,12 +118,11 @@ export const ZenGeometry = Schema.Struct({
 export type ZenGeometry = typeof ZenGeometry.Type;
 
 /**
- * How a space places its cards. `wall` derives every card's rectangle from the
- * card count and the area on screen, so pins cannot stack, a removal reflows,
- * and a resize re-tiles. `arrange` uses the geometry each card stores, which is
- * what a hand-made arrangement needs. A wall never writes geometry, so leaving
- * `arrange` and coming back finds the arrangement as it was, and a space that
- * predates the wall loses nothing by starting as one (0106).
+ * How a space places its cards. `arrange` uses the geometry each card stores:
+ * every card is a window a person moves and sizes. `wall` now means only "never
+ * arranged": the renderer tiles such a space once, writes those tiles as each
+ * card's geometry, and moves it to `arrange`, so a first drag starts from what
+ * was drawn. It stays in the literal because stored spaces carry it.
  */
 export const ZenSpaceLayout = Schema.Literal("wall", "arrange");
 export type ZenSpaceLayout = typeof ZenSpaceLayout.Type;
@@ -747,10 +746,43 @@ export function getZenBuiltinBackground(
   return preset;
 }
 
+/**
+ * A new space opens on a first-party picture, not a flat colour: the glass a
+ * card wears takes its colour from what is behind it, and over a flat ground
+ * the focus zone read as an empty dark page. A space stored before this with
+ * the old flat default is drawn the same way (see
+ * {@link LEGACY_DEFAULT_ZEN_GROUND_COLOR}).
+ */
 export const DEFAULT_ZEN_BACKGROUND: ZenBackground = {
-  kind: "solid",
-  color: "#1a1a2e",
+  kind: "builtin",
+  presetId: "nordic-fjord-aurora",
+  overlay: 20,
+  fill: "cover",
 };
+
+/**
+ * The flat colour every space was given before it had a picture. Nobody chose
+ * it, so a space still carrying it is read as unconfigured and shown on
+ * {@link DEFAULT_ZEN_BACKGROUND}.
+ */
+export const LEGACY_DEFAULT_ZEN_GROUND_COLOR = "#1a1a2e";
+
+/**
+ * How a picture ground is printed. `pixelate` draws it in square cells of
+ * `cell` CSS pixels; `dither` does the same and then quantizes each colour
+ * channel to `levels` steps through an ordered threshold, so it reads as a
+ * halftone. `none` keeps the dials so turning the effect back on restores
+ * them. It applies to built-in and uploaded pictures; the application ground
+ * carries its own dither in Settings › Appearance › Background.
+ */
+export const ZenGroundEffect = Schema.Struct({
+  kind: Schema.Literal("none", "pixelate", "dither"),
+  cell: Schema.Int.pipe(Schema.between(2, 16)),
+  levels: Schema.Int.pipe(Schema.between(2, 16)),
+}).annotations(strict);
+export type ZenGroundEffect = typeof ZenGroundEffect.Type;
+
+export const DEFAULT_ZEN_GROUND_EFFECT: ZenGroundEffect = { kind: "none", cell: 3, levels: 8 };
 
 export const ZenAppearance = Schema.Struct({
   background: ZenBackground,
@@ -759,6 +791,8 @@ export const ZenAppearance = Schema.Struct({
   reducedMotion: Schema.Boolean,
   reducedTransparency: Schema.Boolean,
   increasedContrast: Schema.Boolean,
+  /** Absent on every space stored before the effect existed; read as none. */
+  groundEffect: Schema.optional(ZenGroundEffect),
 }).annotations(strict);
 export type ZenAppearance = typeof ZenAppearance.Type;
 

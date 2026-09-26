@@ -1009,6 +1009,7 @@ function makeConnection(
                     runtimeClient.createSession({
                       permission: permissionRules(
                         input.executionPolicy,
+                        mode,
                         state.managedTools?.serverName,
                       ),
                     }),
@@ -1205,6 +1206,7 @@ function makeConnection(
                           attachments: input.attachments,
                           permission: permissionRules(
                             state.executionPolicy,
+                            mode,
                             managedTools?.serverName,
                           ),
                         }),
@@ -1464,6 +1466,7 @@ function mapAndOffer(
 
 function permissionRules(
   policy: ProviderExecutionPolicy,
+  mode: "chat" | "work" | "code",
   managedToolServerName?: string,
 ): PermissionRuleset {
   let rules: PermissionRuleset;
@@ -1494,6 +1497,16 @@ function permissionRules(
       { permission: "external_directory", pattern: "*", action: "deny" },
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
+  }
+  // Work has no shell, Git, or provider-owned subagents: bash and task are
+  // refused outright rather than asked about, since approving either would
+  // grant the thread more than its mode holds, and a task child runs outside
+  // Octant's journal. OpenCode applies the last matching rule.
+  if (mode === "work") {
+    rules.push(
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "task", pattern: "*", action: "deny" },
+    );
   }
   rules.push(
     { permission: "*_*", pattern: "*", action: "deny" },
