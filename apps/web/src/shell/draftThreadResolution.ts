@@ -74,6 +74,43 @@ export function resolveWorkProviderChoice(
 }
 
 /**
+ * The model a new Work thread starts on. A pick made in the Work composer
+ * wins, then the Work default from Settings, then the first model. While the
+ * host has not yet said what the default is there is no choice at all, so a
+ * thread cannot start on a guess. A host without Work settings keeps the older
+ * fallback: the shared draft choice, which Chat and Code picks also move.
+ */
+export function resolveWorkDraftChoice(input: {
+  readonly choices: ReadonlyArray<CodeThreadProviderChoice>;
+  readonly settingsStatus: "loading" | "ready" | "unsupported";
+  readonly defaults?:
+    | {
+        readonly defaultProviderInstanceId?: CodeThreadProviderChoice["instanceId"] | undefined;
+        readonly defaultModelId?: CodeThreadProviderChoice["modelId"] | undefined;
+      }
+    | undefined;
+  readonly workSelection?: {
+    readonly providerInstanceId: CodeThreadProviderChoice["instanceId"];
+    readonly modelId: CodeThreadProviderChoice["modelId"];
+  };
+  readonly sharedSelection?: {
+    readonly providerInstanceId: CodeThreadProviderChoice["instanceId"];
+    readonly modelId: CodeThreadProviderChoice["modelId"];
+  };
+}): CodeThreadProviderChoice | undefined {
+  if (input.settingsStatus === "loading") return undefined;
+  const selection =
+    input.workSelection ??
+    (input.settingsStatus === "unsupported" ? input.sharedSelection : undefined);
+  return resolveWorkProviderChoice(
+    input.choices,
+    selection?.providerInstanceId,
+    selection?.modelId,
+    input.defaults,
+  );
+}
+
+/**
  * What to say when Code has nothing loaded yet.
  *
  * "Still loading" is only true while it is loading. A disconnected or refused

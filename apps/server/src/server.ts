@@ -59,6 +59,7 @@ import {
   type CapacityReservationId,
   type CodeThreadId,
   type OctantMode,
+  type WorkAccess,
   type WorkThreadId,
 } from "@octant/contracts";
 import { ExtensionProviderFamily, type StandaloneSkillScope } from "@octant/contracts/extensions";
@@ -4946,6 +4947,9 @@ export function startOctantServer(
     const nativeHarnessFollowUpCreation: {
       current: NativeHarnessFollowUpCreationDependencies | undefined;
     } = { current: undefined };
+    // The Work turn service is built further down; the harness asks it for a
+    // running turn's access only once turns run.
+    let runningWorkTurnAccess: ((threadId: string) => WorkAccess | undefined) | undefined;
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
       store: nativeHarnessSessionsLive,
@@ -5068,6 +5072,7 @@ export function startOctantServer(
         hostId: deriveToolHostId(providerDataDirectory),
         persistence,
         workThreads: workThreadProjection,
+        runningWorkTurnAccess: (threadId) => runningWorkTurnAccess?.(threadId),
         readThreadTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, threadId),
       }),
@@ -5693,6 +5698,7 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    runningWorkTurnAccess = (threadId) => workTurnService.runningTurnAccess(threadId);
     const fileMentionService = new FileMentionService({
       authority: {
         resolveCodeRoot: async (windowId, threadId, checkoutId) => {

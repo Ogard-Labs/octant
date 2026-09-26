@@ -199,7 +199,7 @@ import {
   checkoutNotPreparedMessage,
   codeUnavailableMessage,
   resolveDraftProject,
-  resolveWorkProviderChoice,
+  resolveWorkDraftChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
 } from "./shell/draftThreadResolution";
 import type { RepositoryIssueRow } from "./github/readIssuesAcrossRepositories";
@@ -863,6 +863,13 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] = useState<
     import("@octant/contracts/providers").ProviderModelId | undefined
   >(() => readLastModelChoice()?.modelId);
+  // A model picked in the Work composer itself. The shared draft choice above
+  // also follows Chat and Code picks through the remembered choice, and it
+  // must not outrank the Work default from Settings.
+  const [workComposerSelection, setWorkComposerSelection] = useState<{
+    readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
+    readonly modelId: import("@octant/contracts/providers").ProviderModelId;
+  }>();
   const [draftExecutionPolicy, setDraftExecutionPolicy] = useState<
     import("@octant/contracts/providers").ProviderExecutionPolicy | undefined
   >();
@@ -1250,7 +1257,7 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
-  const workSettings = useWorkSettings(workThreadClient);
+  const workSettings = useWorkSettings(workThreadClient, machineChanges.workNavigation);
   const chatController = useChatController({
     client: chatClient,
     navigationRefreshMs: 0,
@@ -2545,12 +2552,17 @@ function LaunchedShell(
       ),
     [workProviderGroups],
   );
-  const workProviderChoice = resolveWorkProviderChoice(
-    workProviderChoices,
-    draftProviderInstanceId,
-    draftModelId,
-    workSettings.settings,
-  );
+  const workProviderChoice = resolveWorkDraftChoice({
+    choices: workProviderChoices,
+    settingsStatus: workSettings.status,
+    defaults: workSettings.settings,
+    ...(workComposerSelection === undefined ? {} : { workSelection: workComposerSelection }),
+    ...(draftProviderInstanceId === undefined || draftModelId === undefined
+      ? {}
+      : {
+          sharedSelection: { providerInstanceId: draftProviderInstanceId, modelId: draftModelId },
+        }),
+  });
   const draftProviderGroups =
     activeMode === "chat"
       ? chatProviderGroups
@@ -6265,6 +6277,12 @@ function LaunchedShell(
                     onDraftSelectProvider={(selection) => {
                       setDraftProviderInstanceId(selection.providerInstanceId);
                       setDraftModelId(selection.modelId);
+                      if (activeMode === "work") {
+                        setWorkComposerSelection({
+                          providerInstanceId: selection.providerInstanceId,
+                          modelId: selection.modelId,
+                        });
+                      }
                     }}
                     onDraftExecutionPolicyChange={(policy, persistence) => {
                       setDraftExecutionPolicy(policy);

@@ -2,6 +2,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts";
 import type {
   ChatThreadId,
   OctantMode,
+  WorkAccess,
   ThreadExternalContentTaint,
   ToolActionAuthority,
   ToolHostId,
@@ -18,6 +19,12 @@ export interface NativeHarnessAuthorityOptions {
     "readProject" | "readCodeThread" | "readProviderInstance" | "readChatThread"
   >;
   readonly workThreads: Pick<WorkThreadProjection, "read">;
+  /**
+   * The access a Work thread's running turn holds. A goal-loop round can run
+   * ask-first on an auto-accept thread; edits answer to the round, not the
+   * thread. Without it, or with no turn running, Work edits ask first.
+   */
+  readonly runningWorkTurnAccess?: (threadId: string) => WorkAccess | undefined;
   readonly readThreadTaint: (threadId: string) => ThreadExternalContentTaint;
   readonly clock?: () => string;
 }
@@ -66,12 +73,14 @@ export function createNativeHarnessAuthority(
     resolveLiveFacts: ({ threadId, mode }) => {
       const code =
         mode === "code" ? options.persistence.readCodeThread(threadId as never) : undefined;
-      // A Work thread's access is its own; auto-accept lets the harness write
-      // project files without asking, as it does for a Code thread.
-      const work = mode === "work" ? options.workThreads.read(threadId as never) : undefined;
+      // A Work turn's access is the running turn's: the thread's own, or
+      // ask-first when a goal-loop round's ceiling is narrower. Auto-accept
+      // lets the harness write project files without asking, as it does for a
+      // Code thread; anything else, including no turn at all, asks.
+      const workAccess = mode === "work" ? options.runningWorkTurnAccess?.(threadId) : undefined;
       const executionPolicy =
         code?.executionPolicy ??
-        (work?.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated");
+        (workAccess === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated");
       return {
         // The harness is only composed for a provider that runs app-managed
         // tools; a provider that cannot never reaches this service.

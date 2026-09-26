@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   codeUnavailableMessage,
   resolveDraftProject,
+  resolveWorkDraftChoice,
   resolveWorkProviderChoice,
 } from "./draftThreadResolution";
 
@@ -123,5 +124,61 @@ describe("codeUnavailableMessage", () => {
     expect(codeUnavailableMessage({ status: "disconnected" })).toMatch(/unavailable/i);
     expect(codeUnavailableMessage({ status: "disconnected" })).not.toMatch(/still loading/i);
     expect(codeUnavailableMessage({ status: "ready" })).not.toMatch(/still loading/i);
+  });
+});
+
+describe("resolveWorkDraftChoice", () => {
+  const first = {
+    instanceId: "90000000-0000-4000-8000-000000000001" as never,
+    modelId: "gpt-5" as never,
+    label: "First",
+  };
+  const preferred = {
+    instanceId: "90000000-0000-4000-8000-000000000002" as never,
+    modelId: "sonnet" as never,
+    label: "Preferred",
+  };
+  const defaults = {
+    defaultProviderInstanceId: preferred.instanceId,
+    defaultModelId: preferred.modelId,
+  };
+  const chatPick = { providerInstanceId: first.instanceId, modelId: first.modelId };
+
+  it("offers no model until the host has said what Work's default is", () => {
+    expect(
+      resolveWorkDraftChoice({ choices: [first, preferred], settingsStatus: "loading" }),
+    ).toBeUndefined();
+  });
+
+  it("keeps a model remembered from Chat or Code from overriding Work's default", () => {
+    expect(
+      resolveWorkDraftChoice({
+        choices: [first, preferred],
+        settingsStatus: "ready",
+        defaults,
+        sharedSelection: chatPick,
+      }),
+    ).toEqual(preferred);
+  });
+
+  it("lets a pick made in the Work composer win over the default", () => {
+    expect(
+      resolveWorkDraftChoice({
+        choices: [first, preferred],
+        settingsStatus: "ready",
+        defaults,
+        workSelection: chatPick,
+      }),
+    ).toEqual(first);
+  });
+
+  it("keeps the shared choice on a host without Work settings", () => {
+    expect(
+      resolveWorkDraftChoice({
+        choices: [preferred, first],
+        settingsStatus: "unsupported",
+        sharedSelection: chatPick,
+      }),
+    ).toEqual(first);
   });
 });

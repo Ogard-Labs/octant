@@ -5,6 +5,7 @@ import { WorkSettingsView } from "./WorkSettingsView";
 
 function controller(overrides: Partial<WorkSettingsController> = {}): WorkSettingsController {
   return {
+    status: "ready",
     settings: {
       defaultAccess: "ask-first",
       version: 3 as never,

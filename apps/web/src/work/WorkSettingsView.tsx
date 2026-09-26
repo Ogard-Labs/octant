@@ -75,6 +75,7 @@ export function WorkSettingsView(props: {
         >
           <ComposerModelPicker
             ariaLabel="Default Work provider and model"
+            disabled={props.controller.busy}
             groups={groups}
             menuSide="bottom"
             onSelect={(selection) =>
