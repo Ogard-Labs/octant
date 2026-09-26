@@ -75,7 +75,9 @@ function makeFixture() {
     createView: vi.fn(() => view),
     attach: vi.fn(),
     detach: vi.fn(),
-    boundsForAnchor: vi.fn((_window: object, value: CodeOperationApprovalAnchor) => value.bounds),
+    boundsForAnchor: vi.fn(
+      (_window: object, value: CodeOperationApprovalAnchor, _pendingCount: number) => value.bounds,
+    ),
     fallbackBounds: vi.fn<() => CodeOperationApprovalBounds | undefined>(() => undefined),
     approvalPalette: vi.fn<() => CodeOperationApprovalPalette | undefined>(() => undefined),
     isWindowDestroyed: vi.fn(() => false),
@@ -103,6 +105,9 @@ describe("Code operation approval view controller", () => {
     expect(html).toContain('id="approve"');
     expect(html).toContain("Show authority details");
     expect(html).toContain("disabled>Allow</button>");
+    expect(html).toContain('role="alertdialog"');
+    expect(html).toContain('aria-labelledby="message"');
+    expect(html).toContain('aria-describedby="detail"');
     expect(html).not.toContain("Approve once");
     expect(html).toContain("prefers-reduced-motion");
     // Enter must never grant. Three things make that true, and each is the
@@ -249,6 +254,12 @@ describe("Code operation approval view controller", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(firstSettled).not.toHaveBeenCalled();
     expect(fixture.prepare).toHaveBeenCalledTimes(1);
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    expect(fixture.host.boundsForAnchor).toHaveBeenLastCalledWith(fixture.window, anchor(), 2);
     await fixture.controller.decision({
       senderId: 41,
       token: "approval-view-token",
@@ -258,6 +269,7 @@ describe("Code operation approval view controller", () => {
     await first;
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fixture.prepare).toHaveBeenCalledTimes(2);
+    expect(fixture.host.boundsForAnchor).toHaveBeenLastCalledWith(fixture.window, anchor(), 1);
     fixture.controller.closeWindow("window-1");
     await expect(second).resolves.toBeUndefined();
   });

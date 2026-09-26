@@ -130,9 +130,13 @@ export interface CodeOperationApprovalViewHost<TWindow> {
   readonly boundsForAnchor: (
     window: TWindow,
     anchor: CodeOperationApprovalAnchor,
+    pendingCount: number,
   ) => CodeOperationApprovalBounds | undefined;
   /** Safe owner-window fallback for dock actions whose composer is unmounted. */
-  readonly fallbackBounds?: (window: TWindow) => CodeOperationApprovalBounds | undefined;
+  readonly fallbackBounds?: (
+    window: TWindow,
+    pendingCount: number,
+  ) => CodeOperationApprovalBounds | undefined;
   /**
    * The resolved palette the owning window's theme is showing, if it has
    * reported one. Absent, the view draws the system palette it always has.
@@ -262,16 +266,23 @@ export function createCodeOperationApprovalViewController<TWindow>(
   const expiryMs = options.expiryMs ?? DEFAULT_EXPIRY_MS;
   const anchorWaitMs = options.anchorWaitMs ?? DEFAULT_ANCHOR_WAIT_MS;
 
+  const pendingCount = (windowId: string): number =>
+    1 + (queuedByWindow.get(windowId)?.length ?? 0);
+
   const showQueueCount = (windowId: string) => {
     const active = pendingByWindow.get(windowId);
     active?.view?.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.queue, {
-      count: 1 + (queuedByWindow.get(windowId)?.length ?? 0),
+      count: pendingCount(windowId),
     });
   };
 
   const place = (pending: PendingApproval<TWindow>): void => {
     if (pending.view === undefined || pending.anchor === undefined) return;
-    const bounds = options.host.boundsForAnchor(pending.window, pending.anchor);
+    const bounds = options.host.boundsForAnchor(
+      pending.window,
+      pending.anchor,
+      pendingCount(pending.windowId),
+    );
     if (bounds === undefined) return;
     pending.view.setBounds(bounds);
   };
@@ -337,8 +348,12 @@ export function createCodeOperationApprovalViewController<TWindow>(
     }
     const initialBounds =
       pending.anchor === undefined
-        ? options.host.fallbackBounds?.(pending.window)
-        : options.host.boundsForAnchor(pending.window, pending.anchor);
+        ? options.host.fallbackBounds?.(pending.window, pendingCount(pending.windowId))
+        : options.host.boundsForAnchor(
+            pending.window,
+            pending.anchor,
+            pendingCount(pending.windowId),
+          );
     if (initialBounds === undefined) {
       pending.beginInFlight = false;
       return;
@@ -374,8 +389,12 @@ export function createCodeOperationApprovalViewController<TWindow>(
       }
       const bounds =
         pending.anchor === undefined
-          ? options.host.fallbackBounds?.(pending.window)
-          : options.host.boundsForAnchor(pending.window, pending.anchor);
+          ? options.host.fallbackBounds?.(pending.window, pendingCount(pending.windowId))
+          : options.host.boundsForAnchor(
+              pending.window,
+              pending.anchor,
+              pendingCount(pending.windowId),
+            );
       if (bounds === undefined) return;
       const viewToken = token();
       const view = options.host.createView(viewToken);
@@ -626,5 +645,5 @@ details{color:var(--approval-muted)}summary{cursor:pointer;font-size:12px}
 #queue:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}#queue-count{color:var(--approval-muted)}
 .actions{display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;margin-top:auto}
 button{border:1px solid var(--approval-border);border-radius:8px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:2px solid var(--approval-primary);outline-offset:2px}button:disabled{opacity:.5;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
-</style></head><body><main id="approval" aria-live="polite"><div class="content"><h1 id="message">Preparing approval…</h1><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details></div><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Allow</button></div></main></body></html>`;
+</style></head><body><main id="approval" role="alertdialog" aria-labelledby="message" aria-describedby="detail" aria-live="polite"><div class="content"><h1 id="message">Preparing approval…</h1><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details></div><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Allow</button></div></main></body></html>`;
 }

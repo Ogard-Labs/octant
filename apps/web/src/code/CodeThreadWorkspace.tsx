@@ -83,6 +83,7 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
+import { observeComposerPlacement } from "./codeWorkspaceApprovals";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
@@ -338,7 +339,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const resize = new ResizeObserver(sync);
     const scroll = () => sync();
     const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
-    if (composer !== undefined && composer !== null) resize.observe(composer);
+    if (composer !== undefined && composer !== null) {
+      observeComposerPlacement(composer, resize);
+    }
     window.addEventListener("resize", sync);
     window.addEventListener("scroll", scroll, true);
     sync();
