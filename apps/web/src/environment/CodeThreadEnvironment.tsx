@@ -106,7 +106,8 @@ export interface CodeThreadEnvironmentProps {
    * the caller has no thread record to read it from.
    */
   readonly deliveryOutcome?: CodeDeliveryOutcomeKind;
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentOpen?: boolean;
   readonly onOpenGit?: () => void;
   readonly onCreatePullRequest?: () => void;

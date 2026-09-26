@@ -273,7 +273,8 @@ export interface WorkspaceViewProps {
     readonly threadId: string;
     readonly mode: "work" | "code";
   }) => void;
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentDockOpen?: boolean;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
@@ -2081,7 +2082,8 @@ function ChatThreadWorkspace(props: {
   readonly providerController: ProviderController;
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentOpen?: boolean;
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
   readonly usageDashboardClient?: UsageDashboardClient;

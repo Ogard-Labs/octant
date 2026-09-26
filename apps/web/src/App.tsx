@@ -6126,7 +6126,7 @@ function LaunchedShell(
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
                     onOpenSubagent={openSubagent}
-                    onOpenAgents={() => openDockTab("agents")}
+                    onOpenAgents={openSubagent}
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
