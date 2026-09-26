@@ -17,11 +17,36 @@ export type MarkdownBlock =
   | { readonly type: "code"; readonly language: string | undefined; readonly code: string };
 
 const FENCE = /```([^\n`]*)\n([\s\S]*?)```/g;
-const THINKING_TAG = /<thinking>([\s\S]*?)<\/thinking>/gi;
-const REASONING_TAG = /<reasoning>([\s\S]*?)<\/reasoning>/gi;
-// The shorter tag several open models emit inline (GLM, DeepSeek, Qwen) when
-// their reasoning arrives as text rather than a separate channel.
-const THINK_TAG = /<think>([\s\S]*?)<\/think>/gi;
+// `think` is the shorter tag several open models emit inline (GLM, DeepSeek,
+// Qwen) when their reasoning arrives as text rather than a separate channel.
+const REASONING_TAGS = ["thinking", "reasoning", "think"] as const;
+
+/**
+ * Each closed `<tag>…</tag>` pair, first closer after each opener. Found by
+ * index rather than a lazy regex: on model output with many openers and no
+ * closer, `/<tag>([\s\S]*?)<\/tag>/` rescans to the end from every opener.
+ */
+function closedTagSpans(
+  body: string,
+  lower: string,
+  tag: string,
+): ReadonlyArray<{ readonly start: number; readonly end: number; readonly text: string }> {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const spans: Array<{ start: number; end: number; text: string }> = [];
+  let from = 0;
+  for (;;) {
+    const start = lower.indexOf(open, from);
+    if (start === -1) break;
+    const inner = start + open.length;
+    const closing = lower.indexOf(close, inner);
+    // No closer after this opener means none after any later opener either.
+    if (closing === -1) break;
+    spans.push({ start, end: closing + close.length, text: body.slice(inner, closing) });
+    from = closing + close.length;
+  }
+  return spans;
+}
 
 function normalizeStatus(raw: string | undefined): ChatToolPartStatus {
   const value = (raw ?? "").toLowerCase();
@@ -70,32 +95,16 @@ export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessag
   // A part left undefined marks a span the reader never sees.
   const annotated: Array<{ start: number; end: number; part: ChatMessagePart | undefined }> = [];
 
-  for (const match of body.matchAll(THINKING_TAG)) {
-    const start = match.index ?? 0;
-    if (insideCode(start)) continue;
-    annotated.push({
-      start,
-      end: start + match[0].length,
-      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
-    });
-  }
-  for (const match of body.matchAll(REASONING_TAG)) {
-    const start = match.index ?? 0;
-    if (insideCode(start)) continue;
-    annotated.push({
-      start,
-      end: start + match[0].length,
-      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
-    });
-  }
-  for (const match of body.matchAll(THINK_TAG)) {
-    const start = match.index ?? 0;
-    if (insideCode(start)) continue;
-    annotated.push({
-      start,
-      end: start + match[0].length,
-      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
-    });
+  const lower = body.toLowerCase();
+  for (const tag of REASONING_TAGS) {
+    for (const span of closedTagSpans(body, lower, tag)) {
+      if (insideCode(span.start)) continue;
+      annotated.push({
+        start: span.start,
+        end: span.end,
+        part: { kind: "reasoning", text: span.text.trim() },
+      });
+    }
   }
   for (const match of body.matchAll(FENCE)) {
     const start = match.index ?? 0;
