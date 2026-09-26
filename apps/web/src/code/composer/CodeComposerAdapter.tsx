@@ -91,6 +91,7 @@ import type {
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 import type { OctantHostBridge } from "../../shell/hostBridge";
 import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
+import { observeComposerPlacement } from "../codeWorkspaceApprovals";
 
 export interface CodeComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -275,7 +276,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     };
     const resize = new ResizeObserver(sync);
     const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
-    if (composer !== undefined && composer !== null) resize.observe(composer);
+    if (composer !== undefined && composer !== null) {
+      observeComposerPlacement(composer, resize);
+    }
     window.addEventListener("resize", sync);
     window.addEventListener("scroll", sync, true);
     sync();

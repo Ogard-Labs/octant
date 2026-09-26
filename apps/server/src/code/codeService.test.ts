@@ -1809,6 +1809,50 @@ describe("CodeService replay and files", () => {
     );
   });
 
+  it("streams a session-only Full access grant to the granting window as full-access", async () => {
+    const current = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({ threads: [current], approve: true });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).resolves.toMatchObject({ thread: { executionPolicy: "full-access" } });
+
+    const persisted = thread({ executionPolicy: "approval-gated", version: 2 as never });
+    fixture.persistence.readCodeThread.mockReturnValue(persisted);
+    fixture.persistence.readCodeThreadView.mockReturnValue({
+      thread: persisted,
+      checkout,
+      lastSequence: persisted.version,
+    });
+    fixture.persistence.journal.replayAggregate.mockReturnValue([
+      eventEnvelope(42, "code.thread-updated@1", { kind: "thread-updated", thread: persisted }, 2),
+    ]);
+
+    const grantingWindowFrames: CodeEventFrame[] = [];
+    for await (const frame of fixture.service.subscribe(ids.window, ids.thread, 1)) {
+      grantingWindowFrames.push(frame);
+    }
+    expect(grantingWindowFrames).toMatchObject([
+      { event: { thread: { executionPolicy: "full-access" } } },
+    ]);
+
+    const otherWindow = decodeWindowId(testUuid(9001));
+    const otherWindowFrames: CodeEventFrame[] = [];
+    for await (const frame of fixture.service.subscribe(otherWindow, ids.thread, 1)) {
+      otherWindowFrames.push(frame);
+    }
+    expect(otherWindowFrames).toMatchObject([
+      { event: { thread: { executionPolicy: "approval-gated" } } },
+    ]);
+  });
+
   it("rejects a per-thread cursor ahead of the current thread head", async () => {
     const fixture = serviceFixture();
 
