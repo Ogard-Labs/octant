@@ -35,7 +35,14 @@ export const dockModules: Readonly<
   agents: (props) =>
     createElement(
       AgentsModule,
-      inputs(props, ["agentRunClient", "agentRunSettingsClient", "nativeHarnessClient", "subject"]),
+      inputs(props, [
+        "agentRunClient",
+        "agentRunSettingsClient",
+        "nativeHarnessClient",
+        "onAgentRunRequestHandled",
+        "requestedAgentRunId",
+        "subject",
+      ]),
     ),
   "side-chat": (props) =>
     createElement(

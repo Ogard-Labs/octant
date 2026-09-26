@@ -1,4 +1,4 @@
-import type { AgentRunConversationResponse } from "@octant/contracts";
+import type { AgentRunConversationEntry, AgentRunConversationResponse } from "@octant/contracts";
 import { ArrowLeft } from "lucide-react";
 import { useId, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
@@ -185,16 +185,16 @@ function AgentRunReply(props: {
         {conversation?.truncated === true ? (
           <p className="agent-run-detail__note">Earlier text was truncated.</p>
         ) : null}
-        {entries.map((entry) =>
-          entry.kind === "assistant" ? (
+        {replyBlocks(entries).map((block) =>
+          block.kind === "assistant" ? (
             <Markdown
-              body={entry.text}
+              body={block.text}
               className="chat-rich-text agent-run-detail__message"
-              key={entry.sequence}
+              key={block.key}
             />
           ) : (
-            <p className="agent-run-detail__event" key={entry.sequence}>
-              {entry.text}
+            <p className="agent-run-detail__event" key={block.key}>
+              {block.text}
             </p>
           ),
         )}
@@ -309,4 +309,29 @@ function SteerControl(props: {
       </div>
     </form>
   );
+}
+
+/**
+ * The host records a reply as it streams, one entry per text delta, so
+ * "Hello, Henrik!" arrived as "Hello", ",", " Henrik", "!" and rendered as
+ * four paragraphs. Consecutive assistant entries are one message; a status
+ * entry between them ends it.
+ */
+function replyBlocks(
+  entries: ReadonlyArray<AgentRunConversationEntry>,
+): ReadonlyArray<{
+  readonly key: number;
+  readonly kind: "assistant" | "status";
+  readonly text: string;
+}> {
+  const blocks: Array<{ key: number; kind: "assistant" | "status"; text: string }> = [];
+  for (const entry of entries) {
+    const last = blocks.at(-1);
+    if (entry.kind === "assistant" && last?.kind === "assistant") {
+      last.text += entry.text;
+      continue;
+    }
+    blocks.push({ key: entry.sequence, kind: entry.kind, text: entry.text });
+  }
+  return blocks;
 }

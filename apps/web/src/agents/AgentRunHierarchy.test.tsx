@@ -444,6 +444,38 @@ describe("AgentRunHierarchy", () => {
     expect(conversation).toHaveTextContent("The reply was truncated.");
   });
 
+  it("reads a streamed reply as one message, not one paragraph per piece", async () => {
+    const user = userEvent.setup();
+    const occurredAt = "2026-09-26T19:00:35.000Z" as never;
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "completed", task: "Say hello" })],
+      })),
+      conversation: vi.fn(async () => ({
+        runId,
+        parentThreadId,
+        executionKind: "octant-managed" as const,
+        modelId: "test-model" as never,
+        lifecycleStatus: "completed" as const,
+        status: "complete" as const,
+        entries: ["Hello", ",", " Henrik", "!"].map((text, index) => ({
+          sequence: index + 1,
+          kind: "assistant" as const,
+          text,
+          occurredAt,
+        })),
+        truncated: false,
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+
+    await user.click(await screen.findByRole("button", { name: /Say hello/ }));
+
+    const conversation = screen.getByRole("log", { name: "Subagent conversation" });
+    await waitFor(() => expect(within(conversation).getByText("Hello, Henrik!")).toBeVisible());
+  });
+
   it("says plainly when a finished subagent left nothing to read", async () => {
     const user = userEvent.setup();
     const client = emptyClient({
@@ -468,7 +500,8 @@ describe("AgentRunHierarchy", () => {
     expect(screen.queryByRole("button", { name: "Cancel this subagent" })).not.toBeInTheDocument();
   });
 
-  it("opens on the subagent another surface asked for and reports the request handled", async () => {
+  it("stays on the subagent another surface asked for, even when the tool remounts, until the reader goes back", async () => {
+    const user = userEvent.setup();
     const onRequestedRunHandled = vi.fn();
     const client = emptyClient({
       parentSummary: vi.fn(async () => ({
@@ -476,16 +509,23 @@ describe("AgentRunHierarchy", () => {
         entries: [summaryEntry({ lifecycleStatus: "running", task: "Trace the flaky test" })],
       })),
     });
-    render(
+    const tool = () => (
       <AgentRunHierarchy
         client={client}
         onRequestedRunHandled={onRequestedRunHandled}
         parentThreadId={parentThreadId}
         requestedRunId={String(runId)}
-      />,
+      />
     );
-
+    const first = render(tool());
     expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+    // The dock re-keys the tool body once the new tab has its id.
+    first.unmount();
+    render(tool());
+    expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+    expect(onRequestedRunHandled).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
     expect(onRequestedRunHandled).toHaveBeenCalledTimes(1);
   });
 });

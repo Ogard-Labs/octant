@@ -34,8 +34,8 @@ export function AgentRunHierarchy(props: {
   readonly settingsClient?: AgentRunSettingsClient;
   /**
    * A subagent someone asked to see from elsewhere — a row in the composer's
-   * tray. The tool opens on its page and reports the request handled, so
-   * coming back to the tool later shows the list rather than reopening it.
+   * tray. The tool opens on its page, and reports the request handled once
+   * the reader goes back to the list, so the tool opens on the list again.
    */
   readonly requestedRunId?: string;
   readonly onRequestedRunHandled?: () => void;
@@ -56,11 +56,17 @@ export function AgentRunHierarchy(props: {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(props.requestedRunId);
   const onRequestedRunHandled = useRef(props.onRequestedRunHandled);
   onRequestedRunHandled.current = props.onRequestedRunHandled;
+  // The request stands until the reader leaves the page it opened. Clearing it
+  // on arrival lost it: the dock re-keys the tool body when the new tab gets
+  // its id, and the remounted tool, finding no request, opened on the list.
   useEffect(() => {
     if (props.requestedRunId === undefined) return;
     setSelectedRunId(props.requestedRunId);
-    onRequestedRunHandled.current?.();
   }, [props.requestedRunId]);
+  const leaveSelectedRun = () => {
+    setSelectedRunId(undefined);
+    if (props.requestedRunId !== undefined) onRequestedRunHandled.current?.();
+  };
   // The live conversation streams only while its page is open.
   const conversationState = useAgentRunConversation(
     props.client,
@@ -313,7 +319,7 @@ export function AgentRunHierarchy(props: {
         {error}
         <AgentRunDetail
           row={selectedRow}
-          onBack={() => setSelectedRunId(undefined)}
+          onBack={leaveSelectedRun}
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
           onSteer={(input) => void command("steer", input)}
