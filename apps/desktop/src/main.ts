@@ -1039,6 +1039,7 @@ const approvalPalettesByWindow = new Map<string, CodeOperationApprovalPalette>()
 function codeApprovalBoundsForAnchor(
   window: BrowserWindow,
   anchor: CodeOperationApprovalAnchor,
+  pendingCount: number,
 ): CodeOperationApprovalBounds | undefined {
   if (window.isDestroyed()) return undefined;
   const content = window.getContentBounds();
@@ -1055,7 +1056,8 @@ function codeApprovalBoundsForAnchor(
     return undefined;
   }
   const width = Math.min(560, Math.max(320, Math.floor(bounds.width)), content.width - 24);
-  const height = Math.min(216, Math.max(180, Math.floor(bounds.y - 44)));
+  const maxHeight = pendingCount > 1 ? 260 : 216;
+  const height = Math.min(maxHeight, Math.max(180, Math.floor(bounds.y - 44)));
   if (width < 320 || height < 180) return undefined;
   const x = Math.min(Math.max(12, Math.floor(bounds.x)), content.width - width - 12);
   const y = Math.floor(bounds.y - height - 8);
@@ -1065,11 +1067,13 @@ function codeApprovalBoundsForAnchor(
 
 function codeApprovalFallbackBounds(
   window: BrowserWindow,
+  pendingCount: number,
 ): CodeOperationApprovalBounds | undefined {
   if (window.isDestroyed()) return undefined;
   const content = window.getContentBounds();
   const width = Math.min(560, content.width - 24);
-  const height = Math.min(216, content.height - 44);
+  const maxHeight = pendingCount > 1 ? 260 : 216;
+  const height = Math.min(maxHeight, content.height - 44);
   if (width < 320 || height < 180) return undefined;
   return {
     x: content.width - width - 12,

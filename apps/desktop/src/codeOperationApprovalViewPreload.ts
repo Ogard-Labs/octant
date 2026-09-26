@@ -27,6 +27,7 @@ function send(decision: "approve" | "cancel" | "next" | "previous"): void {
 }
 
 function render(next: ApprovalChallengeView): void {
+  const firstChallenge = challenge === undefined;
   challenge = next;
   const approve = element("approve");
   if (approve instanceof HTMLButtonElement) approve.disabled = false;
@@ -53,6 +54,12 @@ function render(next: ApprovalChallengeView): void {
   }
   if (digests !== undefined) {
     digests.textContent = `Effect digest: ${next.effectDigest}\nContext digest: ${next.contextDigest}`;
+  }
+  if (firstChallenge) {
+    // Focusing Cancel makes VoiceOver read the dialog and Enter the safe
+    // cancellation action; Allow still requires an explicit Tab or click.
+    const cancel = element("cancel");
+    if (cancel instanceof HTMLButtonElement) cancel.focus();
   }
 }
 
@@ -85,8 +92,8 @@ window.addEventListener("DOMContentLoaded", () => {
   element("next")?.addEventListener("click", () => send("next"));
   element("approve")?.addEventListener("click", () => send("approve"));
   element("cancel")?.addEventListener("click", () => send("cancel"));
-  // Escape cancels; Enter deliberately has no action so an accidental keypress
-  // cannot grant Full access before the person explicitly clicks Approve.
+  // Escape cancels; there is no custom Enter handler, so the focused Cancel
+  // button remains the only safe native action before someone chooses Allow.
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") send("cancel");
   });
