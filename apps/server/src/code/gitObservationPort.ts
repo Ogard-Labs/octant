@@ -789,7 +789,7 @@ function parseNumstatCount(text: string): number | undefined {
   return Number.isSafeInteger(value) ? value : undefined;
 }
 
-function parseStatus(output: string): GitStatusEntry[] | undefined {
+export function parseStatus(output: string): GitStatusEntry[] | undefined {
   const fields = output.split("\0");
   fields.pop();
   const entries: GitStatusEntry[] = [];

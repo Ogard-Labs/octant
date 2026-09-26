@@ -91,6 +91,35 @@ describe("GitEnvironmentPort", () => {
     });
   });
 
+  it("lists every uncommitted path, untracked files included, with its line counts", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "README.md"), "one\n");
+    git(repository, "add", "README.md");
+    git(repository, "commit", "-m", "initial");
+    writeFileSync(join(repository, "README.md"), "one\ntwo\n");
+    writeFileSync(join(repository, "NOTES.md"), "never added\n");
+    const port = new GitEnvironmentPort(undefined, confinedOptions());
+
+    const observed = await port.observe(realpathSync(repository));
+
+    expect(observed).toMatchObject({
+      status: "ready",
+      changedFiles: {
+        files: [
+          { path: "NOTES.md", change: "untracked" },
+          { path: "README.md", change: "modified", insertions: 1, deletions: 0 },
+        ],
+        total: 2,
+        truncated: false,
+      },
+    });
+  });
+
   it("counts what a tracked file changed against HEAD", async () => {
     const root = temporaryDirectory();
     const repository = join(root, "repository");

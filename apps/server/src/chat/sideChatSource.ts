@@ -20,6 +20,8 @@ import {
   type SideChatDeliveryTargetState,
   type SideChatSourceState,
   type SideChatSubagentsState,
+  type SideChatUncommittedFile,
+  type SideChatUncommittedFilesState,
   type SideChatWorkFolderState,
 } from "@octant/domain";
 import type { SideChatSourceContext } from "./chatService";
@@ -121,11 +123,21 @@ export interface SideChatSourceStatePorts {
         readonly proposedBaseBranch: string;
       };
     }>;
+    /**
+     * The checkout observation the Environment panel reads, with the
+     * uncommitted paths behind it from the same Git status and numstat.
+     */
     readonly observeCheckout: (
       windowId: WindowId,
       projectId: ProjectId,
       threadId: CodeThreadId,
-    ) => Promise<CodeEnvironmentObservation>;
+    ) => Promise<{
+      readonly observation: CodeEnvironmentObservation;
+      readonly changedFiles?: {
+        readonly files: ReadonlyArray<SideChatUncommittedFile>;
+        readonly total: number;
+      };
+    }>;
     readonly conversation: (
       windowId: WindowId,
       threadId: CodeThreadId,
@@ -158,12 +170,16 @@ export function createSideChatSourceStateReader(
         code.readThread(windowId, threadId).catch(() => undefined),
         readChangedFiles(code.conversation, windowId, threadId),
       ]);
-      const checkout =
+      const { checkout, uncommittedFiles } =
         thread === undefined
-          ? ({ kind: "unavailable" } as const)
+          ? {
+              checkout: { kind: "unavailable" } as const,
+              uncommittedFiles: { kind: "unavailable" } as const,
+            }
           : await readCheckout(code.observeCheckout, windowId, thread, threadId);
       return {
         checkout,
+        uncommittedFiles,
         changedFiles,
         ...(thread === undefined ? {} : { deliveryTarget: deliveryTarget(thread.deliveryTarget) }),
         subagents,
@@ -200,21 +216,41 @@ async function readCheckout(
   windowId: WindowId,
   thread: { readonly projectId: ProjectId; readonly workingDirectory?: string | undefined },
   threadId: CodeThreadId,
-): Promise<SideChatCheckoutState> {
-  let observation: CodeEnvironmentObservation;
+): Promise<{
+  readonly checkout: SideChatCheckoutState;
+  readonly uncommittedFiles: SideChatUncommittedFilesState;
+}> {
+  const unavailable = {
+    checkout: { kind: "unavailable" },
+    uncommittedFiles: { kind: "unavailable" },
+  } as const;
+  let observed: Awaited<ReturnType<typeof observe>>;
   try {
-    observation = await observe(windowId, thread.projectId, threadId);
+    observed = await observe(windowId, thread.projectId, threadId);
   } catch {
-    return { kind: "unavailable" };
+    return unavailable;
   }
-  if (observation.status !== "ready") return { kind: "unavailable" };
+  const observation = observed.observation;
+  if (observation.status !== "ready") return unavailable;
   return {
-    kind: "observed",
-    branch: observation.branch,
-    changes: observation.changes,
-    ...(observation.insertions === undefined ? {} : { insertions: observation.insertions }),
-    ...(observation.deletions === undefined ? {} : { deletions: observation.deletions }),
-    ...(thread.workingDirectory === undefined ? {} : { workingDirectory: thread.workingDirectory }),
+    checkout: {
+      kind: "observed",
+      branch: observation.branch,
+      changes: observation.changes,
+      ...(observation.insertions === undefined ? {} : { insertions: observation.insertions }),
+      ...(observation.deletions === undefined ? {} : { deletions: observation.deletions }),
+      ...(thread.workingDirectory === undefined
+        ? {}
+        : { workingDirectory: thread.workingDirectory }),
+    },
+    uncommittedFiles:
+      observed.changedFiles === undefined
+        ? { kind: "unavailable" }
+        : {
+            kind: "observed",
+            files: observed.changedFiles.files,
+            total: observed.changedFiles.total,
+          },
   };
 }
 

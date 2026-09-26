@@ -424,8 +424,9 @@ source. Each turn the host re-resolves the source on the sender's window and
 frames it as the conversation's subject: the newest 40 messages within 32,000
 characters, with truncation stated, plus a current-state section capped at
 8,000 characters. For Code that section names the branch, clean or dirty with
-line totals, up to 50 paths the thread's turns changed, and the delivery
-target; for Work, the Project folder and working folder; for every mode, the
+line totals, up to 50 uncommitted paths from Git (status joined with numstat
+against HEAD, untracked files included), up to 50 paths the thread's turns
+changed, and the delivery target; for Work, the Project folder and working folder; for every mode, the
 newest five subagent results. Each state part that cannot be read says so on
 its own; an unreadable transcript refuses the turn. The source block is a
 required context entry, so the planner blocks with its usual remedies rather
@@ -510,7 +511,10 @@ flowchart LR
 - **Projections.** Each feature owns its projection and persistence schema
   (`persistence/*Projection.ts`, `*PersistenceSchema.ts`). Projections are
   checkpointed by sequence, detect lag, and can be rebuilt individually or
-  wholesale (`db:status`, `db:verify`, `db:rebuild`).
+  wholesale (`db:status`, `db:verify`, `db:rebuild`). A projection whose state
+  lives only in process memory (AgentRuns) declares `holdsStateInMemory` and
+  replays from the start of the journal at every host start, because its
+  stored checkpoint describes the previous process rather than this one.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
@@ -1108,9 +1112,12 @@ mechanisms are:
   are the only tools it gains. Before every call the host checks that the
   sidecar link still exists and that the caller's window can still Open the
   source, and the call then runs through the same host read the Files panel
-  uses (Code's checkout listing, search, and file open; Work's folder listing
-  and confined read), which re-authorizes the window against the source's
-  root. Paths are relative and confined; results are bounded and recorded as
+  uses (Code's checkout listing and search; Work's folder listing and
+  confined read), which re-authorizes the window against the source's root. A
+  Code read goes through `CodeService.readFile`, the same checkout authority
+  and confinement sequence without the desktop file helper that the editor's
+  open needs, and Code calls wait briefly while the host is still resolving a
+  `waiting` checkout. Paths are relative and confined; results are bounded and recorded as
   external content like other app-managed tool results. There is no write,
   shell, Git, or network tool, and a provider that cannot take app-managed
   tools gets none and is told the files are unreadable. The `#thread`

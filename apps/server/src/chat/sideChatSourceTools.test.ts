@@ -3,7 +3,6 @@ import {
   SIDE_CHAT_LIST_FILES_TOOL_NAME,
   SIDE_CHAT_READ_FILE_TOOL_NAME,
   SIDE_CHAT_SEARCH_FILES_TOOL_NAME,
-  decodeCodeFileOpenResultEnvelope,
   decodeCodeThreadId,
   decodeWorkThreadId,
   type CodeCheckoutId,
@@ -18,11 +17,10 @@ import {
 const codeThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000301");
 const workThreadId = decodeWorkThreadId("00000000-0000-4000-8000-000000000302");
 const checkoutId = "00000000-0000-4000-8000-000000000601" as CodeCheckoutId;
-const digest = "a".repeat(64);
 
 function codeReads(text = "line one\nline two\nline three"): SideChatCodeSourceReads {
   return {
-    checkoutOf: vi.fn(async () => checkoutId),
+    checkoutOf: vi.fn(async () => ({ checkoutId, availability: "available" })),
     listFiles: vi.fn(async () => ({
       status: "listed" as const,
       listing: {
@@ -38,27 +36,10 @@ function codeReads(text = "line one\nline two\nline three"): SideChatCodeSourceR
       status: "failed" as const,
       failure: { category: "unavailable" as const, message: "Search is unavailable." },
     })),
-    openFile: vi.fn(async () =>
-      decodeCodeFileOpenResultEnvelope({
-        kind: "code-file-open-result",
-        result: {
-          status: "editable",
-          fileId: "00000000-0000-4000-8000-000000000701",
-          metadata: {
-            identity: { device: "1", inode: "2" },
-            byteLength: text.length,
-            modifiedNanoseconds: "1",
-            digest,
-          },
-          content: {
-            contentId: "00000000-0000-4000-8000-000000000702",
-            digest,
-            byteLength: text.length,
-          },
-        },
-      }),
-    ),
-    readContent: vi.fn(async () => ({ bytes: new TextEncoder().encode(text) })),
+    readFile: vi.fn(async () => ({
+      status: "read" as const,
+      bytes: new TextEncoder().encode(text),
+    })),
   };
 }
 
@@ -105,7 +86,7 @@ describe("Side Chat source file tools", () => {
     });
     expect(second).toMatchObject({ isError: true, result: { status: "refused" } });
     expect(authorize).toHaveBeenCalledTimes(2);
-    expect(reads.openFile).toHaveBeenCalledTimes(1);
+    expect(reads.readFile).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a path outside the source's folder before any host read", async () => {
@@ -122,7 +103,55 @@ describe("Side Chat source file tools", () => {
       });
       expect(result).toMatchObject({ isError: true, result: { status: "refused" } });
     }
-    expect(reads.openFile).not.toHaveBeenCalled();
+    expect(reads.readFile).not.toHaveBeenCalled();
+  });
+
+  it("waits for a checkout the host is still resolving instead of calling the file unreadable", async () => {
+    const availability = ["waiting", "waiting", "available"];
+    const reads = {
+      ...codeReads("first line\nsecond line"),
+      checkoutOf: vi.fn(async () => ({
+        checkoutId,
+        availability: availability.shift() ?? "available",
+      })),
+    };
+    const tools = createSideChatSourceTools({
+      source: { mode: "code", threadId: codeThreadId, reads },
+      authorize: async () => true,
+      sleep: async () => undefined,
+    });
+
+    const result = await tools.execute({
+      name: SIDE_CHAT_READ_FILE_TOOL_NAME,
+      inputJson: JSON.stringify({ path: "README.md" }),
+    });
+
+    expect(result).toMatchObject({ result: { status: "read", text: "first line\nsecond line" } });
+    expect(reads.checkoutOf).toHaveBeenCalledTimes(3);
+    expect(reads.readFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the checkout is still being prepared when it never becomes available", async () => {
+    const reads = {
+      ...codeReads(),
+      checkoutOf: vi.fn(async () => ({ checkoutId, availability: "waiting" })),
+    };
+    const tools = createSideChatSourceTools({
+      source: { mode: "code", threadId: codeThreadId, reads },
+      authorize: async () => true,
+      sleep: async () => undefined,
+    });
+
+    const result = await tools.execute({
+      name: SIDE_CHAT_LIST_FILES_TOOL_NAME,
+      inputJson: "{}",
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      result: { status: "refused", message: expect.stringContaining("still being prepared") },
+    });
+    expect(reads.listFiles).not.toHaveBeenCalled();
   });
 
   it("returns a window of lines and says where it stopped", async () => {

@@ -20,6 +20,13 @@ import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 export interface Projection {
   readonly name: string;
   readonly dependencies: ReadonlyArray<string>;
+  /**
+   * Set by a projection whose state lives only in process memory. Its stored
+   * checkpoint says how far a previous process got, not what this one holds,
+   * so catch-up replays it from the start of the journal instead of resuming
+   * there; resuming left it empty after every restart.
+   */
+  readonly holdsStateInMemory?: true;
   reset(connection: SqliteConnection): void;
   apply(connection: SqliteConnection, event: EventEnvelope): void;
 }
@@ -161,6 +168,10 @@ function catchUpProjectionUnsafe(input: ReplayInput): ProjectionCheckpoint {
   const journalHead = input.journal.headSequence();
   let current = readOrInitializeCheckpoint(input, statements);
   assertCheckpointIsValid(current, journalHead);
+  if (input.projection.holdsStateInMemory === true) {
+    input.projection.reset(input.connection);
+    current = checkpoint(input.projection.name, 0, current.updatedAt);
+  }
 
   while (current.lastSequence < journalHead) {
     let events: ReadonlyArray<EventEnvelope>;

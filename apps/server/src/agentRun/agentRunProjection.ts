@@ -131,6 +131,9 @@ function summaryRoute(receipt: AgentRun["routingReceipt"]): AgentRunParentSummar
 export class AgentRunProjection implements Projection {
   readonly name = "agent-runs";
   readonly dependencies: ReadonlyArray<string> = [];
+  // Runs live only in these maps, so every host start must replay them all:
+  // resuming from the stored checkpoint showed a restarted host no children.
+  readonly holdsStateInMemory = true as const;
   readonly #byId = new Map<AgentRunId, AgentRun>();
   readonly #byRequestId = new Map<AgentRunRequestId, AgentRunId>();
   readonly #byParent = new Map<AgentRunParentThreadId, Set<AgentRunId>>();

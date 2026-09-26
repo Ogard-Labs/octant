@@ -9,7 +9,6 @@ import {
   decodeCodeRelativePath,
   type CodeCheckoutId,
   type CodeFileListingResult,
-  type CodeFileOpenResultEnvelope,
   type CodeRelativePath,
   type CodeSearchResult,
   type CodeSearchScope,
@@ -19,6 +18,7 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "@octant/domain";
+import type { CodeConfinedFileRead } from "../code/codeConfinedFileRead";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { readConfinedWorkFile } from "../work/workConfinedRead";
 import type { WorkFilesystemPort } from "../work/workFilesystemPort";
@@ -32,7 +32,15 @@ import { joinWorkPath, resolveContainedWorkPath } from "../work/workPathConfinem
  * calls; it only names which thread it is asking about.
  */
 export interface SideChatCodeSourceReads {
-  readonly checkoutOf: (threadId: CodeThreadId) => Promise<CodeCheckoutId>;
+  /**
+   * The thread's checkout and whether the host has resolved it yet. A checkout
+   * is `waiting` for a moment after a host starts or a thread opens, and every
+   * read before then is refused, so the tools wait for it rather than report a
+   * file as unreadable.
+   */
+  readonly checkoutOf: (
+    threadId: CodeThreadId,
+  ) => Promise<{ readonly checkoutId: CodeCheckoutId; readonly availability: string }>;
   readonly listFiles: (input: {
     readonly threadId: CodeThreadId;
     readonly checkoutId: CodeCheckoutId;
@@ -46,13 +54,18 @@ export interface SideChatCodeSourceReads {
     readonly query: string;
     readonly signal?: AbortSignal;
   }) => Promise<CodeSearchResult>;
-  readonly openFile: (input: {
+  /**
+   * The confined, helper-free Code read. Not the editor's open: that goes
+   * through the file helper, which only the desktop app starts, so on any
+   * other host every open answered `helper-unavailable` for files the listing
+   * had just returned.
+   */
+  readonly readFile: (input: {
     readonly threadId: CodeThreadId;
     readonly checkoutId: CodeCheckoutId;
     readonly relativePath: CodeRelativePath;
-    readonly signal?: AbortSignal;
-  }) => Promise<CodeFileOpenResultEnvelope>;
-  readonly readContent: (contentId: string) => Promise<{ readonly bytes: Uint8Array }>;
+    readonly maximumBytes: number;
+  }) => Promise<CodeConfinedFileRead | { readonly status: "unavailable" }>;
 }
 
 /**
@@ -105,7 +118,12 @@ export type SideChatFileSource =
 export function createSideChatSourceTools(input: {
   readonly source: SideChatFileSource;
   readonly authorize: () => Promise<boolean>;
+  /** Pauses between checkout-availability checks. Tests pass an instant one. */
+  readonly sleep?: (milliseconds: number) => Promise<void>;
 }): AppManagedToolSet {
+  const sleep =
+    input.sleep ??
+    ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   const definitions = sideChatSourceToolDefinitions(input.source.mode);
   return {
     definitions,
@@ -135,7 +153,15 @@ export function createSideChatSourceTools(input: {
       }
       const source = input.source;
       try {
-        if (source.mode === "code") return await executeCode(source, name, args, signal);
+        if (source.mode === "code") {
+          const checkout = await availableCheckout(source, sleep, signal);
+          if (checkout === undefined) {
+            return refused(
+              "The thread's checkout is still being prepared by the host. Try again in a moment.",
+            );
+          }
+          return await executeCode(source, checkout, name, args, signal);
+        }
         return await executeWork(source, name, args, signal);
       } catch {
         return refused("The thread's files could not be read.");
@@ -204,8 +230,27 @@ export function sideChatSourceToolDefinitions(
   return [list, search, read];
 }
 
+/** Checks spaced over roughly five seconds before a `waiting` checkout is reported. */
+const CHECKOUT_WAIT_ATTEMPTS = 20;
+const CHECKOUT_WAIT_INTERVAL_MS = 250;
+
+async function availableCheckout(
+  source: Extract<SideChatFileSource, { mode: "code" }>,
+  sleep: (milliseconds: number) => Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<CodeCheckoutId | undefined> {
+  for (let attempt = 0; attempt < CHECKOUT_WAIT_ATTEMPTS; attempt += 1) {
+    const checkout = await source.reads.checkoutOf(source.threadId);
+    if (checkout.availability === "available") return checkout.checkoutId;
+    if (checkout.availability !== "waiting" || signal?.aborted === true) return undefined;
+    await sleep(CHECKOUT_WAIT_INTERVAL_MS);
+  }
+  return undefined;
+}
+
 async function executeCode(
   source: Extract<SideChatFileSource, { mode: "code" }>,
+  checkoutId: CodeCheckoutId,
   name: string,
   args: ReadonlyMap<string, unknown>,
   signal: AbortSignal | undefined,
@@ -214,7 +259,6 @@ async function executeCode(
     const directory = optionalString(args, "directory");
     const relative = directory === undefined ? undefined : codePath(directory);
     if (relative === "refused") return outsideRoot();
-    const checkoutId = await source.reads.checkoutOf(source.threadId);
     const result = await source.reads.listFiles({
       threadId: source.threadId,
       checkoutId,
@@ -242,7 +286,6 @@ async function executeCode(
     }
     const scopeArg = args.get("scope");
     const scope: CodeSearchScope = scopeArg === "path" ? "path" : "content";
-    const checkoutId = await source.reads.checkoutOf(source.threadId);
     const result = await source.reads.searchFiles({
       threadId: source.threadId,
       checkoutId,
@@ -268,26 +311,34 @@ async function executeCode(
   if (requested === undefined) return refused("Name the file to read.");
   const relative = codePath(requested);
   if (relative === "refused") return outsideRoot();
-  const checkoutId = await source.reads.checkoutOf(source.threadId);
-  const opened = await source.reads.openFile({
+  const read = await source.reads.readFile({
     threadId: source.threadId,
     checkoutId,
     relativePath: relative,
-    ...(signal === undefined ? {} : { signal }),
+    maximumBytes: MAX_SIDE_CHAT_CODE_READ_BYTES,
   });
-  const result = opened.result;
-  if (result.status === "read-only") {
-    return refused(
-      result.reason === "binary"
-        ? "That file is binary, so it cannot be read as text."
-        : "That file is too large to read here.",
-    );
+  if (read.status === "unavailable") return refused("The thread's checkout is not available.");
+  if (read.status === "refused") {
+    switch (read.reason) {
+      case "outside-root":
+        return refused("That file does not exist inside the thread's checkout.");
+      case "not-a-file":
+        return refused("That path is a folder, not a file. List it instead.");
+      case "too-large":
+        return refused("That file is too large to read here.");
+      case "unreadable":
+        return refused("That file could not be read.");
+    }
   }
-  if (result.status === "interrupted") return refused("The file changed while it was read.");
-  if (result.status === "failed") return refused("That file could not be opened.");
-  const content = await source.reads.readContent(String(result.content.contentId));
-  return textWindow(relative, content.bytes, args);
+  return textWindow(relative, read.bytes, args);
 }
+
+/**
+ * Largest checkout file a Side Chat reads. The tool returns a window of a few
+ * hundred lines, so past this the file is refused as too large rather than
+ * loaded whole to show a sliver of it.
+ */
+const MAX_SIDE_CHAT_CODE_READ_BYTES = 2 * 1024 * 1024;
 
 async function executeWork(
   source: Extract<SideChatFileSource, { mode: "work" }>,

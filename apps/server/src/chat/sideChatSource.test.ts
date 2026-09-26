@@ -37,8 +37,8 @@ function codePorts(turns: ReadonlyArray<never>) {
         proposedBaseBranch: "main",
       },
     })),
-    observeCheckout: vi.fn(async () =>
-      decodeCodeEnvironmentObservation({
+    observeCheckout: vi.fn(async () => ({
+      observation: decodeCodeEnvironmentObservation({
         status: "ready",
         projectId,
         projectName: "Octant",
@@ -50,7 +50,14 @@ function codePorts(turns: ReadonlyArray<never>) {
         insertions: 42,
         deletions: 7,
       }),
-    ),
+      changedFiles: {
+        files: [
+          { path: "README.md", change: "modified", insertions: 1, deletions: 0 },
+          { path: "NOTES.md", change: "untracked" },
+        ],
+        total: 2,
+      },
+    })),
     conversation: vi.fn(async () => ({ turns, nextCursor: 0, hasMore: false })),
   };
 }
@@ -75,6 +82,10 @@ describe("Side Chat source state", () => {
 
     expect(text).toContain("Checkout: branch feature/picker, uncommitted changes (+42 -7");
     expect(text).toContain("Working folder: apps/web.");
+    // What Git sees now, including a file no turn touched and one nobody added.
+    expect(text).toContain("Uncommitted files from Git (2):");
+    expect(text).toContain("- README.md (modified, +1 -0)");
+    expect(text).toContain("- NOTES.md (untracked)");
     expect(text).toContain("Delivery target: opened-pr on branch feature/picker");
     // Newest turn first, each path once.
     expect(text.indexOf("- src/picker.ts (+3 -1)")).toBeLessThan(text.indexOf("- src/old.ts"));
@@ -101,6 +112,7 @@ describe("Side Chat source state", () => {
     const text = await contextFor(reader);
 
     expect(text).toContain("Checkout: could not be observed");
+    expect(text).toContain("Uncommitted files: Git could not list them");
     expect(text).not.toContain("no uncommitted changes");
   });
 

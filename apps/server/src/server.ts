@@ -1516,6 +1516,7 @@ function withCodeOperationRuntime(
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
+    ...(service.readFile === undefined ? {} : { readFile: service.readFile.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     readRepositoryTestStatus: (windowId, input) =>
       runtime.readRepositoryTestStatus(windowId, input.threadId, input.checkoutId),
@@ -1605,6 +1606,7 @@ function withCodeBoard(
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
+    ...(service.readFile === undefined ? {} : { readFile: service.readFile.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     ...(service.readRepositoryTestStatus === undefined
       ? {}
@@ -5262,7 +5264,7 @@ export function startOctantServer(
         readThread: async (windowId, threadId) =>
           (await routeCodeService.read(windowId, threadId)).thread,
         observeCheckout: (windowId, projectId, threadId) =>
-          environmentService.observeThread(windowId, projectId, threadId),
+          environmentService.observeThreadChanges(windowId, projectId, threadId),
         conversation: async (windowId, threadId, afterCursor, limit) => {
           const read = routeCodeService.conversation;
           if (read === undefined) throw new Error("Code conversation is unavailable.");
@@ -5287,13 +5289,17 @@ export function startOctantServer(
         (await threadMentionService.openableThread(windowId, sidecar.sourceThreadId)) !== undefined;
       let source: SideChatFileSource;
       if (sidecar.sourceMode === "code") {
-        const openFile = routeCodeService.openFile;
         source = {
           mode: "code",
           threadId: decodeCodeThreadId(String(sidecar.sourceThreadId)),
           reads: {
-            checkoutOf: async (codeThreadId) =>
-              (await routeCodeService.read(windowId, codeThreadId)).thread.checkoutId,
+            checkoutOf: async (codeThreadId) => {
+              const view = await routeCodeService.read(windowId, codeThreadId);
+              return {
+                checkoutId: view.thread.checkoutId,
+                availability: view.checkout.availability,
+              };
+            },
             listFiles: async (input) => {
               const list = routeCodeService.listFiles;
               if (list === undefined) {
@@ -5314,9 +5320,11 @@ export function startOctantServer(
               }
               return await search(windowId, input);
             },
-            openFile: async (input) => await openFile(windowId, input),
-            readContent: async (contentId) =>
-              await routeCodeService.readContent(windowId, contentId),
+            readFile: async (input) => {
+              const read = routeCodeService.readFile;
+              if (read === undefined) return { status: "unavailable" };
+              return await read(windowId, input);
+            },
           },
         };
       } else {

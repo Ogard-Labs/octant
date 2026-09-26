@@ -40,6 +40,30 @@ export type SideChatCheckoutState =
     }
   | { readonly kind: "unavailable" };
 
+/** One path Git reports as differing from HEAD, untracked files included. */
+export interface SideChatUncommittedFile {
+  readonly path: string;
+  readonly change: string;
+  /** Absent where Git has no line counts, such as an untracked file. */
+  readonly insertions?: number;
+  readonly deletions?: number;
+  readonly binary?: boolean;
+}
+
+/**
+ * The checkout's uncommitted paths as Git sees them now. This is the list the
+ * turn records cannot give: a change nobody made through a turn is still in
+ * the checkout, and a Side Chat asked "what is uncommitted" must name it.
+ */
+export type SideChatUncommittedFilesState =
+  | {
+      readonly kind: "observed";
+      readonly files: ReadonlyArray<SideChatUncommittedFile>;
+      /** Every uncommitted path, including those `files` leaves out. */
+      readonly total: number;
+    }
+  | { readonly kind: "unavailable" };
+
 export interface SideChatChangedFile {
   readonly path: string;
   readonly insertions: number;
@@ -99,6 +123,7 @@ export type SideChatSubagentsState =
  */
 export interface SideChatSourceState {
   readonly checkout?: SideChatCheckoutState;
+  readonly uncommittedFiles?: SideChatUncommittedFilesState;
   readonly changedFiles?: SideChatChangedFilesState;
   readonly deliveryTarget?: SideChatDeliveryTargetState;
   readonly workFolder?: SideChatWorkFolderState;
@@ -191,6 +216,9 @@ export function formatSideChatSourceState(state: SideChatSourceState): string {
       `Delivery target: ${target.outcomeKind} on branch ${target.branchIntent}, against ${target.remoteName} ${target.baseRepository} ${target.baseBranch}.`,
     );
   }
+  if (state.uncommittedFiles !== undefined) {
+    lines.push(...uncommittedFileLines(state.uncommittedFiles));
+  }
   if (state.changedFiles !== undefined) lines.push(...changedFileLines(state.changedFiles));
   if (state.subagents !== undefined) lines.push(...subagentLines(state.subagents));
   if (lines.length === 0) return "";
@@ -227,6 +255,30 @@ function workFolderLine(folder: SideChatWorkFolderState): string {
       ? ""
       : `, working folder ${folder.workingDirectory}`;
   return `Project folder: ${folder.projectName}${working}.`;
+}
+
+function uncommittedFileLines(uncommitted: SideChatUncommittedFilesState): ReadonlyArray<string> {
+  if (uncommitted.kind === "unavailable") {
+    return ["Uncommitted files: Git could not list them for this turn."];
+  }
+  if (uncommitted.total === 0) return ["Uncommitted files: none."];
+  const shown = uncommitted.files.slice(0, MAX_SIDE_CHAT_SOURCE_CHANGED_PATHS);
+  const header =
+    shown.length < uncommitted.total
+      ? `Uncommitted files from Git, ${shown.length} of ${uncommitted.total}; the list is truncated:`
+      : `Uncommitted files from Git (${uncommitted.total}):`;
+  return [
+    header,
+    ...shown.map((file) => {
+      const counts =
+        file.binary === true
+          ? ", binary"
+          : file.insertions === undefined || file.deletions === undefined
+            ? ""
+            : `, +${file.insertions} -${file.deletions}`;
+      return `- ${file.path} (${file.change}${counts})`;
+    }),
+  ];
 }
 
 function changedFileLines(changed: SideChatChangedFilesState): ReadonlyArray<string> {
