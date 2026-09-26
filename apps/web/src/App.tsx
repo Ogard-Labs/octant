@@ -943,6 +943,12 @@ function LaunchedShell(
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
+  // The subagent a composer tray row asked the Agents tool to open, for the
+  // thread it was asked on. The tool clears it once it has opened there.
+  const [requestedSubagent, setRequestedSubagent] = useState<{
+    readonly threadKey: string;
+    readonly runId: string;
+  }>();
   // Documents a turn wrote, per thread, and which the dock already offered.
   // Session-local presentation: nothing here is authority, and a reopened
   // window starts by offering nothing until a turn writes again.
@@ -2812,6 +2818,12 @@ function LaunchedShell(
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
+        {...(requestedSubagent?.threadKey === dockThreadKey
+          ? {
+              requestedAgentRunId: requestedSubagent.runId,
+              onAgentRunRequestHandled: () => setRequestedSubagent(undefined),
+            }
+          : {})}
         nativeHarnessClient={nativeHarnessClient}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
@@ -2916,7 +2928,7 @@ function LaunchedShell(
     return threadUtility(surface);
   }
 
-  function invokeAddAgent() {
+  function openSubagent(runId?: string) {
     if (dockThreadKey === undefined) return;
     setAddAgentInvokedByThread((current) => {
       if (current.has(dockThreadKey)) return current;
@@ -2924,6 +2936,7 @@ function LaunchedShell(
       next.add(dockThreadKey);
       return next;
     });
+    setRequestedSubagent(runId === undefined ? undefined : { threadKey: dockThreadKey, runId });
     openDockTab("agents");
   }
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
@@ -6111,7 +6124,7 @@ function LaunchedShell(
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
-                    onAddAgent={invokeAddAgent}
+                    onOpenSubagent={openSubagent}
                     onOpenAgents={() => openDockTab("agents")}
                     chatClient={chatClient}
                     chatController={chatController}

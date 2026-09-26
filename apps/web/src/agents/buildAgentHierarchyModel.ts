@@ -1,5 +1,3 @@
-export type AgentHierarchyFilter = "active" | "history" | "all";
-
 export interface AgentHierarchyInputRoute {
   readonly requestedProviderInstanceId: string;
   readonly requestedModelId: string;
@@ -47,6 +45,8 @@ export interface AgentHierarchyRow {
   readonly needsAcknowledgement: boolean;
   readonly followUpReason?: string;
   readonly recoveryReason?: string;
+  /** The model the host ran, for a row's one-line facts. */
+  readonly model?: string;
   readonly routeLabel?: string;
   readonly routeReason?: string;
   readonly nativeReadOnly: boolean;
@@ -56,12 +56,11 @@ export interface AgentHierarchyRow {
 }
 
 export interface AgentHierarchyModel {
-  readonly filter: AgentHierarchyFilter;
-  readonly query: string;
   readonly creationPosture: "off" | "ask" | "automatic";
-  readonly activeCount: number;
-  readonly historyCount: number;
-  readonly rows: ReadonlyArray<AgentHierarchyRow>;
+  /** Queued, starting, running, and waiting subagents, in the host's order. */
+  readonly working: ReadonlyArray<AgentHierarchyRow>;
+  /** Every settled subagent, newest first. */
+  readonly finished: ReadonlyArray<AgentHierarchyRow>;
   readonly emptyReason?: string;
 }
 
@@ -73,56 +72,36 @@ export function isActiveAgentHierarchyStatus(lifecycleStatus: string): boolean {
 
 /**
  * Pure browser hierarchy projection. Never decides routing/authority/completion;
- * only filters and presents server-authored AgentRun summaries.
+ * only groups and presents server-authored AgentRun summaries.
+ *
+ * A thread's subagents are a short list, so there is no filter or search:
+ * what is still working leads, and what has settled follows newest first.
+ * Working rows keep the host's order so a row does not jump each time its
+ * status (and with it `updatedAt`) changes.
  */
 export function buildAgentHierarchyModel(input: {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
-  readonly filter?: AgentHierarchyFilter;
-  readonly query?: string;
   readonly creationPosture?: "off" | "ask" | "automatic";
 }): AgentHierarchyModel {
-  const filter = input.filter ?? "active";
-  const query = (input.query ?? "").trim().toLowerCase();
   const creationPosture = input.creationPosture ?? "ask";
-  const rows = input.entries
-    .map((entry) => toRow(entry, depthOf(entry, input.entries)))
+  const rows = input.entries.map((entry) => toRow(entry, depthOf(entry, input.entries)));
+  const working = rows.filter((row) => row.bucket === "active");
+  const finished = rows
+    .filter((row) => row.bucket === "history")
     .sort((a, b) => {
       if (a.updatedAt === b.updatedAt) return a.runId.localeCompare(b.runId);
       return a.updatedAt < b.updatedAt ? 1 : -1;
     });
-  const activeCount = rows.filter((row) => row.bucket === "active").length;
-  const historyCount = rows.filter((row) => row.bucket === "history").length;
-  let visible = rows.filter((row) =>
-    filter === "all"
-      ? true
-      : filter === "active"
-        ? row.bucket === "active"
-        : row.bucket === "history",
-  );
-  if (query.length > 0) {
-    visible = visible.filter(
-      (row) =>
-        row.task.toLowerCase().includes(query) ||
-        row.role.toLowerCase().includes(query) ||
-        row.lifecycleStatus.toLowerCase().includes(query) ||
-        row.runId.toLowerCase().includes(query),
-    );
-  }
   return {
-    filter,
-    query: input.query ?? "",
     creationPosture,
-    activeCount,
-    historyCount,
-    rows: visible,
-    ...(visible.length === 0
+    working,
+    finished,
+    ...(rows.length === 0
       ? {
           emptyReason:
             creationPosture === "off"
               ? "Subagents are turned off in Settings."
-              : filter === "history"
-                ? "No finished subagents yet."
-                : "No subagents running.",
+              : "No subagents on this thread yet.",
         }
       : {}),
   };
@@ -147,7 +126,9 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
       : { followUpReason: entry.resultAcknowledgement.followUpReason }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
     ...(entry.result === undefined ? {} : { result: entry.result }),
-    ...(entry.route === undefined ? {} : { routeLabel: routeLabel(entry.route) }),
+    ...(entry.route === undefined
+      ? {}
+      : { model: entry.route.executionModelId, routeLabel: routeLabel(entry.route) }),
     ...(entry.route?.routingReason === undefined ? {} : { routeReason: entry.route.routingReason }),
     nativeReadOnly: entry.executionKind === "provider-native",
     version: entry.version,

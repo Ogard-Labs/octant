@@ -1,171 +1,95 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import {
-  decodeAgentRunId,
-  decodeAgentRunParentThreadId,
-  decodeProviderModelId,
-  decodeUtcTimestamp,
-  type AgentRunConversationResponse,
-} from "@octant/contracts";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
+import type { AgentHierarchyInputEntry } from "./buildAgentHierarchyModel";
 
-const liveRunId = "11111111-1111-4111-8111-111111111111";
-const liveConversation: AgentRunConversationResponse = {
-  runId: decodeAgentRunId(liveRunId),
-  parentThreadId: decodeAgentRunParentThreadId("22222222-2222-4222-8222-222222222222"),
-  executionKind: "octant-managed",
-  modelId: decodeProviderModelId("gpt-5.6-luna"),
-  lifecycleStatus: "running",
-  status: "live",
-  entries: [
-    {
-      sequence: 1,
-      kind: "assistant",
-      text: "Live child reply",
-      occurredAt: decodeUtcTimestamp("2026-08-23T00:00:00.000Z"),
-    },
-  ],
-  truncated: false,
-};
-
-const entries = [
+const entries: ReadonlyArray<AgentHierarchyInputEntry> = [
   {
-    runId: liveRunId,
+    runId: "run-live",
     role: "research",
     task: "Active research",
     lifecycleStatus: "running",
     executionKind: "octant-managed",
     usageQuality: "provider-reported",
     resultAcknowledgement: { required: false, acknowledged: false },
+    route: {
+      requestedProviderInstanceId: "provider-a",
+      requestedModelId: "gpt-6-astra",
+      executionProviderInstanceId: "provider-a",
+      executionModelId: "gpt-6-astra",
+      poolDerived: false,
+    },
     version: 2,
     updatedAt: "2026-08-01T15:01:00.000Z",
   },
   {
-    runId: "run-2",
+    runId: "run-older",
     role: "review",
-    task: "Completed review",
+    task: "Older review",
+    lifecycleStatus: "completed",
+    executionKind: "octant-managed",
+    usageQuality: "estimated",
+    resultAcknowledgement: { required: true, acknowledged: true },
+    version: 3,
+    updatedAt: "2026-08-01T15:00:00.000Z",
+  },
+  {
+    runId: "run-newer",
+    role: "review",
+    task: "Newer review",
     lifecycleStatus: "completed",
     executionKind: "provider-native",
     usageQuality: "estimated",
-    resultAcknowledgement: {
-      required: true,
-      acknowledged: false,
-      followUpReason: "unacknowledged-child-result",
-    },
+    resultAcknowledgement: { required: true, acknowledged: false },
     version: 4,
     updatedAt: "2026-08-01T15:02:00.000Z",
   },
 ];
 
 describe("AgentHierarchyPanel", () => {
-  it("renders active children and can switch to history", async () => {
-    const user = userEvent.setup();
+  it("lists working subagents apart from finished ones, newest finished first", () => {
     render(<AgentHierarchyPanel entries={entries} creationPosture="automatic" />);
-    expect(screen.getByText("Active research")).toBeInTheDocument();
-    expect(screen.queryByText("Completed review")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      ),
+
+    const working = screen.getByRole("region", { name: "Working" });
+    expect(within(working).getByRole("button", { name: /Active research/ })).toHaveTextContent(
+      "Working · Research · gpt-6-astra",
     );
-    await user.click(screen.getByRole("option", { name: "History" }));
-    expect(screen.getByText("Completed review")).toBeInTheDocument();
-    expect(screen.getByText(/native read-only/i)).toBeInTheDocument();
+    const finished = screen.getByRole("region", { name: "Finished" });
+    const rows = within(finished).getAllByRole("button");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Newer review"),
+      expect.stringContaining("Older review"),
+    ]);
+    // Only the result nobody has looked at yet asks for review, in words.
+    expect(rows[0]).toHaveTextContent("Needs review");
+    expect(rows[1]).not.toHaveTextContent("Needs review");
   });
 
-  it("invokes acknowledge for completed unacknowledged children", async () => {
+  it("opens the subagent whose row is chosen", async () => {
     const user = userEvent.setup();
-    const onAcknowledge = vi.fn();
-    render(
-      <AgentHierarchyPanel entries={entries} creationPosture="ask" onAcknowledge={onAcknowledge} />,
-    );
-    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      ),
-    );
-    await user.click(screen.getByRole("option", { name: "History" }));
-    await user.click(screen.getByRole("button", { name: /acknowledge result/i }));
-    expect(onAcknowledge).toHaveBeenCalledWith({ runId: "run-2", version: 4 });
+    const onOpen = vi.fn();
+    render(<AgentHierarchyPanel entries={entries} onOpen={onOpen} />);
+
+    await user.click(screen.getByRole("button", { name: /Newer review/ }));
+
+    expect(onOpen).toHaveBeenCalledWith("run-newer");
   });
 
-  it("shows the honest server-authored route receipt for pool-routed children", () => {
-    render(
-      <AgentHierarchyPanel
-        creationPosture="automatic"
-        entries={[
-          {
-            ...entries[0]!,
-            route: {
-              requestedProviderInstanceId: "provider-a",
-              requestedModelId: "gpt-4o",
-              executionProviderInstanceId: "provider-b",
-              executionModelId: "claude-x",
-              poolDerived: true,
-              selectionKind: "fallback",
-              routingReason: "The requested model is unavailable; a permitted fallback ran.",
-            },
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByText(/gpt-4o → claude-x · pool fallback/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/The requested model is unavailable; a permitted fallback ran\./),
-    ).toBeInTheDocument();
-  });
-
-  it("offers cancellation only for active rows and reports the selected run", async () => {
+  it("keeps New subagent folded behind New once the thread has subagents", async () => {
     const user = userEvent.setup();
-    const onCancel = vi.fn();
-    render(
-      <AgentHierarchyPanel entries={entries} creationPosture="automatic" onCancel={onCancel} />,
-    );
-    expect(
-      screen.getByRole("button", { name: "View conversation for Active research" }),
-    ).toHaveAttribute("data-variant", "ghost");
-    expect(screen.getByRole("button", { name: "Cancel Active research" })).toHaveAttribute(
-      "data-variant",
-      "secondary",
-    );
-    await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
-    expect(onCancel).toHaveBeenCalledWith({ runId: liveRunId });
+    render(<AgentHierarchyPanel creation={<p>Create form</p>} entries={entries} />);
 
-    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      ),
-    );
-    await user.click(screen.getByRole("option", { name: "History" }));
-    expect(
-      screen.queryByRole("button", { name: "Cancel Completed review" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Create form")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New" }));
+    expect(screen.getByText("Create form")).toBeVisible();
   });
 
-  it("inspects a live transcript while remaining the control surface", async () => {
-    const user = userEvent.setup();
-    const onCancel = vi.fn();
-    const onInspectConversation = vi.fn();
-    render(
-      <AgentHierarchyPanel
-        conversation={liveConversation}
-        creationPosture="automatic"
-        entries={entries}
-        onCancel={onCancel}
-        onInspectConversation={onInspectConversation}
-      />,
-    );
-    expect(screen.getByText("Live child reply")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
-    expect(onCancel).toHaveBeenCalledWith({ runId: liveRunId });
-    await user.click(screen.getByRole("button", { name: "View conversation for Active research" }));
-    expect(onInspectConversation).toHaveBeenCalledWith(liveRunId);
+  it("shows New subagent at once on a thread with none, under a plain empty line", () => {
+    render(<AgentHierarchyPanel creation={<p>Create form</p>} entries={[]} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("No subagents on this thread yet.");
+    expect(screen.getByText("Create form")).toBeVisible();
+    expect(screen.getByRole("button", { name: "New" })).toHaveAttribute("aria-expanded", "true");
   });
 });

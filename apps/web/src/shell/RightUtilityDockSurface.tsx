@@ -231,7 +231,7 @@ function groupTools(surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>) 
 }
 
 function workMapDetail(surface: RightUtilityDockSurfaceId): string {
-  if (surface === "agents") return "Inspect and control child runs";
+  if (surface === "agents") return "Read and control this thread's subagents";
   if (surface === "environment") return "Inspect this thread's working context";
   if (surface === "browser") return "Inspect live web activity";
   if (surface === "canvas") return "Open the thread Canvas";

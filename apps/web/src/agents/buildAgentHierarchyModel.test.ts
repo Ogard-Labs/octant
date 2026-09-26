@@ -32,29 +32,28 @@ const entries = [
 ] as const;
 
 describe("buildAgentHierarchyModel", () => {
-  it("splits active and history buckets and marks native read-only truth", () => {
-    const model = buildAgentHierarchyModel({ entries, filter: "all" });
-    expect(model.activeCount).toBe(1);
-    expect(model.historyCount).toBe(1);
-    const done = model.rows.find((row) => row.runId === "run-done");
-    expect(done?.bucket).toBe("history");
+  it("splits working and finished subagents and marks native read-only truth", () => {
+    const model = buildAgentHierarchyModel({ entries });
+    expect(model.working.map((row) => row.runId)).toEqual(["run-active"]);
+    expect(model.finished.map((row) => row.runId)).toEqual(["run-done"]);
+    const done = model.finished[0];
     expect(done?.nativeReadOnly).toBe(true);
     expect(done?.needsAcknowledgement).toBe(true);
     expect(done?.depth).toBe(1);
   });
 
-  it("filters by query without inventing authority", () => {
-    const model = buildAgentHierarchyModel({ entries, filter: "all", query: "review" });
-    expect(model.rows).toHaveLength(1);
-    expect(model.rows[0]?.runId).toBe("run-done");
+  it("lists finished subagents newest first", () => {
+    const model = buildAgentHierarchyModel({
+      entries: [
+        { ...entries[1], runId: "older", updatedAt: "2026-08-01T15:00:00.000Z" },
+        { ...entries[1], runId: "newer", updatedAt: "2026-08-01T16:00:00.000Z" },
+      ],
+    });
+    expect(model.finished.map((row) => row.runId)).toEqual(["newer", "older"]);
   });
 
-  it("explains empty active state when posture is Off", () => {
-    const model = buildAgentHierarchyModel({
-      entries: [],
-      filter: "active",
-      creationPosture: "off",
-    });
+  it("explains an empty thread when posture is Off", () => {
+    const model = buildAgentHierarchyModel({ entries: [], creationPosture: "off" });
     expect(model.emptyReason).toMatch(/Off/i);
   });
 
@@ -112,8 +111,8 @@ describe("buildAgentHierarchyModel", () => {
       },
       { ...entries[0], runId: "run-no-route" },
     ];
-    const model = buildAgentHierarchyModel({ entries: routeEntries, filter: "all" });
-    const byId = new Map(model.rows.map((row) => [row.runId, row]));
+    const model = buildAgentHierarchyModel({ entries: routeEntries });
+    const byId = new Map([...model.working, ...model.finished].map((row) => [row.runId, row]));
     expect(byId.get("run-pool-fallback")?.routeLabel).toBe("gpt-4o → claude-x · pool fallback");
     expect(byId.get("run-pool-fallback")?.routeReason).toBe(
       "The requested model is unavailable; a permitted fallback ran.",
@@ -124,6 +123,7 @@ describe("buildAgentHierarchyModel", () => {
     );
     expect(byId.get("run-pool-requested")?.routeLabel).toBe("gpt-4o · pool");
     expect(byId.get("run-plain")?.routeLabel).toBe("gpt-4o");
+    expect(byId.get("run-pool-fallback")?.model).toBe("claude-x");
     expect(byId.get("run-plain")?.routeReason).toBeUndefined();
     expect(byId.get("run-no-route")?.routeLabel).toBeUndefined();
   });

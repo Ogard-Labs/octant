@@ -14,10 +14,11 @@ import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
-import { isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
+import { AgentRunDetail } from "./AgentRunDetail";
+import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { AgentRunCreateForm, type AgentRunCreateFormValues } from "./AgentRunCreateForm";
 import { useAgentRunConversation } from "./useAgentRunConversation";
 
@@ -31,6 +32,13 @@ export function AgentRunHierarchy(props: {
   readonly allowCreation?: boolean;
   /** Fetches the server-authoritative posture. */
   readonly settingsClient?: AgentRunSettingsClient;
+  /**
+   * A subagent someone asked to see from elsewhere — a row in the composer's
+   * tray. The tool opens on its page and reports the request handled, so
+   * coming back to the tool later shows the list rather than reopening it.
+   */
+  readonly requestedRunId?: string;
+  readonly onRequestedRunHandled?: () => void;
 }) {
   const [entries, setEntries] = useState<
     Awaited<ReturnType<AgentRunClient["parentSummary"]>>["entries"]
@@ -45,10 +53,18 @@ export function AgentRunHierarchy(props: {
   const [facts, setFacts] = useState<AgentRunControlResolvedFacts>();
   const [factsStatus, setFactsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [role, setRole] = useState<AgentRunRole>();
-  const [conversationRunId, setConversationRunId] = useState<string>();
+  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(props.requestedRunId);
+  const onRequestedRunHandled = useRef(props.onRequestedRunHandled);
+  onRequestedRunHandled.current = props.onRequestedRunHandled;
+  useEffect(() => {
+    if (props.requestedRunId === undefined) return;
+    setSelectedRunId(props.requestedRunId);
+    onRequestedRunHandled.current?.();
+  }, [props.requestedRunId]);
+  // The live conversation streams only while its page is open.
   const conversationState = useAgentRunConversation(
     props.client,
-    conversationRunId === undefined ? undefined : decodeAgentRunId(conversationRunId),
+    selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
   );
 
   const refresh = useCallback(async () => {
@@ -62,7 +78,7 @@ export function AgentRunHierarchy(props: {
       setErrorMessage(
         error instanceof AgentRunClientFailure
           ? error.message
-          : "AgentRun hierarchy is unavailable. Reconnect and retry.",
+          : "Subagents are unavailable. Reconnect and retry.",
       );
       setStatus("error");
     }
@@ -261,6 +277,8 @@ export function AgentRunHierarchy(props: {
     [props.client, props.parentThreadId, refresh],
   );
 
+  const model = useMemo(() => buildAgentHierarchyModel({ entries }), [entries]);
+
   if (status === "loading") {
     return <ShellState state="loading" title="Loading agents" />;
   }
@@ -272,53 +290,72 @@ export function AgentRunHierarchy(props: {
         message={errorMessage ?? "The local AgentRun service is unavailable."}
         role="alert"
         state="warning"
-        title="Agent hierarchy unavailable"
+        title="Subagents unavailable"
       />
     );
   }
 
   const effectivePosture = posture ?? "ask";
+  const error =
+    errorMessage === undefined ? null : (
+      <p className="code-thread-workspace__error" role="alert">
+        {errorMessage}
+      </p>
+    );
+  const selectedRow =
+    selectedRunId === undefined
+      ? undefined
+      : [...model.working, ...model.finished].find((row) => row.runId === selectedRunId);
+
+  if (selectedRow !== undefined) {
+    return (
+      <>
+        {error}
+        <AgentRunDetail
+          row={selectedRow}
+          onBack={() => setSelectedRunId(undefined)}
+          onAcknowledge={(input) => void acknowledge(input)}
+          onCancel={(input) => void cancel(input)}
+          onSteer={(input) => void command("steer", input)}
+          onRetry={(input) => void command("retry", input)}
+          onResume={(input) => void command("resume", input)}
+          {...(conversationState.conversation === undefined
+            ? {}
+            : { conversation: conversationState.conversation })}
+          conversationReconnecting={conversationState.reconnecting}
+          conversationLoading={conversationState.loading}
+          {...(conversationState.errorMessage === undefined
+            ? {}
+            : { conversationError: conversationState.errorMessage })}
+        />
+      </>
+    );
+  }
 
   return (
     <>
-      {errorMessage === undefined ? null : (
-        <p className="code-thread-workspace__error" role="alert">
-          {errorMessage}
-        </p>
-      )}
+      {error}
       <AgentHierarchyPanel
         creationPosture={effectivePosture}
         entries={entries}
-        onAcknowledge={(input) => void acknowledge(input)}
-        onCancel={(input) => void cancel(input)}
-        onSteer={(input) => void command("steer", input)}
-        onRetry={(input) => void command("retry", input)}
-        onResume={(input) => void command("resume", input)}
+        onOpen={setSelectedRunId}
         reconnecting={status === "refreshing"}
-        {...(conversationState.conversation === undefined
-          ? {}
-          : { conversation: conversationState.conversation })}
-        conversationReconnecting={conversationState.reconnecting}
-        conversationLoading={conversationState.loading}
-        {...(conversationState.errorMessage === undefined
-          ? {}
-          : { conversationError: conversationState.errorMessage })}
-        onInspectConversation={(runId) =>
-          setConversationRunId((current) => (current === runId ? undefined : runId))
-        }
+        {...(props.allowCreation
+          ? {
+              creation: (
+                <AgentRunCreateForm
+                  posture={effectivePosture}
+                  submitting={creating}
+                  factsStatus={factsStatus}
+                  {...(facts === undefined ? {} : { facts })}
+                  {...(creationError === undefined ? {} : { errorMessage: creationError })}
+                  onRoleChange={setRole}
+                  onSubmit={(values) => void createChild(values)}
+                />
+              ),
+            }
+          : {})}
       />
-      {/* The list of what is running leads; starting another one follows it. */}
-      {props.allowCreation ? (
-        <AgentRunCreateForm
-          posture={effectivePosture}
-          submitting={creating}
-          factsStatus={factsStatus}
-          {...(facts === undefined ? {} : { facts })}
-          {...(creationError === undefined ? {} : { errorMessage: creationError })}
-          onRoleChange={setRole}
-          onSubmit={(values) => void createChild(values)}
-        />
-      ) : null}
     </>
   );
 }

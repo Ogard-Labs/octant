@@ -1,6 +1,7 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
+import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import {
   FollowUpSuggestionContext,
   type ComposerOffers,
@@ -88,7 +89,7 @@ import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
-import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
+import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -139,7 +140,8 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
-  readonly onAddAgent?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent's page. */
+  readonly onOpenSubagent?: (runId?: string) => void;
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -622,29 +624,31 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             <FollowUpSuggestionContext
               value={followUpSuggestionsFor(surface, props.followUpSuggestions)}
             >
-              <ComposerNoticeProvider
-                value={paneId === activePaneId && inlineNotice ? contextNotice : null}
-              >
-                <ComposerContextMeterGate
-                  enabled={
-                    paneId === props.workspace.activePaneIds[props.mode] &&
-                    offersThreadComposer(surface)
-                  }
+              <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
+                <ComposerNoticeProvider
+                  value={paneId === activePaneId && inlineNotice ? contextNotice : null}
                 >
-                  <SurfaceLinkActionsProvider
-                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                    {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
-                    paneId={paneId}
-                    surface={surface}
+                  <ComposerContextMeterGate
+                    enabled={
+                      paneId === props.workspace.activePaneIds[props.mode] &&
+                      offersThreadComposer(surface)
+                    }
                   >
-                    {onWelcomeGround(
-                      surface,
-                      props.welcomeBackdrop,
-                      renderTab(surface, props, paneId, canvasContext),
-                    )}
-                  </SurfaceLinkActionsProvider>
-                </ComposerContextMeterGate>
-              </ComposerNoticeProvider>
+                    <SurfaceLinkActionsProvider
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      {...(props.onOpenLink === undefined ? {} : { onOpenLink: props.onOpenLink })}
+                      paneId={paneId}
+                      surface={surface}
+                    >
+                      {onWelcomeGround(
+                        surface,
+                        props.welcomeBackdrop,
+                        renderTab(surface, props, paneId, canvasContext),
+                      )}
+                    </SurfaceLinkActionsProvider>
+                  </ComposerContextMeterGate>
+                </ComposerNoticeProvider>
+              </ComposerSubagentsContext>
             </FollowUpSuggestionContext>
           )}
           {...(props.providerByThreadId === undefined
@@ -733,6 +737,23 @@ function followUpSuggestionsFor(
   if ("hostId" in surface && surface.hostId !== undefined) return undefined;
   if (!("threadId" in surface)) return undefined;
   return { ...host, threadId: String(surface.threadId), mode: surface.mode };
+}
+
+/**
+ * The thread's subagent tray, for the composer of a pane that shows a Chat,
+ * Work, or Code thread. It mounts — and reads the host — only once that
+ * composer renders, so a thread still loading asks for nothing.
+ */
+function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): ReactNode {
+  if (props.agentRunClient === undefined || !offersThreadComposer(surface)) return null;
+  if (!("threadId" in surface)) return null;
+  return (
+    <ThreadSubagentsTray
+      client={props.agentRunClient}
+      {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
+      threadId={String(surface.threadId)}
+    />
+  );
 }
 
 function offersThreadComposer(surface: WorkspaceTab): boolean {
@@ -914,8 +935,6 @@ function renderCodeTab(
       }
     >
       <CodeWorkspaceTab
-        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -1405,13 +1424,6 @@ function renderNonCodeTab(
         {...(props.onOpenChatThread === undefined ? {} : { onOpenThread: props.onOpenChatThread })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
         threadId={tab.threadId}
-        childRunStatus={
-          <ThreadChildRunStatusSlot
-            {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-            {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
-            threadId={String(tab.threadId)}
-          />
-        }
       />
     );
   }
@@ -1534,17 +1546,6 @@ function renderNonCodeTab(
                 {...(props.onWorkThreadUpdated === undefined
                   ? {}
                   : { onThreadUpdated: props.onWorkThreadUpdated })}
-                childRunStatus={
-                  displayReady ? (
-                    <ThreadChildRunStatusSlot
-                      {...(props.agentRunClient === undefined
-                        ? {}
-                        : { client: props.agentRunClient })}
-                      {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
-                      threadId={String(tab.threadId)}
-                    />
-                  ) : undefined
-                }
               />
             </ThreadActivityPictureInPicture>
           </WorkThreadEnvironment>
@@ -2080,7 +2081,6 @@ function ChatThreadWorkspace(props: {
   readonly providerController: ProviderController;
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
-  readonly childRunStatus?: ReactNode;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
@@ -2172,7 +2172,6 @@ function ChatThreadWorkspace(props: {
                 props.onOpenThread?.(thread.id, thread.title, thread.projectId),
             })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
-        {...(props.childRunStatus === undefined ? {} : { childRunStatus: props.childRunStatus })}
       />
     </ChatThreadEnvironment>
   );

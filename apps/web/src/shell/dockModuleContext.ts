@@ -34,6 +34,10 @@ export interface ThreadUtilityDockSubject {
 export interface ThreadUtilityDockContentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
+  /** A subagent the Agents tool should open on, asked for from the composer's tray. */
+  readonly requestedAgentRunId?: string;
+  /** Clears that request once the Agents tool has opened on it. */
+  readonly onAgentRunRequestHandled?: () => void;
   readonly nativeHarnessClient?: NativeHarnessClient;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;

@@ -47,7 +47,6 @@ import type {
   AppleActionRequest,
   ApplePlatform,
 } from "@octant/contracts/apple-toolchain";
-import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -114,8 +113,6 @@ export interface CodeWorkspaceApprovals {
 
 export interface CodeWorkspaceProps {
   readonly appleToolchainClient?: AppleToolchainClient;
-  readonly agentRunClient?: AgentRunClient;
-  readonly onAddAgent?: () => void;
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
@@ -190,8 +187,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   if (props.tab.kind === "code-overview") {
     return (
       <CodeThreadWorkspace
-        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         controller={props.controller}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(props.browserAvailable === undefined

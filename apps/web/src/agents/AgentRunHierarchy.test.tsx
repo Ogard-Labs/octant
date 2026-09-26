@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -78,6 +78,29 @@ function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   };
 }
 
+function summaryEntry(overrides: {
+  readonly lifecycleStatus: string;
+  readonly task: string;
+  readonly result?: {
+    readonly reference: string;
+    readonly text?: string;
+    readonly truncated: boolean;
+  };
+}) {
+  return {
+    runId,
+    requestId: "request-1",
+    parentThreadId,
+    role: "research",
+    executionKind: "octant-managed",
+    usageQuality: "provider-reported",
+    resultAcknowledgement: { required: true, acknowledged: false },
+    version: 3,
+    updatedAt: "2026-08-01T15:01:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("AgentRunHierarchy", () => {
   it("does not offer child creation unless the surface opts in", async () => {
     const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
@@ -92,7 +115,7 @@ describe("AgentRunHierarchy", () => {
     expect(requestRun).not.toHaveBeenCalled();
   });
 
-  it("renders server-authored history and acknowledges a completed child", async () => {
+  it("opens a finished subagent and marks it reviewed at the version the host reported", async () => {
     const user = userEvent.setup();
     const acknowledge = vi.fn(async () => ({
       kind: "run-updated" as const,
@@ -128,16 +151,8 @@ describe("AgentRunHierarchy", () => {
       <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="ask" />,
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
-    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      ),
-    );
-    await user.click(screen.getByRole("option", { name: "History" }));
-    expect(screen.getByText("Verify the packaged child")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /acknowledge result/i }));
+    await user.click(screen.getByRole("button", { name: /Verify the packaged child/ }));
+    await user.click(screen.getByRole("button", { name: "Mark reviewed" }));
 
     expect(acknowledge).toHaveBeenCalledWith({ runId, expectedVersion: 2 });
   });
@@ -174,11 +189,16 @@ describe("AgentRunHierarchy", () => {
           creationPosture="ask"
         />,
       );
-      await waitFor(() => expect(screen.getByText("1 active · 0 done")).toBeVisible());
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible(),
+      );
 
       await vi.advanceTimersByTimeAsync(2_000);
 
-      await waitFor(() => expect(screen.getByText("0 active · 1 done")).toBeVisible());
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Finished · 1" })).toBeVisible(),
+      );
+      expect(screen.queryByRole("heading", { name: /Working/ })).not.toBeInTheDocument();
       // Settled children stop the panel from asking again.
       const calls = parentSummary.mock.calls.length;
       await vi.advanceTimersByTimeAsync(6_000);
@@ -261,7 +281,7 @@ describe("AgentRunHierarchy", () => {
     );
   });
 
-  it("cancels an active child through the panel's Cancel action", async () => {
+  it("cancels a working subagent from its page", async () => {
     const user = userEvent.setup();
     const cancel = vi.fn(async () => ({
       results: [{ kind: "run-updated" as const, run: { id: runId, lifecycleStatus: "cancelled" } }],
@@ -293,14 +313,14 @@ describe("AgentRunHierarchy", () => {
         creationPosture="automatic"
       />,
     );
-    await waitFor(() => expect(screen.getByText("Draft the release notes")).toBeVisible());
-    await user.click(screen.getByRole("button", { name: "Cancel Draft the release notes" }));
+    await user.click(await screen.findByRole("button", { name: /Draft the release notes/ }));
+    await user.click(screen.getByRole("button", { name: "Cancel this subagent" }));
 
     expect(cancel).toHaveBeenCalledWith({ runId, scope: "subtree" });
     await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
   });
 
-  it("steers a running child with expected version", async () => {
+  it("steers a running subagent from its page at the version the host reported", async () => {
     const user = userEvent.setup();
     const steer = vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never }));
     const client = emptyClient({
@@ -332,7 +352,7 @@ describe("AgentRunHierarchy", () => {
         creationPosture="automatic"
       />,
     );
-    await waitFor(() => expect(screen.getByText("Draft the release notes")).toBeVisible());
+    await user.click(await screen.findByRole("button", { name: /Draft the release notes/ }));
     await user.click(screen.getByRole("button", { name: "Steer Draft the release notes" }));
     await user.type(screen.getByLabelText("Steering instruction"), "Stay on the failing test.");
     await user.click(screen.getByRole("button", { name: "Send steering" }));
@@ -364,5 +384,108 @@ describe("AgentRunHierarchy", () => {
     );
     await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
     expect(settingsClient.current).toHaveBeenCalled();
+  });
+
+  it("goes from the list to a subagent's page and back", async () => {
+    const user = userEvent.setup();
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "running", task: "Trace the flaky test" })],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+
+    await user.click(await screen.findByRole("button", { name: /Trace the flaky test/ }));
+    const page = screen.getByRole("region", { name: "Subagent" });
+    expect(within(page).getByRole("heading", { name: "Trace the flaky test" })).toBeVisible();
+    expect(client.conversation).toHaveBeenCalledWith(runId);
+
+    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
+    expect(screen.queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible();
+  });
+
+  it("answers with the retained reply when the live conversation is gone after completion", async () => {
+    const user = userEvent.setup();
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          summaryEntry({
+            lifecycleStatus: "completed",
+            task: "Summarize the release",
+            result: {
+              reference: "result-1",
+              text: "The release **ships** Friday.",
+              truncated: true,
+            },
+          }),
+        ],
+      })),
+      conversation: vi.fn(async () => ({
+        runId,
+        parentThreadId,
+        executionKind: "octant-managed" as const,
+        modelId: "test-model" as never,
+        lifecycleStatus: "completed" as const,
+        status: "unavailable" as const,
+        entries: [],
+        truncated: false,
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+
+    await user.click(await screen.findByRole("button", { name: /Summarize the release/ }));
+
+    const conversation = screen.getByRole("log", { name: "Subagent conversation" });
+    await waitFor(() => expect(within(conversation).getByText("ships")).toBeVisible());
+    expect(within(conversation).getByText("ships").tagName).toBe("STRONG");
+    expect(conversation).toHaveTextContent("The reply was truncated.");
+  });
+
+  it("says plainly when a finished subagent left nothing to read", async () => {
+    const user = userEvent.setup();
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "failed", task: "Probe the cache" })],
+      })),
+      conversation: vi.fn(async () => {
+        throw new Error("gone");
+      }),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+
+    await user.click(await screen.findByRole("button", { name: /Probe the cache/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("log", { name: "Subagent conversation" })).toHaveTextContent(
+        "This subagent left no reply to show.",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Cancel this subagent" })).not.toBeInTheDocument();
+  });
+
+  it("opens on the subagent another surface asked for and reports the request handled", async () => {
+    const onRequestedRunHandled = vi.fn();
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [summaryEntry({ lifecycleStatus: "running", task: "Trace the flaky test" })],
+      })),
+    });
+    render(
+      <AgentRunHierarchy
+        client={client}
+        onRequestedRunHandled={onRequestedRunHandled}
+        parentThreadId={parentThreadId}
+        requestedRunId={String(runId)}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+    expect(onRequestedRunHandled).toHaveBeenCalledTimes(1);
   });
 });
