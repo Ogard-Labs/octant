@@ -2875,6 +2875,9 @@ form > .work-composer-adapter__attachments {
    wrap to different lengths, a one-line card centred its title lower than
    its neighbours ("Explain this codebase" sat off the line), so the content
    starts at the top-left corner of every card. */
+/* They are cards, the same hairline card on the card fill as the intents
+   above: drawn bare, the prompts sat straight on the ground's dither and read
+   as loose text on a picture rather than things to pick. */
 .code-home__suggestions > button {
   display: grid;
   height: auto;
@@ -2883,8 +2886,16 @@ form > .work-composer-adapter__attachments {
   gap: var(--oct-space-1);
   justify-items: start;
   padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
   text-align: left;
   white-space: normal;
+}
+
+.code-home__suggestions > button:hover:not(:disabled) {
+  border-color: var(--octant-border-strong);
+  background: var(--octant-card);
 }
 
 .draft-thread__intent-cards > button {
@@ -3056,13 +3067,19 @@ form > .work-composer-adapter__attachments {
   container-type: inline-size;
 }
 
+/* Continue's rows share one card, divided by hairlines, so the list reads
+   as one object on the page rather than lines drawn over the ground. */
 .code-home__grid--rows {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
 }
 
-.code-home__grid--rows > li {
-  border-bottom: 1px solid var(--oct-border);
+.code-home__grid--rows > li + li {
+  border-top: 1px solid var(--oct-border);
 }
 
 .code-home__row {

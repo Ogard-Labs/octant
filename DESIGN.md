@@ -562,8 +562,9 @@ chooser or uploads while refused. Model, access, and destination controls keep
 one type scale and quiet keyboard focus. Access labels read "Plan · read-only"
 and "Ask for approvals" in both new and existing threads.
 Under the Code composer the start screen is an agent home rather than a
-blank prompt: suggested prompts as small cards (a label and the
-sentence they fill in), then three sections that share one card grid, two
+blank prompt: suggested prompts as small hairline cards on the card fill (a
+label and the sentence they fill in), never bare text on the ground, and
+Continue's rows share one such card, then three sections that share one card grid, two
 across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery
 state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
