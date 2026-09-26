@@ -64,6 +64,7 @@ import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments, type StagedCodeAttachment } from "./useCodeAttachments";
+import type { CodeThreadControllers } from "./codeThreadControllers";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
@@ -149,6 +150,7 @@ export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onAddAgent?: () => void;
   readonly controller: CodeController;
+  readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
    * Whether the thread's provider advertises native harness-delegated
@@ -938,11 +940,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           permissionPersistence: thread.permissionPersistence,
         });
         if (approvalId === undefined) {
-          props.controller.setAccessNotice(
+          const text =
             !mountedRef.current || activeThreadKeyRef.current !== originThreadKey
               ? "Full access confirmation was cancelled when you left this thread. It keeps its current access."
-              : "Full access was not confirmed. This thread keeps its current access.",
-          );
+              : "Full access was not confirmed. This thread keeps its current access.";
+          if (props.holdAccessNotice === undefined) props.controller.setAccessNotice(text);
+          else props.holdAccessNotice(thread.id, text);
           return;
         }
       }

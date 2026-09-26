@@ -1505,11 +1505,14 @@ describe("CodeThreadWorkspace", () => {
     const cancelApproval = vi.fn(async () => undefined);
     const setAccessNoticeA = vi.fn();
     const setAccessNoticeB = vi.fn();
+    const holdAccessNoticeA = vi.fn();
+    const holdAccessNoticeB = vi.fn();
     const leftThreadNotice =
       "Full access confirmation was cancelled when you left this thread. It keeps its current access.";
     const { unmount } = render(
       <CodeThreadWorkspace
         controller={controller({ setAccessNotice: setAccessNoticeA })}
+        holdAccessNotice={holdAccessNoticeA}
         requestFullAccessApproval={requestFullAccessApproval}
         cancelApproval={cancelApproval}
         threadId={threadId}
@@ -1525,19 +1528,22 @@ describe("CodeThreadWorkspace", () => {
     const threadB = render(
       <CodeThreadWorkspace
         controller={controller({ setAccessNotice: setAccessNoticeB }, anotherThreadId)}
+        holdAccessNotice={holdAccessNoticeB}
         requestFullAccessApproval={requestFullAccessApproval}
         cancelApproval={cancelApproval}
         threadId={anotherThreadId}
       />,
     );
     approval.resolve(undefined);
-    await waitFor(() => expect(setAccessNoticeA).toHaveBeenCalledWith(leftThreadNotice));
+    await waitFor(() => expect(holdAccessNoticeA).toHaveBeenCalledWith(threadId, leftThreadNotice));
     expect(setAccessNoticeB).not.toHaveBeenCalled();
+    expect(holdAccessNoticeB).not.toHaveBeenCalled();
     expect(screen.queryByText(leftThreadNotice)).not.toBeInTheDocument();
 
     threadB.rerender(
       <CodeThreadWorkspace
         controller={controller({ accessNotice: leftThreadNotice })}
+        holdAccessNotice={holdAccessNoticeA}
         requestFullAccessApproval={requestFullAccessApproval}
         cancelApproval={cancelApproval}
         threadId={threadId}

@@ -8,6 +8,7 @@ import { deferredCodeAdapterFor } from "./codeLeafAdapters";
 import { CodeWorkspace, type CodeWorkspaceProps } from "./CodeWorkspace";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import type { CodeController } from "./useCodeController";
+import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
@@ -25,6 +26,7 @@ type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
+  readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly agentRunClient?: AgentRunClient;
   readonly onAddAgent?: () => void;
   readonly appleToolchainClient?: AppleToolchainClient;
@@ -145,6 +147,9 @@ export default function CodeWorkspaceTab(props: {
         {...(approvals === undefined ? {} : { approvals })}
         client={props.controller.client}
         controller={props.controller}
+        {...(props.holdAccessNotice === undefined
+          ? {}
+          : { holdAccessNotice: props.holdAccessNotice })}
         {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
