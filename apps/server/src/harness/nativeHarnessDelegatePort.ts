@@ -35,12 +35,12 @@ export interface NativeHarnessDelegatePortOptions {
 }
 
 /**
- * Delegation from a lead model. The model names a role and a task; the host
- * admits the child through the same path a person's request takes, picks its
- * model from the role's slot, journals that routing decision on the parent's
- * harness session, and starts the run. Under the Ask posture nothing starts:
- * the model is told the user must create children by hand or set Automatic,
- * because a model asking is not a person confirming.
+ * Delegation from a lead model, the only way a subagent starts. The model
+ * names a role and a task; the host admits the child from its own records of
+ * the parent thread, picks its model from the role's slot, journals that
+ * routing decision on the parent's harness session, and starts the run. The
+ * child's reply comes back to the model through `collect`. With subagents
+ * turned off in Settings nothing starts.
  */
 export function createNativeHarnessDelegatePort(
   options: NativeHarnessDelegatePortOptions,
@@ -55,20 +55,13 @@ export function createNativeHarnessDelegatePort(
   const parentThreadId = scope.parentThreadId as AgentRunParentThreadId;
   return {
     start: async (input): Promise<NativeHarnessDelegateStart> => {
-      const posture = options.admission.settings.current().creationPosture;
-      if (posture === "off") {
+      // The settings store never reports Ask (it reads a stored Ask as Off),
+      // so anything but Automatic is a person having turned subagents off.
+      if (options.admission.settings.current().creationPosture !== "automatic") {
         return {
           status: "refused",
           reason: "creation-posture-off",
-          message: "Child runs are turned off in Settings → Octant Harness → Helper agents.",
-        };
-      }
-      if (posture === "ask") {
-        return {
-          status: "refused",
-          reason: "creation-posture-ask",
-          message:
-            "Child runs need a person to start them under the current setting. Ask the user to start the child from the Agents dock, or to choose Automatically under Settings → Octant Harness → Helper agents.",
+          message: "Subagents are turned off in Settings → Octant Harness → Helper agents.",
         };
       }
       let controlRequest: AgentRunControlRequest;

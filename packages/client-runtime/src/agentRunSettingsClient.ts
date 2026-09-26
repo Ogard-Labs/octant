@@ -1,7 +1,7 @@
 import {
   decodeAgentRunPolicySettings,
-  type AgentRunCreationPosture,
   type AgentRunPolicySettings,
+  type AgentRunSelectableCreationPosture,
 } from "@octant/contracts";
 
 export interface AgentRunSettingsClientOptions {
@@ -13,7 +13,7 @@ export interface AgentRunSettingsClientOptions {
 export interface AgentRunSettingsClient {
   current(): Promise<AgentRunPolicySettings>;
   update(input: {
-    readonly creationPosture: AgentRunCreationPosture;
+    readonly creationPosture: AgentRunSelectableCreationPosture;
     readonly expectedVersion: number;
   }): Promise<AgentRunPolicySettings>;
 }
@@ -29,9 +29,9 @@ export class AgentRunSettingsClientFailure extends Error {
 }
 
 /**
- * Client for the Agents settings route: Off / Ask /
- * Automatic creation posture with server-authoritative persistence. Never
- * caches a posture across a failed request — every read/write round-trips.
+ * Client for the Agents settings route: Off / Automatic creation posture with
+ * server-authoritative persistence. Never caches a posture across a failed
+ * request — every read/write round-trips.
  */
 export function createAgentRunSettingsClient(
   options: AgentRunSettingsClientOptions,

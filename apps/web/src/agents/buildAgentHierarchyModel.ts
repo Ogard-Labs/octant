@@ -83,7 +83,7 @@ export function buildAgentHierarchyModel(input: {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly creationPosture?: "off" | "ask" | "automatic";
 }): AgentHierarchyModel {
-  const creationPosture = input.creationPosture ?? "ask";
+  const creationPosture = input.creationPosture ?? "automatic";
   const rows = input.entries.map((entry) => toRow(entry, depthOf(entry, input.entries)));
   const working = rows.filter((row) => row.bucket === "active");
   const finished = rows

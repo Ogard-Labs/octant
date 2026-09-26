@@ -33,10 +33,10 @@ function failure(message: string, status: number, origin: string | null): Respon
 }
 
 /**
- * Authenticated Agents settings routes: Off / Ask / Automatic creation
- * posture with server-authoritative persistence. No client
- * value from any other route is ever trusted as the effective posture; every
- * AgentRun creation route reads `store.current()` directly.
+ * Authenticated Agents settings routes: Off / Automatic creation posture
+ * with server-authoritative persistence. No client value from any other
+ * route is ever trusted as the effective posture; delegation admission reads
+ * `store.current()` directly.
  */
 export function createAgentRunSettingsRouteHandler(
   dependencies: AgentRunSettingsRouteDependencies,

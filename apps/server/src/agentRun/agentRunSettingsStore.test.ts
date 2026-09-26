@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { AgentRunPolicySettings } from "@octant/contracts";
+import { AgentRunPolicySettings, CorrelationId, EventId } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -62,9 +62,39 @@ function createStore(journal = createJournal()): AgentRunSettingsStore {
 }
 
 describe("AgentRunSettingsStore", () => {
-  it("defaults to Ask at version 0 before any update", () => {
+  it("lets the agent start subagents on a host that never chose a posture", () => {
     const store = createStore();
-    expect(store.current()).toEqual({ creationPosture: "ask", version: 0, updatedAt: now });
+    expect(store.current()).toEqual({ creationPosture: "automatic", version: 0, updatedAt: now });
+  });
+
+  it("reads a stored Ask as Off, since no one can start a subagent by hand any more", () => {
+    const connection = openConnection();
+    // A host that chose "Only when I start them" before that choice was removed.
+    createJournal(connection).append({
+      aggregate: {
+        aggregateType: AGENT_RUN_SETTINGS_AGGREGATE_TYPE,
+        aggregateId: AGENT_RUN_SETTINGS_AGGREGATE_ID,
+      },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: Schema.decodeUnknownSync(EventId)("bbbbbbbb-bbbb-4bbb-8bbb-000000000001"),
+          eventName: AGENT_RUN_SETTINGS_UPDATED,
+          eventVersion: 1,
+          correlationId: Schema.decodeUnknownSync(CorrelationId)(
+            "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+          ),
+          actor,
+          occurredAt: now,
+          payload: { creationPosture: "ask", version: 1, updatedAt: now },
+        },
+      ],
+    });
+
+    const store = createStore(createJournal(connection));
+    expect(store.current()).toEqual({ creationPosture: "off", version: 1, updatedAt: now });
+    // The next choice applies on top of the stored version, so it is not refused as stale.
+    expect(store.update({ creationPosture: "automatic", expectedVersion: 1 }).version).toBe(2);
   });
 
   it("persists an update and reflects it immediately", () => {

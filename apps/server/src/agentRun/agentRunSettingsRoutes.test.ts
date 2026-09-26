@@ -67,7 +67,7 @@ describe("agentRunSettingsRoutes", () => {
     );
     expect(response?.status).toBe(200);
     const body = (await response!.json()) as { settings: { creationPosture: string } };
-    expect(body.settings.creationPosture).toBe("ask");
+    expect(body.settings.creationPosture).toBe("automatic");
   });
 
   it("rejects unauthenticated reads", async () => {
@@ -90,6 +90,22 @@ describe("agentRunSettingsRoutes", () => {
     );
     expect(response?.status).toBe(200);
     expect(store.current().creationPosture).toBe("off");
+  });
+
+  it("refuses Ask, which no longer names anything a person can choose", async () => {
+    const { handler, store, token } = createHandler();
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-run-settings", {
+        method: "PUT",
+        headers: {
+          "x-octant-window-capability": token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ creationPosture: "ask", expectedVersion: 0 }),
+      }),
+    );
+    expect(response?.status).toBe(400);
+    expect(store.current()).toMatchObject({ creationPosture: "automatic", version: 0 });
   });
 
   it("returns 409 on a stale expected version instead of silently applying it", async () => {
