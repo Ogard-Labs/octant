@@ -572,8 +572,12 @@ flowchart LR
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
-- **Composer feature tips.** Empty Chat, Work, and Code composers show a short
-  tip about a built-in feature instead of a fixed placeholder. A session-local
+- **Composer feature tips.** An empty follow-up composer in a Chat, Work, or
+  Code thread shows a short tip about a built-in feature instead of a fixed
+  placeholder. A start screen's composer asks in plain words instead ("Ask
+  anything…", "Describe the work…", "Describe the change…"): a first-time
+  person meeting "Tip: Press Enter to send" where a prompt belongs could not
+  tell what the box was for. A session-local
   sequence advances when a composer mounts or its thread identity changes,
   including returning to a thread and creating another draft. It stays steady
   through typing and routine updates. Callers offer only mounted capabilities:
@@ -760,7 +764,7 @@ native harness in `apps/server/src/harness`:
   slot through the shared `admitAgentRunControlRequest` path.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
-  follow-up suggestions, the questions a lead asked with how each was
+  the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session
   while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
@@ -768,11 +772,9 @@ native harness in `apps/server/src/harness`:
   or the Code thread's own inline question path), or until it expires or the
   turn is interrupted. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
-  reply, parses the follow-up block, and asks the `advisor` slot for a review.
-  A confirmed follow-up is created by `createNativeHarnessFollowUp` through
-  the mode's ordinary creation command on the confirming window, and the
-  activation result carries the new thread id; the prompt is never sent on
-  the person's behalf.
+  reply, and asks the `advisor` slot for a review. The session view still
+  carries the thread's follow-up suggestions for the surfaces that read it,
+  joined in from their own store (below).
 - **Terminal.** `octant agent` in `packages/cli` is the same thread on a
   terminal: `agentThread.ts` is the mode-neutral thread port (Chat, Work,
   and Code adapters over the modes' own routes, plus creation), `agentHost.ts`
@@ -783,6 +785,23 @@ native harness in `apps/server/src/harness`:
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
+
+Follow-up suggestions are every provider's, not the harness's
+(`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
+provider, carries one fixed instructions block that lets the model end a reply
+with up to three suggestions in an `octant-follow-ups` fenced block.
+`ThreadFollowUpSuggestionStore` journals the latest reply's set per thread
+(`thread-follow-up-suggestions`), retires it when a later reply suggests
+nothing, and replays sets a harness session journaled earlier. The shared
+message parser leaves the block out of the reply a person reads.
+`/api/follow-up-suggestions/:threadId` reads the set, previews what one
+suggestion would create — a new thread in the same mode and Project, or a
+worktree only for a Code thread in a Project — and activates it with an
+explicit confirmation, refusing a repeat before anything is created. A
+confirmed follow-up is created by `createFollowUp` through the mode's ordinary
+creation command on the confirming window, on the model that suggested it; the
+prompt is never sent on the person's behalf. The web shows the set as chips at
+the top of the composer of each local thread pane.
 
 ## Extensions and skills
 

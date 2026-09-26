@@ -226,11 +226,12 @@ describe("CodeComposerAdapter", () => {
     expect(new Set(composerIds).size).toBe(2);
   });
 
-  it("keeps the welcome prompt on the shared composer frame", () => {
+  it("asks for the change in plain words rather than opening on a tip", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
-    expect(
-      screen.getByRole("textbox", { name: "First message" }).getAttribute("placeholder"),
-    ).toMatch(/^Tip: /);
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveAttribute(
+      "placeholder",
+      "Describe the change…",
+    );
   });
 
   it("puts Project, branch, and Environment on the context row above the composer", () => {

@@ -83,7 +83,12 @@ import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
 import { useMinuteTick } from "./polling/useMinuteTick";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
-import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
+import type {
+  CodeOperationId,
+  NativeHarnessFollowUpCreation,
+  ProviderInstance,
+  VoiceSettings,
+} from "@octant/contracts";
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
@@ -211,6 +216,7 @@ import {
   activeProjectTabId,
   activeSurfaceTitle,
   activeWorkThreadTabId,
+  findWorkspacePane,
   openLocalCodeThreadIds,
   openThreadIds,
 } from "./shell/workspaceTabLifecycle";
@@ -221,6 +227,7 @@ import {
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
+  useSidebarDrawerViewport,
   useBackgroundImageLibrary,
   usePrefersReducedMotion,
   useResolvedMaterial,
@@ -967,17 +974,55 @@ function LaunchedShell(
   // otherwise be dropped on the document body. Remember which control replaces
   // it and focus that one once the new layout has rendered.
   const sidebarToggleFocusRef = useRef<"Hide sidebar" | "Show sidebar" | undefined>(undefined);
-  const setSidebarCollapsedPersistent = useCallback((collapsed: boolean) => {
-    sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
-    setSidebarCollapsed(collapsed);
-    writeSidebarCollapsed(globalThis, collapsed);
-  }, []);
+  // At phone width the sidebar is a drawer over the page. It opened on every
+  // load and covered the whole screen with no way out but its own small hide
+  // button, so there it starts closed, closes on Escape, a tap outside, or
+  // choosing somewhere to go, and never writes the desktop preference.
+  const sidebarIsDrawer = useSidebarDrawerViewport();
+  const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
+  const presentedSidebarCollapsed = sidebarIsDrawer ? !sidebarDrawerOpen : sidebarCollapsed;
+  const setSidebarCollapsedPersistent = useCallback(
+    (collapsed: boolean) => {
+      sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+      if (sidebarIsDrawer) {
+        setSidebarDrawerOpen(!collapsed);
+        return;
+      }
+      setSidebarCollapsed(collapsed);
+      writeSidebarCollapsed(globalThis, collapsed);
+    },
+    [sidebarIsDrawer],
+  );
   useLayoutEffect(() => {
     const label = sidebarToggleFocusRef.current;
     if (label === undefined) return;
     sidebarToggleFocusRef.current = undefined;
     document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)?.focus();
-  }, [sidebarCollapsed]);
+  }, [presentedSidebarCollapsed]);
+  useEffect(() => {
+    if (!sidebarIsDrawer || !sidebarDrawerOpen) return;
+    const close = () => setSidebarCollapsedPersistent(true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      // A menu or dialog opened from the drawer takes Escape first.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("[role='dialog'], [role='menu']") !== null) return;
+      close();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".shell-frame > .sidebar, [role='menu'], [role='dialog']") !== null) {
+        return;
+      }
+      close();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [setSidebarCollapsedPersistent, sidebarDrawerOpen, sidebarIsDrawer]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
@@ -1207,6 +1252,7 @@ function LaunchedShell(
     hostClient,
     projectBrowserClient,
     projectTerminalClient,
+    followUpSuggestionClient,
     hostControlClient,
     imageGenerationClient,
     speechClient,
@@ -2702,6 +2748,51 @@ function LaunchedShell(
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
   );
+  // The prompt of a confirmed follow-up waits in the composer of the thread
+  // it belongs to; sending it is the person's move.
+  const openCreatedFollowUp = ({
+    mode,
+    created,
+    prompt,
+  }: {
+    readonly mode: "chat" | "work" | "code";
+    readonly created: NativeHarnessFollowUpCreation;
+    readonly prompt: string;
+  }) => {
+    const seed = (threadMode: "chat" | "work" | "code", threadId: string) =>
+      composerThreadDrafts.write(threadMode, threadId, {
+        text: prompt,
+        caretIndex: prompt.length,
+        stagedDropped: false,
+      });
+    if (created.kind === "same-thread") {
+      seed(mode, created.threadId);
+      return;
+    }
+    if (created.threadId === undefined) return;
+    seed(created.mode, created.threadId);
+    if (created.mode === "chat") {
+      void controller.openChatThread(
+        decodeChatThreadId(created.threadId),
+        created.title,
+        created.projectId,
+      );
+    } else if (created.mode === "work") {
+      void controller.openWorkThread(
+        decodeWorkThreadId(created.threadId),
+        created.title,
+        undefined,
+        created.projectId,
+      );
+    } else {
+      void controller.openCodeThread(
+        decodeCodeThreadId(created.threadId),
+        created.title,
+        undefined,
+        created.projectId,
+      );
+    }
+  };
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     // Each dock module owns its readiness: a terminal or file tool does not
@@ -2719,43 +2810,6 @@ function LaunchedShell(
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
         nativeHarnessClient={nativeHarnessClient}
-        onFollowUpCreated={({ created, prompt }) => {
-          // The prompt waits in the composer of the thread it belongs to;
-          // sending it is the person's move.
-          const seed = (mode: "chat" | "work" | "code", threadId: string) =>
-            composerThreadDrafts.write(mode, threadId, {
-              text: prompt,
-              caretIndex: prompt.length,
-              stagedDropped: false,
-            });
-          if (created.kind === "same-thread") {
-            seed(dockThread.mode, created.threadId);
-            return;
-          }
-          if (created.threadId === undefined) return;
-          seed(created.mode, created.threadId);
-          if (created.mode === "chat") {
-            void controller.openChatThread(
-              decodeChatThreadId(created.threadId),
-              created.title,
-              created.projectId,
-            );
-          } else if (created.mode === "work") {
-            void controller.openWorkThread(
-              decodeWorkThreadId(created.threadId),
-              created.title,
-              undefined,
-              created.projectId,
-            );
-          } else {
-            void controller.openCodeThread(
-              decodeCodeThreadId(created.threadId),
-              created.title,
-              undefined,
-              created.projectId,
-            );
-          }
-        }}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         androidToolchainClient={androidToolchainClient}
@@ -3387,6 +3441,40 @@ function LaunchedShell(
     () => ({ openExternal: (url: string) => openExternalUrl(props.hostBridge, url) }),
     [props.hostBridge],
   );
+
+  // Choosing a thread or destination from the phone drawer is the reason it
+  // was opened; the page it chose should be what the person sees next. The
+  // surface is keyed by its id, not its title: two untitled threads share one.
+  const drawerDestination = [
+    activeMode,
+    controller.workspace === undefined
+      ? ""
+      : String(
+          findWorkspacePane(
+            controller.workspace.layouts[activeMode],
+            controller.workspace.activePaneIds[activeMode],
+          )?.surface.id ?? "",
+        ),
+    searchOpen,
+    projectsListOpen,
+    selectedProjectTabId ?? "",
+    inboxOpen,
+    workBoardOpen,
+    codeBoardOpen,
+    codePullRequestsOpen,
+    githubIssuesOpen,
+    linearIssuesOpen,
+    automationCenterOpen,
+    agentsCenterOpen,
+    artifactLibraryOpen,
+    imageLibraryOpen,
+  ].join(":");
+  const lastDrawerDestination = useRef(drawerDestination);
+  useEffect(() => {
+    if (lastDrawerDestination.current === drawerDestination) return;
+    lastDrawerDestination.current = drawerDestination;
+    setSidebarDrawerOpen(false);
+  }, [drawerDestination]);
 
   if (controller.status === "loading") {
     return (
@@ -5434,10 +5522,10 @@ function LaunchedShell(
             isNarrow={isNarrow}
             material={material}
             nativeTitlebarInset={hostReservesTitlebarInset}
-            {...(sidebarCollapsed
+            {...(presentedSidebarCollapsed
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            {...(sidebarCollapsed
+            {...(presentedSidebarCollapsed
               ? {
                   onNewThread: () => {
                     if (activeMode === "chat") createChat();
@@ -5461,7 +5549,7 @@ function LaunchedShell(
           void controller.updateSettings({ sidebarWidth: width });
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={presentedSidebarCollapsed}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
@@ -5976,6 +6064,10 @@ function LaunchedShell(
                   <ComposerContextMeterShortcut />
                   <WorkspaceView
                     {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                    followUpSuggestions={{
+                      client: followUpSuggestionClient,
+                      onCreated: openCreatedFollowUp,
+                    }}
                     greetingName={controller.settings?.userProfile.displayName}
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}

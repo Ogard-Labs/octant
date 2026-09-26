@@ -49,6 +49,7 @@ import { createGithubCloneClient } from "@octant/client-runtime/github-clone-cli
 import { createGoalClient } from "@octant/client-runtime/goal-client";
 import { createProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import { createFollowUpSuggestionClient } from "@octant/client-runtime/follow-up-suggestion-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import {
   createNativeHarnessClient,
@@ -130,6 +131,7 @@ export interface LaunchedShellClients {
   readonly goalClient: ReturnType<typeof createGoalClient>;
   readonly projectBrowserClient: ReturnType<typeof createProjectBrowserClient>;
   readonly projectTerminalClient: ReturnType<typeof createProjectTerminalClient>;
+  readonly followUpSuggestionClient: ReturnType<typeof createFollowUpSuggestionClient>;
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
@@ -214,6 +216,7 @@ export function createLaunchedShellClients(
     goalClient: createGoalClient(port),
     projectBrowserClient: createProjectBrowserClient(port),
     projectTerminalClient: createProjectTerminalClient(port),
+    followUpSuggestionClient: createFollowUpSuggestionClient(port),
     goalLoopClient: createGoalLoopClient(port),
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),
     hostControlClient: createHostControlClient(port),

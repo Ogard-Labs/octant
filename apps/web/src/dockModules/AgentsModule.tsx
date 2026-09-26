@@ -6,11 +6,7 @@ import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  | "agentRunClient"
-  | "agentRunSettingsClient"
-  | "nativeHarnessClient"
-  | "onFollowUpCreated"
-  | "subject"
+  "agentRunClient" | "agentRunSettingsClient" | "nativeHarnessClient" | "subject"
 >;
 
 export default function AgentsModule(props: Props) {
@@ -22,9 +18,6 @@ export default function AgentsModule(props: Props) {
       {props.nativeHarnessClient === undefined ? null : (
         <NativeHarnessSessionCard
           client={props.nativeHarnessClient}
-          onFollowUpActivated={({ preview, created }) =>
-            props.onFollowUpCreated?.({ created, prompt: preview.suggestion.prompt })
-          }
           threadId={props.subject.threadId}
         />
       )}

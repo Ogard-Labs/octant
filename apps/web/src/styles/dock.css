@@ -200,9 +200,25 @@
   border-inline: 1px solid transparent;
 }
 
+.dock-work-map__groups {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
 .dock-work-map__list {
   display: grid;
   gap: 1px;
+}
+
+/* Inset to the row icons' edge (a row's 1px ghost border plus its padding),
+   within a pixel, on the spacing scale. */
+.dock-work-map__group-label {
+  margin: 0;
+  padding: 0 var(--oct-space-3) var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.3;
 }
 
 /* A launcher row: a 16px tool icon, the tool's name, and up to two lines saying

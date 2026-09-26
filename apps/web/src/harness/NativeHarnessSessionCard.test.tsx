@@ -67,60 +67,16 @@ function view(): NativeHarnessSessionView {
 }
 
 describe("NativeHarnessSessionCard", () => {
-  it("shows the lead, a fallback routing decision, and the suggested follow-ups", async () => {
+  it("shows the lead and a fallback routing decision", async () => {
     const client = {
       session: vi.fn(async () => view()),
       command: vi.fn(),
-      previewFollowUp: vi.fn(),
-      activateFollowUp: vi.fn(),
       answerQuestion: vi.fn(),
       decideApproval: vi.fn(),
     };
     render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
     await waitFor(() => expect(screen.getByText(/frontier-large/)).toBeVisible());
     expect(screen.getByText(/fell back to spare after rate-limited/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Add tests" })).toBeVisible();
-  });
-
-  it("previews a follow-up and only activates it after an explicit confirmation", async () => {
-    const activated = vi.fn();
-    const client = {
-      session: vi.fn(async () => view()),
-      command: vi.fn(),
-      previewFollowUp: vi.fn(async () => ({
-        suggestion: view().followUps!.suggestions[0]!,
-        wouldCreate: { kind: "new-thread", mode: "code", title: "Add tests" },
-      })),
-      activateFollowUp: vi.fn(async () => ({
-        kind: "follow-up-activated",
-        suggestionId,
-        created: { kind: "new-thread", mode: "code", title: "Add tests" },
-      })),
-    };
-    render(
-      <NativeHarnessSessionCard
-        client={client as never}
-        onFollowUpActivated={activated}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add tests" })).toBeVisible());
-    await userEvent.click(screen.getByRole("button", { name: "Add tests" }));
-    await waitFor(() =>
-      expect(screen.getByRole("dialog", { name: "Follow-up preview" })).toBeVisible(),
-    );
-    expect(client.activateFollowUp).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
-    await waitFor(() => expect(client.activateFollowUp).toHaveBeenCalledTimes(1));
-    expect((client.activateFollowUp.mock.calls[0] as unknown[] | undefined)?.[1]).toMatchObject({
-      confirmed: true,
-    });
-    expect(activated).toHaveBeenCalledWith({
-      preview: expect.objectContaining({
-        wouldCreate: { kind: "new-thread", mode: "code", title: "Add tests" },
-      }),
-      created: { kind: "new-thread", mode: "code", title: "Add tests" },
-    });
   });
 
   it("shows the lead's pending question and sends the picked option as the answer", async () => {
@@ -134,8 +90,6 @@ describe("NativeHarnessSessionCard", () => {
     const client = {
       session: vi.fn(async () => ({ ...view(), questions: [question] })),
       command: vi.fn(),
-      previewFollowUp: vi.fn(),
-      activateFollowUp: vi.fn(),
       answerQuestion: vi.fn(async () => ({
         kind: "question-answered",
         question: { ...question, status: "answered", answer: "sqlite" },
@@ -164,8 +118,6 @@ describe("NativeHarnessSessionCard", () => {
     const client = {
       session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
       command: vi.fn(),
-      previewFollowUp: vi.fn(),
-      activateFollowUp: vi.fn(),
       answerQuestion: vi.fn(),
       decideApproval: vi.fn(async () => ({
         kind: "approval-decided",

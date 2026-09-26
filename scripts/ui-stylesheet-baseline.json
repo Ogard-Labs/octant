@@ -1,6 +1,6 @@
 {
   "font-size-scale": {
-    "apps/web/src/harness/native-harness.css": 6,
+    "apps/web/src/harness/native-harness.css": 5,
     "apps/web/src/styles.css": 1,
     "apps/web/src/styles/octant.css": 5
   },
@@ -55,7 +55,7 @@
     "apps/web/src/code/project-pull-request-review.css": 7,
     "apps/web/src/context/context.css": 17,
     "apps/web/src/gitHistory/git-history.css": 4,
-    "apps/web/src/styles.css": 160,
+    "apps/web/src/styles.css": 158,
     "apps/web/src/styles/chat.css": 30,
     "apps/web/src/styles/code.css": 59,
     "apps/web/src/styles/components.css": 29,

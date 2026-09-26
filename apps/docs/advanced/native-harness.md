@@ -78,15 +78,10 @@ question with `second-opinion`.
 
 ## Follow-ups
 
-At the end of a turn the lead may suggest up to three follow-ups. They appear
-as chips on the harness card and as a numbered list in the CLI (`/next 2`
-takes the second one). Activating one shows exactly what would be created and
-asks you to confirm; nothing is created by the suggestion itself. On confirm
-the host creates the thread the follow-up names — a Chat or Work thread in
-the same Project, or a Code thread in the current checkout or on its own
-worktree — under the lead's model, and the app opens it with the prompt
-waiting in the composer. Sending it is still your move. A Code follow-up
-starts approval-gated, because Full access is remembered per thread.
+Follow-up suggestions work the same on every provider; see
+[Suggested follow-ups](/guide/#suggested-follow-ups). A harness session also
+lists them in the CLI (`/next 2` takes the second one), with the same preview
+and confirmation.
 
 ## Approvals
 

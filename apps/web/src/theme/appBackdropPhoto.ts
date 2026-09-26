@@ -93,7 +93,44 @@ export function drawDitheredPhoto(
   return drawPhoto(target, image, imageSize, viewport, cell, true);
 }
 
-/** Draws the photo at physical display resolution without quantizing its pixels. */
+/** How a picture ground is printed: plain, in square cells, or dithered cells. */
+export interface PrintEffect {
+  readonly kind: "none" | "pixelate" | "dither";
+  /** CSS pixels per cell. */
+  readonly cell: number;
+  /** Colour steps per channel, for dither. */
+  readonly levels: number;
+}
+
+/**
+ * Draws a picture ground through its print effect. Pixelate and dither draw
+ * one canvas pixel per cell and rely on `image-rendering: pixelated` to keep
+ * each cell square; plain uses the display's device pixels.
+ */
+export function drawPrinted(
+  target: HTMLCanvasElement,
+  image: CanvasImageSource,
+  imageSize: PhotoSize,
+  viewport: PhotoSize,
+  effect: PrintEffect,
+): boolean {
+  if (effect.kind === "none") return drawPhoto(target, image, imageSize, viewport);
+  return drawPhoto(
+    target,
+    image,
+    imageSize,
+    viewport,
+    effect.cell,
+    effect.kind === "dither",
+    effect.levels,
+  );
+}
+
+/**
+ * Draws the photo covering the viewport. At one cell it uses the display's
+ * device pixels; at a larger cell it draws one canvas pixel per cell, and
+ * quantizes those cells only when `dithered`.
+ */
 export function drawPhoto(
   target: HTMLCanvasElement,
   image: CanvasImageSource,
@@ -101,10 +138,11 @@ export function drawPhoto(
   viewport: PhotoSize,
   cell = 1,
   dithered = false,
+  levels: number = PHOTO_LEVELS,
 ): boolean {
   let width: number;
   let height: number;
-  if (dithered) {
+  if (cell > 1) {
     width = Math.max(1, Math.ceil(viewport.width / cell));
     height = Math.max(1, Math.ceil(viewport.height / cell));
   } else {
@@ -133,7 +171,7 @@ export function drawPhoto(
   );
   if (dithered) {
     const frame = context.getImageData(0, 0, width, height);
-    ditherPixels(frame.data, width, height);
+    ditherPixels(frame.data, width, height, levels);
     context.putImageData(frame, 0, 0);
   }
   return true;

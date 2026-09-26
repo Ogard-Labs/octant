@@ -1,23 +1,20 @@
 import {
-  decodeActivateNativeHarnessFollowUp,
   decodeAnswerNativeHarnessQuestion,
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
   type SteerNativeHarnessSession,
-  decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionCommand,
-  type NativeHarnessFollowUpActivationResult,
-  type NativeHarnessFollowUpCreation,
-  type NativeHarnessFollowUpSuggestion,
   type NativeHarnessQuestionAnswerResult,
   type NativeHarnessSessionCommandResult,
-  type NativeHarnessSessionView,
 } from "@octant/contracts";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import type { NativeHarnessFollowUpCreationOutcome } from "./nativeHarnessFollowUpCreation";
+import {
+  settleFollowUpSuggestion,
+  type FollowUpSuggestionActionDependencies,
+} from "../followUps/followUpSuggestionRoutes";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -26,30 +23,18 @@ const PREFIX = "/api/native-harness/sessions/";
 
 export interface NativeHarnessSessionRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly store: Pick<NativeHarnessSessionStore, "read" | "pause" | "resume" | "activateFollowUp">;
+  readonly store: Pick<NativeHarnessSessionStore, "read" | "pause" | "resume">;
+  /** The thread's follow-up suggestions, which the session view shows but does not own. */
+  readonly followUps: FollowUpSuggestionActionDependencies;
   /** Whether this window may read and steer the thread; never a body field. */
   readonly authorizeThread: (input: {
     readonly threadId: string;
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
-  /** What activating a suggestion would create for this thread, decided by the host. */
-  readonly previewFollowUp: (input: {
-    readonly view: NativeHarnessSessionView;
-    readonly suggestion: NativeHarnessFollowUpSuggestion;
-  }) => NativeHarnessFollowUpCreation | undefined;
   readonly interruptTurn?: (input: {
     readonly threadId: string;
     readonly windowId: string;
   }) => void;
-  /**
-   * Creates what a confirmed follow-up names, on the confirming window. Absent
-   * on a host that only records the activation.
-   */
-  readonly createFollowUp?: (input: {
-    readonly windowId: string;
-    readonly view: NativeHarnessSessionView;
-    readonly creation: NativeHarnessFollowUpCreation;
-  }) => Promise<NativeHarnessFollowUpCreationOutcome>;
   readonly decideApproval?: (input: {
     readonly threadId: string;
     readonly approvalId: string;
@@ -88,14 +73,11 @@ function failure(message: string, status: number, origin: string | null): Respon
 }
 
 /**
- * The harness session as every surface reads it, plus the two things a person
- * may do to it: pause or resume the run, and turn a suggested follow-up into
- * a preview and then an activation. Activation records the decision; the
- * thread it names is created through the surface's ordinary creation command
- * with the suggestion's prompt, so no new creation path exists here.
+ * The harness session as every surface reads it, plus what a person may do to
+ * it: pause or resume the run, answer, approve, steer, and take a suggested
+ * follow-up. Follow-ups are the thread's on every provider; this route keeps
+ * offering them at their old address for surfaces that read the session.
  */
-/** Suggestions whose thread is being created right now, so a repeat waits its turn and is refused. */
-const activating = new Set<string>();
 
 export function createNativeHarnessSessionRouteHandler(
   dependencies: NativeHarnessSessionRouteDependencies,
@@ -249,75 +231,13 @@ export function createNativeHarnessSessionRouteHandler(
 
     if (action === "follow-ups") {
       const [, , sub = ""] = url.pathname.slice(PREFIX.length).split("/");
-      const record = (body ?? {}) as Record<string, unknown>;
-      const suggestion = view?.followUps?.suggestions.find(
-        (entry) => String(entry.id) === String(record.suggestionId),
-      );
-      if (view === undefined || suggestion === undefined) {
-        return json(
-          refusedFollowUp(String(record.suggestionId ?? ""), "suggestion-not-found"),
-          404,
-          origin,
-        );
-      }
-      const created = dependencies.previewFollowUp({ view, suggestion });
-      if (created === undefined) {
-        return json(refusedFollowUp(String(suggestion.id), "target-unavailable"), 409, origin);
-      }
-      if (sub === "preview") {
-        const preview = decodeNativeHarnessFollowUpPreview({ suggestion, wouldCreate: created });
-        return json({ preview }, 200, origin);
-      }
-      if (sub === "activate") {
-        let activation;
-        try {
-          activation = decodeActivateNativeHarnessFollowUp(body);
-        } catch {
-          return failure("Follow-up activation requires an explicit confirmation.", 400, origin);
-        }
-        // Refuse a repeat before anything is created, not after — including a
-        // second request that arrives while the first is still creating.
-        const activationKey = `${threadId}:${String(suggestion.id)}`;
-        if (
-          view.activatedFollowUpIds.some((id) => String(id) === String(suggestion.id)) ||
-          activating.has(activationKey)
-        ) {
-          return json(refusedFollowUp(String(suggestion.id), "already-activated"), 409, origin);
-        }
-        activating.add(activationKey);
-        let creation;
-        try {
-          creation =
-            dependencies.createFollowUp === undefined
-              ? { kind: "created" as const, created }
-              : await dependencies.createFollowUp({ windowId, view, creation: created });
-        } finally {
-          activating.delete(activationKey);
-        }
-        if (creation.kind === "refused") {
-          const result: NativeHarnessFollowUpActivationResult = {
-            kind: "follow-up-refused",
-            suggestionId: suggestion.id,
-            reason: "target-unavailable",
-            message: creation.message,
-          };
-          return json(result, 409, origin);
-        }
-        const outcome = dependencies.store.activateFollowUp(
-          threadId,
-          activation.suggestionId,
-          creation.created,
-        );
-        if (outcome !== "activated") {
-          return json(refusedFollowUp(String(suggestion.id), outcome), 409, origin);
-        }
-        const result: NativeHarnessFollowUpActivationResult = {
-          kind: "follow-up-activated",
-          suggestionId: suggestion.id,
-          created: creation.created,
-        };
-        return json(result, 200, origin);
-      }
+      const settled = await settleFollowUpSuggestion(dependencies.followUps, {
+        threadId,
+        windowId,
+        action: sub,
+        body,
+      });
+      return json(settled.body, settled.status, origin);
     }
     return failure("Unknown native harness session action.", 404, origin);
   };
@@ -333,17 +253,5 @@ function refusedCommand(
     kind: "native-harness-session-refused",
     reason,
     message: `The harness session command was refused: ${reason}.`,
-  };
-}
-
-function refusedFollowUp(
-  suggestionId: string,
-  reason: Extract<NativeHarnessFollowUpActivationResult, { kind: "follow-up-refused" }>["reason"],
-): NativeHarnessFollowUpActivationResult {
-  return {
-    kind: "follow-up-refused",
-    suggestionId: suggestionId as never,
-    reason,
-    message: `The follow-up was refused: ${reason}.`,
   };
 }

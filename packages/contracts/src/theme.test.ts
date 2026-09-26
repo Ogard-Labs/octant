@@ -476,7 +476,24 @@ describe("application background contracts", () => {
     photoOpacity: 42,
     scope: "welcome",
     coversSidebar: false,
+    effectCell: 3,
+    effectTones: 8,
   };
+
+  it("keeps a picture's effect and motion, and refuses cells or colours out of range", () => {
+    expect(
+      decodeAppBackground({
+        kind: "theme",
+        effect: "dither",
+        effectCell: 6,
+        effectTones: 3,
+        motion: "pulse",
+      }),
+    ).toMatchObject({ effect: "dither", effectCell: 6, effectTones: 3, motion: "pulse" });
+    expect(() => decodeAppBackground({ kind: "theme", effectCell: 1 })).toThrow();
+    expect(() => decodeAppBackground({ kind: "theme", effectTones: 17 })).toThrow();
+    expect(() => decodeAppBackground({ kind: "theme", motion: "spin" })).toThrow();
+  });
 
   it("decodes the theme pattern, a built-in, a photo, and none, and rejects invalid sources", () => {
     expect(decodeAppBackground({ kind: "theme" })).toEqual({ kind: "theme", ...tuning });

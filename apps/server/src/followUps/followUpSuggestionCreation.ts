@@ -9,19 +9,30 @@ import {
   type CodeThreadId,
   type HostId,
   type NativeHarnessFollowUpCreation,
-  type NativeHarnessSessionView,
+  type NativeHarnessFollowUpSuggestion,
   type Project,
   type ProjectId,
+  type ThreadFollowUpSuggestions,
   type WindowId,
   type WorkThreadCommandResult,
 } from "@octant/contracts";
+import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import type { ChatService } from "../chat/chatService";
 
-export type NativeHarnessFollowUpCreationOutcome =
-  | { readonly kind: "created"; readonly created: NativeHarnessFollowUpCreation }
+export type FollowUpCreationOutcome =
+  | {
+      readonly kind: "created";
+      readonly created: NativeHarnessFollowUpCreation;
+      /**
+       * False when the thread exists but on its default model, because the
+       * suggesting one could not carry over; nothing may be sent for the
+       * person to a model they did not see.
+       */
+      readonly onSuggestingModel: boolean;
+    }
   | { readonly kind: "refused"; readonly message: string };
 
-export interface NativeHarnessFollowUpCreationDependencies {
+export interface FollowUpCreationDependencies {
   readonly chat: Pick<ChatService, "execute">;
   readonly work: {
     readonly execute: (
@@ -51,22 +62,24 @@ export interface NativeHarnessFollowUpCreationDependencies {
  * thread lands with ordinary authority and shows up everywhere a thread
  * does. The follow-up's prompt is not sent: it is standalone by contract, and
  * the person sends it from the new thread after reading it. A new thread
- * runs under the lead's own model, so it stays on the harness; a Code thread
- * starts approval-gated, because Full access is remembered per thread and
- * nobody remembered it for this one.
+ * runs on the model that suggested it, so a harness thread's follow-up stays
+ * on the harness and a Claude or Codex thread's stays on that runtime; a Code
+ * thread starts approval-gated, because Full access is remembered per thread
+ * and nobody remembered it for this one.
  */
-export async function createNativeHarnessFollowUp(
-  dependencies: NativeHarnessFollowUpCreationDependencies,
+export async function createFollowUp(
+  dependencies: FollowUpCreationDependencies,
   input: {
     readonly windowId: string;
-    readonly view: NativeHarnessSessionView;
+    readonly view: ThreadFollowUpSuggestions;
     readonly creation: NativeHarnessFollowUpCreation;
   },
-): Promise<NativeHarnessFollowUpCreationOutcome> {
+): Promise<FollowUpCreationOutcome> {
   const { creation, view } = input;
-  const lead = view.session.lead;
+  const lead = view.suggestedBy;
   try {
-    if (creation.kind === "same-thread") return { kind: "created", created: creation };
+    if (creation.kind === "same-thread")
+      return { kind: "created", created: creation, onSuggestingModel: true };
     const windowId = decodeWindowId(input.windowId);
     if (creation.kind === "new-worktree") {
       return await createCodeThread(dependencies, {
@@ -108,7 +121,7 @@ export async function createNativeHarnessFollowUp(
       if (!("kind" in result) || result.kind !== "thread-created") {
         return refused("The host did not create the Work thread.");
       }
-      return { kind: "created", created: { ...creation, threadId } };
+      return { kind: "created", created: { ...creation, threadId }, onSuggestingModel: true };
     }
     const threadId = dependencies.uuid();
     const result = await dependencies.chat.execute({
@@ -120,18 +133,26 @@ export async function createNativeHarnessFollowUp(
     });
     if (result.kind !== "thread-created")
       return refused("The host did not create the Chat thread.");
-    // The lead's own model keeps the follow-up on the harness. A provider the
-    // thread cannot take leaves the thread on its default, still created.
-    await dependencies.chat
-      .execute({
-        kind: "change-chat-provider",
-        threadId,
-        expectedVersion: result.thread.version,
-        providerInstanceId: lead.providerInstanceId,
-        modelId: lead.modelId,
-      })
-      .catch(() => undefined);
-    return { kind: "created", created: { ...creation, threadId } };
+    // The suggesting model carries over. A provider the new thread cannot
+    // take leaves it on its default, still created, and says so.
+    const alreadyOnModel =
+      String(result.thread.providerInstanceId) === String(lead.providerInstanceId) &&
+      String(result.thread.modelId) === String(lead.modelId);
+    const onSuggestingModel =
+      alreadyOnModel ||
+      (await dependencies.chat
+        .execute({
+          kind: "change-chat-provider",
+          threadId,
+          expectedVersion: result.thread.version,
+          providerInstanceId: lead.providerInstanceId,
+          modelId: lead.modelId,
+        })
+        .then(
+          () => true,
+          () => false,
+        ));
+    return { kind: "created", created: { ...creation, threadId }, onSuggestingModel };
   } catch (error) {
     // A service refusal carries a sentence worth showing; a schema dump does not.
     const message = error instanceof Error ? error.message : "";
@@ -142,16 +163,16 @@ export async function createNativeHarnessFollowUp(
 }
 
 async function createCodeThread(
-  dependencies: NativeHarnessFollowUpCreationDependencies,
+  dependencies: FollowUpCreationDependencies,
   input: {
     readonly windowId: ReturnType<typeof decodeWindowId>;
-    readonly view: NativeHarnessSessionView;
+    readonly view: ThreadFollowUpSuggestions;
     readonly creation: Exclude<NativeHarnessFollowUpCreation, { readonly kind: "same-thread" }>;
     readonly placement: "checkout" | "worktree";
   },
-): Promise<NativeHarnessFollowUpCreationOutcome> {
+): Promise<FollowUpCreationOutcome> {
   if (dependencies.code === undefined) return refused("Code is unavailable on this host.");
-  const parent = dependencies.readCodeThread(decodeCodeThreadId(input.view.session.threadId));
+  const parent = dependencies.readCodeThread(decodeCodeThreadId(input.view.threadId));
   if (parent === undefined)
     return refused("The Code thread this follow-up came from is unavailable.");
   const projectId = input.creation.projectId ?? parent.projectId;
@@ -164,8 +185,12 @@ async function createCodeThread(
   }
   const now = dependencies.clock();
   const threadId = dependencies.uuid();
-  const lead = input.view.session.lead;
+  const lead = input.view.suggestedBy;
   if (input.placement === "worktree") {
+    // A fresh task starts from the base branch on a branch of its own: the
+    // parent's branch is already checked out in the parent's worktree, and an
+    // open outcome proposal belongs to the parent, not to this thread.
+    const { proposedOutcome: _parentProposal, ...deliveryTarget } = parent.deliveryTarget;
     const result = await dependencies.code.execute(
       input.windowId,
       decodeCodeCommand({
@@ -178,15 +203,26 @@ async function createCodeThread(
         modelId: lead.modelId,
         executionPolicy: "approval-gated",
         permissionPersistence: "current-session",
-        deliveryTarget: { ...parent.deliveryTarget, confirmedAt: now },
-        sourceBranch: parent.deliveryTarget.proposedBaseBranch,
+        deliveryTarget: {
+          ...deliveryTarget,
+          branchIntent: defaultDeliveryBranchIntent(
+            deliveryTarget.proposedBaseBranch,
+            threadId.replace(/-/g, "").slice(0, 12),
+          ),
+          confirmedAt: now,
+        },
+        sourceBranch: deliveryTarget.proposedBaseBranch,
         startFromOrigin: false,
-        remoteName: parent.deliveryTarget.remoteName,
+        remoteName: deliveryTarget.remoteName,
       }),
     );
-    if (result.kind !== "thread-created")
+    if (result.kind !== "managed-thread-created")
       return refused("The host did not create the worktree thread.");
-    return { kind: "created", created: { ...input.creation, threadId } };
+    return {
+      kind: "created",
+      created: { ...input.creation, threadId },
+      onSuggestingModel: true,
+    };
   }
   if (prepared.checkout.head.kind !== "branch") {
     return refused(
@@ -220,9 +256,31 @@ async function createCodeThread(
     decodeCodeCommand({ kind: "create-code-thread", thread }),
   );
   if (result.kind !== "thread-created") return refused("The host did not create the Code thread.");
-  return { kind: "created", created: { ...input.creation, threadId } };
+  return { kind: "created", created: { ...input.creation, threadId }, onSuggestingModel: true };
 }
 
-function refused(message: string): NativeHarnessFollowUpCreationOutcome {
+function refused(message: string): FollowUpCreationOutcome {
   return { kind: "refused", message };
+}
+
+/**
+ * What activating a suggestion would create on this thread, decided by the
+ * host rather than the model: a new thread lands in the same mode and
+ * Project, and only a Code thread in a Project can take a worktree.
+ */
+export function previewFollowUpCreation(
+  view: ThreadFollowUpSuggestions,
+  suggestion: NativeHarnessFollowUpSuggestion,
+): NativeHarnessFollowUpCreation | undefined {
+  if (suggestion.target === "same-thread") return { kind: "same-thread", threadId: view.threadId };
+  if (suggestion.target === "new-thread") {
+    return {
+      kind: "new-thread",
+      mode: view.mode,
+      ...(view.projectId === undefined ? {} : { projectId: view.projectId }),
+      title: suggestion.title,
+    };
+  }
+  if (view.mode !== "code" || view.projectId === undefined) return undefined;
+  return { kind: "new-worktree", mode: "code", projectId: view.projectId, title: suggestion.title };
 }

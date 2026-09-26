@@ -133,7 +133,7 @@ describe("ChatWelcome", () => {
     const onCreateChat = vi.fn();
     render(<ChatWelcome onCreateChat={onCreateChat} />);
 
-    expect(screen.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
     expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
     expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship the preview");

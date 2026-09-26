@@ -1,5 +1,4 @@
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
-import { useComposerTip } from "../composer/useComposerTip";
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
@@ -87,10 +86,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
   });
-  const tip = useComposerTip({
-    scopeKey: "chat-welcome",
-    commands: slash.commandIds,
-  });
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,
@@ -172,7 +167,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={tip}
+                placeholder={presentation.composerPlaceholder}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

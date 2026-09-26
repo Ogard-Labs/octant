@@ -178,11 +178,7 @@ describe("CodeProjectPullRequests", () => {
     expect(within(octant).getByText("Checks passing")).toBeVisible();
     expect(within(octant).getByText("Review approved")).toBeVisible();
     expect(within(octant).getByText("Linked: Manual refresh")).toBeVisible();
-    expect(
-      within(notes).getByText(
-        "No github.com origin. Add one to list this Project's pull requests.",
-      ),
-    ).toBeVisible();
+    expect(within(notes).getByText("Not on GitHub")).toBeVisible();
     expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -456,7 +452,7 @@ describe("CodeProjectPullRequests", () => {
     expect(screen.queryByText("No Code Projects yet")).toBeNull();
   });
 
-  it("keeps an unconnected Project's dock list honest instead of empty", async () => {
+  it("says a Project is not on GitHub instead of asking for a refresh that cannot help", async () => {
     render(
       <CodeProjectPullRequests
         load={async () => view()}
@@ -466,11 +462,31 @@ describe("CodeProjectPullRequests", () => {
       />,
     );
 
-    expect(await screen.findByRole("region", { name: "Project Local notes" })).toBeVisible();
-    expect(
-      screen.getByText("No github.com origin. Add one to list this Project's pull requests."),
-    ).toBeVisible();
+    expect(await screen.findByText("This Project isn't on GitHub")).toBeVisible();
+    // A remote added since the last look is found by checking again.
+    expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+    expect(screen.queryByText(/Refresh to load|No GitHub snapshot/)).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Search pull requests" })).toBeNull();
     expect(screen.queryByText("List active pull requests")).toBeNull();
+  });
+
+  it("says so when checking an off-GitHub Project again fails", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        presentation="dock"
+        projectId={projectBId}
+        refresh={async () => {
+          throw new Error("offline");
+        }}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The pull-request list could not be refreshed.",
+    );
   });
 
   it("filters the cached snapshot locally and clears the query without contacting GitHub", async () => {

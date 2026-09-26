@@ -7,6 +7,7 @@ describe("octantSettingsRegistry", () => {
       "general",
       "profile",
       "appearance",
+      "sidebar",
       "keybindings",
       "chat",
       "work",

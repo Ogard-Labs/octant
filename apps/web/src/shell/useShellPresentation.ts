@@ -191,7 +191,18 @@ export function useSidebarVibrancyModeSync(
 }
 
 export function useNarrowViewport(): boolean {
-  const query = "(max-width: 960px)";
+  return useViewportMatch("(max-width: 960px)");
+}
+
+/**
+ * At phone width the sidebar stops sharing the row and becomes a drawer over
+ * the page (shell.css, 680px), so it opens and closes on its own terms.
+ */
+export function useSidebarDrawerViewport(): boolean {
+  return useViewportMatch("(max-width: 680px)");
+}
+
+function useViewportMatch(query: string): boolean {
   const [narrow, setNarrow] = useState(() =>
     typeof window.matchMedia === "function" ? window.matchMedia(query).matches : false,
   );
@@ -202,7 +213,7 @@ export function useNarrowViewport(): boolean {
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
-  }, []);
+  }, [query]);
   return narrow;
 }
 

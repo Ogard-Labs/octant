@@ -41,6 +41,19 @@ into split panes; the active pane is marked, and the right dock follows that
 pane's thread and Project. Work and Code have server-derived thread boards;
 Chat has no board.
 
+### Suggested follow-ups
+
+Any model, on any provider and in every mode, may end a reply by suggesting
+up to three next tasks. They appear as chips at the top of the thread's
+composer; a later reply that suggests nothing clears them, and the × hides
+them for now. Choosing one shows what it would do — put the prompt in this
+composer, start a new thread in the same mode and Project, or, in Code,
+start a thread on its own worktree — and nothing happens until you choose
+**Start** (or **Use prompt**). The new thread opens on the same model with
+the prompt waiting in its composer; sending it is still your move. A Code
+follow-up starts approval-gated, because Full access is remembered per
+thread.
+
 An approved later interaction model is recorded in the architecture decision
 records and is **not** what the app renders today for remaining dock
 placement: live thread-owned tools still replace the generic Thread panel.

@@ -15,7 +15,6 @@ import {
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ContextHarnessService } from "../context/contextHarnessService";
-import { parseNativeHarnessFollowUps } from "./nativeHarnessFollowUps";
 import { nativeHarnessInstructions } from "./nativeHarnessInstructions";
 import type { NativeHarnessRouter } from "./nativeHarnessRouter";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -65,7 +64,7 @@ const ADVISOR_INSTRUCTIONS = [
 /**
  * What the harness does around every lead turn on a provider it drives: it
  * puts the stable instructions (and any pending advisor redirect) in front of
- * the context, records the turn and its follow-ups on the session, journals
+ * the context, records the turn on the session, journals
  * the context reductions the planner made, and asks the advisor slot to
  * review a digest of the turn. The advisor's answer can redirect the next
  * turn or pause the run; it can never touch the world.
@@ -181,12 +180,6 @@ export class NativeHarnessTurnObserver {
       // A turn the journal refused still completed for the user; nothing else
       // here depends on the record existing.
     }
-    const followUps = parseNativeHarnessFollowUps({
-      text: input.text,
-      turnId,
-      uuid: this.#options.uuid,
-    });
-    if (followUps !== undefined) this.#options.sessions.recordFollowUps(input.threadId, followUps);
     if (input.contextSubject !== undefined)
       this.#recordReductions(input.threadId, turnId, input.contextSubject);
     // The advisor answers in its own time; the thread is free the moment the

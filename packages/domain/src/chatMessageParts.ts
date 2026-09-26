@@ -1,4 +1,8 @@
-import type { ChatMessagePart, ChatToolPartStatus } from "@octant/contracts";
+import {
+  FOLLOW_UP_BLOCK_LANGUAGE,
+  type ChatMessagePart,
+  type ChatToolPartStatus,
+} from "@octant/contracts";
 
 /**
  * Distilled message-part resolution for Octant clients.
@@ -13,11 +17,36 @@ export type MarkdownBlock =
   | { readonly type: "code"; readonly language: string | undefined; readonly code: string };
 
 const FENCE = /```([^\n`]*)\n([\s\S]*?)```/g;
-const THINKING_TAG = /<thinking>([\s\S]*?)<\/thinking>/gi;
-const REASONING_TAG = /<reasoning>([\s\S]*?)<\/reasoning>/gi;
-// The shorter tag several open models emit inline (GLM, DeepSeek, Qwen) when
-// their reasoning arrives as text rather than a separate channel.
-const THINK_TAG = /<think>([\s\S]*?)<\/think>/gi;
+// `think` is the shorter tag several open models emit inline (GLM, DeepSeek,
+// Qwen) when their reasoning arrives as text rather than a separate channel.
+const REASONING_TAGS = ["thinking", "reasoning", "think"] as const;
+
+/**
+ * Each closed `<tag>…</tag>` pair, first closer after each opener. Found by
+ * index rather than a lazy regex: on model output with many openers and no
+ * closer, `/<tag>([\s\S]*?)<\/tag>/` rescans to the end from every opener.
+ */
+function closedTagSpans(
+  body: string,
+  lower: string,
+  tag: string,
+): ReadonlyArray<{ readonly start: number; readonly end: number; readonly text: string }> {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const spans: Array<{ start: number; end: number; text: string }> = [];
+  let from = 0;
+  for (;;) {
+    const start = lower.indexOf(open, from);
+    if (start === -1) break;
+    const inner = start + open.length;
+    const closing = lower.indexOf(close, inner);
+    // No closer after this opener means none after any later opener either.
+    if (closing === -1) break;
+    spans.push({ start, end: closing + close.length, text: body.slice(inner, closing) });
+    from = closing + close.length;
+  }
+  return spans;
+}
 
 function normalizeStatus(raw: string | undefined): ChatToolPartStatus {
   const value = (raw ?? "").toLowerCase();
@@ -42,9 +71,12 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
  * Split a host message body into reasoning / tool / markdown parts.
  * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking>,
  * <reasoning>, and <think> tags — the closed pairs, plus an open tail at the end of a
- * body that is still streaming.
+ * body that is still streaming. A follow-up suggestion block is not prose: the
+ * host reads it and surfaces offer it as chips, so it is left out here, even
+ * while it is still streaming in.
  */
-export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePart> {
+export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessagePart> {
+  const body = withoutOpenFollowUpBlock(streamed);
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
 
   // Reasoning markers inside code samples are literal source, including an
@@ -60,34 +92,19 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
 
   const parts: ChatMessagePart[] = [];
   let cursor = 0;
-  const annotated: Array<{ start: number; end: number; part: ChatMessagePart }> = [];
+  // A part left undefined marks a span the reader never sees.
+  const annotated: Array<{ start: number; end: number; part: ChatMessagePart | undefined }> = [];
 
-  for (const match of body.matchAll(THINKING_TAG)) {
-    const start = match.index ?? 0;
-    if (insideCode(start)) continue;
-    annotated.push({
-      start,
-      end: start + match[0].length,
-      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
-    });
-  }
-  for (const match of body.matchAll(REASONING_TAG)) {
-    const start = match.index ?? 0;
-    if (insideCode(start)) continue;
-    annotated.push({
-      start,
-      end: start + match[0].length,
-      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
-    });
-  }
-  for (const match of body.matchAll(THINK_TAG)) {
-    const start = match.index ?? 0;
-    if (insideCode(start)) continue;
-    annotated.push({
-      start,
-      end: start + match[0].length,
-      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
-    });
+  const lower = body.toLowerCase();
+  for (const tag of REASONING_TAGS) {
+    for (const span of closedTagSpans(body, lower, tag)) {
+      if (insideCode(span.start)) continue;
+      annotated.push({
+        start: span.start,
+        end: span.end,
+        part: { kind: "reasoning", text: span.text.trim() },
+      });
+    }
   }
   for (const match of body.matchAll(FENCE)) {
     const start = match.index ?? 0;
@@ -100,6 +117,10 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
         end: start + match[0].length,
         part: { kind: "reasoning", text: code.trim() },
       });
+      continue;
+    }
+    if (lang === FOLLOW_UP_BLOCK_LANGUAGE) {
+      annotated.push({ start, end: start + match[0].length, part: undefined });
       continue;
     }
     if (lang === "tool") {
@@ -124,7 +145,10 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
       const text = body.slice(cursor, item.start).trim();
       if (text.length > 0) parts.push({ kind: "markdown", text });
     }
-    if (item.part.kind === "reasoning" && item.part.text.length === 0) {
+    if (
+      item.part === undefined ||
+      (item.part.kind === "reasoning" && item.part.text.length === 0)
+    ) {
       cursor = item.end;
       continue;
     }
@@ -160,8 +184,22 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
     const text = body.slice(cursor).trim();
     if (text.length > 0) parts.push({ kind: "markdown", text });
   }
-  if (parts.length === 0) return [{ kind: "markdown", text: body }];
+  if (parts.length === 0) {
+    const hidden = annotated.some((item) => item.part === undefined);
+    return [{ kind: "markdown", text: hidden ? "" : body }];
+  }
   return parts;
+}
+
+/** A reply cut at a follow-up block whose closing fence has not streamed in yet. */
+function withoutOpenFollowUpBlock(body: string): string {
+  const openers = Array.from(
+    body.matchAll(new RegExp(`^\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}[^\n]*$`, "gm")),
+  );
+  const last = openers.at(-1);
+  if (last === undefined) return body;
+  const closed = body.indexOf("```", last.index + last[0].length) !== -1;
+  return closed ? body : body.slice(0, last.index).trimEnd();
 }
 
 /** Prefer structured parts; otherwise derive from role + body text. */

@@ -193,6 +193,28 @@ export type AppBackgroundScope = typeof AppBackgroundScope.Type;
 export const AppBackgroundPercent = Schema.Int.pipe(Schema.between(0, 100));
 export type AppBackgroundPercent = typeof AppBackgroundPercent.Type;
 
+/**
+ * How a picture ground is printed: as it is, in square cells (`pixelate`),
+ * or in cells quantized through an ordered threshold (`dither`). Absent on
+ * rows written before it existed; the resolver then reads the older
+ * `photoDithered` switch, so a dithered photo stays dithered.
+ */
+export const AppBackgroundEffect = Schema.Literal("none", "pixelate", "dither");
+export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
+
+/**
+ * What moves: nothing, the picture breathing slowly (`pulse`), or bands of
+ * dither dots rolling across it (`wave`, the theme's pattern). Absent on
+ * older rows; the resolver then reads `patternEnabled`, so a ground that drew
+ * the pattern keeps drawing it.
+ */
+export const AppBackgroundMotion = Schema.Literal("still", "pulse", "wave");
+export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
+
+/** CSS pixels per effect cell, and colour steps per channel for dither. */
+export const AppBackgroundEffectCell = Schema.Int.pipe(Schema.between(2, 16));
+export const AppBackgroundEffectTones = Schema.Int.pipe(Schema.between(2, 16));
+
 const AppBackgroundTuning = {
   /** Whether the animated/dithered theme pattern is visible over the ground. */
   patternEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
@@ -209,6 +231,10 @@ const AppBackgroundTuning = {
   scope: Schema.optionalWith(AppBackgroundScope, { default: () => "welcome" as const }),
   /** Whether an everywhere ground also runs under the sidebar. */
   coversSidebar: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  effect: Schema.optional(AppBackgroundEffect),
+  effectCell: Schema.optionalWith(AppBackgroundEffectCell, { default: () => 3 }),
+  effectTones: Schema.optionalWith(AppBackgroundEffectTones, { default: () => 8 }),
+  motion: Schema.optional(AppBackgroundMotion),
 };
 
 const ThemeAppBackground = Schema.Struct({
@@ -264,11 +290,24 @@ export const ThemeSettings = Schema.Struct({
   appBackground: Schema.optionalWith(AppBackground, {
     default: () => DEFAULT_APP_BACKGROUND,
   }),
+  /**
+   * How much of the theme's sidebar colour lies over the glass behind the
+   * sidebar and the card gutters, in percent. Absent means the glass level's
+   * own default (Subtle or Strong); set, it replaces both. Optional so rows
+   * written before the slider existed still decode.
+   */
+  glassTint: Schema.optional(Schema.Int.pipe(Schema.between(0, 90))),
   increasedContrast: Schema.Boolean,
   reducedMotion: Schema.Boolean,
   reducedTransparency: Schema.Boolean,
 }).annotations(strict);
 export type ThemeSettings = typeof ThemeSettings.Type;
+
+/** The tint each glass level uses until a person sets one, by theme mode. */
+export const GLASS_TINT_DEFAULTS = {
+  light: { subtle: 78, strong: 62 },
+  dark: { subtle: 58, strong: 32 },
+} as const;
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",
