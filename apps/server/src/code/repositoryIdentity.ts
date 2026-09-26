@@ -41,6 +41,7 @@ export interface FileSystemIdentity {
 export interface GitCommandResult {
   readonly exitCode: number;
   readonly stdout: string;
+  readonly stderr?: string;
 }
 
 export interface RepositoryIdentityDependencies {
@@ -66,14 +67,31 @@ export type RepositoryIdentityObservation =
     }>
   | Readonly<{ status: "unavailable"; reason: "root-missing-or-moved" | "not-repository" }>
   | Readonly<{ status: "ineligible"; reason: "bare" | "submodule" | "not-worktree" }>
-  | Readonly<{ status: "failed" }>;
+  | Readonly<{
+      status: "failed";
+      git?: Readonly<{ command: string; stderr: string }>;
+    }>;
+
+class GitObservationFailure extends Error {
+  readonly command: string;
+  readonly stderr: string;
+
+  constructor(command: string, stderr: string) {
+    super("Git repository observation failed");
+    this.command = command;
+    this.stderr = stderr;
+  }
+}
 
 async function requireGit(
   run: (args: readonly string[]) => Promise<GitCommandResult>,
   args: readonly string[],
 ): Promise<string> {
   const result = await run(args);
-  if (result.exitCode !== 0) throw new Error("Git repository observation failed");
+  if (result.exitCode !== 0) {
+    const stderr = (result.stderr ?? "").split("\n").find((line) => line.trim() !== "") ?? "";
+    throw new GitObservationFailure(args.join(" "), stderr.trim());
+  }
   return result.stdout;
 }
 
@@ -169,8 +187,10 @@ export async function observeRepositoryIdentity(
       checkout,
       worktrees,
     };
-  } catch {
-    return { status: "failed" };
+  } catch (error) {
+    return error instanceof GitObservationFailure
+      ? { status: "failed", git: { command: error.command, stderr: error.stderr } }
+      : { status: "failed" };
   }
 }
 

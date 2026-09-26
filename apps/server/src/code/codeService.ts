@@ -1333,8 +1333,13 @@ export class CodeService {
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.projectId);
-        } catch {
-          throw this.#failure("unavailable", "The bound Code repository is unavailable.");
+        } catch (error) {
+          throw this.#failure(
+            "unavailable",
+            error instanceof Error && error.message !== ""
+              ? error.message
+              : "The bound Code repository is unavailable.",
+          );
         }
         if (
           !repeatsJournaledCheckout(
@@ -1452,8 +1457,13 @@ export class CodeService {
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.thread.projectId);
-        } catch {
-          throw this.#failure("unavailable", "The bound Code repository is unavailable.");
+        } catch (error) {
+          throw this.#failure(
+            "unavailable",
+            error instanceof Error && error.message !== ""
+              ? error.message
+              : "The bound Code repository is unavailable.",
+          );
         }
         const checkout = this.#persistence.readCodeCheckout(command.thread.checkoutId);
         if (
