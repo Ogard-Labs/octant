@@ -320,9 +320,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
-  const [accessMessage, setAccessMessage] = useState<
-    { readonly threadKey: string; readonly text: string } | undefined
-  >();
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -929,7 +926,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   async function changeAccess(next: ProviderExecutionPolicy) {
     if (next === thread.executionPolicy) return;
     const originThreadKey = activeThreadKeyRef.current;
-    setAccessMessage(undefined);
+    props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
     try {
       let approvalId: CodeApprovalId | undefined;
@@ -941,13 +938,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           permissionPersistence: thread.permissionPersistence,
         });
         if (approvalId === undefined) {
-          setAccessMessage({
-            threadKey: originThreadKey,
-            text:
-              activeThreadKeyRef.current !== originThreadKey
-                ? "Full access confirmation was cancelled when you left this thread. It keeps its current access."
-                : "Full access was not confirmed. This thread keeps its current access.",
-          });
+          props.controller.setAccessNotice(
+            !mountedRef.current || activeThreadKeyRef.current !== originThreadKey
+              ? "Full access confirmation was cancelled when you left this thread. It keeps its current access."
+              : "Full access was not confirmed. This thread keeps its current access.",
+          );
           return;
         }
       }
@@ -966,7 +961,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   async function changeAutoApprove(next: boolean) {
     if (thread.autoApprove === next) return;
-    setAccessMessage(undefined);
+    props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
     try {
       await props.controller.execute({
@@ -1760,14 +1755,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {providerChanging ? "Checking the selected provider…" : "Queued"}
               </span>
             ) : null}
-            {accessMessage === undefined ||
-            accessMessage.threadKey !== String(props.threadId) ? null : (
+            {props.controller.accessNotice === undefined ? null : (
               <span
                 className="code-thread-workspace__hint"
                 role="status"
-                title={accessMessage.text}
+                title={props.controller.accessNotice}
               >
-                {accessMessage.text}
+                {props.controller.accessNotice}
               </span>
             )}
             {/*

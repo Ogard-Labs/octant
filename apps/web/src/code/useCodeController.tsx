@@ -361,6 +361,7 @@ export function useCodeController(options: CodeControllerOptions) {
   // is left. Both are the provider's own figures; nothing here is derived from
   // a price list or a limit Octant assumed.
   const [threadUsage, setThreadUsage] = useState<CodeThreadUsage>(EMPTY_THREAD_USAGE);
+  const [accessNotice, setAccessNotice] = useState<string>();
   // The way back from this thread's last restore, as the host recorded it. It
   // lives here rather than in the surface that ran the restore because that
   // surface is unmounted the moment the user opens another tab, and the only
@@ -2286,6 +2287,8 @@ export function useCodeController(options: CodeControllerOptions) {
 
   return {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
+    accessNotice,
+    setAccessNotice,
     announceFirstPrompt,
     answerProviderRequest,
     cancelTurn,

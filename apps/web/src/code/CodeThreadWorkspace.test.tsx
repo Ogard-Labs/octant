@@ -1503,9 +1503,13 @@ describe("CodeThreadWorkspace", () => {
     const approval = deferred<CodeApprovalId | undefined>();
     const requestFullAccessApproval = vi.fn(() => approval.promise);
     const cancelApproval = vi.fn(async () => undefined);
-    const { rerender } = render(
+    const setAccessNoticeA = vi.fn();
+    const setAccessNoticeB = vi.fn();
+    const leftThreadNotice =
+      "Full access confirmation was cancelled when you left this thread. It keeps its current access.";
+    const { unmount } = render(
       <CodeThreadWorkspace
-        controller={controller()}
+        controller={controller({ setAccessNotice: setAccessNoticeA })}
         requestFullAccessApproval={requestFullAccessApproval}
         cancelApproval={cancelApproval}
         threadId={threadId}
@@ -1517,34 +1521,29 @@ describe("CodeThreadWorkspace", () => {
       await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
     );
 
-    rerender(
+    unmount();
+    const threadB = render(
       <CodeThreadWorkspace
-        controller={controller({}, anotherThreadId)}
+        controller={controller({ setAccessNotice: setAccessNoticeB }, anotherThreadId)}
         requestFullAccessApproval={requestFullAccessApproval}
         cancelApproval={cancelApproval}
         threadId={anotherThreadId}
       />,
     );
     approval.resolve(undefined);
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Full access confirmation was cancelled when you left this thread."),
-      ).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(setAccessNoticeA).toHaveBeenCalledWith(leftThreadNotice));
+    expect(setAccessNoticeB).not.toHaveBeenCalled();
+    expect(screen.queryByText(leftThreadNotice)).not.toBeInTheDocument();
 
-    rerender(
+    threadB.rerender(
       <CodeThreadWorkspace
-        controller={controller()}
+        controller={controller({ accessNotice: leftThreadNotice })}
         requestFullAccessApproval={requestFullAccessApproval}
         cancelApproval={cancelApproval}
         threadId={threadId}
       />,
     );
-    expect(
-      await screen.findByText(
-        "Full access confirmation was cancelled when you left this thread. It keeps its current access.",
-      ),
-    ).toBeVisible();
+    expect(await screen.findByText(leftThreadNotice)).toBeVisible();
   });
 
   it("resets one-shot access as soon as the host accepts the start", async () => {
@@ -3258,6 +3257,8 @@ function controller(
         version: 1,
       },
     },
+    accessNotice: undefined,
+    setAccessNotice: vi.fn(),
     conversation: [],
     conversationHistory: "loaded",
     followUps: new Map(),
