@@ -139,8 +139,10 @@ while the sidebar and gutters frost it. The dither itself is cut to the
 primary card's shape: outside the card the picture shows plain, so the card
 keeps an edge even on a start screen whose page is see-through. A pane header and the dock head share the 38px
 title rail, and the card draws the one hairline under both. Below 681px the
-workspace sidebar is an overlay drawer and the frame stays flat; Settings keeps
-its own narrow layout, a drawer with a flat page, below 960px.
+workspace sidebar is an overlay drawer and the frame stays flat. The drawer
+starts closed on every load, closes on Escape, on a tap outside it, and on
+choosing somewhere to go, and never changes the saved wide-window choice.
+Settings keeps its own narrow layout, a drawer with a flat page, below 960px.
 
 ### Page shell
 
@@ -197,6 +199,12 @@ waits for pending writes, and grants no authority. Profile editing has its own
 Personal settings destination. Code suggestions keep their full descriptions
 visible; Continue retains compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings.
+A Work or Code pane with no thread and no Project asks one centred question
+("Pick a folder to work in"), says in one sentence what choosing a folder
+means, and offers Choose a folder… as the primary action with starting
+without one beside it; once a Project exists the new task leads instead.
+Start-screen composers ask in plain words ("Ask anything…") rather than
+showing a feature tip; tips belong to a thread's follow-up composer.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
@@ -218,6 +226,10 @@ resolved accent alone; Pride carries a six-colour spectrum and Norway carries
 red, white, and blue. The semantic accent remains the first ink, so overrides
 still reach the ground. Increased contrast turns the ground off; reduced motion
 holds it still. It is chosen in Settings › Appearance › Background.
+When the ground runs behind everything, a start screen's reading column
+carries a soft wash of the page colour that fades out before the edges, and a
+conversation pane's title rail shares the conversation's reading surface, so
+no text sits straight on a busy photo.
 
 ## Source of truth and CSS layers
 
@@ -555,8 +567,9 @@ chooser or uploads while refused. Model, access, and destination controls keep
 one type scale and quiet keyboard focus. Access labels read "Plan · read-only"
 and "Ask for approvals" in both new and existing threads.
 Under the Code composer the start screen is an agent home rather than a
-blank prompt: suggested prompts as small cards (a label and the
-sentence they fill in), then three sections that share one card grid, two
+blank prompt: suggested prompts as small hairline cards on the card fill (a
+label and the sentence they fill in), never bare text on the ground; then
+three sections that share one card grid (Continue's rows share one card), two
 across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery
 state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
@@ -798,7 +811,8 @@ tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
 renders Markdown with the preview's own viewer. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
-tool rows; the head's Add tool action appears once a tab is open, since with
+tool rows, grouped under This thread, Workspace, and Devices when more than
+one group has a tool; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
 the same compact tool-tab and Add tool model for Review, Terminal, Browser,
 Files, and Side chat where supported. Selecting a tool removes that presentation from the other

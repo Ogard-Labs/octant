@@ -408,7 +408,7 @@ describe("boardRuntimeActivityFromTurnsAndSignals", () => {
     });
     expect(activity.awaitingInput).toBe(true);
     expect(activity.executing).toBe(false);
-    expect(activity.blockingReason).toBe("Runtime work is waiting for a decision or input.");
+    expect(activity.blockingReason).toBe("Waiting for a decision or answer.");
   });
 
   it("reports which kind of request the thread is waiting on", () => {

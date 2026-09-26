@@ -161,10 +161,9 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
         className="sr-only"
         data-announcement-sequence={props.announcementSequence}
       >
-        {props.announcement}
-        {props.announcementSequence > 0 ? (
-          <span className="sr-only"> Event {props.announcementSequence}.</span>
-        ) : null}
+        {/* A fresh node per announcement makes a repeated message speak again.
+            A visible counter did the same job but was read aloud as "Event 5." */}
+        <span key={props.announcementSequence}>{props.announcement}</span>
       </p>
       <p
         aria-atomic="true"

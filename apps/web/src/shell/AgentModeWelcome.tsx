@@ -1,5 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { Aperture, FolderPlus, Sparkles } from "lucide-react";
+import { FolderOpen, FolderPlus, SquarePen } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface AgentModeWelcomeProps {
@@ -12,115 +12,100 @@ export interface AgentModeWelcomeProps {
   readonly providerMessage?: string;
 }
 
-const copy: Record<
-  AgentModeWelcomeProps["mode"],
-  { readonly eyebrow: string; readonly heading: string; readonly description: string }
-> = {
+interface Presentation {
+  readonly name: string;
+  readonly heading: string;
+  readonly lead: string;
+  readonly newTask: string;
+}
+
+/* The first visit asks for one thing, a folder, and says in plain words what
+   choosing it means. The page it replaced opened on "Bind a confined folder"
+   and "the harness composer", which named the mechanism instead of the
+   outcome. */
+const withoutProjects: Record<AgentModeWelcomeProps["mode"], Presentation> = {
   work: {
-    eyebrow: "Work",
-    heading: "Add a folder to start",
-    description:
-      "Bind a confined folder for documents, decks, spreadsheets, and artifacts. Then open a work thread from the harness composer.",
+    name: "Work",
+    heading: "Pick a folder to work in",
+    lead: "Work reads and edits the documents, decks, and spreadsheets in one folder you choose. It can’t change anything outside it.",
+    newTask: "Start without a folder",
   },
   code: {
-    eyebrow: "Code",
-    heading: "Add a folder to start",
-    description:
-      "Bind a confined folder for approval-gated coding work. Then start a Code thread with provider, branch, and delivery context.",
+    name: "Code",
+    heading: "Pick a folder to code in",
+    lead: "Code works inside one folder you choose and asks before it changes a file.",
+    newTask: "Start without a folder",
   },
 };
 
 /* Once a folder is bound the page is a starting point, not setup: it leads
    with the task and keeps adding a folder as the second thing to do. */
-const withProjects: Record<
-  AgentModeWelcomeProps["mode"],
-  { readonly heading: string; readonly description: string }
-> = {
+const withProjects: Record<AgentModeWelcomeProps["mode"], Presentation> = {
   work: {
+    name: "Work",
     heading: "Start a task",
-    description: "Pick a Project in the sidebar, or start here and choose one in the composer.",
+    lead: "Pick a Project in the sidebar, or start here and choose one as you go.",
+    newTask: "Start a new task",
   },
   code: {
+    name: "Code",
     heading: "Start a Code thread",
-    description: "Pick a Project in the sidebar, or start here and choose one in the composer.",
+    lead: "Pick a Project in the sidebar, or start here and choose one as you go.",
+    newTask: "Start a new thread",
   },
 };
 
 export function AgentModeWelcome(props: AgentModeWelcomeProps) {
-  const base = copy[props.mode];
-  const presentation = props.hasProjects === true ? { ...base, ...withProjects[props.mode] } : base;
+  const leadsWithTask = props.hasProjects === true;
+  const presentation = (leadsWithTask ? withProjects : withoutProjects)[props.mode];
+  const addFolder = (
+    <OctantButton
+      onClick={props.onAddFolder}
+      size="lg"
+      type="button"
+      variant={leadsWithTask ? "ghost" : "default"}
+    >
+      <FolderPlus aria-hidden="true" size={16} strokeWidth={1.8} />
+      {leadsWithTask ? "Add another folder" : "Choose a folder…"}
+    </OctantButton>
+  );
   const newTask =
     props.onOpenDraft === undefined ? null : (
       <OctantButton
-        className="draft-thread__intent-card"
         disabled={!props.providerReady}
         onClick={props.onOpenDraft}
-        role="listitem"
+        size="lg"
         type="button"
-        variant="ghost"
+        variant={leadsWithTask ? "default" : "ghost"}
       >
-        <span className="draft-thread__intent-label">
-          <Sparkles aria-hidden="true" size={14} strokeWidth={1.8} />
-          New task
-        </span>
-        <span className="draft-thread__intent-description">
-          {props.hasProjects === true
-            ? "Start a new thread in a Project."
-            : "Start a draft thread before a folder is bound."}
-        </span>
+        {leadsWithTask ? <SquarePen aria-hidden="true" size={16} strokeWidth={1.8} /> : null}
+        {presentation.newTask}
       </OctantButton>
     );
   return (
     <section
-      aria-label={`${presentation.eyebrow} welcome`}
+      aria-label={`${presentation.name} welcome`}
       className="draft-thread agent-mode-welcome"
     >
-      <div className="draft-thread__canvas">
-        <div className="draft-thread__welcome">
-          <Aperture
-            aria-hidden="true"
-            className="new-thread-welcome__mark"
-            size={24}
-            strokeWidth={1.4}
-          />
-          <p className="draft-thread__eyebrow">Octant {presentation.eyebrow}</p>
-          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
-          <p className="draft-thread__description">{presentation.description}</p>
+      <div className="agent-mode-welcome__panel">
+        <span aria-hidden="true" className="agent-mode-welcome__mark">
+          <FolderOpen size={20} strokeWidth={1.6} />
+        </span>
+        <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
+        <p className="agent-mode-welcome__lead">{presentation.lead}</p>
+        <div className="agent-mode-welcome__actions">
+          {leadsWithTask ? newTask : addFolder}
+          {leadsWithTask ? addFolder : newTask}
         </div>
-
-        <div className="draft-thread__intent-cards" role="list" aria-label="Get started">
-          {props.hasProjects === true ? newTask : null}
-          <OctantButton
-            className="draft-thread__intent-card"
-            onClick={props.onAddFolder}
-            role="listitem"
-            type="button"
-            variant="ghost"
-          >
-            <span className="draft-thread__intent-label">
-              <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />
-              Add folder
-            </span>
-            <span className="draft-thread__intent-description">
-              Select a confined folder on this Mac.
-            </span>
-          </OctantButton>
-          {props.hasProjects === true ? null : newTask}
-        </div>
-
         {props.providerMessage === undefined ? null : (
           <p className="draft-thread__error" role="status">
             {props.providerMessage}
           </p>
         )}
-        {!props.providerReady ? (
+        {props.providerReady ? null : (
           <p className="draft-thread__hint" role="status">
-            Detecting local providers… connect Ollama or a CLI runtime in Settings if this takes
-            longer than a few seconds.
-          </p>
-        ) : props.hasProjects === true ? null : (
-          <p className="draft-thread__hint">
-            Tip: use the sidebar <strong>Add folder</strong> action any time.
+            Looking for AI providers on this computer… If this takes more than a few seconds,
+            connect one in Settings.
           </p>
         )}
       </div>

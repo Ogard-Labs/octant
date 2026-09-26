@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
+import {
+  RIGHT_UTILITY_DOCK_SURFACES,
+  type RightUtilityDockSurfaceId,
+} from "./rightUtilityDockModel";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 
 const browser = surface("browser");
@@ -12,7 +15,7 @@ const files = surface("files");
 const sharedStylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
 const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
 
-function surface(id: "browser" | "terminal" | "files") {
+function surface(id: RightUtilityDockSurfaceId) {
   const found = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === id);
   if (found === undefined) throw new Error(`Missing ${id} dock surface.`);
   return found;
@@ -90,6 +93,32 @@ describe("the right sidebar surface", () => {
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(onOpenTab).toHaveBeenCalledWith("terminal");
     expect(screen.queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
+  });
+
+  it("groups a long tool list under what each tool looks at", () => {
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[
+          surface("environment"),
+          browser,
+          terminal,
+          surface("android-emulator"),
+        ]}
+        onCloseTab={vi.fn()}
+        onOpenTab={vi.fn()}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+      />,
+    );
+
+    const thread = screen.getByRole("group", { name: "This thread" });
+    const workspace = screen.getByRole("group", { name: "Workspace" });
+    const devices = screen.getByRole("group", { name: "Devices" });
+    expect(within(thread).getByRole("button", { name: "Environment" })).toBeVisible();
+    expect(within(workspace).getByRole("button", { name: "Browser" })).toBeVisible();
+    expect(within(workspace).getByRole("button", { name: "Terminal" })).toBeVisible();
+    expect(within(devices).getByRole("button", { name: "Android emulator" })).toBeVisible();
   });
 
   it("selects and hides open tools without stopping their strip", async () => {

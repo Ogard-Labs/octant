@@ -1,38 +1,50 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentModeWelcome } from "./AgentModeWelcome";
 
 describe("AgentModeWelcome", () => {
-  it("asks Code to bind a folder, not a repository root", () => {
+  it("asks for a folder in plain words and leads with choosing one", async () => {
+    const onAddFolder = vi.fn();
+    render(
+      <AgentModeWelcome
+        mode="work"
+        onAddFolder={onAddFolder}
+        onOpenDraft={vi.fn()}
+        providerReady
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Pick a folder to work in" })).toBeVisible();
+    expect(screen.queryByText(/confined|harness|bind/i)).not.toBeInTheDocument();
+    const [first, second] = screen.getAllByRole("button");
+    expect(first).toHaveTextContent("Choose a folder…");
+    expect(second).toHaveTextContent("Start without a folder");
+    await userEvent.click(screen.getByRole("button", { name: "Choose a folder…" }));
+    expect(onAddFolder).toHaveBeenCalledOnce();
+  });
+
+  it("asks Code for a folder, not a repository root", () => {
     render(<AgentModeWelcome mode="code" onAddFolder={vi.fn()} providerReady />);
 
-    expect(screen.getByRole("heading", { name: "Add a folder to start" })).toBeVisible();
-    expect(
-      screen.getByText(
-        "Bind a confined folder for approval-gated coding work. Then start a Code thread with provider, branch, and delivery context.",
-      ),
-    ).toBeVisible();
-    expect(screen.getByText("Select a confined folder on this Mac.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Pick a folder to code in" })).toBeVisible();
     expect(screen.queryByText(/repository/i)).not.toBeInTheDocument();
   });
 
-  it("leads with a new task once a Project is bound, and stops asking for a folder", () => {
-    const onOpenDraft = vi.fn();
+  it("leads with a new task once a Project is bound, and keeps adding a folder second", () => {
     render(
       <AgentModeWelcome
         hasProjects
         mode="code"
         onAddFolder={vi.fn()}
-        onOpenDraft={onOpenDraft}
+        onOpenDraft={vi.fn()}
         providerReady
       />,
     );
 
     expect(screen.getByRole("heading", { name: "Start a Code thread" })).toBeVisible();
-    const cards = screen.getAllByRole("listitem");
-    expect(cards[0]).toHaveTextContent("New task");
-    expect(cards[1]).toHaveTextContent("Add folder");
-    expect(screen.queryByText(/Open harness/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Tip: use the sidebar/)).not.toBeInTheDocument();
+    const [first, second] = screen.getAllByRole("button");
+    expect(first).toHaveTextContent("Start a new thread");
+    expect(second).toHaveTextContent("Add another folder");
   });
 });
