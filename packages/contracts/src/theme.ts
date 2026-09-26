@@ -203,10 +203,8 @@ export const AppBackgroundEffect = Schema.Literal("none", "pixelate", "dither");
 export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
 
 /**
- * What moves: nothing, the picture breathing slowly (`pulse`), or bands of
- * dither dots rolling across it (`wave`, the theme's pattern). Absent on
- * older rows; the resolver then reads `patternEnabled`, so a ground that drew
- * the pattern keeps drawing it.
+ * Retired: the ground no longer moves or draws a pattern. Kept so rows that
+ * chose still, pulse, or wave still decode; nothing reads it.
  */
 export const AppBackgroundMotion = Schema.Literal("still", "pulse", "wave");
 export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
@@ -216,13 +214,11 @@ export const AppBackgroundEffectCell = Schema.Int.pipe(Schema.between(2, 16));
 export const AppBackgroundEffectTones = Schema.Int.pipe(Schema.between(2, 16));
 
 const AppBackgroundTuning = {
-  /** Whether the animated/dithered theme pattern is visible over the ground. */
+  // Retired with the drawn dot pattern: rows written while it existed carry
+  // these, so they still decode, and nothing reads them.
   patternEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-  /** How much of the pattern shows over the ground; 0 hides it. */
   patternOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 22 }),
-  /** How fast the pattern drifts; 0 holds it still. */
   patternSpeed: Schema.optionalWith(AppBackgroundPercent, { default: () => 50 }),
-  /** How much of the field the pattern fills at its densest. */
   patternIntensity: Schema.optionalWith(AppBackgroundPercent, { default: () => 35 }),
   /** Whether a photo keeps the ordered-dither print treatment. */
   photoDithered: Schema.optionalWith(Schema.Boolean, { default: () => true }),
@@ -237,6 +233,7 @@ const AppBackgroundTuning = {
   motion: Schema.optional(AppBackgroundMotion),
 };
 
+/** Retired: the drawn dot pattern. It decodes and resolves to the plain page. */
 const ThemeAppBackground = Schema.Struct({
   kind: Schema.Literal("theme"),
   ...AppBackgroundTuning,

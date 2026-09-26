@@ -1,7 +1,6 @@
 import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
-import { getThemePreset, MAX_THEME_PATTERN_INKS } from "@octant/theme";
 import { useLayoutEffect, type ReactNode } from "react";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { approvalSurfacePalette } from "./approvalSurfacePalette";
@@ -31,13 +30,6 @@ export function ThemeSettingsProvider(props: {
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
     const resolved = resolveEffectiveTokens(accessible, systemPrefersDark);
-    const selectedPresetId =
-      resolved.mode === "light" ? accessible.lightPresetId : accessible.darkPresetId;
-    const presetPalette =
-      (selectedPresetId === undefined
-        ? undefined
-        : getThemePreset(String(selectedPresetId))?.patternPalette) ?? [];
-    const patternPalette = [resolved.tokens.accent!, ...presetPalette.slice(1)];
     for (const [role, color] of Object.entries(resolved.tokens)) {
       root.style.setProperty(`--octant-${role}`, color);
       for (const alias of VARIABLE_ALIASES[role] ?? []) {
@@ -75,13 +67,6 @@ export function ThemeSettingsProvider(props: {
         );
       }
     }
-    for (let index = 0; index < MAX_THEME_PATTERN_INKS; index += 1) {
-      const color = patternPalette[index];
-      const property = `--octant-pattern-ink-${String(index + 1)}`;
-      if (color === undefined) root.style.removeProperty(property);
-      else root.style.setProperty(property, color);
-    }
-    root.dataset.octantPatternInkCount = String(patternPalette.length);
     root.dataset.octantThemeMode = resolved.mode;
     root.dataset.octantIncreasedContrast = String(accessible.increasedContrast);
     root.dataset.octantReducedMotion = String(accessible.reducedMotion);
@@ -107,10 +92,6 @@ export function ThemeSettingsProvider(props: {
       root.style.removeProperty("--octant-workspace-translucent");
       root.style.removeProperty("--octant-workspace-translucent-subtle");
       root.style.removeProperty("--octant-workspace-translucent-strong");
-      for (let index = 0; index < MAX_THEME_PATTERN_INKS; index += 1) {
-        root.style.removeProperty(`--octant-pattern-ink-${String(index + 1)}`);
-      }
-      delete root.dataset.octantPatternInkCount;
       delete root.dataset.octantThemeMode;
       delete root.dataset.octantIncreasedContrast;
       delete root.dataset.octantReducedMotion;

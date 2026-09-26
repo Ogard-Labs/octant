@@ -769,7 +769,8 @@ describe("SettingsView", () => {
           ...DEFAULT_THEME_SETTINGS,
           appBackground: {
             ...DEFAULT_THEME_SETTINGS.appBackground,
-            kind: "theme",
+            kind: "builtin",
+            presetId: "warm-walnut-planks",
             scope: "everywhere",
             coversSidebar: true,
           },

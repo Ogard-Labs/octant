@@ -546,7 +546,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
    * so Increased contrast, which resolves the ground to `none`, clears it
    * here exactly as it does under the shell. Zen resolves the same two
    * preferences for its own surface as well, and honours whichever reading
-   * asks for less, rather than drifting a cloud a space was told to hold
+   * asks for less, rather than moving a picture a space was told to hold
    * still.
    */
   const appGround =
@@ -554,8 +554,12 @@ export function ZenSurface(props: ZenSurfaceProps) {
       ? undefined
       : appearance.increasedContrast
         ? undefined
-        : appearance.reducedMotion
-          ? { ...props.appBackground, animated: false }
+        : appearance.reducedMotion && props.appBackground.backgroundAnimated
+          ? {
+              ...props.appBackground,
+              backgroundAnimated: false,
+              backgroundUrl: props.appBackground.backgroundStillUrl,
+            }
           : props.appBackground;
   const groundEffectLayer = resolveGroundEffect(appearance, props.backgroundImageUrl);
   const overlay = Math.max(

@@ -5,13 +5,7 @@ import { AppBackdrop } from "./AppBackdrop";
 afterEach(cleanup);
 
 const dials = {
-  patternEnabled: true,
-  patternOpacity: 0.55,
-  patternSpeed: 1,
-  patternIntensity: 0.6,
-  photoDithered: true,
   effect: { kind: "dither", cell: 2, levels: 4 },
-  pulse: false,
   photoOpacity: 0.42,
   scope: "welcome",
   coversSidebar: false,
@@ -22,14 +16,12 @@ const dials = {
 
 describe("AppBackdrop", () => {
   beforeEach(() => {
-    // jsdom has no canvas: the pattern degrades to nothing, the photo to
-    // its fetch, and neither may throw.
+    // jsdom has no canvas: the photo degrades to its fetch and may not throw.
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    delete document.documentElement.dataset.octantThemeMode;
   });
 
   it("draws nothing when the ground is off", () => {
@@ -37,40 +29,10 @@ describe("AppBackdrop", () => {
       <AppBackdrop
         fetcher={vi.fn()}
         placement="welcome"
-        resolved={{ ...dials, kind: "none", backgroundId: null, animated: false }}
+        resolved={{ ...dials, kind: "none", backgroundId: null }}
       />,
     );
     expect(container.querySelector("[data-octant-app-backdrop]")).toBeNull();
-  });
-
-  it("keeps the ground when the browser has no WebGL, and says whether it moves", () => {
-    const { container } = render(
-      <AppBackdrop
-        fetcher={vi.fn()}
-        placement="welcome"
-        resolved={{ ...dials, kind: "theme", backgroundId: null, animated: false }}
-      />,
-    );
-    const ground = container.querySelector("[data-octant-app-backdrop]");
-    expect(ground?.getAttribute("data-octant-app-backdrop")).toBe("theme");
-    expect(ground?.getAttribute("data-animated")).toBe("false");
-    expect(ground?.getAttribute("aria-hidden")).toBe("true");
-    // Without WebGL2 the pattern canvas is dropped rather than left blank.
-    expect(container.querySelector(".app-backdrop__pattern")).toBeNull();
-  });
-
-  it("presses the pattern into a light theme and lifts it out of a dark one", () => {
-    document.documentElement.dataset.octantThemeMode = "light";
-    const { container } = render(
-      <AppBackdrop
-        fetcher={vi.fn()}
-        placement="shell"
-        resolved={{ ...dials, kind: "theme", backgroundId: null, animated: true }}
-      />,
-    );
-    // The blend is decided before the canvas learns it has no context.
-    const pattern = container.querySelector(".app-backdrop__pattern");
-    expect(pattern === null || pattern.getAttribute("data-blend") === "multiply").toBe(true);
   });
 
   it("asks the authenticated fetcher for the photo the ground names", async () => {
@@ -81,19 +43,12 @@ describe("AppBackdrop", () => {
       <AppBackdrop
         fetcher={fetcher}
         placement="welcome"
-        resolved={{
-          ...dials,
-          kind: "photo",
-          backgroundId: "00000000-0000-4000-8000-000000000b01",
-          animated: true,
-        }}
+        resolved={{ ...dials, kind: "photo", backgroundId: "00000000-0000-4000-8000-000000000b01" }}
       />,
     );
-    expect(
-      container
-        .querySelector("[data-octant-app-backdrop]")
-        ?.getAttribute("data-octant-app-backdrop"),
-    ).toBe("photo");
+    const ground = container.querySelector("[data-octant-app-backdrop]");
+    expect(ground).toHaveAttribute("data-octant-app-backdrop", "photo");
+    expect(ground).toHaveAttribute("aria-hidden", "true");
     expect(container.querySelector(".app-backdrop__photo")).not.toBeNull();
     await waitFor(() => {
       expect(fetcher).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000b01");
@@ -113,7 +68,6 @@ describe("AppBackdrop", () => {
           backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
           backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
           backgroundAnimated: true,
-          animated: false,
           // Plain, so the animated preset stays a moving CSS image.
           effect: { kind: "none", cell: 3, levels: 8 },
         }}
@@ -127,7 +81,7 @@ describe("AppBackdrop", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("prints a built-in through its effect from the still frame, and marks the ground to breathe", async () => {
+  it("prints a built-in through its effect from the still frame, with no pattern over it", async () => {
     const fetched = vi.fn(async () => new Response(new Blob([new Uint8Array([1])])));
     vi.stubGlobal("fetch", fetched);
     try {
@@ -142,8 +96,6 @@ describe("AppBackdrop", () => {
             backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
             backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
             backgroundAnimated: true,
-            animated: false,
-            pulse: true,
             effect: { kind: "pixelate", cell: 6, levels: 8 },
           }}
         />,
@@ -153,10 +105,7 @@ describe("AppBackdrop", () => {
         "data-effect",
         "pixelate",
       );
-      expect(container.querySelector("[data-octant-app-backdrop]")).toHaveAttribute(
-        "data-pulse",
-        "true",
-      );
+      expect(container.querySelector(".app-backdrop__pattern")).toBeNull();
       await waitFor(() =>
         expect(fetched).toHaveBeenCalledWith("/zen-backgrounds/perspective-dot-plane.jpg"),
       );
@@ -165,7 +114,7 @@ describe("AppBackdrop", () => {
     }
   });
 
-  it("marks a photo as clean when dithering and the pattern are disabled", () => {
+  it("marks a photo as clean when it has no effect", () => {
     const { container } = render(
       <AppBackdrop
         fetcher={vi.fn(async () => new Blob([new Uint8Array([0x89, 0x50])], { type: "image/png" }))}
@@ -174,15 +123,10 @@ describe("AppBackdrop", () => {
           ...dials,
           kind: "photo",
           backgroundId: "00000000-0000-4000-8000-000000000b01",
-          animated: false,
-          patternEnabled: false,
-          photoDithered: false,
           effect: { kind: "none", cell: 2, levels: 4 },
-          pulse: false,
         }}
       />,
     );
-    expect(container.querySelector(".app-backdrop__pattern")).toBeNull();
     expect(container.querySelector(".app-backdrop__photo")).toHaveAttribute(
       "data-dithered",
       "false",
