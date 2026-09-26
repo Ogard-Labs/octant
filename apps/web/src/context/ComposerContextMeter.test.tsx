@@ -85,7 +85,7 @@ describe("ComposerContextMeter", () => {
         }),
       );
       const popover = screen.getByRole("dialog", { name: "Provider usage" });
-      expect(popover).toHaveTextContent("91% used");
+      expect(popover).toHaveTextContent("5-hour limit91%");
       if (tokens === undefined) {
         expect(popover).toHaveTextContent("No usage has been reported for this thread.");
         expect(within(popover).getAllByText("Not reported").length).toBeGreaterThan(0);
@@ -103,7 +103,12 @@ describe("ComposerContextMeter", () => {
     expect(button).toHaveAccessibleName(/104 \/ 1K \(10%\)/);
     expect(button).toHaveAccessibleName(/Next turn: Healthy/);
     expect(button.querySelector(".composer-context-meter__ring")).not.toBeNull();
-    expect(button.querySelector(".composer-context-meter__used")).not.toBeNull();
+    // The arc is measured on a path length of 100, so its dash is the share.
+    expect(button.querySelector(".composer-context-meter__used")).toHaveAttribute(
+      "stroke-dasharray",
+      "10.4 100",
+    );
+    expect(document.querySelector(".composer-context-meter")).not.toHaveAttribute("data-fill");
     expect(
       screen.getByText(/Fixture thread\. Last sent 104 \/ 1K \(10%\)\. Provider reported\./),
     ).toBeInTheDocument();
@@ -121,14 +126,9 @@ describe("ComposerContextMeter", () => {
     // meter's own segments. Repeating all four as a separate list above the
     // meter said the same numbers twice before the reader reached the picture.
     expect(popover).toHaveTextContent("Context window104 / 1K (10%)");
-    expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
-    expect(popover).toHaveTextContent("Free space79680%");
-    expect(popover).toHaveTextContent("Current request42");
-    expect(popover).toHaveTextContent("Octant tools58 · Estimated");
-    expect(popover).toHaveTextContent("Observed overhead4");
-    expect(popover).toHaveTextContent("Reserved100");
-    expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
-    expect(popover).toHaveTextContent(/MCP0 loaded· 3 deferred/);
+    expect(
+      within(popover).getByRole("meter", { name: /Context window composition/ }),
+    ).toHaveAttribute("aria-valuenow", "10");
     expect(popover).toHaveTextContent("Provider account limits");
     expect(popover).toHaveTextContent("Concurrent turns");
     expect(popover).toHaveTextContent("Requests");
@@ -160,6 +160,7 @@ describe("ComposerContextMeter", () => {
     render(<Harness snapshot={contextFixture({ unknownTokens: true })} />);
     const button = screen.getByRole("button", { name: /plus unknown/i });
     await user.click(button);
+    await user.click(screen.getByRole("button", { name: "Context breakdown" }));
     expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
       "Octant toolsUnknown",
     );
@@ -289,9 +290,15 @@ describe("ComposerContextMeter", () => {
     const button = screen.getByRole("button", { name: /Context window 50K of 200K \(25%\)/i });
     await user.click(button);
     const popover = screen.getByRole("dialog", { name: "Context window" });
-    expect(
-      within(popover).getByRole("progressbar", { name: "Context window used" }),
-    ).toHaveAttribute("aria-valuenow", "25");
+    expect(popover).toHaveTextContent("Context window50K / 200K (25%)");
+    expect(within(popover).getByRole("meter", { name: /Context window used/ })).toHaveAttribute(
+      "aria-valuenow",
+      "25",
+    );
+    // Provenance is detail: it waits in the breakdown, while the trigger's
+    // accessible name always carries it.
+    expect(popover).not.toHaveTextContent("Reported by the provider with its last turn.");
+    await user.click(within(popover).getByRole("button", { name: "Context breakdown" }));
     expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
   });
 
@@ -392,7 +399,7 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent(/not a context-window maximum/);
     expect(popover).not.toHaveTextContent("Context maximum");
     expect(popover).toHaveTextContent("Provider account limits");
-    expect(popover).toHaveTextContent(/5-hour limitLow · 91% used · resets/i);
+    expect(popover).toHaveTextContent(/5-hour limitResets now91%/);
   });
 
   it("moves the ring to its new share instead of snapping between renders", () => {
@@ -435,12 +442,11 @@ describe("ComposerContextMeter", () => {
     await user.click(
       screen.getByRole("button", { name: /Provider reported 25\.5K input and 38 output/i }),
     );
-    const meter = document.querySelector(".context-window-popover__limit-meter > span");
-    expect(meter).not.toBeNull();
-    expect((meter as HTMLElement).style.width).toBe("91%");
-    expect(
-      document.querySelector(".context-window-popover__limit-meter")?.getAttribute("data-tone"),
-    ).toBe("warn");
+    const meter = screen.getByRole("meter", { name: "5-hour limit used" });
+    expect(meter).toHaveAttribute("aria-valuetext", "91% used, running low");
+    expect((meter.firstElementChild as HTMLElement).style.width).toBe("91%");
+    // Near its cap is a fact on the row, not only the warning ink on the bar.
+    expect(meter.closest(".context-window-popover__limit")).toHaveAttribute("data-level", "near");
   });
 
   it("marks the ring with a red dot when a provider limit runs low or is spent", () => {
@@ -547,5 +553,143 @@ describe("ComposerContextMeter", () => {
     );
 
     expect(document.querySelector(".composer-context-meter__alert")).toBeNull();
+  });
+
+  it("folds the breakdown until asked and then lists every attributed category with its share", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    const toggle = within(popover).getByRole("button", { name: "Context breakdown" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(popover).queryByRole("table")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const rows = within(within(popover).getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Current request424%",
+      "Octant toolsEstimated586%",
+      "Observed overhead40.4%",
+      "Reserved10010%",
+      "Free space79680%",
+    ]);
+    expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
+    expect(popover).toHaveTextContent(/Tools2 loaded · 6 deferred/);
+    expect(popover).toHaveTextContent(/MCP0 loaded · 3 deferred/);
+  });
+
+  it("breaks a provider-reported window into only what the provider reported", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          contextWindow: 200_000,
+          contextTokens: 50_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /Context window 50K of 200K/i }));
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    await user.click(within(popover).getByRole("button", { name: "Context breakdown" }));
+    // The thread's input and output are sums over turns, not parts of the
+    // window's occupancy, so they are not categories of it.
+    const rows = within(within(popover).getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual(["Used50K25%", "Free space150K75%"]);
+    expect(within(popover).getByLabelText("This thread")).toHaveTextContent("Input25,500Output38");
+  });
+
+  it("turns the ring to the warning ink once most of the window is used", () => {
+    render(
+      <ComposerContextMeterProvider
+        fallback={{ contextWindow: 200_000, contextTokens: 170_000, limits: [] }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+    expect(document.querySelector(".composer-context-meter")).toHaveAttribute("data-fill", "high");
+    expect(document.querySelector(".composer-context-meter__used")).toHaveAttribute(
+      "stroke-dasharray",
+      "85 100",
+    );
+  });
+
+  it("names provider windows by their length and says when they reset", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-23T22:42:00.000Z"));
+    try {
+      const user = userEvent.setup();
+      render(
+        <ComposerContextMeterProvider
+          fallback={{
+            limits: [
+              {
+                window: "plan-a:primary_5h",
+                status: "allowed",
+                utilization: 0.4,
+                resetsAt: "2026-08-24T01:00:00.000Z" as never,
+              },
+              {
+                window: "plan-b:secondary_7d",
+                status: "exhausted",
+                utilization: 1,
+              },
+            ],
+          }}
+          status="not-planned"
+          subjectKey="code-thread:a"
+        >
+          <ComposerContextMeterGate enabled>
+            <ComposerContextMeter />
+          </ComposerContextMeterGate>
+        </ComposerContextMeterProvider>,
+      );
+      await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+      const popover = screen.getByRole("dialog", { name: "Provider usage" });
+      // Two scopes are present, so each window keeps the provider's scope name.
+      expect(popover).toHaveTextContent("5-hour limitplan-aResets in 2 hr 18 min40%");
+      expect(popover).toHaveTextContent("7-day limitplan-b100%");
+      expect(popover).not.toHaveTextContent("primary");
+      expect(screen.getByRole("meter", { name: "7-day limit used" })).toHaveAttribute(
+        "aria-valuetext",
+        "100% used, spent",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens the usage surface from a provider-reported panel and closes the panel", async () => {
+    const user = userEvent.setup();
+    const onOpenUsage = vi.fn();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{ contextWindow: 200_000, contextTokens: 50_000, limits: [] }}
+        onOpenUsage={onOpenUsage}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    await user.click(screen.getByRole("button", { name: "View usage" }));
+    expect(onOpenUsage).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
   });
 });

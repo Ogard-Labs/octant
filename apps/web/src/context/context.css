@@ -12,29 +12,35 @@
 }
 
 .composer-context-meter__button:hover,
-.composer-context-meter__button:focus-visible {
+.composer-context-meter__button:focus-visible,
+.composer-context-meter__button[aria-expanded="true"] {
   color: var(--octant-text-primary);
 }
 
 .composer-context-meter__ring {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
 }
 
+/* The track is the whole window, so it has to read as a ring on its own. At
+   the border ink it disappeared and a short arc looked like a spinner. Mixing
+   from the foreground keeps it a fixed step below the arc in every theme. */
 .composer-context-meter__track {
-  stroke: var(--octant-border-strong);
-  stroke-width: 2.5;
+  stroke: color-mix(in oklab, var(--octant-text-primary) 30%, transparent);
+  stroke-width: 2;
 }
 
-/* The arc moves to its new length rather than jumping to it: the ring is the
-   only place the reader sees the window filling, and a value that snaps
-   between renders reads as a redraw rather than as consumption. */
+/* The arc wears the foreground ink rather than the button's secondary ink:
+   it is the figure, and the track is the ground. It moves to its new length
+   rather than jumping to it — a value that snaps between renders reads as a
+   redraw rather than as consumption. */
 .composer-context-meter__used {
-  stroke: currentcolor;
-  stroke-width: 2.5;
+  stroke: var(--octant-text-primary);
+  stroke-width: 2;
   stroke-linecap: round;
-  transition: stroke-dasharray 480ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: stroke-dasharray var(--oct-motion-base) var(--oct-ease-motion);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -43,15 +49,11 @@
   }
 }
 
-.composer-context-meter[data-health="watch"] .composer-context-meter__used,
-.composer-context-meter[data-health="optimizing"] .composer-context-meter__used {
-  color: var(--octant-text-primary);
-}
-
-.composer-context-meter[data-health="action-needed"] .composer-context-meter__used,
-.composer-context-meter[data-health="blocked"] .composer-context-meter__used,
-.composer-context-meter[data-health="rate-limited"] .composer-context-meter__used {
-  color: var(--octant-text-primary);
+/* Past four fifths of the window the next long turn may not fit; the arc
+   takes the theme's warning ink, and the trigger's name carries the figure
+   for anyone who cannot see the change. */
+.composer-context-meter[data-fill="high"] .composer-context-meter__used {
+  stroke: var(--oct-warn-fg);
 }
 
 /* A provider usage limit is at warning or exhausted. The dot is the only
@@ -65,43 +67,167 @@
   fill: var(--octant-destructive);
 }
 
-/* Position/anchoring now comes from OctantPopover's floating positioner
-   (side="top" align="end"); only width, padding, and color remain this
-   surface's own. */
+/* Position/anchoring comes from OctantPopover's floating positioner
+   (side="top" align="end"); width, padding, and the neutral ramp below are
+   this surface's own. */
 .context-window-popover {
-  width: min(360px, calc(100vw - 24px));
+  /* A graded neutral ramp for the breakdown. The default theme puts no hue
+     on marks, so categories are told apart by lightness, mixed from the
+     foreground into the popover's own ground so a swatch in the key and its
+     segment in the bar are the same paint. */
+  --context-window-track: color-mix(in oklab, var(--oct-fg) 10%, var(--octant-floating));
+  --context-window-tone: var(--oct-fg);
+
+  width: min(320px, calc(100vw - 24px));
   padding: 12px;
   color: var(--octant-text-primary);
+  font-size: var(--oct-text-xs);
 }
 
-.context-window-popover__header,
-.context-window-popover__breakdown > div,
-.context-window-popover__capabilities p,
-.context-window-popover__limits p {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+.context-window-popover [data-tone="2"] {
+  --context-window-tone: color-mix(in oklab, var(--oct-fg) 78%, var(--octant-floating));
+}
+
+.context-window-popover [data-tone="3"] {
+  --context-window-tone: color-mix(in oklab, var(--oct-fg) 62%, var(--octant-floating));
+}
+
+.context-window-popover [data-tone="4"] {
+  --context-window-tone: color-mix(in oklab, var(--oct-fg) 48%, var(--octant-floating));
+}
+
+.context-window-popover [data-tone="5"] {
+  --context-window-tone: color-mix(in oklab, var(--oct-fg) 38%, var(--octant-floating));
+}
+
+.context-window-popover [data-tone="6"] {
+  --context-window-tone: color-mix(in oklab, var(--oct-fg) 30%, var(--octant-floating));
+}
+
+.context-window-popover [data-tone="7"] {
+  --context-window-tone: color-mix(in oklab, var(--oct-fg) 20%, var(--octant-floating));
+}
+
+.context-window-popover [data-tone="8"] {
+  --context-window-tone: var(--context-window-track);
 }
 
 .context-window-popover__header {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 8px;
   font-size: var(--oct-text-detail);
 }
 
-.context-window-popover__header strong,
-.context-window-popover__breakdown dd {
+.context-window-popover__title {
+  color: var(--octant-text-secondary);
+}
+
+.context-window-popover__total {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.context-window-popover__chevron {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-motion);
+}
+
+.context-window-popover__chevron[data-expanded="true"] {
+  transform: rotate(180deg);
+}
+
+.context-window-popover__meter {
+  display: flex;
+  width: 100%;
+  height: 4px;
+  gap: 1px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: var(--context-window-track);
+  border-radius: var(--oct-radius-pill);
+}
+
+.context-window-popover__meter > span {
+  min-width: 2px;
+  height: 100%;
+  flex: 0 0 var(--context-window-meter-size);
+  background: var(--context-window-tone);
+}
+
+.context-window-popover__source {
+  margin: 8px 0 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.context-window-popover__details {
+  margin-top: 8px;
+}
+
+.context-window-popover__legend {
+  width: 100%;
+  border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
 
-/* The fallback panel still lists plain facts: a provider that reported usage
-   without a context-window maximum has no meter to draw. */
+.context-window-popover__legend th,
+.context-window-popover__legend td {
+  padding: 2px 0;
+  font-weight: 400;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.context-window-popover__legend th {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.context-window-popover__legend td {
+  padding-left: 12px;
+  text-align: right;
+}
+
+.context-window-popover__legend td:last-child {
+  width: 5ch;
+  color: var(--octant-text-secondary);
+}
+
+.context-window-popover__swatch {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: var(--context-window-tone);
+  border-radius: 2px;
+}
+
+/* Free space is the bar's empty track, so its swatch is the track too, drawn
+   with a hairline so an almost-ground square still reads as a square. */
+.context-window-popover__legend tr[data-kind="free"] .context-window-popover__swatch {
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+}
+
+.context-window-popover__qualifier {
+  margin-left: 4px;
+  color: var(--octant-text-secondary);
+}
+
+/* The thread's totals sit apart from the window's occupancy: they are sums
+   over turns, not parts of what the window holds. */
 .context-window-popover__facts {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   margin: 8px 0 0;
 }
 
-.context-window-popover__facts > div {
+.context-window-popover__facts > div,
+.context-window-popover__capabilities p {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -111,158 +237,34 @@
 .context-window-popover__facts dt,
 .context-window-popover__facts dd {
   margin: 0;
-  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
-.context-window-popover__facts dt {
+.context-window-popover__facts dt,
+.context-window-popover__capabilities p > span:last-child {
   color: var(--octant-text-secondary);
 }
 
-.context-window-popover__source {
-  margin: 8px 0 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-}
-
-.context-window-popover__meter {
-  display: flex;
-  width: 100%;
-  height: 8px;
-  margin: 8px 0 0;
-  overflow: hidden;
-  background: var(--octant-border);
-  border-radius: var(--oct-radius-pill);
-}
-
-.context-window-popover__meter > span {
-  min-width: 2px;
-  height: 100%;
-  width: var(--context-window-meter-size);
-  background: var(--context-window-tone);
-}
-
-.context-window-popover [data-tone="1"] {
-  --context-window-tone: var(--oct-series-6);
-}
-
-.context-window-popover [data-tone="2"] {
-  --context-window-tone: var(--oct-series-2);
-}
-
-.context-window-popover [data-tone="3"] {
-  --context-window-tone: var(--oct-series-1);
-}
-
-.context-window-popover [data-tone="4"] {
-  --context-window-tone: var(--oct-series-3);
-}
-
-.context-window-popover [data-tone="5"] {
-  --context-window-tone: var(--oct-series-5);
-}
-
-.context-window-popover [data-tone="6"] {
-  --context-window-tone: var(--oct-series-4);
-}
-
-.context-window-popover [data-tone="7"] {
-  --context-window-tone: var(--octant-border-strong);
-}
-
-.context-window-popover [data-tone="8"] {
-  --context-window-tone: var(--octant-control);
-}
-
-.context-window-popover__breakdown {
+.context-window-popover__capabilities {
   display: grid;
-  gap: 6px;
-  margin: 12px 0 0;
+  gap: 4px;
+  margin-top: 8px;
 }
 
-.context-window-popover__breakdown dt,
-.context-window-popover__breakdown dd {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
+.context-window-popover__capabilities p {
   margin: 0;
-  font-size: var(--oct-text-xs);
 }
 
-.context-window-popover__breakdown dt > span {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  background: var(--context-window-tone);
-  border-radius: 2px;
+.context-window-popover__limits,
+.context-window-popover__footer {
+  padding-top: 8px;
+  margin-top: 8px;
+  border-top: 1px solid var(--oct-hairline);
 }
 
-.context-window-popover__breakdown dd > span {
-  width: 42px;
-  justify-content: flex-end;
-  color: var(--octant-text-secondary);
-}
-
-.context-window-popover__capabilities,
 .context-window-popover__limits {
-  padding-top: 9px;
-  margin-top: 9px;
-  border-top: 1px solid var(--octant-border);
-}
-
-/* A window's share is a quantity, and a number alone makes the reader compare
-   percentages in their head. Each limit carries the same bar the context
-   window has, so one glance ranks them. */
-.context-window-popover__limit-meter {
-  display: block;
-  height: 3px;
-  margin: 4px 0 8px;
-  overflow: hidden;
-  background: var(--octant-border);
-  border-radius: var(--oct-radius-pill);
-}
-
-.context-window-popover__limit-meter > span {
-  display: block;
-  height: 100%;
-  background: var(--oct-accent-fg);
-  border-radius: inherit;
-  transition: width 480ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.context-window-popover__limit-meter[data-tone="warn"] > span {
-  background: var(--oct-warn-fg);
-}
-
-.context-window-popover__limit-meter[data-tone="danger"] > span {
-  background: var(--oct-danger-fg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .context-window-popover__limit-meter > span {
-    transition: none;
-  }
-}
-
-.context-window-popover__capabilities p,
-.context-window-popover__limits p {
-  margin: 4px 0 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-}
-
-.context-window-popover__capabilities p > span:first-child,
-.context-window-popover__limits p > span:first-child {
-  margin-right: auto;
-  color: var(--octant-text-primary);
-}
-
-.context-window-popover__limits h3 {
-  margin: 0 0 5px;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
+  display: grid;
+  gap: 8px;
 }
 
 .context-window-popover__limits-heading {
@@ -272,22 +274,55 @@
   gap: 8px;
 }
 
-.context-window-popover__limits-heading time,
-.context-window-popover__reset,
-.context-window-popover__limit-state {
+.context-window-popover__limits h3 {
+  margin: 0;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 .context-window-popover__limits-heading time {
+  color: var(--octant-text-secondary);
+  white-space: nowrap;
+}
+
+.context-window-popover__limit p,
+.context-window-popover__limit-state {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.context-window-popover__limit-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-window-popover__reset {
+  color: var(--octant-text-secondary);
+  white-space: nowrap;
+}
+
+/* A limit with no measurable share states its condition in words; the words
+   are a status, not a figure, so they take the quieter ink. */
+.context-window-popover__limit[data-share="none"] .context-window-popover__limit-value {
+  color: var(--octant-text-secondary);
+}
+
+.context-window-popover__limit-value {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
   white-space: nowrap;
 }
 
 .context-window-popover__limit-state {
-  display: flex;
   justify-content: space-between;
-  gap: 12px;
-  margin: 4px 0 0;
+  color: var(--octant-text-secondary);
 }
 
 .context-window-popover__limit-state > span:first-child {
@@ -295,18 +330,59 @@
 }
 
 .context-window-popover__limit-state[data-state="rate-limited"] > span:last-child {
-  color: var(--octant-accent-text);
+  color: var(--oct-warn-fg);
 }
 
-.context-window-popover__limits p[data-state="unavailable"] > span:last-child {
-  color: var(--octant-text-secondary);
+/* A window's share is a quantity, and a number alone makes the reader compare
+   percentages in their head. Each limit carries the same thin bar the
+   context window has, so one glance ranks them. */
+.context-window-popover__limit-meter {
+  display: block;
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  background: var(--context-window-track);
+  border-radius: var(--oct-radius-pill);
 }
 
-.context-window-popover__inspect {
-  width: 100%;
+.context-window-popover__limit-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--oct-fg);
+  border-radius: inherit;
+  transition: width var(--oct-motion-base) var(--oct-ease-motion);
+}
+
+.context-window-popover__limit[data-level="near"] .context-window-popover__limit-meter > span {
+  background: var(--oct-warn-fg);
+}
+
+.context-window-popover__limit[data-level="spent"] .context-window-popover__limit-meter > span {
+  background: var(--oct-danger-fg);
+}
+
+.context-window-popover__limit[data-level="near"] .context-window-popover__limit-value,
+.context-window-popover__limit[data-level="spent"] .context-window-popover__limit-value {
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-window-popover__limit-meter > span,
+  .context-window-popover__chevron {
+    transition: none;
+  }
+}
+
+/* The ghost action's own padding would indent its label past the rows above;
+   pulling it out by the same amount keeps the label on the content edge and
+   lets the hover fill overhang it. */
+.context-window-popover__footer-action {
+  width: calc(100% + 16px);
   justify-content: space-between;
-  margin-top: 10px;
-  color: var(--octant-text-secondary);
+  margin: 0 -8px;
+  padding: 0 8px;
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
 }
 
 .octant-dialog__popup.context-inspector-dialog {
@@ -494,7 +570,7 @@
 
 @media (max-width: 720px) {
   .context-window-popover {
-    width: min(360px, calc(100vw - 12px));
+    width: min(320px, calc(100vw - 12px));
   }
 
   .context-inspector__header {
