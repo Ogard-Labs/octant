@@ -13,6 +13,7 @@ export const SETTINGS_SECTION_IDS = [
   "general",
   "profile",
   "appearance",
+  "sidebar",
   "keybindings",
   "chat",
   "code",

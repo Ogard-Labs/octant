@@ -1456,6 +1456,9 @@ html[data-octant-native-host="true"]
 @media (min-width: 681px) {
   .shell.shell-frame {
     --octant-card-gutter: var(--oct-space-2);
+    /* A rounded rectangle at whatever size the mask is drawn: the primary
+       card's own shape, so the frost reaches into its corners too. */
+    --octant-primary-card-hole: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' rx='16'/%3E%3C/svg%3E");
   }
 
   .shell--material-translucent.shell-frame > .sidebar {
@@ -1468,12 +1471,11 @@ html[data-octant-native-host="true"]
 
   .shell-frame > .workspace-layer {
     gap: var(--octant-card-gutter);
-    padding: var(--octant-card-gutter) var(--octant-card-gutter) var(--octant-card-gutter) 0;
+    /* A gutter on every side, the sidebar's too: the card floats on the back
+       rather than sitting against the sidebar's edge, so the sidebar reads as
+       part of the back and not as a second column. */
+    padding: var(--octant-card-gutter);
     background: var(--octant-sidebar-opaque);
-  }
-
-  .shell--sidebar-collapsed.shell-frame > .workspace-layer {
-    padding-left: var(--octant-card-gutter);
   }
 
   .shell--material-translucent.shell-frame > .workspace-layer {
@@ -1507,6 +1509,91 @@ html[data-octant-native-host="true"]
 
   .shell--app-backdrop.shell-frame > .workspace-layer > .primary-workspace-layer {
     background: transparent;
+  }
+
+  /* Over the application ground the back is laid only in the gutters. Painted
+     across the whole workspace layer, its tint sat under the see-through
+     primary card too, so the ground inside the card read through a 60% dark
+     film and the dither's cells washed out. The layer below is frosted
+     everywhere except a rounded hole the size of the primary card, measured by
+     ShellFrame, so the outer gutters and the gaps beside the dock and bottom
+     panel frost alike. Before the first measurement the hole falls back to the
+     card's usual place. The masks read alpha only, so currentColor stands in
+     for "keep". */
+  .shell--app-backdrop.shell-frame > .workspace-layer,
+  .shell--app-backdrop.shell-frame[data-octant-sidebar-vibrancy] > .workspace-layer {
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+  }
+
+  .shell--app-backdrop.shell-frame > .workspace-layer::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--octant-sidebar-opaque);
+    pointer-events: none;
+    -webkit-mask:
+      var(--octant-primary-card-hole) no-repeat
+        var(--octant-primary-card-x, var(--octant-card-gutter))
+        var(--octant-primary-card-y, var(--octant-card-gutter)) /
+        var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
+        var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
+      linear-gradient(currentColor 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      var(--octant-primary-card-hole) no-repeat
+        var(--octant-primary-card-x, var(--octant-card-gutter))
+        var(--octant-primary-card-y, var(--octant-card-gutter)) /
+        var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
+        var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
+      linear-gradient(currentColor 0 0);
+    mask-composite: exclude;
+  }
+
+  /* The ground's dither belongs to the card. Drawn under the whole shell, its
+     dots ran on through the gutters, the strip above the card, and the gap
+     beside the dock, so the start screen's card had no edge at all: the same
+     dotted picture inside and out. The pattern is cut to the primary card's
+     rounded rectangle, measured from the window by ShellFrame; outside it the
+     picture stays plain, under the frost. Before the first measurement the
+     pattern covers the window as before. */
+  .shell--app-backdrop.shell-frame
+    > .app-backdrop[data-placement="shell"]
+    > .app-backdrop__pattern {
+    -webkit-mask: var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 0)
+      var(--octant-primary-card-frame-y, 0) / var(--octant-primary-card-w, 100%)
+      var(--octant-primary-card-h, 100%);
+    mask: var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 0)
+      var(--octant-primary-card-frame-y, 0) / var(--octant-primary-card-w, 100%)
+      var(--octant-primary-card-h, 100%);
+  }
+
+  /* When the ground runs under an opaque sidebar too, the gutters take the
+     same wash the sidebar does (surface.css), so the back stays one piece. */
+  .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame
+    > .workspace-layer::before {
+    background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);
+  }
+
+  .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before {
+    background: var(--octant-sidebar-translucent);
+    backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+  }
+
+  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+    > .workspace-layer::before {
+    --octant-glass-blur: 16px;
+    --octant-glass-saturate: 120%;
+    background: var(--octant-sidebar-translucent-subtle);
+  }
+
+  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+    > .workspace-layer::before {
+    --octant-glass-blur: 34px;
+    --octant-glass-saturate: 165%;
+    background: var(--octant-sidebar-translucent-strong);
   }
 
   /* Reader pages painted the darker page ground so they stood apart from the
@@ -1727,6 +1814,24 @@ html[data-octant-native-host="true"]
     background: var(--oct-bg);
     backdrop-filter: none;
   }
+
+  .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before,
+  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
+    > .workspace-layer::before {
+    background: var(--octant-sidebar-opaque);
+    backdrop-filter: none;
+  }
+}
+
+/* The same fallback when Reduce transparency is the app's own setting rather
+   than the system's: the theme provider marks the root, not the media query. */
+@media (min-width: 681px) {
+  html[data-octant-reduced-transparency="true"]
+    .shell--app-backdrop.shell--material-translucent.shell-frame
+    > .workspace-layer::before {
+    background: var(--octant-sidebar-opaque);
+    backdrop-filter: none;
+  }
 }
 
 @media (prefers-contrast: more) {
@@ -1810,7 +1915,7 @@ html[data-octant-native-host="true"]
   margin-bottom: 24px;
 }
 
-.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome {
+.draft-thread__welcome {
   justify-items: center;
   text-align: center;
 }
@@ -2205,10 +2310,62 @@ form > .work-composer-adapter__attachments {
   }
 }
 
-.agent-mode-welcome .draft-thread__intent-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+/* The Work and Code page before a thread exists: one question, one sentence
+   saying what the choice means, and the two things to do, centred on the
+   same axis as every other start screen. It had been a left-aligned eyebrow,
+   paragraph, and tip over two cards, which read as a settings form. */
+.agent-mode-welcome__panel {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: grid;
+  width: min(100% - 48px, 560px);
+  justify-items: center;
+  gap: var(--oct-space-3);
+  margin: 0 auto;
+  padding-block: min(20vh, 180px) var(--oct-space-12);
+  text-align: center;
+}
+
+.agent-mode-welcome__mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: var(--oct-space-1);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  background: var(--octant-card);
+}
+
+.agent-mode-welcome__lead {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
+.agent-mode-welcome__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+@media (max-width: 640px) {
+  .agent-mode-welcome__panel {
+    width: calc(100% - 32px);
+    padding-block: var(--oct-space-12) var(--oct-space-6);
+  }
+
+  .agent-mode-welcome__actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .work-composer-adapter,
@@ -2819,14 +2976,31 @@ form > .work-composer-adapter__attachments {
   margin: var(--oct-space-4) auto 0;
 }
 
+/* The button recipe centres its content. In a row of cards whose sentences
+   wrap to different lengths, a one-line card centred its title lower than
+   its neighbours ("Explain this codebase" sat off the line), so the content
+   starts at the top-left corner of every card. */
+/* They are cards, the same hairline card on the card fill as the intents
+   above: drawn bare, the prompts sat straight on the ground's dither and read
+   as loose text on a picture rather than things to pick. */
 .code-home__suggestions > button {
   display: grid;
   height: auto;
+  align-content: start;
+  justify-content: start;
   gap: var(--oct-space-1);
   justify-items: start;
   padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
   text-align: left;
   white-space: normal;
+}
+
+.code-home__suggestions > button:hover:not(:disabled) {
+  border-color: var(--octant-border-strong);
+  background: var(--octant-card);
 }
 
 .draft-thread__intent-cards > button {
@@ -2834,6 +3008,7 @@ form > .work-composer-adapter__attachments {
   height: auto;
   min-height: 0;
   align-content: start;
+  justify-content: start;
   justify-items: start;
   gap: 4px;
   padding: 12px 14px;
@@ -2997,13 +3172,19 @@ form > .work-composer-adapter__attachments {
   container-type: inline-size;
 }
 
+/* Continue's rows share one card, divided by hairlines, so the list reads
+   as one object on the page rather than lines drawn over the ground. */
 .code-home__grid--rows {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
 }
 
-.code-home__grid--rows > li {
-  border-bottom: 1px solid var(--oct-border);
+.code-home__grid--rows > li + li {
+  border-top: 1px solid var(--oct-border);
 }
 
 .code-home__row {

@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, type ReactNode } from "react";
 import type { SettingsScope } from "./registry";
 
 const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
@@ -13,6 +13,13 @@ const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
 export function scopeLabel(scope: SettingsScope): string {
   return SCOPE_LABELS[scope];
 }
+
+/**
+ * The scope the whole page applies to, said once under its title. A row whose
+ * scope matches it prints nothing: "This app" beside forty rows of one page
+ * was the loudest text on it. A row that differs still says so.
+ */
+export const SettingsPageScope = createContext<SettingsScope | undefined>(undefined);
 
 export interface ScopeIndicatorProps {
   readonly scope: SettingsScope;
@@ -72,6 +79,7 @@ export function SettingRow({
   children,
 }: SettingRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
+  const pageScope = useContext(SettingsPageScope);
 
   useEffect(() => {
     if (!focused || rowRef.current === null) return;
@@ -130,7 +138,7 @@ export function SettingRow({
           the control's `grid-row: 1 / -1` span does not cover. */}
       <p className="setrow-hint" id={`${settingId}-description`}>
         {description === undefined ? null : <span>{description} </span>}
-        <ScopeIndicator scope={scope} />
+        {pageScope === scope ? null : <ScopeIndicator scope={scope} />}
       </p>
       <div className="setrow-control">{children}</div>
     </div>

@@ -10,6 +10,8 @@ const dials = {
   patternSpeed: 1,
   patternIntensity: 0.6,
   photoDithered: true,
+  effect: { kind: "dither", cell: 2, levels: 4 },
+  pulse: false,
   photoOpacity: 0.42,
   scope: "welcome",
   coversSidebar: false,
@@ -112,6 +114,8 @@ describe("AppBackdrop", () => {
           backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
           backgroundAnimated: true,
           animated: false,
+          // Plain, so the animated preset stays a moving CSS image.
+          effect: { kind: "none", cell: 3, levels: 8 },
         }}
       />,
     );
@@ -121,6 +125,44 @@ describe("AppBackdrop", () => {
       backgroundImage: 'url("/zen-backgrounds/perspective-dot-plane-dark.webp")',
     });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("prints a built-in through its effect from the still frame, and marks the ground to breathe", async () => {
+    const fetched = vi.fn(async () => new Response(new Blob([new Uint8Array([1])])));
+    vi.stubGlobal("fetch", fetched);
+    try {
+      const { container } = render(
+        <AppBackdrop
+          fetcher={vi.fn()}
+          placement="shell"
+          resolved={{
+            ...dials,
+            kind: "builtin",
+            backgroundId: "perspective-dot-plane-animated",
+            backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
+            backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+            backgroundAnimated: true,
+            animated: false,
+            pulse: true,
+            effect: { kind: "pixelate", cell: 6, levels: 8 },
+          }}
+        />,
+      );
+      expect(container.querySelector(".app-backdrop__builtin")).toBeNull();
+      expect(container.querySelector(".app-backdrop__photo")).toHaveAttribute(
+        "data-effect",
+        "pixelate",
+      );
+      expect(container.querySelector("[data-octant-app-backdrop]")).toHaveAttribute(
+        "data-pulse",
+        "true",
+      );
+      await waitFor(() =>
+        expect(fetched).toHaveBeenCalledWith("/zen-backgrounds/perspective-dot-plane.jpg"),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("marks a photo as clean when dithering and the pattern are disabled", () => {
@@ -135,6 +177,8 @@ describe("AppBackdrop", () => {
           animated: false,
           patternEnabled: false,
           photoDithered: false,
+          effect: { kind: "none", cell: 2, levels: 4 },
+          pulse: false,
         }}
       />,
     );

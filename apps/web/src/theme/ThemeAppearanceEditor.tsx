@@ -21,6 +21,14 @@ export function ThemeAppearanceEditor(props: {
   readonly effectivePlugins?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
   /** The control a Settings deep link or search result landed on. */
   readonly focusedSetting?: string;
+  /**
+   * Sections the page places between the theme's own: the window's glass and
+   * the background after the colour scheme, reading after typography. The
+   * page reads look, then text, then accessibility, rather than every theme
+   * control first and the rest after.
+   */
+  readonly afterScheme?: ReactNode;
+  readonly afterTypography?: ReactNode;
 }) {
   const focusedSetting = props.focusedSetting;
   const theme = props.controller;
@@ -29,10 +37,17 @@ export function ThemeAppearanceEditor(props: {
     isAppearancePresetAvailable(preset.id, props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE),
   );
   if (draft === undefined) {
+    // The page's own sections do not wait on the theme: glass and reading are
+    // shell settings, and they stayed reachable while the theme loaded before
+    // they were placed between its sections.
     return (
-      <p className="settings-view__empty" role="status">
-        Loading Appearance settings…
-      </p>
+      <>
+        <p className="settings-view__empty" role="status">
+          Loading Appearance settings…
+        </p>
+        {props.afterScheme}
+        {props.afterTypography}
+      </>
     );
   }
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
@@ -132,6 +147,7 @@ export function ThemeAppearanceEditor(props: {
           </SettingRow>
         </div>
       </section>
+      {props.afterScheme}
       {/* The interface font and its size are among the most-changed settings
           in the app, so they are not worth a click to reach. */}
       <section className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
@@ -180,6 +196,7 @@ export function ThemeAppearanceEditor(props: {
           </SettingsDisclosure>
         </div>
       </section>
+      {props.afterTypography}
       <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
         <legend>Accessibility</legend>
         <div className="setgroup">
@@ -415,4 +432,4 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
   );
 }
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";

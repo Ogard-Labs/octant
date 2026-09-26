@@ -572,8 +572,12 @@ flowchart LR
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
-- **Composer feature tips.** Empty Chat, Work, and Code composers show a short
-  tip about a built-in feature instead of a fixed placeholder. A session-local
+- **Composer feature tips.** An empty follow-up composer in a Chat, Work, or
+  Code thread shows a short tip about a built-in feature instead of a fixed
+  placeholder. A start screen's composer asks in plain words instead ("Ask
+  anything…", "Describe the work…", "Describe the change…"): a first-time
+  person meeting "Tip: Press Enter to send" where a prompt belongs could not
+  tell what the box was for. A session-local
   sequence advances when a composer mounts or its thread identity changes,
   including returning to a thread and creating another draft. It stays steady
   through typing and routine updates. Callers offer only mounted capabilities:

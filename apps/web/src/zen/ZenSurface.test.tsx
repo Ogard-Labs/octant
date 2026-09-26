@@ -60,6 +60,8 @@ const APP_GROUND: ResolvedAppBackground = {
   patternSpeed: 1,
   patternIntensity: 0.6,
   photoDithered: true,
+  effect: { kind: "dither", cell: 2, levels: 4 },
+  pulse: false,
   photoOpacity: 0.42,
   scope: "everywhere",
   coversSidebar: false,

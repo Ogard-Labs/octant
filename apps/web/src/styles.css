@@ -6026,34 +6026,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
 }
 
-.code-board__search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: var(--oct-rail-button-h);
-  padding: 0 9px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-  background: var(--oct-surface);
-}
-
-.code-board__search:focus-within {
-  border-color: var(--oct-accent-fg);
-  box-shadow: 0 0 0 1px var(--oct-accent-fg);
-}
-
-.code-board__search input[type="search"] {
-  width: 100%;
-  min-width: 0;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  font-size: var(--oct-text-sm);
-  background: transparent;
-  color: var(--oct-fg);
-}
+/* The Board search is the shared toolbar field (surface.css). A second frame
+   here zeroed the input's padding, so the magnifier sat on top of the
+   placeholder, and drew an accent ring on focus. */
 
 .code-board__filters {
   display: flex;
