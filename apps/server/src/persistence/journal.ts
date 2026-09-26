@@ -116,6 +116,7 @@ export class Journal {
   readonly #replayRows: SqliteStatement;
   readonly #replayAggregateTypeRows: SqliteStatement;
   readonly #replayAggregateTypeThreadRows: SqliteStatement;
+  readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
   readonly #latestThreadKindRows: SqliteStatement;
 
@@ -198,6 +199,12 @@ export class Journal {
         AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
       ORDER BY global_sequence DESC LIMIT ?
     `);
+    // The thread predicate is spelled exactly as the expression in
+    // `event_journal_thread_kind_sequence`, because SQLite only uses an
+    // expression index for a textually identical expression. The bare
+    // `json_extract` form this replaced searched on `aggregate_type` alone and
+    // read every code-operation row's payload, on every batch of every
+    // thread's history read.
     this.#replayAggregateTypeThreadRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
@@ -205,8 +212,35 @@ export class Journal {
         actor_id, ${actorJsonSelect}, occurred_at, payload_json
       FROM event_journal
       WHERE aggregate_type = ?
-        AND json_extract(payload_json, '$.threadId') = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
         AND global_sequence > ?
+      ORDER BY global_sequence ASC
+      LIMIT ?
+    `);
+    // The same thread slice, narrowed in SQL to the aggregates that recorded
+    // an event of one kind, plus rows whose event carries a result of one
+    // kind. A reader that folds per-operation history (the Code conversation)
+    // ignores every other row, and a thread whose journal was flooded with
+    // one-event terminal attaches had 19,026 of those: decoding each one in
+    // JavaScript held the event loop for over a second per read.
+    this.#replayThreadAnchoredRows = options.connection.prepare(`
+      SELECT
+        global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+        AND global_sequence > ?
+        AND (
+          aggregate_id IN (
+            SELECT aggregate_id FROM event_journal
+            WHERE aggregate_type = ?
+              AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+              AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+          )
+          OR CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END = ?
+        )
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
@@ -518,6 +552,47 @@ export class Journal {
         cursor.aggregateType,
         cursor.threadId,
         cursor.afterSequence,
+        cursor.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * One thread's slice of an aggregate type, restricted to every row of an
+   * aggregate that recorded an event of `anchorKind` and to rows whose event
+   * carries a result of `resultKind`, in journal order. Rows are still decoded
+   * through the registered schema; the filter only decides which rows are read.
+   */
+  replayThreadAnchoredRows(cursor: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly anchorKind: string;
+    readonly resultKind: string;
+    readonly afterSequence: number;
+    readonly limit: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      cursor.aggregateType.trim().length === 0 ||
+      cursor.threadId.trim().length === 0 ||
+      cursor.anchorKind.trim().length === 0 ||
+      cursor.resultKind.trim().length === 0 ||
+      !Number.isSafeInteger(cursor.afterSequence) ||
+      cursor.afterSequence < 0 ||
+      !Number.isSafeInteger(cursor.limit) ||
+      cursor.limit < 1 ||
+      cursor.limit > 1_000
+    ) {
+      throw new JournalInputInvalid({ operation: "replay" });
+    }
+    return (
+      this.#replayThreadAnchoredRows.all(
+        cursor.aggregateType,
+        cursor.threadId,
+        cursor.afterSequence,
+        cursor.aggregateType,
+        cursor.threadId,
+        cursor.anchorKind,
+        cursor.resultKind,
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));

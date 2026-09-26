@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReplayCursor } from "@octant/contracts";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import { EventRegistry } from "./eventRegistry";
 import {
@@ -658,6 +658,32 @@ describe("Journal", () => {
     expect(journal.replayAggregateTypeForThread(cursor(1)).map((event) => event.eventId)).toEqual([
       ids.event3,
     ]);
+    connection.close();
+  });
+
+  it("finds a thread's rows through the thread index instead of reading every row of the type", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    // The statements the journal itself prepared, not a copy of their text: a
+    // copy would keep passing after the journal's own spelling drifted away
+    // from the index expression, which is how the thread replay lost it.
+    const threadReplays = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter(
+        (sql) => sql.includes("'$.threadId'") && sql.includes("ORDER BY global_sequence ASC"),
+      );
+    prepare.mockRestore();
+
+    expect(threadReplays).toHaveLength(2);
+    for (const sql of threadReplays) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toContain("event_journal_thread_kind_sequence (aggregate_type=? AND <expr>=?");
+      expect(plan).not.toMatch(/SCAN event_journal\b/);
+    }
     connection.close();
   });
 
