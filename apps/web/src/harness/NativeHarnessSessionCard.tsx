@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  NativeHarnessFollowUpCreation,
-  NativeHarnessFollowUpPreview,
-  NativeHarnessFollowUpSuggestion,
-  NativeHarnessRouteDecision,
-  NativeHarnessSessionView,
-} from "@octant/contracts";
+import type { NativeHarnessRouteDecision, NativeHarnessSessionView } from "@octant/contracts";
 import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
@@ -18,19 +12,9 @@ import "./native-harness.css";
 export interface NativeHarnessSessionCardProps {
   readonly client: Pick<
     NativeHarnessClient,
-    | "session"
-    | "command"
-    | "previewFollowUp"
-    | "activateFollowUp"
-    | "answerQuestion"
-    | "decideApproval"
+    "session" | "command" | "answerQuestion" | "decideApproval"
   >;
   readonly threadId: string;
-  /** Called with the standalone prompt once a follow-up is confirmed. */
-  readonly onFollowUpActivated?: (input: {
-    readonly preview: NativeHarnessFollowUpPreview;
-    readonly created: NativeHarnessFollowUpCreation;
-  }) => void;
   readonly refreshIntervalMs?: number;
 }
 
@@ -54,15 +38,13 @@ function describeRoute(decision: NativeHarnessRouteDecision): string {
 
 /**
  * The harness session for one thread: its status, the routing decisions that
- * were made, what the advisor did, and the follow-ups the lead suggested.
- * Nothing here spawns work by itself — a follow-up is previewed, confirmed,
- * and then handed to the surface's ordinary creation path.
+ * were made, and what the advisor did. The follow-ups a reply suggests are
+ * the thread's on every provider and show over its composer instead.
  */
 export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   const [view, setView] = useState<NativeHarnessSessionView | null>();
   const requestGeneration = useRef(0);
   const [error, setError] = useState<string>();
-  const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [busy, setBusy] = useState(false);
   const [draftAnswer, setDraftAnswer] = useState("");
 
@@ -166,42 +148,6 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       setBusy(false);
     }
   }, [props.client, props.threadId, view, busy, load]);
-
-  const openPreview = useCallback(
-    async (suggestion: NativeHarnessFollowUpSuggestion) => {
-      const result = await props.client.previewFollowUp(props.threadId, String(suggestion.id));
-      if ("wouldCreate" in result) setPreview(result);
-      else setError(result.kind === "follow-up-refused" ? result.message : "Preview refused.");
-    },
-    [props.client, props.threadId],
-  );
-
-  const confirm = useCallback(async () => {
-    if (
-      preview === undefined ||
-      view === null ||
-      view === undefined ||
-      view.followUps === undefined
-    )
-      return;
-    setBusy(true);
-    try {
-      const result = await props.client.activateFollowUp(props.threadId, {
-        turnId: view.followUps.turnId,
-        suggestionId: preview.suggestion.id,
-        confirmed: true,
-      });
-      if (result.kind === "follow-up-activated") {
-        props.onFollowUpActivated?.({ preview, created: result.created });
-        setPreview(undefined);
-        await load();
-      } else {
-        setError(result.message);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [preview, props, view, load]);
 
   if (view === undefined) {
     // The Agents tab mounts this card above the run hierarchy, which shows
@@ -370,50 +316,6 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             ))}
           </ul>
         </>
-      )}
-      {view.followUps === undefined || view.followUps.suggestions.length === 0 ? null : (
-        <>
-          <h4>Suggested next</h4>
-          <div className="native-harness-chips">
-            {view.followUps.suggestions.map((suggestion) => {
-              const activated = view.activatedFollowUpIds.includes(suggestion.id);
-              return (
-                <OctantButton
-                  disabled={activated || busy}
-                  key={String(suggestion.id)}
-                  onClick={() => void openPreview(suggestion)}
-                  size="sm"
-                  variant="secondary"
-                >
-                  {suggestion.title}
-                  {activated ? " ✓" : ""}
-                </OctantButton>
-              );
-            })}
-          </div>
-        </>
-      )}
-      {preview === undefined ? null : (
-        <div className="native-harness-preview" role="dialog" aria-label="Follow-up preview">
-          <p>
-            <strong>{preview.suggestion.title}</strong> will{" "}
-            {preview.wouldCreate.kind === "same-thread"
-              ? "continue in this thread"
-              : preview.wouldCreate.kind === "new-thread"
-                ? `start a new ${preview.wouldCreate.mode} thread`
-                : "start a new Code thread on its own worktree"}
-            .
-          </p>
-          <pre className="native-harness-preview__prompt">{preview.suggestion.prompt}</pre>
-          <div className="native-harness-panel__actions">
-            <OctantButton disabled={busy} onClick={() => void confirm()} variant="default">
-              Confirm
-            </OctantButton>
-            <OctantButton onClick={() => setPreview(undefined)} variant="ghost">
-              Cancel
-            </OctantButton>
-          </div>
-        </div>
       )}
       {error === undefined ? null : (
         <p className="native-harness-panel__error" role="alert">

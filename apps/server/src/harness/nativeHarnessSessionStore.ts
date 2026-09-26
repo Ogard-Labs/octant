@@ -14,9 +14,6 @@ import {
   decodeUtcTimestamp,
   type NativeHarnessAdvisorIntervention,
   type NativeHarnessContextReduction,
-  type NativeHarnessFollowUpCreation,
-  type NativeHarnessFollowUpId,
-  type NativeHarnessFollowUpSet,
   type NativeHarnessQuestion,
   type NativeHarnessQuestionId,
   type NativeHarnessQuestionStatus,
@@ -63,8 +60,6 @@ interface SessionRecord {
   turns: NativeHarnessTurnRecord[];
   reductions: NativeHarnessContextReduction[];
   interventions: NativeHarnessAdvisorIntervention[];
-  followUps: NativeHarnessFollowUpSet | undefined;
-  activated: NativeHarnessFollowUpId[];
   questions: NativeHarnessQuestion[];
   approvals: NativeHarnessApproval[];
   version: number;
@@ -72,8 +67,8 @@ interface SessionRecord {
 
 /**
  * One harness session per thread, rebuilt from the journal. Every routing
- * decision, turn, context reduction, advisor intervention, and follow-up set
- * is a frame here, which is what lets the web, desktop, phone, and CLI show
+ * decision, turn, context reduction, and advisor intervention is a frame
+ * here, which is what lets the web, desktop, phone, and CLI show
  * the same truth about why a model was switched or a run was paused.
  */
 export class NativeHarnessSessionStore {
@@ -104,8 +99,9 @@ export class NativeHarnessSessionStore {
       turns: record.turns,
       reductions: record.reductions,
       interventions: record.interventions,
-      ...(record.followUps === undefined ? {} : { followUps: record.followUps }),
-      activatedFollowUpIds: record.activated,
+      // Follow-up suggestions belong to the thread on every provider; the
+      // session route joins them in from their own store.
+      activatedFollowUpIds: [],
       questions: record.questions,
       approvals: record.approvals,
       steering: this.#steering.get(threadId) ?? [],
@@ -158,8 +154,6 @@ export class NativeHarnessSessionStore {
       turns: [],
       reductions: [],
       interventions: [],
-      followUps: undefined,
-      activated: [],
       questions: [],
       approvals: [],
       version: 0,
@@ -232,38 +226,6 @@ export class NativeHarnessSessionStore {
     if (intervention.kind === "pause-run") {
       this.pause(threadId, "paused-by-advisor", intervention.reason);
     }
-  }
-
-  recordFollowUps(threadId: string, followUps: NativeHarnessFollowUpSet): void {
-    const record = this.#records.get(threadId);
-    if (record === undefined) return;
-    this.#append(
-      record,
-      threadId,
-      NATIVE_HARNESS_SESSION_EVENT_NAMES.followUpsSuggested,
-      followUps,
-    );
-    record.followUps = followUps;
-    record.activated = [];
-  }
-
-  activateFollowUp(
-    threadId: string,
-    suggestionId: NativeHarnessFollowUpId,
-    created: NativeHarnessFollowUpCreation,
-  ): "activated" | "suggestion-not-found" | "already-activated" {
-    const record = this.#records.get(threadId);
-    if (record === undefined) return "suggestion-not-found";
-    const suggestion = record.followUps?.suggestions.find((entry) => entry.id === suggestionId);
-    if (suggestion === undefined) return "suggestion-not-found";
-    if (record.activated.includes(suggestionId)) return "already-activated";
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.followUpActivated, {
-      sessionId: record.session.id,
-      suggestionId,
-      created,
-    });
-    record.activated.push(suggestionId);
-    return "activated";
   }
 
   askApproval(threadId: string, approval: NativeHarnessApproval): void {
@@ -474,8 +436,6 @@ export class NativeHarnessSessionStore {
         turns: [],
         reductions: [],
         interventions: [],
-        followUps: undefined,
-        activated: [],
         questions: [],
         approvals: [],
         version: 1,
@@ -505,11 +465,6 @@ export class NativeHarnessSessionStore {
       }
     } else if (eventName === names.advisorIntervened) {
       push(record.interventions, payload as NativeHarnessAdvisorIntervention);
-    } else if (eventName === names.followUpsSuggested) {
-      record.followUps = payload as NativeHarnessFollowUpSet;
-      record.activated = [];
-    } else if (eventName === names.followUpActivated) {
-      record.activated.push(body.suggestionId as NativeHarnessFollowUpId);
     } else if (eventName === names.approvalAsked) {
       push(record.approvals, payload as NativeHarnessApproval);
     } else if (eventName === names.approvalSettled) {

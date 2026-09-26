@@ -65,6 +65,7 @@ export * from "./modes";
 export * from "./multiModelPool";
 export * from "./nativeHarnessRouting";
 export * from "./nativeHarness";
+export * from "./followUpSuggestions";
 export * from "./navigatorAssistant";
 export * from "./userProfile";
 export * from "./previews";

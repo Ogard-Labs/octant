@@ -10,9 +10,8 @@ const scope = {
 };
 
 function observer(isHarness = true, session?: { status: string; detail?: string }) {
-  const recorded: { turns: unknown[]; followUps: unknown[]; interventions: unknown[] } = {
+  const recorded: { turns: unknown[]; interventions: unknown[] } = {
     turns: [],
-    followUps: [],
     interventions: [],
   };
   let counter = 0;
@@ -30,9 +29,6 @@ function observer(isHarness = true, session?: { status: string; detail?: string 
       markRunning: () => undefined,
       recordTurn: (_threadId: string, turn: unknown) => {
         recorded.turns.push(turn);
-      },
-      recordFollowUps: (_threadId: string, set: unknown) => {
-        recorded.followUps.push(set);
       },
       recordReduction: () => undefined,
       recordIntervention: (_threadId: string, intervention: unknown) => {
@@ -54,7 +50,7 @@ describe("native harness turn observer", () => {
   it("puts the stable instructions in front of a harness turn and nothing in front of others", () => {
     const harness = observer(true).subject.contextFor(scope);
     expect(harness[0]?.kind).toBe("instructions");
-    expect(harness[0]?.text).toContain("octant-follow-ups");
+    expect(harness[0]?.text).toContain("todo-write");
     expect(observer(false).subject.contextFor(scope)).toEqual([]);
   });
 
@@ -81,7 +77,7 @@ describe("native harness turn observer", () => {
     ).toEqual({ kind: "admitted" });
   });
 
-  it("records the turn and the follow-ups a reply ends with", async () => {
+  it("records the turn a reply completes", async () => {
     const { subject, recorded } = observer();
     await subject.turnCompleted({
       ...scope,
@@ -94,7 +90,6 @@ describe("native harness turn observer", () => {
       toolCalls: 4,
       stopReason: "end-of-turn",
     });
-    expect(recorded.followUps).toHaveLength(1);
     expect(recorded.interventions).toEqual([]);
   });
 

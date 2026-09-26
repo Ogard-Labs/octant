@@ -1,0 +1,59 @@
+/*
+ * Follow-up chips sit at the top of the composer, inside its surface, so an
+ * offer reads as part of what the person types next rather than as another
+ * transcript row.
+ */
+.composer-follow-ups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.composer-follow-ups__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-follow-ups__label {
+  margin-inline-end: 4px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.composer-follow-ups__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer-follow-ups__summary,
+.composer-follow-ups__prompt,
+.composer-follow-ups__error {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.composer-follow-ups__summary {
+  color: var(--octant-text-secondary);
+}
+
+.composer-follow-ups__prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.composer-follow-ups__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.composer-follow-ups__error {
+  color: var(--octant-danger-text);
+}
