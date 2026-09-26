@@ -11,7 +11,6 @@ import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-
 import {
   AgentRunControlRefused,
   buildControlRequestCommand,
-  previewAgentRunControl,
   resolveAgentRunControlFacts,
   type AgentRunControlParentFacts,
 } from "./agentRunControlService";
@@ -150,7 +149,7 @@ describe("server-derived AgentRun control facts", () => {
     const facts = resolveAgentRunControlFacts({
       parent: chatParent(),
       role: "research",
-      creationPosture: "ask",
+      creationPosture: "automatic",
       nativeEvidence: ineligibleNative,
     });
     expect(facts.mode).toBe("chat");
@@ -211,15 +210,13 @@ describe("server-derived AgentRun control facts", () => {
   });
 
   it("surfaces Octant-managed fallback and its reason when native is ineligible", () => {
-    const preview = previewAgentRunControl({
+    const facts = resolveAgentRunControlFacts({
       parent: chatParent(),
-      creationPosture: "ask",
+      creationPosture: "automatic",
       nativeEvidence: ineligibleNative,
     });
-    expect(preview.status).toBe("ready");
-    if (preview.status !== "ready") return;
-    expect(preview.facts.executionKind).toBe("octant-managed");
-    expect(preview.facts.nativeFallbackReason).toMatch(/nativeChildAgents/);
+    expect(facts.executionKind).toBe("octant-managed");
+    expect(facts.nativeFallbackReason).toMatch(/nativeChildAgents/);
   });
 });
 

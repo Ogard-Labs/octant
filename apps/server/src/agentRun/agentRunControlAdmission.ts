@@ -65,9 +65,9 @@ export type AgentRunControlAdmission =
   | { readonly kind: "invalid"; readonly message: string; readonly status: number };
 
 /**
- * The one path that turns a control request into an admitted child, whether
- * a person asked from a surface or a lead model asked through the delegate
- * tool. Parent authority, workspace admission, routing, and posture are all
+ * The one path that turns a control request into an admitted child: the
+ * thread's agent asking through the Octant Harness delegate tool. Parent
+ * authority, workspace admission, routing, and posture are all
  * decided here from the server's own records; the request supplies a role, a
  * task, and an idempotency key.
  *

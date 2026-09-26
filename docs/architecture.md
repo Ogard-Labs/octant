@@ -389,13 +389,18 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
-A child AgentRun receives a server-prepared workspace: Chat a research-only
-virtual workspace, Work the current confined Project root and binding revision,
-and Code an isolated managed worktree that is confirmed before admission.
-Renderers supply only receipt ids — never absolute paths or a claimed
-`verified` flag. Admission, restart, and replay refuse stale, expired,
-foreign-thread, foreign-Project, parent-checkout, unavailable, or
-wider-than-parent grants.
+A child AgentRun starts only when the thread's agent delegates to it through the
+Octant Harness `delegate` tool, and its result returns to that agent through
+`collect`; the host's AgentRun routes read and control existing runs but start
+none. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
+on the server: Chat a research-only virtual workspace, Work the current
+confined Project root and binding revision, and Code an isolated managed
+worktree that is confirmed before admission. No client supplies a path, a
+receipt, or a claimed `verified` flag. Admission, restart, and replay refuse
+stale, expired, foreign-thread, foreign-Project, parent-checkout, unavailable,
+or wider-than-parent grants. Whether the agent may delegate is one host
+setting, on by default; a stored Ask from the retired "only when I start them"
+choice reads as off.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
@@ -761,7 +766,8 @@ native harness in `apps/server/src/harness`:
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
   and a per-slot circuit breaker. Child runs take their model from the role's
-  slot through the shared `admitAgentRunControlRequest` path.
+  slot through `admitAgentRunControlRequest`, the one path that starts a
+  subagent.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
   the questions a lead asked with how each was

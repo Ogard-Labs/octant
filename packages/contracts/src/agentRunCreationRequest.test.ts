@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeAgentRunControlRequest,
   decodeAgentRunCreationRequest,
-  decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspaceHandle,
-  decodeAgentRunWorkspacePreparationRequest,
-  decodeAgentRunWorkspacePreparationResult,
 } from "./agentRunCreationRequest";
 
 const ids = {
@@ -169,32 +166,6 @@ describe("AgentRunCreationRequest", () => {
         verified: true,
       }),
     ).toThrow();
-  });
-
-  it("decodes prepare and confirm requests that name only ids", () => {
-    expect(
-      decodeAgentRunWorkspacePreparationRequest({ parentThreadId: ids.thread }).parentThreadId,
-    ).toBe(ids.thread);
-    expect(
-      decodeAgentRunWorkspaceConfirmationRequest({
-        parentThreadId: ids.thread,
-        worktreeReceiptId: ids.receipt,
-      }).worktreeReceiptId,
-    ).toBe(ids.receipt);
-    expect(() =>
-      decodeAgentRunWorkspacePreparationRequest({
-        parentThreadId: ids.thread,
-        canonicalRoot: "/projects/demo",
-      }),
-    ).toThrow();
-  });
-
-  it("decodes a structured workspace refusal without a path", () => {
-    const refused = decodeAgentRunWorkspacePreparationResult({
-      status: "refused",
-      reason: "parent-checkout",
-    });
-    expect(refused).toEqual({ status: "refused", reason: "parent-checkout" });
   });
 
   it("rejects mismatched mode and workspace kinds", () => {

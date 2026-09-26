@@ -121,9 +121,10 @@ to review, done) that opens the Agents dock; reading, steering, and every other
 AgentRun control stay in the Agents dock. The thread's live subagents (working, or finished
 and awaiting review) also show as a card tucked behind its composer, whose rows open the
 Agents dock on that subagent; see [DESIGN.md](../../DESIGN.md#welcome-and-composer).
-The Agents dock is a list and a page. The list has one title with a New
-control that reveals the New subagent form (open by default only when the
-thread has none), then Working and Finished sections of one-button rows —
+The Agents dock is a list and a page, and it shows and controls subagents
+without starting them: only the thread's agent starts one, through the Octant
+Harness `delegate` tool, and collects its result. The list has one title, then
+Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
 rows newest first and an unreviewed result marked "Needs review". A row opens
 that subagent's page in place of the list, with a back control: its task as
@@ -132,9 +133,8 @@ the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page
 says so. Mark reviewed, Steer, Retry, Resume, and Cancel sit in one bar pinned
-under the transcript. What the host resolved for a new subagent folds under a
-single line naming its model and workspace, in plain access words rather than
-ids or policy keys. The workspace-rail Agents Center is that same
+under the transcript. A thread with none says subagents appear when the agent
+hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes; on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and

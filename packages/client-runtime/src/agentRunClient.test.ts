@@ -266,71 +266,10 @@ describe("agentRunClient", () => {
     ).rejects.toBeInstanceOf(AgentRunClientFailure);
   });
 
-  it("prepares a child workspace through the server-owned route", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(input)).toContain("/api/agent-runs/workspaces/prepare");
-      expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toEqual({ parentThreadId });
-      return new Response(
-        JSON.stringify({
-          status: "prepared",
-          workspace: {
-            kind: "chat-virtual",
-            mode: "chat",
-            receiptId: "66666666-6666-4666-8666-666666666666",
-          },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
-    });
-    const client = createAgentRunClient({
-      baseUrl: "http://127.0.0.1:8787",
-      fetch: fetchImpl as unknown as typeof fetch,
-      windowCapability: "cap",
-    });
-    const prepared = await client.prepareWorkspace({ parentThreadId: parentThreadId as never });
-    expect(prepared).toEqual({
-      status: "prepared",
-      workspace: {
-        kind: "chat-virtual",
-        mode: "chat",
-        receiptId: "66666666-6666-4666-8666-666666666666",
-      },
-    });
-  });
-
-  it("requests a new child run through the explicit creation route", async () => {
-    const creationRequest = {
-      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-      parentThreadId,
-      role: "research" as const,
-      task: "Summarize the open PRs.",
-    };
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(input)).toContain("/api/agent-runs/request");
-      expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toEqual(creationRequest);
-      return new Response(
-        JSON.stringify({
-          kind: "run-accepted",
-          run: { id: runId, lifecycleStatus: "queued", task: creationRequest.task },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
-    });
-    const client = createAgentRunClient({
-      baseUrl: "http://127.0.0.1:8787",
-      fetch: fetchImpl as unknown as typeof fetch,
-      windowCapability: "cap",
-    });
-    const result = await client.requestRun(creationRequest as never);
-    expect(result.kind).toBe("run-accepted");
-  });
-
-  it("surfaces creation denial as a typed failure with the server's reason", async () => {
+  it("surfaces a refused run command as a typed result with the server's reason", async () => {
     const fetchImpl = vi.fn(
       async () =>
-        new Response(JSON.stringify({ kind: "run-command-failed", reason: "posture-rejected" }), {
+        new Response(JSON.stringify({ kind: "run-command-failed", reason: "stale-version" }), {
           status: 409,
           headers: { "content-type": "application/json" },
         }),
@@ -340,35 +279,33 @@ describe("agentRunClient", () => {
       fetch: fetchImpl as unknown as typeof fetch,
       windowCapability: "cap",
     });
-    const result = await client.requestRun({
-      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" as never,
-      parentThreadId: parentThreadId as never,
-      role: "research",
-      task: "Summarize the open PRs.",
+    const result = await client.steer({
+      runId: runId as never,
+      expectedVersion: 3,
+      message: "Focus on the failing test.",
     });
     expect(result.kind).toBe("run-command-failed");
-    expect((result as { reason?: string }).reason).toBe("posture-rejected");
+    expect(result.reason).toBe("stale-version");
   });
 
-  it("preserves a server-side creation rejection message", async () => {
+  it("preserves a server-side run command rejection message", async () => {
     const client = createAgentRunClient({
       baseUrl: "http://127.0.0.1:8787",
       fetch: (async () =>
-        new Response(JSON.stringify({ error: "The selected provider/model is not ready." }), {
-          status: 400,
+        new Response(JSON.stringify({ error: "AgentRun steer is not authorized for this run." }), {
+          status: 403,
           headers: { "content-type": "application/json" },
         })) as typeof fetch,
       windowCapability: "cap",
     });
 
     await expect(
-      client.requestRun({
-        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" as never,
-        parentThreadId: parentThreadId as never,
-        role: "research",
-        task: "Summarize the open PRs.",
+      client.steer({
+        runId: runId as never,
+        expectedVersion: 3,
+        message: "Focus on the failing test.",
       }),
-    ).rejects.toThrow("The selected provider/model is not ready.");
+    ).rejects.toThrow("AgentRun steer is not authorized for this run.");
   });
 
   it("cancels a run through the cancel route", async () => {

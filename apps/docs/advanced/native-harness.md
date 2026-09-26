@@ -56,10 +56,10 @@ harness card and in `octant harness session <thread-id>`.
 The lead can hand a bounded task to a child with `delegate`: research,
 implementation, or review. The child runs on the model its role's slot names,
 under authority no wider than its parent, in its own worktree for Code, and
-returns a reply the lead collects. Whether a child may start at all is the
-**Helper agents** setting in **Settings → Octant Harness**: under _Only when I
-start them_ the lead is told a person must start children; under
-_Automatically_ they start within the usual bounds.
+returns a reply the lead collects. This is the only way a subagent starts.
+Whether one may start at all is **Let the agent start subagents** under
+**Settings → Octant Harness → Helper agents**: on by default, and when it is
+off the lead is told subagents are turned off and does the work itself.
 
 This is how a frontier model plans and reviews while cheaper models read and
 implement: put the strong model on `default` and `slow`, the cheap one on

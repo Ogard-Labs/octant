@@ -344,6 +344,7 @@ import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceServic
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
 import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
+import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunControlAdmission";
 import {
   createAgentRunChildWorktreePort,
   deriveAgentRunChildWorktreeThreadId,
@@ -707,7 +708,6 @@ import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
-  nativeHarnessJobForRole,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -1959,37 +1959,11 @@ export function startOctantServer(
       kind: "denied",
       message: "Canvas is unavailable on this host.",
     });
-    const agentRunRouteDependencies: AgentRunRouteDependencies = {
-      windowAuthorityStore,
-      // A child's model comes from its role's slot when one is configured;
-      // the decision is journaled on the parent's harness session so a
-      // switch is visible, and an unroutable slot falls back to inheriting.
-      routeOverride: ({ parent, role }) => {
-        if (nativeHarnessRouter === undefined) return undefined;
-        const decision = nativeHarnessRouter.resolve({
-          job: nativeHarnessJobForRole(role),
-          ...(parent.parentRoute.projectId === undefined
-            ? {}
-            : { projectId: decodeProjectId(parent.parentRoute.projectId) }),
-        });
-        nativeHarnessSessions?.recordRouteDecision(
-          String(parent.workspaceParent.threadId),
-          decision,
-        );
-        if (decision.kind === "unroutable") return undefined;
-        return {
-          providerInstanceId: decision.candidate.providerInstanceId,
-          modelId: decision.candidate.modelId,
-          ...(decision.candidate.reasoning === undefined
-            ? {}
-            : { reasoning: decision.candidate.reasoning }),
-          ...(parent.parentRoute.projectId === undefined
-            ? {}
-            : { projectId: parent.parentRoute.projectId }),
-        };
-      },
+    // Admits the subagents a thread's agent delegates through the Octant
+    // Harness `delegate` tool. No HTTP route starts a subagent: a child a
+    // person started by hand had no agent to hand its result back to.
+    const agentRunAdmission: AgentRunControlAdmissionDependencies = {
       persistence: agentRunPersistence,
-      liveConversations: agentRunLiveConversations,
       orchestration: agentRunOrchestration,
       settings: agentRunSettingsStore,
       providerReadiness: {
@@ -2030,27 +2004,6 @@ export function startOctantServer(
           parentThreadId,
           windowId,
           codeSessionAuthority,
-        }),
-      authorizeCancellation: ({ run, windowId }) =>
-        authorizeAgentRunCancellation({ persistence, workThreadProjection, run, windowId }),
-      // Parent-summary reads and result acknowledgements are gated the same
-      // way as cancellation: the parent thread is resolved from this host's
-      // own thread stores and the window's own workspace, never from a scope
-      // the caller supplied. `workThreadProjection` is declared later in
-      // this scope; the closure runs per request, long after boot.
-      authorizeParentThread: ({ parentThreadId, windowId }) =>
-        authorizeAgentRunParentThread({
-          persistence,
-          workThreadProjection,
-          parentThreadId,
-          windowId,
-        }),
-      resolveCenterContext: ({ parentThreadId, mode }) =>
-        resolveAgentRunCenterContext({
-          persistence,
-          workThreadProjection,
-          parentThreadId,
-          mode,
         }),
       poolRouting: ({ request }) => {
         if (request.pool === undefined) return undefined;
@@ -2149,6 +2102,34 @@ export function startOctantServer(
         },
       },
       uuid: randomUUID,
+    };
+    const agentRunRouteDependencies: AgentRunRouteDependencies = {
+      windowAuthorityStore,
+      persistence: agentRunPersistence,
+      liveConversations: agentRunLiveConversations,
+      orchestration: agentRunOrchestration,
+      authorizeCreation: agentRunAdmission.authorizeCreation,
+      authorizeCancellation: ({ run, windowId }) =>
+        authorizeAgentRunCancellation({ persistence, workThreadProjection, run, windowId }),
+      // Parent-summary reads and result acknowledgements are gated the same
+      // way as cancellation: the parent thread is resolved from this host's
+      // own thread stores and the window's own workspace, never from a scope
+      // the caller supplied. `workThreadProjection` is declared later in
+      // this scope; the closure runs per request, long after boot.
+      authorizeParentThread: ({ parentThreadId, windowId }) =>
+        authorizeAgentRunParentThread({
+          persistence,
+          workThreadProjection,
+          parentThreadId,
+          windowId,
+        }),
+      resolveCenterContext: ({ parentThreadId, mode }) =>
+        resolveAgentRunCenterContext({
+          persistence,
+          workThreadProjection,
+          parentThreadId,
+          mode,
+        }),
       snapshotCanvas: (input) => snapshotCanvasImpl(input),
     };
     const agentRunRoutes = createAgentRunRouteHandler(agentRunRouteDependencies);
@@ -4961,7 +4942,7 @@ export function startOctantServer(
     nativeHarnessRouter = new NativeHarnessRouter({
       store: nativeHarnessRoutingStore,
       isReady: (candidate) =>
-        agentRunRouteDependencies.providerReadiness.isReady({
+        agentRunAdmission.providerReadiness.isReady({
           providerInstanceId: String(candidate.providerInstanceId),
           modelId: String(candidate.modelId),
         }),
@@ -5121,33 +5102,7 @@ export function startOctantServer(
       delegate: (scope) =>
         createNativeHarnessDelegatePort(
           {
-            admission: {
-              persistence: agentRunPersistence,
-              orchestration: agentRunOrchestration,
-              settings: agentRunSettingsStore,
-              providerReadiness: agentRunRouteDependencies.providerReadiness,
-              uuid: randomUUID,
-              authorizeCreation: agentRunRouteDependencies.authorizeCreation,
-              nativeEvidence: ({ parent }) =>
-                agentRunRouteDependencies.nativeEvidence?.({ parent }) ?? {
-                  claimedNativeSupport: "unsupported",
-                  workspace: false,
-                  authority: false,
-                  observability: false,
-                  cancellation: false,
-                  steering: false,
-                  recovery: false,
-                },
-              ...(agentRunRouteDependencies.workspace === undefined
-                ? {}
-                : { workspace: agentRunRouteDependencies.workspace }),
-              ...(agentRunRouteDependencies.poolRouting === undefined
-                ? {}
-                : { poolRouting: agentRunRouteDependencies.poolRouting }),
-              ...(agentRunRouteDependencies.parentContext === undefined
-                ? {}
-                : { parentContext: agentRunRouteDependencies.parentContext }),
-            },
+            admission: agentRunAdmission,
             orchestration: agentRunOrchestration,
             persistence: agentRunPersistence,
             router: nativeHarnessRouterLive,

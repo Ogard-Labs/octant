@@ -5,9 +5,11 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
+  AgentRunPolicySettings,
   AgentRunRequested,
   AgentRunResultAcknowledged,
   AgentRunStatusChanged,
+  decodeAgentRunControlRequest,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
@@ -15,7 +17,7 @@ import {
   decodeWindowId,
   type AgentRun,
   type AgentRunAuthority,
-  type AgentRunId,
+  type AgentRunCommandResult,
   decodeAgentRunCanvasSnapshotResult,
   type AgentRunRoutingReceipt,
   type MultiModelPoolCandidate,
@@ -45,6 +47,13 @@ import { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import { AgentRunProjection } from "./agentRunProjection";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import { createAgentRunRouteHandler, type AgentRunRouteDependencies } from "./agentRunRoutes";
+import {
+  admitAgentRunControlRequest,
+  type AgentRunControlAdmission,
+  type AgentRunControlAdmissionDependencies,
+} from "./agentRunControlAdmission";
+import { AGENT_RUN_SETTINGS_UPDATED, AgentRunSettingsStore } from "./agentRunSettingsStore";
+import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
 
 const directories: string[] = [];
 const now = "2026-08-01T15:00:00.000Z";
@@ -162,7 +171,7 @@ function createHandler(
       }) => ReadonlyArray<{ readonly kind: string; readonly text: string }> | undefined;
     };
     readonly parentMode?: "chat" | "work" | "code";
-    readonly workspace?: AgentRunRouteDependencies["workspace"];
+    readonly workspace?: AgentRunControlAdmissionDependencies["workspace"];
     readonly snapshotCanvas?: AgentRunRouteDependencies["snapshotCanvas"];
   } = {},
 ) {
@@ -173,7 +182,8 @@ function createHandler(
   const registry = new EventRegistry()
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
-    .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged);
+    .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({ connection, registry, projections, clock: () => now });
   const store = new AgentRunEventStore({
@@ -213,88 +223,85 @@ function createHandler(
   });
   const liveConversations = new AgentRunLiveConversationStore();
   let readyProviderId = ids.provider;
-  let creationPosture: "off" | "ask" | "automatic" = "automatic";
-  const handler = createAgentRunRouteHandler({
-    windowAuthorityStore,
-    persistence,
-    liveConversations,
-    orchestration,
-    settings: {
-      current: () => ({ creationPosture, version: 1 as never, updatedAt: now as never }),
-    },
-    providerReadiness: {
-      isReady: ({ providerInstanceId }) => providerInstanceId === readyProviderId,
-    },
-    authorizeCreation: () => {
-      if (options.authorizeCreation?.() === false) return undefined;
-      const parentMode = options.parentMode ?? "chat";
-      const parentAuthority =
-        parentMode === "work"
+  // The real store, so a test sees the posture a host that never chose one gets.
+  const settings = new AgentRunSettingsStore({
+    journal,
+    uuid: (() => {
+      let n = 0;
+      return () => {
+        n += 1;
+        return `dededede-dede-4ede-8ede-${n.toString(16).padStart(12, "0")}`;
+      };
+    })(),
+    actor,
+    clock: () => now,
+  });
+  const authorizeCreation: AgentRunControlAdmissionDependencies["authorizeCreation"] = () => {
+    if (options.authorizeCreation?.() === false) return undefined;
+    const parentMode = options.parentMode ?? "chat";
+    const parentAuthority =
+      parentMode === "work"
+        ? {
+            filesystem: true,
+            shell: false,
+            git: false,
+            network: false,
+            tools: true,
+            subagents: true,
+            executionPolicy: "approval-gated" as const,
+            permissionPersistence: "current-session" as const,
+          }
+        : parentMode === "code"
           ? {
               filesystem: true,
-              shell: false,
-              git: false,
-              network: false,
+              shell: true,
+              git: true,
+              network: true,
               tools: true,
               subagents: true,
               executionPolicy: "approval-gated" as const,
               permissionPersistence: "current-session" as const,
             }
-          : parentMode === "code"
-            ? {
-                filesystem: true,
-                shell: true,
-                git: true,
-                network: true,
-                tools: true,
-                subagents: true,
-                executionPolicy: "approval-gated" as const,
-                permissionPersistence: "current-session" as const,
-              }
-            : {
-                filesystem: false,
-                shell: false,
-                git: false,
-                network: false,
-                tools: true,
-                subagents: true,
-                executionPolicy: "plan" as const,
-                permissionPersistence: "current-session" as const,
-              };
-      return {
-        parentMode,
-        parentAuthority,
-        liveAuthority: parentAuthority,
-        workspaceParent: {
-          threadId: String(ids.thread),
-          mode: parentMode,
-          ...(parentMode === "chat"
-            ? {}
-            : {
-                projectId: "77777777-7777-4777-8777-777777777777",
-                bindingRevisionId: "88888888-8888-4888-8888-888888888888",
-                canonicalRoot: "/projects/demo",
-                checkoutRoot: "/repo",
-              }),
-        },
-        parentRoute: {
-          providerInstanceId: ids.provider as never,
-          modelId: "gpt-4o" as never,
-          ...(parentMode === "chat" ? {} : { projectId: "77777777-7777-4777-8777-777777777777" }),
-        },
-      };
+          : {
+              filesystem: false,
+              shell: false,
+              git: false,
+              network: false,
+              tools: true,
+              subagents: true,
+              executionPolicy: "plan" as const,
+              permissionPersistence: "current-session" as const,
+            };
+    return {
+      parentMode,
+      parentAuthority,
+      liveAuthority: parentAuthority,
+      workspaceParent: {
+        threadId: String(ids.thread),
+        mode: parentMode,
+        ...(parentMode === "chat"
+          ? {}
+          : {
+              projectId: "77777777-7777-4777-8777-777777777777",
+              bindingRevisionId: "88888888-8888-4888-8888-888888888888",
+              canonicalRoot: "/projects/demo",
+              checkoutRoot: "/repo",
+            }),
+      },
+      parentRoute: {
+        providerInstanceId: ids.provider as never,
+        modelId: "gpt-4o" as never,
+        ...(parentMode === "chat" ? {} : { projectId: "77777777-7777-4777-8777-777777777777" }),
+      },
+    };
+  };
+  const admission: AgentRunControlAdmissionDependencies = {
+    persistence,
+    orchestration,
+    settings,
+    providerReadiness: {
+      isReady: ({ providerInstanceId }) => providerInstanceId === readyProviderId,
     },
-    authorizeCancellation: ({ run }) => options.authorizeCancellation?.({ run }) ?? true,
-    authorizeParentThread: (input) => options.authorizeParentThread?.(input) ?? true,
-    resolveCenterContext: ({ parentThreadId }) => ({
-      parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
-    }),
-    ...(options.poolRouting === undefined ? {} : { poolRouting: options.poolRouting }),
-    ...(options.parentContext === undefined
-      ? {}
-      : { parentContext: options.parentContext as never }),
-    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
-    ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
     uuid: (() => {
       let n = 0;
       return () => {
@@ -302,8 +309,83 @@ function createHandler(
         return `cccccccc-cccc-4ccc-8ccc-${n.toString(16).padStart(12, "0")}`;
       };
     })(),
+    authorizeCreation,
+    nativeEvidence: () => ({
+      claimedNativeSupport: "unsupported",
+      workspace: false,
+      authority: false,
+      observability: false,
+      cancellation: false,
+      steering: false,
+      recovery: false,
+    }),
+    ...(options.poolRouting === undefined ? {} : { poolRouting: options.poolRouting }),
+    ...(options.parentContext === undefined
+      ? {}
+      : { parentContext: options.parentContext as never }),
+    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+  };
+  const handler = createAgentRunRouteHandler({
+    windowAuthorityStore,
+    persistence,
+    liveConversations,
+    orchestration,
+    authorizeCreation,
+    authorizeCancellation: ({ run }) => options.authorizeCancellation?.({ run }) ?? true,
+    authorizeParentThread: (input) => options.authorizeParentThread?.(input) ?? true,
+    resolveCenterContext: ({ parentThreadId }) => ({
+      parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
+    }),
+    ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
     now: () => 0,
   });
+  /**
+   * Admits a child from a control request and starts it, as the delegate
+   * tool does, but with the request id, parent run, and pool a test chooses.
+   */
+  const create = async (
+    body: Record<string, unknown>,
+  ): Promise<Exclude<AgentRunControlAdmission, { kind: "admitted" }> | AgentRunCommandResult> => {
+    const admitted = await admitAgentRunControlRequest(admission, {
+      controlRequest: decodeAgentRunControlRequest(body),
+      windowId: String(windowId),
+      confirmed: false,
+    });
+    if (admitted.kind !== "admitted") return admitted;
+    const accepted: AgentRunCommandResult =
+      "kind" in admitted.result ? admitted.result : { kind: "run-accepted", run: admitted.result };
+    if (
+      accepted.kind === "run-accepted" &&
+      accepted.run.lifecycleStatus === "queued" &&
+      accepted.run.recoveryReason === undefined
+    ) {
+      return orchestration.start(accepted.run.id, accepted.run.version, admitted.liveAuthority);
+    }
+    return accepted;
+  };
+  const delegate = () =>
+    createNativeHarnessDelegatePort(
+      {
+        admission,
+        orchestration,
+        persistence,
+        router: {
+          resolve: () => ({ kind: "unroutable", job: "research", reason: "none" }) as never,
+        },
+        sessions: { ensure: () => ({}) as never, recordRouteDecision: () => undefined },
+        uuid: () => String(ids.request),
+      },
+      {
+        parentThreadId: String(ids.thread),
+        windowId: String(windowId),
+        mode: options.parentMode ?? "chat",
+        lead: {
+          hostId: "local",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-4o",
+        } as never,
+      },
+    );
   return {
     handler,
     persistence,
@@ -314,9 +396,9 @@ function createHandler(
     setReadyProvider: (id: string) => {
       readyProviderId = id;
     },
-    setCreationPosture: (posture: "off" | "ask" | "automatic") => {
-      creationPosture = posture;
-    },
+    create,
+    delegate,
+    settings,
   };
 }
 
@@ -1101,63 +1183,102 @@ describe("agentRunRoutes", () => {
     task: "Summarize the open PRs in this repository.",
   });
 
-  it("creates a child run from an explicit request under Automatic posture", async () => {
-    const { handler, token } = createHandler();
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as { kind: string; run: { lifecycleStatus: string } };
-    expect(body.kind).toBe("run-updated");
-    expect(body.run.lifecycleStatus).toBe("starting");
+  /** A run the thread's agent started, for the tests of what a person may do with it. */
+  async function startedRun(
+    create: Awaited<ReturnType<typeof createHandler>>["create"],
+    body: Record<string, unknown> = creationBody(),
+  ): Promise<AgentRun> {
+    const result = await create(body);
+    if (!("run" in result) || result.run === undefined) {
+      throw new Error(`expected a started run, got ${JSON.stringify(result)}`);
+    }
+    return result.run;
+  }
+
+  it("no longer serves a route that starts a subagent by hand", async () => {
+    const { handler, token, persistence } = createHandler();
+    for (const path of [
+      "/api/agent-runs/request",
+      "/api/agent-runs/control-preview",
+      "/api/agent-runs/workspaces/prepare",
+      "/api/agent-runs/workspaces/confirm",
+    ]) {
+      const response = await handler(
+        new Request(`http://127.0.0.1${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": token },
+          body: JSON.stringify(creationBody()),
+        }),
+      );
+      expect(response?.status).toBe(404);
+    }
+    expect(persistence.getByRequestId(ids.request)).toBeUndefined();
   });
 
-  it("denies creation when the posture is Off, regardless of any client-claimed posture", async () => {
-    const { handler, token, setCreationPosture } = createHandler();
-    setCreationPosture("off");
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    expect(response?.status).toBe(409);
-    const body = (await response!.json()) as { reason?: string };
-    expect(body.reason).toBe("posture-rejected");
+  it("admits and starts a delegation from the thread's agent on a host that never chose a posture", async () => {
+    const { delegate, persistence, settings } = createHandler();
+    expect(settings.current().creationPosture).toBe("automatic");
+
+    const outcome = await delegate().start({
+      role: "research",
+      task: "Summarize the open PRs in this repository.",
+      includeParentContext: false,
+    });
+
+    expect(outcome).toEqual({
+      status: "accepted",
+      runId: String(ids.run),
+      lifecycleStatus: "starting",
+    });
+    expect(persistence.getById(ids.run)?.parentThreadId).toBe(ids.thread);
   });
 
-  it("denies creation unless the authenticated window owns the actual parent thread", async () => {
-    const { handler, token } = createHandler({ authorizeCreation: () => false });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    expect(response?.status).toBe(403);
+  it("refuses a delegation once a person turned subagents off", async () => {
+    const { delegate, persistence, settings } = createHandler();
+    settings.update({ creationPosture: "off", expectedVersion: 0 });
+
+    const outcome = await delegate().start({
+      role: "research",
+      task: "Summarize the open PRs in this repository.",
+      includeParentContext: false,
+    });
+
+    expect(outcome).toMatchObject({ status: "refused", reason: "creation-posture-off" });
+    expect(persistence.getByRequestId(ids.request)).toBeUndefined();
+  });
+
+  it("creates a child run under Automatic posture", async () => {
+    const { create } = createHandler();
+    expect(await create(creationBody())).toMatchObject({
+      kind: "run-updated",
+      run: { lifecycleStatus: "starting" },
+    });
+  });
+
+  it("denies creation when the posture is Off, whatever the request claims", async () => {
+    const { create, settings } = createHandler();
+    settings.update({ creationPosture: "off", expectedVersion: 0 });
+    expect(await create(creationBody())).toMatchObject({
+      kind: "run-command-failed",
+      reason: "posture-rejected",
+    });
+  });
+
+  it("denies creation unless the window owns the actual parent thread", async () => {
+    const { create } = createHandler({ authorizeCreation: () => false });
+    expect(await create(creationBody())).toEqual({
+      kind: "refused",
+      reason: "unauthorized",
+      status: 403,
+    });
   });
 
   it("refuses a Chat-only research child on a Code parent", async () => {
-    const { handler, persistence, token } = createHandler({ parentMode: "code" });
-
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-
-    expect(response?.status).toBe(400);
-    expect(await response?.json()).toEqual({
-      status: "refused",
+    const { create, persistence } = createHandler({ parentMode: "code" });
+    expect(await create(creationBody())).toEqual({
+      kind: "refused",
       reason: "unsupported",
+      status: 400,
     });
     expect(persistence.getByRequestId(ids.request)).toBeUndefined();
   });
@@ -1165,99 +1286,54 @@ describe("agentRunRoutes", () => {
   it("does not reserve capacity again when the request id is retried", async () => {
     const capacity = createInMemoryCapacityPort();
     const reserve = vi.spyOn(capacity, "tryReserve");
-    const { handler, token } = createHandler({ capacity });
-    const request = () =>
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      });
+    const { create } = createHandler({ capacity });
 
-    expect((await handler(request()))?.status).toBe(200);
-    expect((await handler(request()))?.status).toBe(200);
+    await startedRun(create);
+    await startedRun(create);
     expect(reserve).toHaveBeenCalledOnce();
   });
 
   it("returns an idempotent receipt before mutable provider readiness is rechecked", async () => {
-    const { handler, token, setReadyProvider } = createHandler();
-    const request = () =>
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      });
-
-    expect((await handler(request()))?.status).toBe(200);
+    const { create, setReadyProvider } = createHandler();
+    await startedRun(create);
     setReadyProvider("99999999-9999-4999-8999-999999999999");
 
-    const retry = await handler(request());
-    expect(retry?.status).toBe(200);
-    expect(await retry!.json()).toMatchObject({
+    expect(await create(creationBody())).toMatchObject({
       kind: "run-accepted",
       run: { id: ids.run, lifecycleStatus: "starting" },
     });
   });
 
   it("rejects a request ID reused for a different parent or authority", async () => {
-    const { handler, token } = createHandler();
-    const request = (body: Record<string, unknown>) =>
-      handler(
-        new Request("http://127.0.0.1/api/agent-runs/request", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-octant-window-capability": token },
-          body: JSON.stringify(body),
-        }),
-      );
+    const { create } = createHandler();
+    await startedRun(create);
+    const reused = {
+      kind: "invalid",
+      message: "AgentRun request ID cannot be reused for a different authorized request.",
+      status: 409,
+    };
 
-    expect((await request(creationBody()))?.status).toBe(200);
-
-    const wrongParent = await request({
-      ...creationBody(),
-      parentThreadId: "cccccccc-cccc-4ccc-8ccc-cccccccccccd",
-    });
-    expect(wrongParent?.status).toBe(409);
-    expect(await wrongParent!.json()).toEqual({
-      error: "AgentRun request ID cannot be reused for a different authorized request.",
-    });
-
-    const differentTask = await request({
-      ...creationBody(),
-      task: "A different bounded task.",
-    });
-    expect(differentTask?.status).toBe(409);
-    expect(await differentTask!.json()).toEqual({
-      error: "AgentRun request ID cannot be reused for a different authorized request.",
-    });
+    expect(
+      await create({ ...creationBody(), parentThreadId: "cccccccc-cccc-4ccc-8ccc-cccccccccccd" }),
+    ).toEqual(reused);
+    expect(await create({ ...creationBody(), task: "A different bounded task." })).toEqual(reused);
   });
 
   it("stores the admitted parent context and journals only its identity", async () => {
-    const { handler, token, connection } = createHandler({
+    const { create, connection } = createHandler({
       parentContext: {
         resolve: () => [{ kind: "user-message", text: "Which service paged first?" }],
       },
     });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ ...creationBody(), includeParentContext: true }),
-      }),
-    );
+    const run = await startedRun(create, { ...creationBody(), includeParentContext: true });
 
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as {
-      readonly run: {
-        readonly id: AgentRunId;
-        readonly routingReceipt: { readonly contextSnapshotId: string };
-      };
-    };
     // The receipt records what the child was admitted with, not the parent's
     // words: the blocks are that thread's conversation and go to the store.
-    expect(body).toMatchObject({ run: { routingReceipt: { admittedContextBlocks: 1 } } });
+    expect(run.routingReceipt.admittedContextBlocks).toBe(1);
     expect(
       readAgentRunAdmittedContext(connection, {
-        runId: body.run.id,
-        contextSnapshotId: body.run.routingReceipt.contextSnapshotId as never,
+        runId: run.id,
+        contextSnapshotId: run.routingReceipt.contextSnapshotId,
       }),
     ).toEqual([{ kind: "user-message", text: "Which service paged first?" }]);
     expect(
@@ -1271,120 +1347,59 @@ describe("agentRunRoutes", () => {
 
   it("refuses a child asking for parent context this host cannot resolve", async () => {
     for (const parentContext of [undefined, { resolve: () => undefined }]) {
-      const { handler, token } = createHandler(
-        parentContext === undefined ? {} : { parentContext },
-      );
-      const response = await handler(
-        new Request("http://127.0.0.1/api/agent-runs/request", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-octant-window-capability": token },
-          body: JSON.stringify({ ...creationBody(), includeParentContext: true }),
-        }),
-      );
-
-      expect(response?.status).toBe(400);
+      const { create } = createHandler(parentContext === undefined ? {} : { parentContext });
+      expect(await create({ ...creationBody(), includeParentContext: true })).toMatchObject({
+        kind: "invalid",
+        status: 400,
+      });
     }
   });
 
   it("rejects a request ID reused with a different parent-context ask", async () => {
-    const { handler, token } = createHandler({
+    const { create } = createHandler({
       parentContext: {
         resolve: () => [{ kind: "user-message", text: "Which service paged first?" }],
       },
     });
-    const request = (body: Record<string, unknown>) =>
-      handler(
-        new Request("http://127.0.0.1/api/agent-runs/request", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-octant-window-capability": token },
-          body: JSON.stringify(body),
-        }),
-      );
+    await startedRun(create, { ...creationBody(), includeParentContext: true });
 
-    expect((await request({ ...creationBody(), includeParentContext: true }))?.status).toBe(200);
-
-    const retried = await request(creationBody());
-    expect(retried?.status).toBe(409);
+    expect(await create(creationBody())).toMatchObject({ kind: "invalid", status: 409 });
   });
 
   it("rejects creation for an unconfigured provider", async () => {
-    const { handler, token, setReadyProvider } = createHandler();
+    const { create, setReadyProvider } = createHandler();
     setReadyProvider("99999999-9999-4999-8999-999999999999");
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    expect(response?.status).toBe(400);
-  });
-
-  it("rejects a raw provider or authority field on the control request", async () => {
-    const { handler, token } = createHandler();
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({
-          ...creationBody(),
-          providerInstanceId: ids.provider,
-          requestedAuthority: authority,
-        }),
-      }),
-    );
-    expect(response?.status).toBe(400);
+    expect(await create(creationBody())).toMatchObject({ kind: "invalid", status: 400 });
   });
 
   it("returns a structured limit result once the global active-run ceiling is reached", async () => {
-    const { handler, token } = createHandler();
+    const { create } = createHandler();
     const distinctThread = (n: number) =>
       decodeAgentRunParentThreadId(`33333333-3333-4333-8333-33333333333${n}`);
     for (let i = 0; i < 4; i++) {
-      const response = await handler(
-        new Request("http://127.0.0.1/api/agent-runs/request", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-octant-window-capability": token },
-          body: JSON.stringify({
-            ...creationBody(),
-            requestId: decodeAgentRunRequestId(`bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${i}`),
-            parentThreadId: distinctThread(i),
-          }),
-        }),
-      );
-      expect(response?.status).toBe(200);
+      await startedRun(create, {
+        ...creationBody(),
+        requestId: decodeAgentRunRequestId(`bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${i}`),
+        parentThreadId: distinctThread(i),
+      });
     }
-    const fifth = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({
-          ...creationBody(),
-          requestId: decodeAgentRunRequestId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4"),
-          parentThreadId: distinctThread(4),
-        }),
+    expect(
+      await create({
+        ...creationBody(),
+        requestId: decodeAgentRunRequestId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4"),
+        parentThreadId: distinctThread(4),
       }),
-    );
-    expect(fifth?.status).toBe(409);
-    const fifthBody = (await fifth!.json()) as { reason?: string };
-    expect(fifthBody.reason).toBe("limit-reached");
+    ).toMatchObject({ kind: "run-command-failed", reason: "limit-reached" });
   });
 
   it("cancels a run through the cancel route", async () => {
-    const { handler, token, orchestration } = createHandler();
-    const created = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    const { handler, token, create } = createHandler();
+    const run = await startedRun(create);
     const response = await handler(
       new Request("http://127.0.0.1/api/agent-runs/cancel", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ runId: createdBody.run.id, scope: "self" }),
+        body: JSON.stringify({ runId: run.id, scope: "self" }),
       }),
     );
     expect(response?.status).toBe(200);
@@ -1392,70 +1407,51 @@ describe("agentRunRoutes", () => {
       results: Array<{ run?: { lifecycleStatus: string } }>;
     };
     expect(body.results[0]?.run?.lifecycleStatus).toBe("cancelled");
-    void orchestration;
   });
 
   it("rejects cancellation when the authenticated window does not own the parent thread", async () => {
-    const { handler, token, persistence } = createHandler({ authorizeCancellation: () => false });
-    const created = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    const createdBody = (await created!.json()) as { run: { id: string } };
+    const { handler, token, persistence, create } = createHandler({
+      authorizeCancellation: () => false,
+    });
+    const run = await startedRun(create);
     const response = await handler(
       new Request("http://127.0.0.1/api/agent-runs/cancel", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ runId: createdBody.run.id, scope: "self" }),
+        body: JSON.stringify({ runId: run.id, scope: "self" }),
       }),
     );
 
     expect(response?.status).toBe(403);
-    expect(persistence.getById(createdBody.run.id as never)?.lifecycleStatus).toBe("starting");
+    expect(persistence.getById(run.id)?.lifecycleStatus).toBe("starting");
   });
 
   it("authorizes every descendant before cancelling a subtree", async () => {
     const checked: string[] = [];
-    const { handler, token, persistence } = createHandler({
+    const { handler, token, persistence, create } = createHandler({
       authorizeCancellation: ({ run }) => {
         checked.push(String(run.id));
         return run.parentRunId === undefined;
       },
     });
-    const create = (body: Record<string, unknown>) =>
-      handler(
-        new Request("http://127.0.0.1/api/agent-runs/request", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-octant-window-capability": token },
-          body: JSON.stringify(body),
-        }),
-      );
-    const root = await create({
-      ...creationBody(),
-    });
-    const rootBody = (await root!.json()) as { run: { id: string } };
-    const child = await create({
+    const root = await startedRun(create);
+    const child = await startedRun(create, {
       ...creationBody(),
       requestId: "22222222-2222-4222-8222-222222222223",
-      parentRunId: rootBody.run.id,
+      parentRunId: root.id,
     });
-    expect(child?.status).toBe(200);
-    const childBody = (await child!.json()) as { run: { id: string } };
     const response = await handler(
       new Request("http://127.0.0.1/api/agent-runs/cancel", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ runId: rootBody.run.id, scope: "subtree" }),
+        body: JSON.stringify({ runId: root.id, scope: "subtree" }),
       }),
     );
     expect(response?.status).toBe(403);
     // Leaf-first authorization must reach the linked child before it can
     // cancel the parent. It fails there, so the parent remains untouched.
-    expect(checked).toEqual([childBody.run.id]);
-    expect(persistence.getById(rootBody.run.id as never)?.lifecycleStatus).toBe("starting");
+    expect(checked).toEqual([String(child.id)]);
+    expect(persistence.getById(root.id)?.lifecycleStatus).toBe("starting");
   });
 
   const poolBody = () => ({
@@ -1469,7 +1465,7 @@ describe("agentRunRoutes", () => {
   });
 
   it("stores one immutable pool-derived route for an accepted pool creation request", async () => {
-    const { handler, token, persistence } = createHandler({
+    const { create, persistence } = createHandler({
       poolRouting: () => ({
         parentCandidate: poolRequestedCandidate,
         runtimeFacts: [
@@ -1478,28 +1474,16 @@ describe("agentRunRoutes", () => {
         ],
       }),
     });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(poolBody()),
-      }),
-    );
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as {
-      kind: string;
-      run: { id: string; lifecycleStatus: string };
-    };
-    expect(body.run.lifecycleStatus).toBe("starting");
-    const persisted = persistence.getById(body.run.id as never);
-    expect(persisted?.routingReceipt.poolRoute?.decision).toMatchObject({
+    const run = await startedRun(create, poolBody());
+    expect(run.lifecycleStatus).toBe("starting");
+    expect(persistence.getById(run.id)?.routingReceipt.poolRoute?.decision).toMatchObject({
       kind: "selected",
       selectionKind: "requested",
     });
   });
 
   it("admits a pool child durably as Waiting when no candidate is eligible", async () => {
-    const { handler, token, persistence } = createHandler({
+    const { create, persistence } = createHandler({
       poolRouting: () => ({
         parentCandidate: poolRequestedCandidate,
         runtimeFacts: [
@@ -1508,22 +1492,12 @@ describe("agentRunRoutes", () => {
         ],
       }),
     });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(poolBody()),
-      }),
-    );
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as {
-      kind: string;
-      run: { id: string; lifecycleStatus: string; recoveryReason?: string };
-    };
-    expect(body.kind).toBe("run-updated");
-    expect(body.run.lifecycleStatus).toBe("waiting");
-    expect(body.run.recoveryReason).toBe("multi-model-pool-no-eligible-candidate");
-    expect(persistence.getById(body.run.id as never)?.routingReceipt.poolRoute?.decision.kind).toBe(
+    const result = await create(poolBody());
+    expect(result).toMatchObject({
+      kind: "run-updated",
+      run: { lifecycleStatus: "waiting", recoveryReason: "multi-model-pool-no-eligible-candidate" },
+    });
+    expect(persistence.getByRequestId(ids.request)?.routingReceipt.poolRoute?.decision.kind).toBe(
       "waiting",
     );
   });
@@ -1532,39 +1506,27 @@ describe("agentRunRoutes", () => {
     const facts = {
       current: [candidateFacts(poolRequestedCandidate), candidateFacts(poolFallbackCandidate)],
     };
-    const { handler, token } = createHandler({
+    const { create } = createHandler({
       poolRouting: () => ({
         parentCandidate: poolRequestedCandidate,
         runtimeFacts: facts.current,
       }),
     });
-    const request = () =>
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(poolBody()),
-      });
-    expect((await handler(request()))?.status).toBe(200);
+    await startedRun(create, poolBody());
 
     facts.current = [
       candidateFacts(poolRequestedCandidate, { modelAvailable: false }),
       candidateFacts(poolFallbackCandidate, { readiness: "unavailable" }),
     ];
-    const retry = await handler(request());
-    expect(retry?.status).toBe(200);
-    const retryBody = (await retry!.json()) as {
-      run: {
-        routingReceipt: { poolRoute?: { decision: { kind: string; selectionKind?: string } } };
-      };
-    };
-    expect(retryBody.run.routingReceipt.poolRoute?.decision).toMatchObject({
+    const retried = await startedRun(create, poolBody());
+    expect(retried.routingReceipt.poolRoute?.decision).toMatchObject({
       kind: "selected",
       selectionKind: "requested",
     });
   });
 
   it("rejects a pool request ID reused with a different pool", async () => {
-    const { handler, token } = createHandler({
+    const { create } = createHandler({
       poolRouting: () => ({
         parentCandidate: poolRequestedCandidate,
         runtimeFacts: [
@@ -1573,48 +1535,22 @@ describe("agentRunRoutes", () => {
         ],
       }),
     });
-    const request = (body: Record<string, unknown>) =>
-      handler(
-        new Request("http://127.0.0.1/api/agent-runs/request", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-octant-window-capability": token },
-          body: JSON.stringify(body),
-        }),
-      );
-    expect((await request(poolBody()))?.status).toBe(200);
+    await startedRun(create, poolBody());
 
-    const differentPool = await request({
-      ...poolBody(),
-      pool: { ...poolBody().pool, fallbackAllowed: false },
-    });
-    expect(differentPool?.status).toBe(409);
-
-    const withoutPool = await request(creationBody());
-    expect(withoutPool?.status).toBe(409);
+    expect(
+      await create({ ...poolBody(), pool: { ...poolBody().pool, fallbackAllowed: false } }),
+    ).toMatchObject({ kind: "invalid", status: 409 });
+    expect(await create(creationBody())).toMatchObject({ kind: "invalid", status: 409 });
   });
 
   it("fails closed when a pool is selected but pool routing is unavailable on this host", async () => {
-    const { handler, token } = createHandler();
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(poolBody()),
-      }),
-    );
-    expect(response?.status).toBe(400);
+    const { create } = createHandler();
+    expect(await create(poolBody())).toMatchObject({ kind: "invalid", status: 400 });
   });
 
   it("serializes honest route receipt data in the parent summary response", async () => {
-    const { handler, token } = createHandler();
-    const created = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    expect(created?.status).toBe(200);
+    const { handler, token, create } = createHandler();
+    await startedRun(create);
     const response = await handler(
       new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
         headers: { "x-octant-window-capability": token },
@@ -1633,16 +1569,8 @@ describe("agentRunRoutes", () => {
     });
   });
 
-  it("rejects unauthenticated creation and cancellation", async () => {
+  it("rejects unauthenticated cancellation", async () => {
     const { handler } = createHandler();
-    const createResponse = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    expect(createResponse?.status).toBe(401);
     const cancelResponse = await handler(
       new Request("http://127.0.0.1/api/agent-runs/cancel", {
         method: "POST",
@@ -1729,115 +1657,9 @@ describe("agentRunRoutes", () => {
     };
   }
 
-  it("prepares a research-only Chat virtual workspace without a filesystem path", async () => {
-    const { handler, token } = createHandler({ workspace: workspaceStub("chat") });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ parentThreadId: ids.thread }),
-      }),
-    );
-    expect(response?.status).toBe(200);
-    expect(await response!.json()).toEqual({
-      status: "prepared",
-      workspace: { kind: "chat-virtual", mode: "chat", receiptId: workspaceReceipt },
-    });
-  });
-
-  it("prepares a Work workspace bound to the current Project and binding revision", async () => {
-    const { handler, token } = createHandler({
-      parentMode: "work",
-      workspace: workspaceStub("work"),
-    });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ parentThreadId: ids.thread }),
-      }),
-    );
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as {
-      workspace: Record<string, unknown>;
-    };
-    expect(body.workspace).toEqual({
-      kind: "work-root",
-      mode: "work",
-      receiptId: workspaceReceipt,
-      projectId,
-      bindingRevisionId: bindingRevision,
-    });
-    expect(body.workspace.canonicalRoot).toBeUndefined();
-  });
-
-  it("confirms a Code child worktree receipt without returning paths", async () => {
-    const { handler, token } = createHandler({
-      parentMode: "code",
-      workspace: workspaceStub("code"),
-    });
-    const prepared = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ parentThreadId: ids.thread }),
-      }),
-    );
-    expect(prepared?.status).toBe(200);
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/workspaces/confirm", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({
-          parentThreadId: ids.thread,
-          worktreeReceiptId: workspaceReceipt,
-        }),
-      }),
-    );
-    expect(response?.status).toBe(200);
-    expect(await response!.json()).toEqual({
-      status: "confirmed",
-      workspace: {
-        kind: "code-worktree",
-        mode: "code",
-        worktreeReceiptId: workspaceReceipt,
-        confirmation: "confirmed",
-      },
-    });
-  });
-
-  it("refuses workspace preparation when the window does not own the parent thread", async () => {
-    const { handler, token } = createHandler({
-      authorizeCreation: () => false,
-      workspace: workspaceStub("chat"),
-    });
-    const response = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ parentThreadId: ids.thread }),
-      }),
-    );
-    expect(response?.status).toBe(403);
-    expect(await response!.json()).toEqual({ status: "refused", reason: "unauthorized" });
-  });
-
   it("admits a Work child from a prepared receipt and refuses parent-checkout Code receipts", async () => {
     const work = createHandler({ parentMode: "work", workspace: workspaceStub("work") });
-    const workResponse = await work.handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-octant-window-capability": work.token,
-        },
-        body: JSON.stringify({
-          ...creationBody(),
-          role: "research",
-        }),
-      }),
-    );
-    expect(workResponse?.status).toBe(200);
+    await startedRun(work.create, { ...creationBody(), role: "research" });
 
     const code = createHandler({
       parentMode: "code",
@@ -1846,106 +1668,51 @@ describe("agentRunRoutes", () => {
         admit: async () => ({ status: "refused" as const, reason: "parent-checkout" as const }),
       },
     });
-    const codeResponse = await code.handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-octant-window-capability": code.token,
-        },
-        body: JSON.stringify({
-          ...creationBody(),
-          role: "implementation",
-        }),
-      }),
-    );
-    expect(codeResponse?.status).toBe(400);
-    expect(await codeResponse!.json()).toEqual({
-      status: "refused",
+    expect(await code.create({ ...creationBody(), role: "implementation" })).toEqual({
+      kind: "refused",
       reason: "parent-checkout",
-    });
-  });
-
-  it("previews derived parent facts without taking client provider or authority", async () => {
-    const { handler, token } = createHandler();
-    const response = await handler(
-      new Request(
-        `http://127.0.0.1/api/agent-runs/control-preview?parentThreadId=${ids.thread}&role=research`,
-        { headers: { "x-octant-window-capability": token } },
-      ),
-    );
-    expect(response?.status).toBe(200);
-    expect(await response!.json()).toMatchObject({
-      status: "ready",
-      facts: {
-        mode: "chat",
-        allowedRoles: ["research"],
-        providerInstanceId: ids.provider,
-        modelId: "gpt-4o",
-        workspaceKind: "chat-virtual",
-        executionKind: "octant-managed",
-      },
+      status: 400,
     });
   });
 
   it("steers a live child at the expected version and refuses a stale one", async () => {
-    const steered: string[] = [];
-    const { handler, token, persistence } = createHandler();
-    const created = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    const { handler, token, persistence, create } = createHandler();
+    const run = await startedRun(create);
     persistence.applyCommand({
       kind: "mark-agent-run-running",
-      runId: createdBody.run.id as never,
-      expectedVersion: createdBody.run.version as never,
+      runId: run.id,
+      expectedVersion: run.version,
     });
-    const running = persistence.getById(createdBody.run.id as never);
     const stale = await handler(
       new Request("http://127.0.0.1/api/agent-runs/steer", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
         body: JSON.stringify({
-          runId: createdBody.run.id,
+          runId: run.id,
           expectedVersion: 1,
           message: "Focus on the failing test.",
         }),
       }),
     );
     expect(stale?.status).toBe(409);
-    void steered;
-    expect(running?.lifecycleStatus).toBe("running");
+    expect(persistence.getById(run.id)?.lifecycleStatus).toBe("running");
   });
 
   it("retries a failed child at the expected version", async () => {
-    const { handler, token, persistence } = createHandler();
-    const created = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    const { handler, token, persistence, create } = createHandler();
+    const run = await startedRun(create);
     persistence.applyCommand({
       kind: "fail-agent-run",
-      runId: createdBody.run.id as never,
-      expectedVersion: createdBody.run.version as never,
+      runId: run.id,
+      expectedVersion: run.version,
       recoveryReason: "provider-unavailable",
     });
-    const failed = persistence.getById(createdBody.run.id as never);
+    const failed = persistence.getById(run.id);
     const response = await handler(
       new Request("http://127.0.0.1/api/agent-runs/retry", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({
-          runId: createdBody.run.id,
-          expectedVersion: failed?.version,
-        }),
+        body: JSON.stringify({ runId: run.id, expectedVersion: failed?.version }),
       }),
     );
     expect(response?.status).toBe(200);
@@ -1954,30 +1721,20 @@ describe("agentRunRoutes", () => {
   });
 
   it("resumes a waiting child and refuses a restart interruption without resume evidence", async () => {
-    const { handler, token, persistence } = createHandler();
-    const created = await handler(
-      new Request("http://127.0.0.1/api/agent-runs/request", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify(creationBody()),
-      }),
-    );
-    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    const { handler, token, persistence, create } = createHandler();
+    const run = await startedRun(create);
     persistence.applyCommand({
       kind: "interrupt-agent-run",
-      runId: createdBody.run.id as never,
-      expectedVersion: createdBody.run.version as never,
+      runId: run.id,
+      expectedVersion: run.version,
       recoveryReason: "restart-without-resumable-execution",
     });
-    const interrupted = persistence.getById(createdBody.run.id as never);
+    const interrupted = persistence.getById(run.id);
     const response = await handler(
       new Request("http://127.0.0.1/api/agent-runs/resume", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({
-          runId: createdBody.run.id,
-          expectedVersion: interrupted?.version,
-        }),
+        body: JSON.stringify({ runId: run.id, expectedVersion: interrupted?.version }),
       }),
     );
     expect(response?.status).toBe(400);
