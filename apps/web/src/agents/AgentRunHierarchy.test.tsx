@@ -142,6 +142,52 @@ describe("AgentRunHierarchy", () => {
     expect(acknowledge).toHaveBeenCalledWith({ runId, expectedVersion: 2 });
   });
 
+  it("shows a child that finishes while the panel is open without the person clicking anything", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const child = (lifecycleStatus: "starting" | "completed") => ({
+        parentThreadId,
+        entries: [
+          {
+            runId,
+            requestId: "request-1",
+            parentThreadId,
+            role: "review",
+            task: "Say hello",
+            lifecycleStatus,
+            executionKind: "octant-managed",
+            usageQuality: "provider-reported",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: lifecycleStatus === "starting" ? 2 : 4,
+            updatedAt: "2026-08-01T15:01:00.000Z",
+          },
+        ],
+      });
+      const parentSummary = vi
+        .fn()
+        .mockResolvedValueOnce(child("starting"))
+        .mockResolvedValue(child("completed"));
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ parentSummary: parentSummary as never })}
+          parentThreadId={parentThreadId}
+          creationPosture="ask"
+        />,
+      );
+      await waitFor(() => expect(screen.getByText("1 active · 0 done")).toBeVisible());
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await waitFor(() => expect(screen.getByText("0 active · 1 done")).toBeVisible());
+      // Settled children stop the panel from asking again.
+      const calls = parentSummary.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(parentSummary).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("hides child creation and shows the Off explanation when posture is Off", async () => {
     const client = emptyClient();
     render(

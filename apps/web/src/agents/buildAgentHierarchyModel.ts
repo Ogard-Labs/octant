@@ -67,6 +67,10 @@ export interface AgentHierarchyModel {
 
 const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
 
+export function isActiveAgentHierarchyStatus(lifecycleStatus: string): boolean {
+  return ACTIVE.has(lifecycleStatus);
+}
+
 /**
  * Pure browser hierarchy projection. Never decides routing/authority/completion;
  * only filters and presents server-authored AgentRun summaries.

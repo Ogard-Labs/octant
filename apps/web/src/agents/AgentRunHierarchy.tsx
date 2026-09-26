@@ -17,8 +17,11 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
+import { isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { AgentRunCreateForm, type AgentRunCreateFormValues } from "./AgentRunCreateForm";
 import { useAgentRunConversation } from "./useAgentRunConversation";
+
+const ACTIVE_CHILD_REFRESH_MS = 2_000;
 
 export function AgentRunHierarchy(props: {
   readonly client: AgentRunClient;
@@ -98,6 +101,30 @@ export function AgentRunHierarchy(props: {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The summary has no push channel, so a child that finished while the panel
+  // sat open kept reading "starting" until the person clicked something. While
+  // any child is still active, read the summary again on a short beat; once
+  // every child has settled the panel stops asking.
+  const anyActive = entries.some((entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus));
+  useEffect(() => {
+    if (!anyActive) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void props.client.parentSummary(props.parentThreadId).then(
+        (summary) => {
+          if (!cancelled) setEntries(summary.entries);
+        },
+        // A missed beat is retried by the next one; the explicit refresh
+        // path owns the visible error.
+        () => undefined,
+      );
+    }, ACTIVE_CHILD_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [anyActive, props.client, props.parentThreadId]);
 
   useEffect(() => {
     void loadFacts(role);
