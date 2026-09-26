@@ -125,6 +125,7 @@ describe("side tasks", () => {
         title: offer.title,
         threadId: "00000000-0000-4000-8000-000000000099",
       },
+      onSuggestingModel: true,
     }));
     const sendFirstMessage = vi.fn(async () => true);
     const dependencies = { store, create, sendFirstMessage, clock: () => now };
@@ -175,6 +176,7 @@ describe("side tasks", () => {
             title: offer.title,
             threadId: "00000000-0000-4000-8000-000000000098",
           },
+          onSuggestingModel: true,
         }),
         sendFirstMessage: async () => {
           throw new Error("provider unavailable");
@@ -193,5 +195,68 @@ describe("side tasks", () => {
       ),
     ).toMatchObject({ kind: "side-task-dismissed" });
     expect(store.read(threadId).tasks[1]?.status).toBe("dismissed");
+  });
+
+  it("opens the thread without sending when it could not keep the offering model", async () => {
+    const store = storeOn(openConnection());
+    await toolsFor(store, "chat").execute({
+      name: "octant_offer_side_task",
+      inputJson: JSON.stringify(offer),
+    });
+    const sendFirstMessage = vi.fn(async () => true);
+    const result = await startSideTask(
+      {
+        store,
+        create: async () => ({
+          kind: "created",
+          created: {
+            kind: "new-thread",
+            mode: "chat",
+            title: offer.title,
+            threadId: "00000000-0000-4000-8000-000000000097",
+          },
+          onSuggestingModel: false,
+        }),
+        sendFirstMessage,
+        clock: () => now,
+      },
+      { threadId, windowId, sideTaskId: String(store.read(threadId).tasks[0]?.offer.id) },
+    );
+    expect(result).toMatchObject({ kind: "side-task-started", sent: false });
+    expect(sendFirstMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a dismissal while the same side task is being started", async () => {
+    const store = storeOn(openConnection());
+    await toolsFor(store, "chat").execute({
+      name: "octant_offer_side_task",
+      inputJson: JSON.stringify(offer),
+    });
+    const sideTaskId = String(store.read(threadId).tasks[0]?.offer.id);
+    let dismissal: unknown;
+    const result = await startSideTask(
+      {
+        store,
+        create: async () => {
+          dismissal = dismissSideTask({ store, clock: () => now }, { threadId, sideTaskId });
+          return {
+            kind: "created",
+            created: {
+              kind: "new-thread",
+              mode: "chat",
+              title: offer.title,
+              threadId: "00000000-0000-4000-8000-000000000096",
+            },
+            onSuggestingModel: true,
+          };
+        },
+        sendFirstMessage: async () => true,
+        clock: () => now,
+      },
+      { threadId, windowId, sideTaskId },
+    );
+    expect(dismissal).toMatchObject({ kind: "side-task-refused", reason: "already-settled" });
+    expect(result).toMatchObject({ kind: "side-task-started", sent: true });
+    expect(store.read(threadId).tasks[0]?.status).toBe("started");
   });
 });

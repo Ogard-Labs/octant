@@ -90,7 +90,7 @@ export async function startSideTask(
     }
     const newThreadId = created.created.threadId;
     if (newThreadId === undefined) return refused(input.sideTaskId, "target-unavailable");
-    dependencies.store.settle(input.threadId, {
+    const settled = dependencies.store.settle(input.threadId, {
       kind: "started",
       payload: {
         sideTaskId: offer.id,
@@ -98,14 +98,20 @@ export async function startSideTask(
         startedAt: decodeUtcTimestamp(dependencies.clock()),
       },
     });
-    const sent = await dependencies
-      .sendFirstMessage({
-        windowId: input.windowId,
-        mode: created.created.mode,
-        threadId: newThreadId,
-        prompt: offer.prompt,
-      })
-      .catch(() => false);
+    // Sending is only for the model the person saw on the card, and only
+    // while the journal agrees the offer is the one being started. Otherwise
+    // the thread still opens, with the prompt waiting for the person.
+    const sent =
+      settled === "settled" &&
+      created.onSuggestingModel &&
+      (await dependencies
+        .sendFirstMessage({
+          windowId: input.windowId,
+          mode: created.created.mode,
+          threadId: newThreadId,
+          prompt: offer.prompt,
+        })
+        .catch(() => false));
     return {
       kind: "side-task-started",
       sideTaskId: offer.id,
@@ -126,6 +132,11 @@ export function dismissSideTask(
 ): SideTaskResult {
   const task = dependencies.store.find(input.threadId, input.sideTaskId);
   if (task === undefined) return refused(input.sideTaskId, "not-found");
+  // A start in flight owns the offer; dismissing under it would journal a
+  // dismissal for a thread that is about to exist.
+  if (starting.has(`${input.threadId}:${input.sideTaskId}`)) {
+    return refused(input.sideTaskId, "already-settled");
+  }
   const outcome = dependencies.store.settle(input.threadId, {
     kind: "dismissed",
     payload: { sideTaskId: task.offer.id, dismissedAt: decodeUtcTimestamp(dependencies.clock()) },

@@ -6167,7 +6167,10 @@ export function startOctantServer(
         sessionId: decodeProviderSessionId(randomUUID()),
         prompt: evidence,
       });
-      return result.kind === "provider-turn-state";
+      return (
+        result.kind === "provider-turn-state" &&
+        (result.state === "running" || result.state === "waiting")
+      );
     };
     followUpCreation.current = {
       chat: chatService,
