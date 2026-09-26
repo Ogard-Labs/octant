@@ -3,7 +3,8 @@ import type { CodeOperationApprovalAnchor, OctantHostBridge } from "../shell/hos
 import type { CodeWorkspaceApprovals } from "./CodeWorkspace";
 
 export function observeComposerPlacement(composer: HTMLElement, observer: ResizeObserver): void {
-  // Opening a dock pane shrinks an ancestor column without resizing the composer, so the panel kept its old x until the next unrelated update.
+  // Opening a dock pane shrinks an ancestor column and shifts the composer
+  // without resizing it, so its own ResizeObserver never fires.
   let current: HTMLElement | null = composer;
   while (current !== null) {
     observer.observe(current);

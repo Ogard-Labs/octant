@@ -269,13 +269,6 @@ export function createCodeOperationApprovalViewController<TWindow>(
   const pendingCount = (windowId: string): number =>
     1 + (queuedByWindow.get(windowId)?.length ?? 0);
 
-  const showQueueCount = (windowId: string) => {
-    const active = pendingByWindow.get(windowId);
-    active?.view?.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.queue, {
-      count: pendingCount(windowId),
-    });
-  };
-
   const place = (pending: PendingApproval<TWindow>): void => {
     if (pending.view === undefined || pending.anchor === undefined) return;
     const bounds = options.host.boundsForAnchor(
@@ -285,6 +278,16 @@ export function createCodeOperationApprovalViewController<TWindow>(
     );
     if (bounds === undefined) return;
     pending.view.setBounds(bounds);
+  };
+
+  const showQueueCount = (windowId: string) => {
+    const active = pendingByWindow.get(windowId);
+    if (active === undefined) return;
+    active.view?.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.queue, {
+      count: pendingCount(windowId),
+    });
+    // The queue nav needs room the single-request bounds do not have.
+    place(active);
   };
 
   const finish = (pending: PendingApproval<TWindow>, approvalId: CodeApprovalId | undefined) => {
