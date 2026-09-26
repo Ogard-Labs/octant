@@ -6,7 +6,7 @@ describe("draftThreadModePresentation", () => {
     const presentation = draftThreadModePresentation("chat");
     expect(presentation.mode).toBe("chat");
     expect(presentation.eyebrow).toBe("Octant Chat");
-    expect(presentation.heading).toBe("What are you working on?");
+    expect(presentation.heading).toBe("What’s on your mind?");
     expect(presentation.intentCards.length).toBeGreaterThanOrEqual(2);
     expect(presentation.composerPlaceholder).toBeTruthy();
   });

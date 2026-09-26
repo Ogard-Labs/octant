@@ -177,7 +177,7 @@ describe("WorkThreadBoard", () => {
           id: "01",
           status: "waiting",
           title: "Blocked thread",
-          blockingReason: "Runtime work is waiting for a decision or input.",
+          blockingReason: "Waiting for your answer.",
         }),
       ]),
     );
@@ -191,7 +191,7 @@ describe("WorkThreadBoard", () => {
     );
 
     expect(await screen.findByText("Blocked thread")).toBeVisible();
-    expect(screen.getByText("Runtime work is waiting for a decision or input.")).toBeVisible();
+    expect(screen.getByText("Waiting for your answer.")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Ready (0)" })?.className).toContain(
       "code-board__list-group",
     );

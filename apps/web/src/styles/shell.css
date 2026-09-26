@@ -1810,7 +1810,7 @@ html[data-octant-native-host="true"]
   margin-bottom: 24px;
 }
 
-.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome {
+.draft-thread__welcome {
   justify-items: center;
   text-align: center;
 }
@@ -2205,10 +2205,62 @@ form > .work-composer-adapter__attachments {
   }
 }
 
-.agent-mode-welcome .draft-thread__intent-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+/* The Work and Code page before a thread exists: one question, one sentence
+   saying what the choice means, and the two things to do, centred on the
+   same axis as every other start screen. It had been a left-aligned eyebrow,
+   paragraph, and tip over two cards, which read as a settings form. */
+.agent-mode-welcome__panel {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: grid;
+  width: min(100% - 48px, 560px);
+  justify-items: center;
+  gap: var(--oct-space-3);
+  margin: 0 auto;
+  padding-block: min(20vh, 180px) var(--oct-space-12);
+  text-align: center;
+}
+
+.agent-mode-welcome__mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: var(--oct-space-1);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  background: var(--octant-card);
+}
+
+.agent-mode-welcome__lead {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
+.agent-mode-welcome__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+@media (max-width: 640px) {
+  .agent-mode-welcome__panel {
+    width: calc(100% - 32px);
+    padding-block: var(--oct-space-12) var(--oct-space-6);
+  }
+
+  .agent-mode-welcome__actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .work-composer-adapter,
@@ -2819,9 +2871,15 @@ form > .work-composer-adapter__attachments {
   margin: var(--oct-space-4) auto 0;
 }
 
+/* The button recipe centres its content. In a row of cards whose sentences
+   wrap to different lengths, a one-line card centred its title lower than
+   its neighbours ("Explain this codebase" sat off the line), so the content
+   starts at the top-left corner of every card. */
 .code-home__suggestions > button {
   display: grid;
   height: auto;
+  align-content: start;
+  justify-content: start;
   gap: var(--oct-space-1);
   justify-items: start;
   padding: var(--oct-space-3);
@@ -2834,6 +2892,7 @@ form > .work-composer-adapter__attachments {
   height: auto;
   min-height: 0;
   align-content: start;
+  justify-content: start;
   justify-items: start;
   gap: 4px;
   padding: 12px 14px;

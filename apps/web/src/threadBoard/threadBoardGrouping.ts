@@ -41,13 +41,13 @@ const STATUS_LABELS: Record<ThreadBoardStatus, string> = {
 };
 
 const STATUS_REASON_LABELS: Record<ThreadBoardReason, string> = {
-  "delivery-satisfied": "The confirmed delivery target is satisfied",
-  executing: "A provider turn, tool, or child run is executing",
-  "awaiting-input": "Waiting for a decision or input",
-  interrupted: "The last agent turn was interrupted",
-  recovering: "Recovering Project or operation history",
-  "delivery-waiting": "Delivery evidence is stale or ambiguous",
-  "idle-unmet-delivery": "Idle; the delivery target is not yet met",
+  "delivery-satisfied": "Done: what you asked for is finished",
+  executing: "An agent is working on it",
+  "awaiting-input": "Waiting for your answer",
+  interrupted: "The agent stopped partway through",
+  recovering: "Catching up after a restart",
+  "delivery-waiting": "Checking whether it is finished",
+  "idle-unmet-delivery": "Paused before it was finished",
 };
 
 export function threadBoardStatusLabel(status: ThreadBoardStatus): string {

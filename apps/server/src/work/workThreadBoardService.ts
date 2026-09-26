@@ -106,7 +106,7 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
     ...(waiting && !executing
       ? {
           blockingReason: awaitingInput
-            ? "Runtime work is waiting for a decision or input."
+            ? "Waiting for your answer."
             : "The last agent turn was interrupted.",
         }
       : {}),
@@ -264,13 +264,13 @@ function recoveryFrom(entry: WorkBoardThread): WorkBoardCard["recovery"] {
 function waitingReasonLabel(reason: WorkBoardCard["statusReason"]): string | undefined {
   switch (reason) {
     case "recovering":
-      return "This thread is recovering its Project or operation history.";
+      return "Catching up after a restart.";
     case "awaiting-input":
-      return "Runtime work is waiting for a decision or input.";
+      return "Waiting for your answer.";
     case "interrupted":
       return "The last agent turn was interrupted.";
     case "delivery-waiting":
-      return "Delivery evidence is stale or ambiguous.";
+      return "Checking whether it is finished.";
     default:
       return undefined;
   }

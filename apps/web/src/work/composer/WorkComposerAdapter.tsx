@@ -1,6 +1,5 @@
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
-import { useComposerTip } from "../../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -24,7 +23,11 @@ import type {
   ProviderModelId,
   ProviderModelOptionValues,
 } from "@octant/contracts/providers";
-import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
+import {
+  draftThreadModePresentation,
+  type CreateHostViewScope,
+  type PickerGroup,
+} from "@octant/domain";
 import { FolderOpen, AlertTriangle } from "lucide-react";
 import {
   useCallback,
@@ -152,13 +155,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
-  });
-  const tip = useComposerTip({
-    scopeKey: "work-draft",
-    threads: threadMentions.composer !== undefined,
-    commands: slash.commandIds,
-    browser: browser.available,
-    computer: computer.available,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -411,7 +407,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}
-                placeholder={tip}
+                placeholder={draftThreadModePresentation("work").composerPlaceholder}
                 rows={3}
                 value={prompt}
               />

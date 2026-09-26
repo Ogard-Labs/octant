@@ -46,8 +46,10 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     // empty section shows its add control at rest, since adding a Project is
     // the only thing to do there.
     expect(screen.getByRole("region", { name: "Projects" })).toHaveAttribute("data-empty", "true");
-    // The heading is not left hanging over nothing: one quiet line says so.
-    expect(screen.getByText("No Projects yet.")).toBeVisible();
+    // The heading is not left hanging over nothing: one quiet line says so,
+    // and offers the one thing to do.
+    expect(screen.getByText(/No Projects yet\./)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add a folder" })).toBeVisible();
     expect(screen.queryByText("No Projects in this mode.")).toBeNull();
     expect(screen.queryByText("Archive")).toBeNull();
   });

@@ -842,7 +842,7 @@ describe("boardRuntimeActivityFromWorks", () => {
         executing: false,
         awaitingInput: true,
         interrupted: false,
-        blockingReason: "Runtime work is waiting for a decision or input.",
+        blockingReason: "Waiting for your answer.",
       });
     }
 

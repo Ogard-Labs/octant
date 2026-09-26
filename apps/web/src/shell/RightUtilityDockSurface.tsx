@@ -156,6 +156,7 @@ function DockWorkMap(props: {
   readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
   readonly surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 }) {
+  const groups = groupTools(props.surfaces);
   return (
     <section aria-labelledby="dock-work-map-title" className="dock-work-map">
       <header className="dock-work-map__header">
@@ -165,27 +166,70 @@ function DockWorkMap(props: {
       {props.surfaces.length === 0 ? (
         <p className="dock-work-map__empty">This thread has no additional tools available.</p>
       ) : (
-        <div className="dock-work-map__list">
-          {props.surfaces.map((surface) => (
-            <OctantButton
-              aria-label={surface.label}
-              className="dock-work-map__item"
-              key={surface.id}
-              onClick={() => props.onOpen(surface.id)}
-              type="button"
-              variant="ghost"
+        <div className="dock-work-map__groups">
+          {groups.map((group) => (
+            <div
+              aria-label={groups.length > 1 ? group.label : undefined}
+              className="dock-work-map__list"
+              key={group.label}
+              role={groups.length > 1 ? "group" : undefined}
             >
-              <DockToolIcon surface={surface.id} />
-              <span className="dock-work-map__copy">
-                <strong>{surface.label}</strong>
-                <small>{workMapDetail(surface.id)}</small>
-              </span>
-            </OctantButton>
+              {groups.length > 1 ? (
+                <h3 aria-hidden="true" className="dock-work-map__group-label">
+                  {group.label}
+                </h3>
+              ) : null}
+              {group.surfaces.map((surface) => (
+                <OctantButton
+                  aria-label={surface.label}
+                  className="dock-work-map__item"
+                  key={surface.id}
+                  onClick={() => props.onOpen(surface.id)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <DockToolIcon surface={surface.id} />
+                  <span className="dock-work-map__copy">
+                    <strong>{surface.label}</strong>
+                    <small>{workMapDetail(surface.id)}</small>
+                  </span>
+                </OctantButton>
+              ))}
+            </div>
           ))}
         </div>
       )}
     </section>
   );
+}
+
+/* A Code thread offers ten tools; as one list of ten, each with a sentence
+   under it, the one a person wanted took reading the whole column. Grouped by
+   what they look at, the eye goes to a heading first. A thread with tools in
+   only one group shows them without a heading. */
+const TOOL_GROUPS: ReadonlyArray<{
+  readonly label: string;
+  readonly ids: ReadonlyArray<RightUtilityDockSurfaceId>;
+}> = [
+  {
+    label: "This thread",
+    ids: ["environment", "side-chat", "plan", "delivery", "agents", "document", "canvas", "review"],
+  },
+  { label: "Workspace", ids: ["files", "terminal", "browser", "tests", "pull-requests"] },
+  { label: "Devices", ids: ["ios-simulator", "android-emulator"] },
+];
+
+function groupTools(surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>) {
+  const grouped = new Set<RightUtilityDockSurfaceId>(TOOL_GROUPS.flatMap((group) => group.ids));
+  // A tool no group names still has to be reachable from the launcher.
+  const other = surfaces.filter((surface) => !grouped.has(surface.id));
+  return [
+    ...TOOL_GROUPS.map((group) => ({
+      label: group.label,
+      surfaces: surfaces.filter((surface) => group.ids.includes(surface.id)),
+    })),
+    { label: "More tools", surfaces: other },
+  ].filter((group) => group.surfaces.length > 0);
 }
 
 function workMapDetail(surface: RightUtilityDockSurfaceId): string {

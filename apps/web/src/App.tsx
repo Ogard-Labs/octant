@@ -220,6 +220,7 @@ import {
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
+  useSidebarDrawerViewport,
   useBackgroundImageLibrary,
   usePrefersReducedMotion,
   useResolvedMaterial,
@@ -959,17 +960,55 @@ function LaunchedShell(
   // otherwise be dropped on the document body. Remember which control replaces
   // it and focus that one once the new layout has rendered.
   const sidebarToggleFocusRef = useRef<"Hide sidebar" | "Show sidebar" | undefined>(undefined);
-  const setSidebarCollapsedPersistent = useCallback((collapsed: boolean) => {
-    sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
-    setSidebarCollapsed(collapsed);
-    writeSidebarCollapsed(globalThis, collapsed);
-  }, []);
+  // At phone width the sidebar is a drawer over the page. It opened on every
+  // load and covered the whole screen with no way out but its own small hide
+  // button, so there it starts closed, closes on Escape, a tap outside, or
+  // choosing somewhere to go, and never writes the desktop preference.
+  const sidebarIsDrawer = useSidebarDrawerViewport();
+  const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
+  const presentedSidebarCollapsed = sidebarIsDrawer ? !sidebarDrawerOpen : sidebarCollapsed;
+  const setSidebarCollapsedPersistent = useCallback(
+    (collapsed: boolean) => {
+      sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+      if (sidebarIsDrawer) {
+        setSidebarDrawerOpen(!collapsed);
+        return;
+      }
+      setSidebarCollapsed(collapsed);
+      writeSidebarCollapsed(globalThis, collapsed);
+    },
+    [sidebarIsDrawer],
+  );
   useLayoutEffect(() => {
     const label = sidebarToggleFocusRef.current;
     if (label === undefined) return;
     sidebarToggleFocusRef.current = undefined;
     document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)?.focus();
-  }, [sidebarCollapsed]);
+  }, [presentedSidebarCollapsed]);
+  useEffect(() => {
+    if (!sidebarIsDrawer || !sidebarDrawerOpen) return;
+    const close = () => setSidebarCollapsedPersistent(true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      // A menu or dialog opened from the drawer takes Escape first.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("[role='dialog'], [role='menu']") !== null) return;
+      close();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".shell-frame > .sidebar, [role='menu'], [role='dialog']") !== null) {
+        return;
+      }
+      close();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [setSidebarCollapsedPersistent, sidebarDrawerOpen, sidebarIsDrawer]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
@@ -3373,6 +3412,37 @@ function LaunchedShell(
     [props.hostBridge],
   );
 
+  // Choosing a thread or destination from the phone drawer is the reason it
+  // was opened; the page it chose should be what the person sees next.
+  const drawerDestination = [
+    activeMode,
+    controller.workspace === undefined
+      ? ""
+      : activeSurfaceTitle(
+          controller.workspace.layouts[activeMode],
+          controller.workspace.activePaneIds[activeMode],
+        ),
+    searchOpen,
+    projectsListOpen,
+    selectedProjectTabId ?? "",
+    inboxOpen,
+    workBoardOpen,
+    codeBoardOpen,
+    codePullRequestsOpen,
+    githubIssuesOpen,
+    linearIssuesOpen,
+    automationCenterOpen,
+    agentsCenterOpen,
+    artifactLibraryOpen,
+    imageLibraryOpen,
+  ].join(":");
+  const lastDrawerDestination = useRef(drawerDestination);
+  useEffect(() => {
+    if (lastDrawerDestination.current === drawerDestination) return;
+    lastDrawerDestination.current = drawerDestination;
+    setSidebarDrawerOpen(false);
+  }, [drawerDestination]);
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -5418,10 +5488,10 @@ function LaunchedShell(
             isNarrow={isNarrow}
             material={material}
             nativeTitlebarInset={hostReservesTitlebarInset}
-            {...(sidebarCollapsed
+            {...(presentedSidebarCollapsed
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            {...(sidebarCollapsed
+            {...(presentedSidebarCollapsed
               ? {
                   onNewThread: () => {
                     if (activeMode === "chat") createChat();
@@ -5445,7 +5515,7 @@ function LaunchedShell(
           void controller.updateSettings({ sidebarWidth: width });
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={presentedSidebarCollapsed}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
