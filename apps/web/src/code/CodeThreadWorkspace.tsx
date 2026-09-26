@@ -22,6 +22,7 @@ import type {
   ProviderExecutionPolicy,
 } from "@octant/contracts";
 import {
+  ACCESS_POSTURE_RANK,
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   type PickerGroup,
@@ -429,7 +430,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }, [composerReady, props.threadId]);
   useEffect(() => {
     setTurnAccessOverride(undefined);
-  }, [props.threadId, view?.thread.executionPolicy]);
+  }, [props.threadId]);
+  useEffect(() => {
+    const nextCeiling = view?.thread.executionPolicy;
+    if (nextCeiling === undefined) return;
+    setTurnAccessOverride((current) =>
+      current !== undefined && ACCESS_POSTURE_RANK[current] > ACCESS_POSTURE_RANK[nextCeiling]
+        ? undefined
+        : current,
+    );
+  }, [view?.thread.executionPolicy]);
 
   // §8.1: `#` must open the same cross-mode picker here as in Chat. The host
   // owns which threads are mentionable and how much of each transcript rides
@@ -1710,6 +1720,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               ceiling={thread.executionPolicy}
               disabled={accessChanging}
               nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              onLowerThread={(next) => void changeAccess(next)}
               onRaiseThread={(next) => void changeAccess(next)}
               onSelect={setTurnAccessOverride}
               value={nextTurnAccess}

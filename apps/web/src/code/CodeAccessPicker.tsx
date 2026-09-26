@@ -15,6 +15,7 @@ import {
   OctantMenuPopup,
   OctantMenuRadioGroup,
   OctantMenuRadioItem,
+  OctantMenuItem,
   OctantMenuCheckboxItem,
   OctantMenuGroup,
   OctantMenuSeparator,
@@ -58,6 +59,8 @@ export interface CodeAccessPickerProps {
   readonly onSelect: (executionPolicy: ProviderExecutionPolicy) => void;
   /** Raise the durable thread grant so later turns can sit at this posture. */
   readonly onRaiseThread: (executionPolicy: ProviderExecutionPolicy) => void;
+  /** Lower the durable thread grant back to approval-gated. Narrowing needs no confirmation. */
+  readonly onLowerThread: (executionPolicy: ProviderExecutionPolicy) => void;
 }
 
 /**
@@ -66,6 +69,7 @@ export interface CodeAccessPickerProps {
  * One-shot choices can only narrow. Choosing more than the thread grants is
  * a thread-grant raise, not a turn overlay — otherwise an approval-gated
  * thread could never reach Auto-accept edits or Full access again.
+ * The picker also offers a durable action to lower the thread back to approval-gated.
  */
 export function CodeAccessPicker(props: CodeAccessPickerProps) {
   const offered = accessPosturesAtOrBelow(props.ceiling);
@@ -135,6 +139,17 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
                 </OctantMenuRadioItem>
               ))}
             </OctantMenuRadioGroup>
+            {ACCESS_POSTURE_RANK[props.ceiling] > ACCESS_POSTURE_RANK["approval-gated"] ? (
+              <OctantMenuGroup>
+                <OctantMenuSeparator />
+                <OctantMenuItem
+                  disabled={props.disabled === true}
+                  onClick={() => props.onLowerThread("approval-gated")}
+                >
+                  Lower thread · Ask for approvals
+                </OctantMenuItem>
+              </OctantMenuGroup>
+            ) : null}
             {reviewAvailable ? (
               <OctantMenuGroup>
                 <OctantMenuSeparator />

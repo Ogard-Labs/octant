@@ -1303,6 +1303,70 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], [], "plan");
   });
 
+  it("keeps a selected Plan posture when the thread lowers to approval-gated access", async () => {
+    const user = userEvent.setup();
+    const initial = controller();
+    const fullAccess = {
+      ...initial,
+      activeView: {
+        ...initial.activeView!,
+        thread: { ...initial.activeView!.thread, executionPolicy: "full-access" as const },
+      },
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace controller={fullAccess} threadId={threadId} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Plan · read-only" }));
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Plan");
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={{
+          ...fullAccess,
+          activeView: {
+            ...fullAccess.activeView!,
+            thread: {
+              ...fullAccess.activeView!.thread,
+              executionPolicy: "approval-gated" as const,
+            },
+          },
+        }}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Plan");
+  });
+
+  it("clears a selected Plan posture when switching to another thread", async () => {
+    const user = userEvent.setup();
+    const initial = controller();
+    const fullAccess = {
+      ...initial,
+      activeView: {
+        ...initial.activeView!,
+        thread: { ...initial.activeView!.thread, executionPolicy: "full-access" as const },
+      },
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace controller={fullAccess} threadId={threadId} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Plan · read-only" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({}, anotherThreadId)}
+        threadId={anotherThreadId}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Ask");
+  });
+
   it("offers auto-accept edits on a thread that already grants it, without changing the thread", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
