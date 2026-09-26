@@ -1,5 +1,4 @@
-import { Plus } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -17,21 +16,16 @@ import "./agent-hierarchy.css";
  * plain-text transcript and five controls in place — for a list that is a
  * handful of rows. Now it is two sections, Working and Finished, of one-button
  * rows; a row opens that subagent's own page, where its conversation and
- * controls live.
+ * controls live. Nothing here starts a subagent: the thread's agent does, when
+ * it hands off part of its work, because only then does the result come back
+ * to it.
  */
 export function AgentHierarchyPanel(props: {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly creationPosture?: "off" | "ask" | "automatic";
   readonly reconnecting?: boolean;
   readonly onOpen?: (runId: string) => void;
-  /**
-   * The New subagent form, where this surface may create one. It starts open
-   * on a thread with no subagents — there is nothing else to show — and folds
-   * behind New once there is a list to read.
-   */
-  readonly creation?: ReactNode;
 }) {
-  const [creating, setCreating] = useState(() => props.entries.length === 0);
   const model = useMemo(
     () =>
       buildAgentHierarchyModel({
@@ -48,18 +42,6 @@ export function AgentHierarchyPanel(props: {
     >
       <header className="agent-hierarchy__header">
         <h2>Subagents</h2>
-        {props.creation === undefined ? null : (
-          <OctantButton
-            aria-expanded={creating}
-            onClick={() => setCreating((current) => !current)}
-            size="xs"
-            type="button"
-            variant="ghost"
-          >
-            <Plus aria-hidden="true" size={12} />
-            New
-          </OctantButton>
-        )}
       </header>
 
       {props.reconnecting ? (
@@ -73,8 +55,6 @@ export function AgentHierarchyPanel(props: {
           {model.emptyReason}
         </p>
       )}
-
-      {creating ? props.creation : null}
 
       <AgentHierarchySection label="Working" onOpen={props.onOpen} rows={model.working} />
       <AgentHierarchySection label="Finished" onOpen={props.onOpen} rows={model.finished} />

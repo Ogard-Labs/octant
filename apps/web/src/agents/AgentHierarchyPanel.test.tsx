@@ -76,20 +76,11 @@ describe("AgentHierarchyPanel", () => {
     expect(onOpen).toHaveBeenCalledWith("run-newer");
   });
 
-  it("keeps New subagent folded behind New once the thread has subagents", async () => {
-    const user = userEvent.setup();
-    render(<AgentHierarchyPanel creation={<p>Create form</p>} entries={entries} />);
+  it("says where subagents come from on a thread with none", () => {
+    render(<AgentHierarchyPanel entries={[]} />);
 
-    expect(screen.queryByText("Create form")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "New" }));
-    expect(screen.getByText("Create form")).toBeVisible();
-  });
-
-  it("shows New subagent at once on a thread with none, under a plain empty line", () => {
-    render(<AgentHierarchyPanel creation={<p>Create form</p>} entries={[]} />);
-
-    expect(screen.getByRole("status")).toHaveTextContent("No subagents on this thread yet.");
-    expect(screen.getByText("Create form")).toBeVisible();
-    expect(screen.getByRole("button", { name: "New" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "No subagents yet. They appear here when the agent hands off part of its work.",
+    );
   });
 });

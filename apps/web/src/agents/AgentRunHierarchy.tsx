@@ -1,10 +1,7 @@
 import {
   decodeAgentRunId,
-  decodeAgentRunRequestId,
-  type AgentRunControlResolvedFacts,
   type AgentRunCreationPosture,
   type AgentRunParentThreadId,
-  type AgentRunRole,
 } from "@octant/contracts";
 import {
   AgentRunClientFailure,
@@ -19,7 +16,6 @@ import { ShellState } from "../shell/ShellState";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
 import { AgentRunDetail } from "./AgentRunDetail";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
-import { AgentRunCreateForm, type AgentRunCreateFormValues } from "./AgentRunCreateForm";
 import { useAgentRunConversation } from "./useAgentRunConversation";
 
 const ACTIVE_CHILD_REFRESH_MS = 2_000;
@@ -28,9 +24,7 @@ export function AgentRunHierarchy(props: {
   readonly client: AgentRunClient;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly creationPosture?: AgentRunCreationPosture;
-  /** Creation is opt-in until a surface has an authoritative parent. */
-  readonly allowCreation?: boolean;
-  /** Fetches the server-authoritative posture. */
+  /** Fetches the server-authoritative posture, so a list turned off says so. */
   readonly settingsClient?: AgentRunSettingsClient;
   /**
    * A subagent someone asked to see from elsewhere — a row in the composer's
@@ -48,11 +42,6 @@ export function AgentRunHierarchy(props: {
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
   );
-  const [creationError, setCreationError] = useState<string>();
-  const [creating, setCreating] = useState(false);
-  const [facts, setFacts] = useState<AgentRunControlResolvedFacts>();
-  const [factsStatus, setFactsStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [role, setRole] = useState<AgentRunRole>();
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(props.requestedRunId);
   const onRequestedRunHandled = useRef(props.onRequestedRunHandled);
   onRequestedRunHandled.current = props.onRequestedRunHandled;
@@ -90,36 +79,6 @@ export function AgentRunHierarchy(props: {
     }
   }, [props.client, props.parentThreadId]);
 
-  const loadFacts = useCallback(
-    async (nextRole?: AgentRunRole) => {
-      if (!props.allowCreation) return;
-      setFactsStatus("loading");
-      try {
-        const preview = await props.client.preview({
-          parentThreadId: props.parentThreadId,
-          ...(nextRole === undefined ? {} : { role: nextRole }),
-        });
-        if (preview.status === "refused") {
-          setFacts(undefined);
-          setFactsStatus("error");
-          setCreationError(`Child workspace refused: ${preview.reason}.`);
-          return;
-        }
-        setFacts(preview.facts);
-        setFactsStatus("ready");
-        setCreationError(undefined);
-      } catch (error) {
-        setFactsStatus("error");
-        setCreationError(
-          error instanceof AgentRunClientFailure
-            ? error.message
-            : "Resolved child facts are unavailable.",
-        );
-      }
-    },
-    [props.allowCreation, props.client, props.parentThreadId],
-  );
-
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -149,21 +108,16 @@ export function AgentRunHierarchy(props: {
   }, [anyActive, props.client, props.parentThreadId]);
 
   useEffect(() => {
-    void loadFacts(role);
-  }, [loadFacts, role]);
-
-  useEffect(() => {
     const settingsClient = props.settingsClient;
-    if (!props.allowCreation || settingsClient === undefined) return;
+    if (settingsClient === undefined) return;
     let cancelled = false;
     void (async () => {
       try {
         const settings = await settingsClient.current();
         if (!cancelled) setPosture(settings.creationPosture);
       } catch (error) {
-        // The hierarchy stays usable (read/acknowledge/cancel) even if the
-        // settings read fails; only child creation depends on this posture,
-        // and AgentRunCreateForm's own server round trip is the last word.
+        // The list stays usable (read/acknowledge/cancel) even if the
+        // settings read fails; the posture only words the empty state.
         if (!cancelled && error instanceof AgentRunSettingsClientFailure) {
           setErrorMessage((current) => current ?? error.message);
         }
@@ -172,7 +126,7 @@ export function AgentRunHierarchy(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.allowCreation, props.settingsClient]);
+  }, [props.settingsClient]);
 
   const acknowledge = useCallback(
     async (input: { readonly runId: string; readonly version: number }) => {
@@ -253,36 +207,6 @@ export function AgentRunHierarchy(props: {
     [props.client, refresh],
   );
 
-  const createChild = useCallback(
-    async (values: AgentRunCreateFormValues) => {
-      setCreationError(undefined);
-      setCreating(true);
-      try {
-        const result = await props.client.requestRun({
-          requestId: decodeAgentRunRequestId(crypto.randomUUID()),
-          parentThreadId: props.parentThreadId,
-          role: values.role,
-          task: values.task,
-          ...(values.includeParentContext === true ? { includeParentContext: true } : {}),
-        });
-        if (result.kind === "run-command-failed") {
-          setCreationError(result.message ?? `Creation rejected: ${result.reason ?? "unknown"}.`);
-          return;
-        }
-        await refresh();
-      } catch (error) {
-        setCreationError(
-          error instanceof AgentRunClientFailure
-            ? error.message
-            : "The child request could not be built from the resolved parent facts.",
-        );
-      } finally {
-        setCreating(false);
-      }
-    },
-    [props.client, props.parentThreadId, refresh],
-  );
-
   const model = useMemo(() => buildAgentHierarchyModel({ entries }), [entries]);
 
   if (status === "loading") {
@@ -346,21 +270,6 @@ export function AgentRunHierarchy(props: {
         entries={entries}
         onOpen={setSelectedRunId}
         reconnecting={status === "refreshing"}
-        {...(props.allowCreation
-          ? {
-              creation: (
-                <AgentRunCreateForm
-                  posture={effectivePosture}
-                  submitting={creating}
-                  factsStatus={factsStatus}
-                  {...(facts === undefined ? {} : { facts })}
-                  {...(creationError === undefined ? {} : { errorMessage: creationError })}
-                  onRoleChange={setRole}
-                  onSubmit={(values) => void createChild(values)}
-                />
-              ),
-            }
-          : {})}
       />
     </>
   );

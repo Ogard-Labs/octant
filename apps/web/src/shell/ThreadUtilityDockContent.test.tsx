@@ -98,8 +98,11 @@ describe("thread utility dock content", () => {
       await screen.findByRole("heading", { name: "Subagents" }, { timeout: 10_000 }),
     ).toBeVisible();
     expect(
-      await screen.findByRole("form", { name: "Create subagent" }, { timeout: 10_000 }),
+      await screen.findByText(/They appear here when the agent hands off/, undefined, {
+        timeout: 10_000,
+      }),
     ).toBeVisible();
+    expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Provider instance ID")).not.toBeInTheDocument();
   });
 

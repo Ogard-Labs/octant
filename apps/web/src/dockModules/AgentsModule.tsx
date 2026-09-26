@@ -27,7 +27,6 @@ export default function AgentsModule(props: Props) {
         />
       )}
       <AgentRunHierarchy
-        allowCreation
         client={props.agentRunClient}
         parentThreadId={decodeAgentRunParentThreadId(props.subject.threadId)}
         {...(props.requestedAgentRunId === undefined

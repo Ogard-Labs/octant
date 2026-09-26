@@ -101,7 +101,7 @@ export function buildAgentHierarchyModel(input: {
           emptyReason:
             creationPosture === "off"
               ? "Subagents are turned off in Settings."
-              : "No subagents on this thread yet.",
+              : "No subagents yet. They appear here when the agent hands off part of its work.",
         }
       : {}),
   };

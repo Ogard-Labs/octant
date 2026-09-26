@@ -102,7 +102,7 @@ function summaryEntry(overrides: {
 }
 
 describe("AgentRunHierarchy", () => {
-  it("does not offer child creation unless the surface opts in", async () => {
+  it("offers no way to start a subagent by hand; only the thread's agent starts one", async () => {
     const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
     render(
       <AgentRunHierarchy
@@ -112,6 +112,10 @@ describe("AgentRunHierarchy", () => {
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /New/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/They appear here when the agent hands off part of its work/),
+    ).toBeVisible();
     expect(requestRun).not.toHaveBeenCalled();
   });
 
@@ -208,77 +212,13 @@ describe("AgentRunHierarchy", () => {
     }
   });
 
-  it("hides child creation and shows the Off explanation when posture is Off", async () => {
+  it("says subagents are turned off when the posture is Off", async () => {
     const client = emptyClient();
     render(
-      <AgentRunHierarchy
-        allowCreation
-        client={client}
-        parentThreadId={parentThreadId}
-        creationPosture="off"
-      />,
+      <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="off" />,
     );
     await waitFor(() => expect(screen.getByRole("heading")).toBeVisible());
     expect(screen.getAllByText(/turned off in Settings/i).length).toBeGreaterThan(0);
-    expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
-  });
-
-  it("submits a role and task and shows resolved facts instead of raw IDs", async () => {
-    const user = userEvent.setup();
-    const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
-    const parentSummary = vi.fn(async () => ({ parentThreadId, entries: [] }));
-    const client = emptyClient({ requestRun: requestRun as never, parentSummary });
-    render(
-      <AgentRunHierarchy
-        allowCreation
-        client={client}
-        parentThreadId={parentThreadId}
-        creationPosture="automatic"
-      />,
-    );
-    await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
-    expect(screen.queryByLabelText("Provider instance ID")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Resolved child facts" })).toHaveTextContent(
-      "Octant-managed",
-    );
-    await user.type(screen.getByLabelText("Task"), "Summarize the open PRs.");
-    await user.click(screen.getByRole("button", { name: "Create subagent" }));
-
-    await waitFor(() => expect(requestRun).toHaveBeenCalledTimes(1));
-    const submitted = requestRun.mock.calls[0]?.[0];
-    expect(submitted).toMatchObject({
-      parentThreadId,
-      task: "Summarize the open PRs.",
-      role: "research",
-    });
-    expect(submitted).not.toHaveProperty("providerInstanceId");
-    expect(submitted).not.toHaveProperty("requestedAuthority");
-    await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
-  });
-
-  it("surfaces a server denial reason next to the creation form without crashing the hierarchy", async () => {
-    const user = userEvent.setup();
-    const requestRun = vi.fn(async () => ({
-      kind: "run-command-failed" as const,
-      reason: "posture-rejected",
-      message: "Subagent creation posture is Off.",
-    }));
-    const client = emptyClient({ requestRun });
-    render(
-      <AgentRunHierarchy
-        allowCreation
-        client={client}
-        parentThreadId={parentThreadId}
-        creationPosture="automatic"
-      />,
-    );
-    await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
-    await user.type(screen.getByLabelText("Task"), "Summarize the open PRs.");
-    await user.click(screen.getByRole("button", { name: "Create subagent" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("Subagent creation posture is Off."),
-    );
   });
 
   it("cancels a working subagent from its page", async () => {
@@ -307,7 +247,6 @@ describe("AgentRunHierarchy", () => {
     const client = emptyClient({ cancel, parentSummary });
     render(
       <AgentRunHierarchy
-        allowCreation
         client={client}
         parentThreadId={parentThreadId}
         creationPosture="automatic"
@@ -346,7 +285,6 @@ describe("AgentRunHierarchy", () => {
     });
     render(
       <AgentRunHierarchy
-        allowCreation
         client={client}
         parentThreadId={parentThreadId}
         creationPosture="automatic"
@@ -375,14 +313,16 @@ describe("AgentRunHierarchy", () => {
     const client = emptyClient();
     render(
       <AgentRunHierarchy
-        allowCreation
         client={client}
         parentThreadId={parentThreadId}
         creationPosture="off"
         settingsClient={settingsClient}
       />,
     );
-    await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByText(/They appear here when the agent hands off/)).toBeVisible(),
+    );
+    expect(screen.queryByText(/turned off in Settings/i)).not.toBeInTheDocument();
     expect(settingsClient.current).toHaveBeenCalled();
   });
 
