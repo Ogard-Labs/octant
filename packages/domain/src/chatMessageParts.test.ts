@@ -108,3 +108,13 @@ describe("parseChatMessageBody with follow-up suggestions", () => {
     expect(parseChatMessageBody(block)).toEqual([{ kind: "markdown", text: "" }]);
   });
 });
+
+describe("parseChatMessageBody on hostile model output", () => {
+  it("reads a reply full of unclosed reasoning tags without rescanning it from every tag", () => {
+    const body = "<thinking>a".repeat(50_000);
+    const started = performance.now();
+    const parts = parseChatMessageBody(body);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(parts.length).toBeGreaterThan(0);
+  });
+});
