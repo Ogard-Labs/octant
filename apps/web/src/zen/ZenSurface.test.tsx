@@ -49,19 +49,12 @@ afterEach(() => {
 
 /** The application ground as Settings › Appearance › Background resolved it. */
 const APP_GROUND: ResolvedAppBackground = {
-  kind: "theme",
-  backgroundId: null,
-  backgroundUrl: null,
-  backgroundStillUrl: null,
-  backgroundAnimated: false,
-  animated: false,
-  patternEnabled: true,
-  patternOpacity: 0.55,
-  patternSpeed: 1,
-  patternIntensity: 0.6,
-  photoDithered: true,
-  effect: { kind: "dither", cell: 2, levels: 4 },
-  pulse: false,
+  kind: "builtin",
+  backgroundId: "perspective-dot-plane-animated",
+  backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
+  backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+  backgroundAnimated: true,
+  effect: { kind: "none", cell: 3, levels: 8 },
   photoOpacity: 0.42,
   scope: "everywhere",
   coversSidebar: false,
@@ -282,7 +275,7 @@ describe("ZenSurface", () => {
       />,
     );
     const ground = container.querySelector("[data-octant-app-backdrop]");
-    expect(ground?.getAttribute("data-octant-app-backdrop")).toBe("theme");
+    expect(ground?.getAttribute("data-octant-app-backdrop")).toBe("builtin");
     // Zen fills the window edge to edge and has no composer to mask away, so
     // it asks for its own placement rather than borrowing the shell's mask.
     expect(ground?.getAttribute("data-placement")).toBe("zen");
@@ -304,7 +297,7 @@ describe("ZenSurface", () => {
         // What Increased contrast resolves the application ground to. Zen
         // draws the resolved value rather than deciding again, so the setting
         // that clears the ground everywhere else clears it here too.
-        appBackground={{ ...APP_GROUND, kind: "none", animated: false }}
+        appBackground={{ ...APP_GROUND, kind: "none" }}
         appBackgroundFetcher={async () => new Blob()}
         barCollapsed={false}
         onExit={() => undefined}
@@ -334,7 +327,7 @@ describe("ZenSurface", () => {
     };
     const { container } = render(
       <ZenSurface
-        appBackground={{ ...APP_GROUND, animated: true }}
+        appBackground={APP_GROUND}
         appBackgroundFetcher={async () => new Blob()}
         barCollapsed={false}
         onExit={() => undefined}
@@ -345,9 +338,10 @@ describe("ZenSurface", () => {
         space={space}
       />,
     );
-    expect(
-      container.querySelector("[data-octant-app-backdrop]")?.getAttribute("data-animated"),
-    ).toBe("false");
+    // A moving built-in shows its still frame instead.
+    expect(container.querySelector(".app-backdrop__builtin")).toHaveStyle({
+      backgroundImage: 'url("/zen-backgrounds/perspective-dot-plane.jpg")',
+    });
     vi.restoreAllMocks();
   });
 

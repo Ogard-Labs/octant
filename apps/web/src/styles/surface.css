@@ -546,25 +546,6 @@
   -webkit-mask-composite: source-in;
 }
 
-/* Keep the full welcome reading column clear, including persistent examples.
-   Photos retain their existing mask; the theme pattern lives at the edges. */
-.app-backdrop[data-placement="welcome"][data-octant-app-backdrop="theme"] {
-  mask-image:
-    linear-gradient(
-      to right,
-      currentColor,
-      transparent calc(50% - min(45%, 420px)),
-      transparent calc(50% + min(45%, 420px)),
-      currentColor
-    ),
-    linear-gradient(
-      to bottom,
-      currentColor 30%,
-      color-mix(in srgb, currentColor 35%, transparent) 58%,
-      transparent 86%
-    );
-}
-
 /* Under the whole shell there is no composer to clear; the ground only
    softens toward the bottom, where transcripts and lists do their reading. */
 .app-backdrop[data-placement="shell"] {
@@ -587,8 +568,7 @@
 }
 
 .app-backdrop__builtin,
-.app-backdrop__photo,
-.app-backdrop__pattern {
+.app-backdrop__photo {
   position: absolute;
   inset: 0;
   display: block;
@@ -602,53 +582,11 @@
   background-size: cover;
 }
 
-/* The pattern and a dithered photo are a coarse grid scaled up with
-   nearest-neighbour sampling. A clean photo is already at device pixels
-   and must sample ordinarily; sharing pixelated with the pattern was
-   turning that path into a 1× nearest-neighbour upscale on Retina. */
-.app-backdrop__pattern,
+/* A printed picture is a coarse grid scaled up with nearest-neighbour
+   sampling. A clean photo is already at device pixels and must sample
+   ordinarily, or it becomes a 1× nearest-neighbour upscale on Retina. */
 .app-backdrop__photo[data-dithered="true"] {
   image-rendering: pixelated;
-}
-
-/* Pulse: the picture breathes, a little brighter and a hair larger and back,
-   so the ground feels alive without anything travelling across it. The
-   resolver turns it off under reduced motion; the media query is the
-   second guard for a system preference that changes while the page is up. */
-@keyframes app-backdrop-breathe {
-  0%,
-  100% {
-    filter: brightness(0.9);
-    transform: scale(1);
-  }
-
-  50% {
-    filter: brightness(1.08);
-    transform: scale(1.015);
-  }
-}
-
-.app-backdrop[data-pulse="true"]
-  > :is(.app-backdrop__builtin, .app-backdrop__photo, .app-backdrop__pattern) {
-  animation: app-backdrop-breathe var(--oct-motion-breathe) var(--oct-ease-standard) infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app-backdrop[data-pulse="true"]
-    > :is(.app-backdrop__builtin, .app-backdrop__photo, .app-backdrop__pattern) {
-    animation: none;
-  }
-}
-
-/* Screen lifts the accent out of a dark ground; multiply presses it into a
-   light one. Either way the cloud tints the page instead of covering it.
-   Both layers take their opacity from the setting, inline. */
-.app-backdrop__pattern {
-  mix-blend-mode: screen;
-}
-
-.app-backdrop__pattern[data-blend="multiply"] {
-  mix-blend-mode: multiply;
 }
 
 /* The shell as a stage for the ground: the layers over it that painted the
@@ -708,18 +646,35 @@
 
 /* A conversation needs one quiet reading surface: separate reply cards over
    the dither made even short answers compete with the composer (0155).
-   Opaque is the fallback, including when transparency is reduced. The pane's
-   title rail belongs to the same surface; left clear, a stripe of dots ran
-   behind the thread's title above an otherwise calm page. */
+   Opaque is the fallback, including when transparency is reduced.
+
+   The surface belongs to the pane that holds a thread, title rail included,
+   not to whichever view the pane is showing at the moment. Painted on the
+   conversation view alone, the "Loading Code thread" state that stands in
+   for it while the thread loads had no surface at all, and the picture
+   showed straight through the card; the title rail had the same gap. */
 .shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-thread-workspace,
 .shell--app-backdrop.shell-frame .code-thread-workspace,
 .shell--app-backdrop.shell-frame
-  .workspace-pane:has(
-    > .workspace-pane__panel :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace)
-  )
-  > .workspace-pane__header {
+  .workspace-pane:is(
+    [data-surface-kind="chat-thread"],
+    [data-surface-kind="work-thread"],
+    [data-surface-kind="code-overview"]
+  ) {
   background: var(--octant-workspace);
+}
+
+/* Inside a thread pane the pane is the surface; a second one on the view
+   would double the tint. */
+.shell--app-backdrop.shell-frame
+  .workspace-pane:is(
+    [data-surface-kind="chat-thread"],
+    [data-surface-kind="work-thread"],
+    [data-surface-kind="code-overview"]
+  )
+  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
+  background: transparent;
 }
 
 @media (prefers-reduced-transparency: no-preference) {
@@ -729,11 +684,11 @@
       .chat-workspace,
       .work-thread-workspace,
       .code-thread-workspace,
-      .workspace-pane:has(
-          > .workspace-pane__panel
-            :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace)
-        )
-        > .workspace-pane__header
+      .workspace-pane:is(
+        [data-surface-kind="chat-thread"],
+        [data-surface-kind="work-thread"],
+        [data-surface-kind="code-overview"]
+      )
     ) {
     background: linear-gradient(
       to right,
@@ -742,6 +697,17 @@
       color-mix(in srgb, var(--octant-workspace) 97%, transparent) 80%,
       color-mix(in srgb, var(--octant-workspace) 90%, transparent)
     );
+  }
+
+  html:not([data-octant-reduced-transparency="true"])
+    .shell--app-backdrop.shell-frame
+    .workspace-pane:is(
+      [data-surface-kind="chat-thread"],
+      [data-surface-kind="work-thread"],
+      [data-surface-kind="code-overview"]
+    )
+    :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
+    background: transparent;
   }
 }
 

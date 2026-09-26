@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -77,7 +77,8 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
  * Only the rectangle is written: no React state, no re-render.
  */
 function usePrimaryCardHole(layer: HTMLDivElement | null, active: boolean): void {
-  useEffect(() => {
+  // Before paint, so the first frame already clips the ground to the card.
+  useLayoutEffect(() => {
     if (!active || layer === null || typeof ResizeObserver === "undefined") return;
     const card = layer.querySelector<HTMLElement>(":scope > .primary-workspace-layer");
     const frame = layer.parentElement;
