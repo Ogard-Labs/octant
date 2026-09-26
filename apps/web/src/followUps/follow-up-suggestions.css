@@ -57,3 +57,70 @@
 .composer-follow-ups__error {
   color: var(--octant-danger-text);
 }
+
+/*
+ * Side-task cards stack above the chips: each is its own offer the person
+ * starts or dismisses, so it reads as an object rather than a row of text.
+ */
+.composer-side-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.composer-side-task {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: var(--oct-radius-sm);
+  animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
+}
+
+.composer-side-task__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--octant-text-secondary);
+}
+
+.composer-side-task__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-side-task__reason,
+.composer-side-task__prompt {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.composer-side-task__prompt summary {
+  color: var(--octant-text-muted);
+  cursor: pointer;
+}
+
+.composer-side-task__prompt p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+
+.composer-side-task__actions {
+  display: flex;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-side-task {
+    animation: none;
+  }
+}

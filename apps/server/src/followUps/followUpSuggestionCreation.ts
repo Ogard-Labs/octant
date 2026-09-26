@@ -23,6 +23,12 @@ export type FollowUpCreationOutcome =
   | { readonly kind: "created"; readonly created: NativeHarnessFollowUpCreation }
   | { readonly kind: "refused"; readonly message: string };
 
+/** The thread a follow-up or side task came from, and the model that offered it. */
+export type FollowUpOrigin = Pick<
+  ThreadFollowUpSuggestions,
+  "threadId" | "mode" | "projectId" | "suggestedBy"
+>;
+
 export interface FollowUpCreationDependencies {
   readonly chat: Pick<ChatService, "execute">;
   readonly work: {
@@ -62,7 +68,7 @@ export async function createFollowUp(
   dependencies: FollowUpCreationDependencies,
   input: {
     readonly windowId: string;
-    readonly view: ThreadFollowUpSuggestions;
+    readonly view: FollowUpOrigin;
     readonly creation: NativeHarnessFollowUpCreation;
   },
 ): Promise<FollowUpCreationOutcome> {
@@ -148,7 +154,7 @@ async function createCodeThread(
   dependencies: FollowUpCreationDependencies,
   input: {
     readonly windowId: ReturnType<typeof decodeWindowId>;
-    readonly view: ThreadFollowUpSuggestions;
+    readonly view: FollowUpOrigin;
     readonly creation: Exclude<NativeHarnessFollowUpCreation, { readonly kind: "same-thread" }>;
     readonly placement: "checkout" | "worktree";
   },

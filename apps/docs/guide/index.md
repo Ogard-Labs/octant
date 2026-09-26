@@ -54,6 +54,18 @@ the prompt waiting in its composer; sending it is still your move. A Code
 follow-up starts approval-gated, because Full access is remembered per
 thread.
 
+### Side tasks
+
+While it works, a model may notice something that belongs in its own thread —
+a real bug, stale docs, missing tests — and offer it as a side task instead of
+widening the current change. The offer appears as a card over the composer
+with a title, one line on why, and the exact prompt behind a disclosure.
+**Start in new worktree** (Code) or **Start in new thread** creates the thread
+on the same model and sends the prompt, so the work begins right away; a Code
+side task still asks before it edits or runs anything unless you gave it Full
+access. × dismisses the offer. Side tasks need a provider that runs Octant's
+app-managed tools; the others can still suggest follow-ups.
+
 An approved later interaction model is recorded in the architecture decision
 records and is **not** what the app renders today for remaining dock
 placement: live thread-owned tools still replace the generic Thread panel.

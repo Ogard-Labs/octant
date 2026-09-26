@@ -799,6 +799,23 @@ creation command on the confirming window, on the model that suggested it; the
 prompt is never sent on the person's behalf. The web shows the set as chips at
 the top of the composer of each local thread pane.
 
+Side tasks are the mid-turn counterpart (`apps/server/src/sideTasks`). On any
+provider that runs app-managed tools, every Chat, Work, and Code turn's tool
+set includes `octant_offer_side_task`, beside browser and computer use: the
+model offers out-of-scope work it noticed (title, one-sentence reason,
+standalone prompt, and in a Code thread in a Project a worktree or the current
+checkout). The call only journals the offer (`thread-side-tasks`, at most five
+open per thread) and returns at once; it grants nothing. `/api/side-tasks/:threadId`
+lists offers and starts or dismisses one. Starting is the person's
+confirmation: the host creates the thread through `createFollowUp` on the
+offering model, marks the offer started, and sends the prompt as the first
+message through the mode's ordinary turn command on the confirming window
+(`send-chat-turn`, `start-work-thread-turn`, or staged evidence plus
+`start-provider-turn`); a Code thread still starts approval-gated. This is the
+one place a prompt is sent for the person, and only on their click. If the
+message does not go out, the thread stays and the prompt waits in its
+composer. The web shows open offers as cards above the chips.
+
 ## Extensions and skills
 
 `@octant/plugin-host` is the pure model: normalized component kinds

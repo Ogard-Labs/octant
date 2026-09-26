@@ -175,6 +175,10 @@ A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss
 control. Choosing one swaps the row for an inline preview of what it would
 create and its prompt; nothing is created until **Start** (or **Use prompt**).
+Side-task offers stack above the chips as hairline cards: a target icon
+(branch for a worktree, new-message otherwise), the title, a dismiss control,
+the one-line reason, a collapsed "Prompt" disclosure, and one primary
+**Start in new worktree** / **Start in new thread** button.
 
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a

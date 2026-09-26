@@ -443,6 +443,12 @@ export interface ChatServiceExecutionContext {
   readonly windowId: WindowId;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
+  /**
+   * Called once a sent turn is journaled and before it runs, for a caller
+   * that must answer as soon as the message is in rather than when the
+   * reply ends.
+   */
+  readonly onTurnAccepted?: () => void;
 }
 
 interface PreparedChatContent {
@@ -2087,6 +2093,7 @@ export class ChatService {
       };
     });
     if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
+    executionContext?.onTurnAccepted?.();
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,

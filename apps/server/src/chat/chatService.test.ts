@@ -1502,6 +1502,33 @@ describe("ChatService", () => {
     ).not.toContain("Referenced thread");
   });
 
+  it("tells a caller the message is in before the provider starts the reply", async () => {
+    const { service, fakeDriver } = openFixture({});
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Side task",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const turnsWhenAccepted: number[] = [];
+
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Compare hash maps and trees",
+      },
+      {
+        windowId: "84000000-0000-4000-8000-000000000099" as WindowId,
+        onTurnAccepted: () => turnsWhenAccepted.push(fakeDriver.sentTurns.length),
+      },
+    );
+
+    expect(turnsWhenAccepted).toEqual([0]);
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
   it("resolves a turn's `#thread` mentions on the server and stores only what the user typed", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     const asked: Array<{ threadMentionIds: ReadonlyArray<string>; windowId?: string }> = [];

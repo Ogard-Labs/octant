@@ -1205,6 +1205,7 @@ function LaunchedShell(
     projectBrowserClient,
     projectTerminalClient,
     followUpSuggestionClient,
+    sideTaskClient,
     hostControlClient,
     imageGenerationClient,
     speechClient,
@@ -2694,7 +2695,8 @@ function LaunchedShell(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
   );
   // The prompt of a confirmed follow-up waits in the composer of the thread
-  // it belongs to; sending it is the person's move.
+  // it belongs to; sending it is the person's move. A started side task has
+  // already sent its prompt and passes none.
   const openCreatedFollowUp = ({
     mode,
     created,
@@ -2705,6 +2707,7 @@ function LaunchedShell(
     readonly prompt: string;
   }) => {
     const seed = (threadMode: "chat" | "work" | "code", threadId: string) =>
+      prompt.length > 0 &&
       composerThreadDrafts.write(threadMode, threadId, {
         text: prompt,
         caretIndex: prompt.length,
@@ -5976,6 +5979,7 @@ function LaunchedShell(
                     {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                     followUpSuggestions={{
                       client: followUpSuggestionClient,
+                      sideTaskClient,
                       onCreated: openCreatedFollowUp,
                     }}
                     greetingName={controller.settings?.userProfile.displayName}
