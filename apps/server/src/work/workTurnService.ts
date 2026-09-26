@@ -21,6 +21,7 @@ import {
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
   type WorkAttachmentReference,
+  type WorkAccess,
   type WorkThread,
   type WorkThreadId,
   type WorkThreadTranscript,
@@ -298,6 +299,15 @@ export interface WorkTurnServiceDependencies {
 }
 
 export class WorkTurnService {
+  /**
+   * The access each running turn holds, by thread. The native harness checks
+   * edits against this rather than the thread's own access, so a goal-loop
+   * round held ask-first stays ask-first for every provider.
+   */
+  readonly #runningAccess = new Map<
+    string,
+    { readonly requestId: string; readonly access: WorkAccess }
+  >();
   readonly #resolveSelectedSkillContext: SelectedSkillContextResolver | undefined;
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
@@ -380,6 +390,13 @@ export class WorkTurnService {
   async startFirstTurn(
     authenticatedWindowId: WindowId,
     input: unknown,
+    options?: {
+      /**
+       * Run this turn ask-first whatever the thread's access, for a caller
+       * whose own authority is narrower than the thread's (a goal loop round).
+       */
+      readonly holdAskFirst?: boolean;
+    },
   ): Promise<WorkTurnLookupResult> {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
@@ -716,6 +733,9 @@ export class WorkTurnService {
     const launch = this.#runTurn({
       command,
       ...(thread === undefined ? {} : { thread }),
+      ...(thread === undefined
+        ? {}
+        : { access: options?.holdAskFirst === true ? ("ask-first" as const) : thread.access }),
       windowId: authenticatedWindowId,
       providerSessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
@@ -726,6 +746,11 @@ export class WorkTurnService {
       contextPlan: planned,
       signal: controller.signal,
     }).finally(() => {
+      if (
+        this.#runningAccess.get(String(command.threadId))?.requestId === String(command.requestId)
+      ) {
+        this.#runningAccess.delete(String(command.threadId));
+      }
       this.#settleSpendReservation(command.requestId);
       this.#controllers.delete(String(command.requestId));
       this.#inflight.delete(String(command.requestId));
@@ -852,9 +877,16 @@ export class WorkTurnService {
     });
   }
 
+  /** The access the thread's running turn holds; undefined when none runs. */
+  runningTurnAccess(threadId: string): WorkAccess | undefined {
+    return this.#runningAccess.get(threadId)?.access;
+  }
+
   async #runTurn(input: {
     readonly command: ReturnType<typeof decodeStartWorkThreadTurnCommand>;
     readonly thread?: WorkThread;
+    /** The thread's access, narrowed to ask-first when its caller held it. */
+    readonly access?: WorkAccess;
     readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
     readonly resumeCursor?: ProviderResumeCursor;
@@ -984,9 +1016,16 @@ export class WorkTurnService {
           };
     if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
     let usageReported = false;
+    if (input.access !== undefined) {
+      this.#runningAccess.set(String(input.command.threadId), {
+        requestId: String(input.command.requestId),
+        access: input.access,
+      });
+    }
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
+      ...(input.access === undefined ? {} : { access: input.access }),
       ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
       ...(input.driver.conversationOwnership !== "provider"
         ? {}

@@ -325,7 +325,7 @@ deletes its data.
 | Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded, approval-gated writes inside that root; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                          |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                          |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
 
 Work's missing shell and Git are withheld, not approval-gated: a person is
@@ -936,6 +936,12 @@ mechanisms are:
   actions, credential access, access outside the bound root, privilege or
   sandbox changes. Grants are scoped and journaled. Code starts approval-gated;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
+  a Work thread takes its access from Settings › Work when it is created —
+  ask-first (the default) or auto-accept-edits — and keeps it; the host sets
+  it, not the renderer, and a goal-loop round uses it only when the loop's own
+  ceiling allows auto-accept-edits too. Nothing else about a Work turn widens:
+  it stays confined to the Project root, and providers without an auto-accept
+  path keep asking;
   Full access is a remembered, per-Project decision. A composer turn may
   request a narrower posture; the server clamps it to the thread's grant
   and records the posture the turn ran under. Compatible harnesses may

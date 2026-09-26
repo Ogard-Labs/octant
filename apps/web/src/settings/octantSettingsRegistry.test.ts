@@ -10,6 +10,7 @@ describe("octantSettingsRegistry", () => {
       "sidebar",
       "keybindings",
       "chat",
+      "work",
       "code",
       "providers",
       "harness",
@@ -56,9 +57,13 @@ describe("octantSettingsRegistry", () => {
     expect(data?.keywords).toMatch(/retention/);
   });
 
-  it("does not register placeholder sections for future work", () => {
-    const ids = octantSettingsRegistry.sections.map((s) => s.id);
-    expect(ids).not.toContain("work");
+  it("registers Work with the two defaults a new Work thread starts with", () => {
+    const work = octantSettingsRegistry.sections.find((s) => s.id === "work");
+    expect(work?.scope).toBe("host");
+    expect(work?.settings.map((setting) => setting.id)).toEqual([
+      "work-default-model",
+      "work-default-access",
+    ]);
   });
 
   it("registers marketplace fetches with the Skills & Extensions it governs", () => {

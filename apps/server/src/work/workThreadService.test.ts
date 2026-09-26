@@ -42,7 +42,11 @@ describe("WorkThreadService", () => {
     const fixture = serviceFixture({ threads: [allowed, hidden] });
 
     await expect(fixture.service.bootstrap(ids.window)).resolves.toEqual(
-      decodeWorkThreadBootstrap({ threads: [allowed] }),
+      decodeWorkThreadBootstrap({
+        threads: [allowed],
+        // Nothing saved yet: new threads ask first and have no default model.
+        settings: { defaultAccess: "ask-first", version: 0, updatedAt: "2026-07-26T21:00:00.000Z" },
+      }),
     );
     expect(fixture.projects.bootstrap).toHaveBeenCalledWith(ids.window);
   });
@@ -168,6 +172,53 @@ describe("WorkThreadService", () => {
         ],
       }),
     );
+  });
+
+  it("starts a new thread with the access Work settings give it, and refuses a stale settings save", async () => {
+    const fixture = serviceFixture({ threads: [] });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-work-settings",
+        expectedVersion: 0,
+        defaultAccess: "auto-accept-edits",
+      }),
+    ).resolves.toMatchObject({
+      kind: "settings-updated",
+      settings: { defaultAccess: "auto-accept-edits", version: 1 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        aggregate: {
+          aggregateType: "work-settings",
+          aggregateId: "00000000-0000-4000-8000-000000000030",
+        },
+        expectedVersion: 0,
+      }),
+    );
+    // A save made against the version before it is refused, not merged.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-work-settings",
+        expectedVersion: 0,
+        defaultAccess: "ask-first",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+
+    const created = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+    });
+    expect(created).toMatchObject({
+      kind: "thread-created",
+      thread: { access: "auto-accept-edits" },
+    });
   });
 
   it("refuses to create a thread when promised GitHub issue context cannot be loaded", async () => {

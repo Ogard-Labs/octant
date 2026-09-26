@@ -62,6 +62,33 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it("holds a goal-loop round ask-first on an auto-accept thread for as long as it runs", async () => {
+    for (const holdAskFirst of [true, false]) {
+      const release = deferred<void>();
+      const seen: Array<string | undefined> = [];
+      const fixture = serviceFixture({
+        threadAccess: "auto-accept-edits",
+        turnRuntime: {
+          run: async (input) => {
+            seen.push(input.access, fixture.service.runningTurnAccess(String(ids.thread)));
+            await release.promise;
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand(), { holdAskFirst });
+      await vi.waitFor(() => expect(seen).toHaveLength(2));
+      release.resolve();
+      await fixture.waitForIdle();
+
+      const expected = holdAskFirst ? "ask-first" : "auto-accept-edits";
+      // The provider session and the native harness's edit check both answer
+      // to the round, not the thread.
+      expect(seen).toEqual([expected, expected]);
+      expect(fixture.service.runningTurnAccess(String(ids.thread))).toBeUndefined();
+    }
+  });
+
   it("refuses a Work request that exceeds the provider-reported context window", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
     attachmentRoots.push(root);
@@ -1399,6 +1426,7 @@ function serviceFixture(
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
+    readonly threadAccess?: "ask-first" | "auto-accept-edits";
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -1509,6 +1537,7 @@ function serviceFixture(
         modelId: "model-a",
         bindingRevisionId: ids.binding,
         workingDirectory: ".",
+        ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
         version: 1,
         createdAt: now,
         updatedAt: now,

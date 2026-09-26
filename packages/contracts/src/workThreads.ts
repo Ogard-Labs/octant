@@ -28,6 +28,20 @@ export const WorkThreadCompletionEvidence = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.Type;
 
+/**
+ * What an agent in a Work thread may do to files inside the Project folder
+ * without asking. `ask-first` raises every edit for approval, which is what
+ * Work always did. `auto-accept-edits` lets edits inside the confined folder
+ * land without a prompt; reaching outside the folder stays refused, and the
+ * rest of the turn's posture is unchanged. Providers without an auto-accept
+ * path keep asking.
+ */
+export const WorkAccess = Schema.Literal("ask-first", "auto-accept-edits");
+export type WorkAccess = typeof WorkAccess.Type;
+
+/** The access a Work thread starts with when nothing else is set. */
+export const DEFAULT_WORK_ACCESS: WorkAccess = "ask-first";
+
 export const WorkThread = Schema.Struct({
   id: WorkThreadId,
   projectId: ProjectId,
@@ -41,6 +55,12 @@ export const WorkThread = Schema.Struct({
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  /**
+   * The access this thread started with, taken from Work settings when it was
+   * created. A thread journaled before access existed decodes as ask-first,
+   * which is what it had.
+   */
+  access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -141,6 +161,45 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
 }).annotations(strict);
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 
+/**
+ * Defaults for new Work threads: the model a new thread starts on and the
+ * access it starts with. A thread keeps what it started with; changing these
+ * never changes a thread that already exists.
+ */
+export const WorkSettings = Schema.Struct({
+  defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
+  defaultModelId: Schema.optional(ProviderModelId),
+  defaultAccess: WorkAccess,
+  version: AggregateVersion,
+  updatedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (settings) =>
+        (settings.defaultProviderInstanceId === undefined) ===
+        (settings.defaultModelId === undefined),
+    ),
+  );
+export type WorkSettings = typeof WorkSettings.Type;
+
+export const UpdateWorkSettingsCommand = Schema.Struct({
+  kind: Schema.Literal("update-work-settings"),
+  expectedVersion: AggregateVersion,
+  defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
+  defaultModelId: Schema.optional(ProviderModelId),
+  defaultAccess: WorkAccess,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        (command.defaultProviderInstanceId === undefined) ===
+        (command.defaultModelId === undefined),
+    ),
+  );
+export type UpdateWorkSettingsCommand = typeof UpdateWorkSettingsCommand.Type;
+
 export const WorkThreadCommand = Schema.Union(
   CreateWorkThreadCommand,
   RenameWorkThreadCommand,
@@ -152,6 +211,7 @@ export const WorkThreadCommand = Schema.Union(
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
   ChangeWorkThreadProviderCommand,
+  UpdateWorkSettingsCommand,
 );
 export type WorkThreadCommand = typeof WorkThreadCommand.Type;
 
@@ -192,10 +252,17 @@ export const WorkThreadCompletionConfirmed = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadCompletionConfirmed = typeof WorkThreadCompletionConfirmed.Type;
 
+export const WorkSettingsUpdated = Schema.Struct({
+  kind: Schema.Literal("settings-updated"),
+  settings: WorkSettings,
+}).annotations(strict);
+export type WorkSettingsUpdated = typeof WorkSettingsUpdated.Type;
+
 export const WorkThreadCommandResult = Schema.Union(
   WorkThreadCreated,
   WorkThreadUpdated,
   WorkThreadCompletionConfirmed,
+  WorkSettingsUpdated,
   WorkThreadFailure,
 );
 export type WorkThreadCommandResult = typeof WorkThreadCommandResult.Type;
@@ -237,6 +304,8 @@ export const WorkThreadBootstrap = Schema.Struct({
   runtime: Schema.optionalWith(Schema.Array(WorkThreadNavigationRuntime), {
     default: () => [],
   }),
+  /** Optional so a remote client talking to an older host still bootstraps. */
+  settings: Schema.optional(WorkSettings),
 }).annotations(strict);
 export type WorkThreadBootstrap = typeof WorkThreadBootstrap.Type;
 
@@ -255,6 +324,9 @@ export const WORK_THREAD_EVENT_NAMES = [
   "work.thread-updated@1",
   "work.thread-completion-confirmed@1",
 ] as const;
+
+export const WORK_SETTINGS_EVENT_NAME = "work.settings-updated@1";
+export const decodeWorkSettingsUpdated = Schema.decodeUnknownSync(WorkSettingsUpdated);
 
 export const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
 export const decodeWorkThread = Schema.decodeUnknownSync(WorkThread);
