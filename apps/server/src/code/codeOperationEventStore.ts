@@ -51,7 +51,11 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 type JournalPort = Pick<
   Journal,
-  "append" | "replayAggregate" | "replayAggregateTypeForThread" | "latestThreadEvents"
+  | "append"
+  | "replayAggregate"
+  | "replayAggregateTypeForThread"
+  | "replayThreadAnchoredRows"
+  | "latestThreadEvents"
 >;
 
 export class CodeOperationEventStoreError extends Error {
@@ -410,9 +414,18 @@ export class CodeOperationEventStore {
     let restoreUndo: CodeConversationPage["restoreUndo"];
 
     for (;;) {
-      const batch = this.#journal.replayAggregateTypeForThread({
+      // The page folds only turn operations and restores, so SQL hands back
+      // just those: every event of an operation that started a turn (any of
+      // them moves the turn's `updatedAt`) and every restore result. Terminal
+      // attaches, test runs, and other operations never reach the decoder. The
+      // scan bound below therefore counts decoded rows, as it always meant to:
+      // it guards decode work, and rows SQL leaves out cost none, so counting
+      // them would fail an honest thread's read on traffic it never uses.
+      const batch = this.#journal.replayThreadAnchoredRows({
         aggregateType: "code-operation",
         threadId: String(threadId),
+        anchorKind: "conversation-turn-started",
+        resultKind: "git-mutation-state",
         afterSequence,
         limit: JOURNAL_REPLAY_BATCH_SIZE,
       });

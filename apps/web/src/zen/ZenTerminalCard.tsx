@@ -46,15 +46,21 @@ export interface ZenTerminalCardProps {
 export function ZenTerminalCard(props: ZenTerminalCardProps) {
   const [terminal, setTerminal] = useState<TerminalResult>();
   const [failure, setFailure] = useState<string>();
+  // The window builds `scope` as a fresh object on every render. Keying the
+  // attach on that object re-attached on each render, and every attach is a
+  // new operation in the thread's journal: one pinned card wrote 19,026 of
+  // them in three hours, and opening the thread then replayed them all.
+  const { checkoutId, threadId } = props.scope;
 
   useEffect(() => {
     if (!props.live) return;
     let active = true;
+    const scope = { checkoutId, threadId };
     void (async () => {
       try {
         const inspection = await props.client.inspectTerminal({
           terminalId: props.terminalId,
-          ...props.scope,
+          ...scope,
         });
         if (!active) return;
         if (String(inspection.terminalId) !== String(props.terminalId)) {
@@ -65,7 +71,7 @@ export function ZenTerminalCard(props: ZenTerminalCardProps) {
           kind: "attach-terminal",
           operationId: props.createOperationId(),
           terminalId: props.terminalId,
-          ...props.scope,
+          ...scope,
         });
         if (!active) return;
         if (result.kind !== "terminal-state") {
@@ -79,7 +85,7 @@ export function ZenTerminalCard(props: ZenTerminalCardProps) {
       }
     })();
     return () => void (active = false);
-  }, [props.client, props.createOperationId, props.live, props.scope, props.terminalId]);
+  }, [checkoutId, props.client, props.createOperationId, props.live, props.terminalId, threadId]);
 
   if (failure !== undefined) {
     return (
