@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
   EventActor,
@@ -124,7 +124,8 @@ describe("thread follow-up suggestions", () => {
     const settle = (
       action: string,
       createFollowUp: () => Promise<
-        { kind: "created"; created: never } | { kind: "refused"; message: string }
+        | { kind: "created"; created: never; onSuggestingModel: boolean }
+        | { kind: "refused"; message: string }
       >,
     ) =>
       settleFollowUpSuggestion(
@@ -144,7 +145,11 @@ describe("thread follow-up suggestions", () => {
       threadId: "00000000-0000-4000-8000-000000000099",
     } as never;
 
-    const preview = await settle("preview", async () => ({ kind: "created", created }));
+    const preview = await settle("preview", async () => ({
+      kind: "created",
+      created,
+      onSuggestingModel: true,
+    }));
     expect(preview.body).toMatchObject({
       preview: { wouldCreate: { kind: "new-thread", mode: "chat", projectId } },
     });
@@ -156,10 +161,54 @@ describe("thread follow-up suggestions", () => {
     expect(refusedCreation).toMatchObject({ status: 409, body: { kind: "follow-up-refused" } });
     expect(store.read(threadId)?.activatedFollowUpIds).toEqual([]);
 
-    const activated = await settle("activate", async () => ({ kind: "created", created }));
+    const activated = await settle("activate", async () => ({
+      kind: "created",
+      created,
+      onSuggestingModel: true,
+    }));
     expect(activated).toMatchObject({ status: 200, body: { kind: "follow-up-activated" } });
-    const repeated = await settle("activate", async () => ({ kind: "created", created }));
-    expect(repeated).toMatchObject({ status: 409, body: { reason: "already-activated" } });
+    const createdAgain = vi.fn(async () => ({
+      kind: "created" as const,
+      created,
+      onSuggestingModel: true,
+    }));
+    // A confirmation retried after its answer was lost gets the same thread back.
+    const repeated = await settle("activate", createdAgain);
+    expect(repeated).toMatchObject({
+      status: 200,
+      body: {
+        kind: "follow-up-activated",
+        created: { threadId: "00000000-0000-4000-8000-000000000099" },
+      },
+    });
+    expect(createdAgain).not.toHaveBeenCalled();
+  });
+
+  it("still hands over the created thread when a newer reply replaced the set mid-creation", async () => {
+    const store = storeOn(openConnection());
+    store.recordReply({ threadId, mode: "chat", suggestedBy: claude, followUps: suggestions() });
+    const created = {
+      kind: "new-thread",
+      mode: "chat",
+      title: "Add tests",
+      threadId: "00000000-0000-4000-8000-000000000098",
+    } as never;
+    const result = await settleFollowUpSuggestion(
+      {
+        store,
+        createFollowUp: async () => {
+          store.recordReply({ threadId, mode: "chat", suggestedBy: claude, followUps: undefined });
+          return { kind: "created", created, onSuggestingModel: true };
+        },
+      },
+      {
+        threadId,
+        windowId: "00000000-0000-4000-8000-0000000000f0",
+        action: "activate",
+        body: { turnId: "00000000-0000-4000-8000-000000000031", suggestionId, confirmed: true },
+      },
+    );
+    expect(result).toMatchObject({ status: 200, body: { kind: "follow-up-activated", created } });
   });
 
   it("still offers a harness thread the follow-ups its session journaled", () => {

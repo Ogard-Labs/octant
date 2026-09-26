@@ -44,6 +44,8 @@ export function registerFollowUpSuggestionEvents(registry: EventRegistry): Event
 interface SuggestionRecord {
   current: ThreadFollowUpsSuggested;
   activated: NativeHarnessFollowUpId[];
+  /** What each activation created, so a retried confirmation gets the same answer. */
+  created: Map<string, NativeHarnessFollowUpCreation>;
   /** Frames on this thread's own aggregate; harness frames replayed below do not count. */
   version: number;
 }
@@ -72,6 +74,11 @@ export class ThreadFollowUpSuggestionStore {
     this.#actor = decodeActor(options.actor);
     this.#clock = options.clock;
     this.#hydrate();
+  }
+
+  /** What activating this suggestion of the current set created, if it was activated. */
+  activation(threadId: string, suggestionId: string): NativeHarnessFollowUpCreation | undefined {
+    return this.#records.get(threadId)?.created.get(suggestionId);
   }
 
   read(threadId: string): ThreadFollowUpSuggestions | undefined {
@@ -122,7 +129,12 @@ export class ThreadFollowUpSuggestionStore {
       THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.suggested,
       suggested,
     );
-    this.#records.set(input.threadId, { current: suggested, activated: [], version: version + 1 });
+    this.#records.set(input.threadId, {
+      current: suggested,
+      activated: [],
+      created: new Map(),
+      version: version + 1,
+    });
   }
 
   activate(
@@ -143,6 +155,7 @@ export class ThreadFollowUpSuggestionStore {
     });
     record.version += 1;
     record.activated.push(suggestion.id);
+    record.created.set(String(suggestion.id), created);
     return "activated";
   }
 
@@ -198,6 +211,7 @@ export class ThreadFollowUpSuggestionStore {
       this.#records.set(threadId, {
         current: payload as ThreadFollowUpsSuggested,
         activated: [],
+        created: new Map(),
         version: (record?.version ?? 0) + 1,
       });
     } else if (
@@ -205,7 +219,7 @@ export class ThreadFollowUpSuggestionStore {
       record !== undefined
     ) {
       record.version += 1;
-      record.activated.push((payload as { suggestionId: NativeHarnessFollowUpId }).suggestionId);
+      applyActivation(record, payload);
     }
   }
 
@@ -235,12 +249,21 @@ export class ThreadFollowUpSuggestionStore {
       this.#records.set(threadId, {
         current: { threadId, ...origin, followUps: payload as NativeHarnessFollowUpSet },
         activated: [],
+        created: new Map(),
         version,
       });
     } else if (eventName === names.followUpActivated) {
-      this.#records
-        .get(threadId)
-        ?.activated.push((payload as { suggestionId: NativeHarnessFollowUpId }).suggestionId);
+      const record = this.#records.get(threadId);
+      if (record !== undefined) applyActivation(record, payload);
     }
   }
+}
+
+function applyActivation(record: SuggestionRecord, payload: unknown): void {
+  const activation = payload as {
+    readonly suggestionId: NativeHarnessFollowUpId;
+    readonly created: NativeHarnessFollowUpCreation;
+  };
+  record.activated.push(activation.suggestionId);
+  record.created.set(String(activation.suggestionId), activation.created);
 }

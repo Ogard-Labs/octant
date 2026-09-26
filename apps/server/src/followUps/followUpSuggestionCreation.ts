@@ -20,7 +20,16 @@ import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source
 import type { ChatService } from "../chat/chatService";
 
 export type FollowUpCreationOutcome =
-  | { readonly kind: "created"; readonly created: NativeHarnessFollowUpCreation }
+  | {
+      readonly kind: "created";
+      readonly created: NativeHarnessFollowUpCreation;
+      /**
+       * False when the thread exists but on its default model, because the
+       * suggesting one could not carry over; nothing may be sent for the
+       * person to a model they did not see.
+       */
+      readonly onSuggestingModel: boolean;
+    }
   | { readonly kind: "refused"; readonly message: string };
 
 /** The thread a follow-up or side task came from, and the model that offered it. */
@@ -75,7 +84,8 @@ export async function createFollowUp(
   const { creation, view } = input;
   const lead = view.suggestedBy;
   try {
-    if (creation.kind === "same-thread") return { kind: "created", created: creation };
+    if (creation.kind === "same-thread")
+      return { kind: "created", created: creation, onSuggestingModel: true };
     const windowId = decodeWindowId(input.windowId);
     if (creation.kind === "new-worktree") {
       return await createCodeThread(dependencies, {
@@ -117,7 +127,7 @@ export async function createFollowUp(
       if (!("kind" in result) || result.kind !== "thread-created") {
         return refused("The host did not create the Work thread.");
       }
-      return { kind: "created", created: { ...creation, threadId } };
+      return { kind: "created", created: { ...creation, threadId }, onSuggestingModel: true };
     }
     const threadId = dependencies.uuid();
     const result = await dependencies.chat.execute({
@@ -130,17 +140,25 @@ export async function createFollowUp(
     if (result.kind !== "thread-created")
       return refused("The host did not create the Chat thread.");
     // The suggesting model carries over. A provider the new thread cannot
-    // take leaves it on its default, still created.
-    await dependencies.chat
-      .execute({
-        kind: "change-chat-provider",
-        threadId,
-        expectedVersion: result.thread.version,
-        providerInstanceId: lead.providerInstanceId,
-        modelId: lead.modelId,
-      })
-      .catch(() => undefined);
-    return { kind: "created", created: { ...creation, threadId } };
+    // take leaves it on its default, still created, and says so.
+    const alreadyOnModel =
+      String(result.thread.providerInstanceId) === String(lead.providerInstanceId) &&
+      String(result.thread.modelId) === String(lead.modelId);
+    const onSuggestingModel =
+      alreadyOnModel ||
+      (await dependencies.chat
+        .execute({
+          kind: "change-chat-provider",
+          threadId,
+          expectedVersion: result.thread.version,
+          providerInstanceId: lead.providerInstanceId,
+          modelId: lead.modelId,
+        })
+        .then(
+          () => true,
+          () => false,
+        ));
+    return { kind: "created", created: { ...creation, threadId }, onSuggestingModel };
   } catch (error) {
     // A service refusal carries a sentence worth showing; a schema dump does not.
     const message = error instanceof Error ? error.message : "";
@@ -206,7 +224,11 @@ async function createCodeThread(
     );
     if (result.kind !== "managed-thread-created")
       return refused("The host did not create the worktree thread.");
-    return { kind: "created", created: { ...input.creation, threadId } };
+    return {
+      kind: "created",
+      created: { ...input.creation, threadId },
+      onSuggestingModel: true,
+    };
   }
   if (prepared.checkout.head.kind !== "branch") {
     return refused(
@@ -240,7 +262,7 @@ async function createCodeThread(
     decodeCodeCommand({ kind: "create-code-thread", thread }),
   );
   if (result.kind !== "thread-created") return refused("The host did not create the Code thread.");
-  return { kind: "created", created: { ...input.creation, threadId } };
+  return { kind: "created", created: { ...input.creation, threadId }, onSuggestingModel: true };
 }
 
 function refused(message: string): FollowUpCreationOutcome {
