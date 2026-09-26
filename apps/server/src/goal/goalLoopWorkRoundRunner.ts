@@ -10,7 +10,11 @@ import type { WorkTurnUsageStore } from "../work/workTurnUsageStore";
 
 /** The Work turn surface the runner drives, narrowed to what a round needs. */
 export interface GoalLoopWorkTurnPort {
-  readonly startFirstTurn: (windowId: WindowId, command: unknown) => Promise<WorkTurnLookupResult>;
+  readonly startFirstTurn: (
+    windowId: WindowId,
+    command: unknown,
+    options?: { readonly holdAskFirst?: boolean },
+  ) => Promise<WorkTurnLookupResult>;
   readonly subscribe: (
     windowId: WindowId,
     threadId: WorkThreadId,
@@ -25,6 +29,8 @@ export interface GoalLoopWorkTurnPort {
 export interface GoalLoopWorkRoundInput {
   readonly threadId: string;
   readonly objective: string;
+  /** The round's effective authority: the loop's ceiling met with the thread's own. */
+  readonly authority?: { readonly executionPolicy: string };
 }
 
 export interface CreateGoalLoopWorkRoundRunnerOptions {
@@ -90,7 +96,12 @@ export function createGoalLoopWorkRoundRunner(
         options.turns.liveCursor(input.threadId as never as WorkThreadId),
         controller.signal,
       );
-      const accepted = await options.turns.startFirstTurn(windowId, command);
+      // A round runs under the loop's effective authority. The thread's
+      // auto-accept reaches it only when the loop's ceiling allows it too;
+      // otherwise the round asks first, as every Work round did before.
+      const accepted = await options.turns.startFirstTurn(windowId, command, {
+        holdAskFirst: input.authority?.executionPolicy !== "auto-accept-edits",
+      });
       if (accepted.kind !== "accepted") {
         return {
           outcome: "failed",

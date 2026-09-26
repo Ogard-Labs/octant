@@ -98,6 +98,19 @@ describe("createGoalLoopWorkRoundRunner", () => {
     });
   });
 
+  it("holds a round ask-first unless the loop's own authority allows auto-accepted edits", async () => {
+    const h = harness();
+    await h.run({ threadId, objective: "Tidy", authority: { executionPolicy: "approval-gated" } });
+    await h.run({ threadId, objective: "Tidy" });
+    await h.run({
+      threadId,
+      objective: "Tidy",
+      authority: { executionPolicy: "auto-accept-edits" },
+    });
+    const holds = vi.mocked(h.turns.startFirstTurn).mock.calls.map((call) => call[2]?.holdAskFirst);
+    expect(holds).toEqual([true, true, false]);
+  });
+
   it("reports the provider's tokens for the turn when the provider reported usage", async () => {
     const usage = new WorkTurnUsageStore();
     const h = harness({

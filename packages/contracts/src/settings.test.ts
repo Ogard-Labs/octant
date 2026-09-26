@@ -17,6 +17,7 @@ describe("SettingsSectionId", () => {
       "sidebar",
       "keybindings",
       "chat",
+      "work",
       "code",
       "providers",
       "harness",

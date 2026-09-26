@@ -48,16 +48,65 @@ export function checkoutNotPreparedMessage(projectName: string): string {
   return `"${projectName}" has no Git checkout. Choose another Project above, or run git init in that folder and retry.`;
 }
 
+/**
+ * The model a new Work thread starts on: the one picked in the composer, then
+ * Work's default from Settings, then the first available. A default the host
+ * no longer offers falls through rather than starting a thread nothing serves.
+ */
 export function resolveWorkProviderChoice(
   choices: ReadonlyArray<CodeThreadProviderChoice>,
   selectedProviderInstanceId?: CodeThreadProviderChoice["instanceId"],
   selectedModelId?: CodeThreadProviderChoice["modelId"],
+  defaults?: {
+    readonly defaultProviderInstanceId?: CodeThreadProviderChoice["instanceId"] | undefined;
+    readonly defaultModelId?: CodeThreadProviderChoice["modelId"] | undefined;
+  },
 ): CodeThreadProviderChoice | undefined {
+  const find = (
+    instanceId: CodeThreadProviderChoice["instanceId"] | undefined,
+    modelId: CodeThreadProviderChoice["modelId"] | undefined,
+  ) => choices.find((choice) => choice.instanceId === instanceId && choice.modelId === modelId);
   return (
-    choices.find(
-      (choice) =>
-        choice.instanceId === selectedProviderInstanceId && choice.modelId === selectedModelId,
-    ) ?? choices[0]
+    find(selectedProviderInstanceId, selectedModelId) ??
+    find(defaults?.defaultProviderInstanceId, defaults?.defaultModelId) ??
+    choices[0]
+  );
+}
+
+/**
+ * The model a new Work thread starts on. A pick made in the Work composer
+ * wins, then the Work default from Settings, then the first model. While the
+ * host has not yet said what the default is there is no choice at all, so a
+ * thread cannot start on a guess. A host without Work settings keeps the older
+ * fallback: the shared draft choice, which Chat and Code picks also move.
+ */
+export function resolveWorkDraftChoice(input: {
+  readonly choices: ReadonlyArray<CodeThreadProviderChoice>;
+  readonly settingsStatus: "loading" | "ready" | "unsupported";
+  readonly defaults?:
+    | {
+        readonly defaultProviderInstanceId?: CodeThreadProviderChoice["instanceId"] | undefined;
+        readonly defaultModelId?: CodeThreadProviderChoice["modelId"] | undefined;
+      }
+    | undefined;
+  readonly workSelection?: {
+    readonly providerInstanceId: CodeThreadProviderChoice["instanceId"];
+    readonly modelId: CodeThreadProviderChoice["modelId"];
+  };
+  readonly sharedSelection?: {
+    readonly providerInstanceId: CodeThreadProviderChoice["instanceId"];
+    readonly modelId: CodeThreadProviderChoice["modelId"];
+  };
+}): CodeThreadProviderChoice | undefined {
+  if (input.settingsStatus === "loading") return undefined;
+  const selection =
+    input.workSelection ??
+    (input.settingsStatus === "unsupported" ? input.sharedSelection : undefined);
+  return resolveWorkProviderChoice(
+    input.choices,
+    selection?.providerInstanceId,
+    selection?.modelId,
+    input.defaults,
   );
 }
 

@@ -59,6 +59,7 @@ import {
   type CapacityReservationId,
   type CodeThreadId,
   type OctantMode,
+  type WorkAccess,
   type WorkThreadId,
 } from "@octant/contracts";
 import { ExtensionProviderFamily, type StandaloneSkillScope } from "@octant/contracts/extensions";
@@ -119,6 +120,7 @@ import { WorkMutationService } from "./work/workMutationService";
 import { WorkResolutionService } from "./work/workResolutionService";
 import {
   WorkThreadProjection,
+  hydrateWorkSettingsFromJournal,
   hydrateWorkThreadProjectionFromJournal,
 } from "./work/workThreadProjection";
 import { WorkThreadService } from "./work/workThreadService";
@@ -2656,6 +2658,20 @@ export function startOctantServer(
       }),
       "Work thread",
     );
+    requireJournalHydration(
+      hydrateWorkSettingsFromJournal({
+        replay: (cursor) =>
+          persistence.journal.replayAggregateType({
+            ...Schema.decodeUnknownSync(ReplayCursor)({
+              afterSequence: cursor.afterSequence,
+              limit: cursor.limit,
+            }),
+            aggregateType: cursor.aggregateType ?? "work-settings",
+          }),
+        projection: workThreadProjection,
+      }),
+      "Work settings",
+    );
     const shellService = new ShellService({
       persistence,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
@@ -4986,6 +5002,9 @@ export function startOctantServer(
     });
     // The Chat, Work, and Code services a follow-up creates through are
     // composed after these routes; the creator is bound once they exist.
+    // The Work turn service is built further down; the harness asks it for a
+    // running turn's access only once turns run.
+    let runningWorkTurnAccess: ((threadId: string) => WorkAccess | undefined) | undefined;
     const followUpCreation: { current: FollowUpCreationDependencies | undefined } = {
       current: undefined,
     };
@@ -5141,6 +5160,7 @@ export function startOctantServer(
         hostId: deriveToolHostId(providerDataDirectory),
         persistence,
         workThreads: workThreadProjection,
+        runningWorkTurnAccess: (threadId) => runningWorkTurnAccess?.(threadId),
         readThreadTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, threadId),
       }),
@@ -5787,6 +5807,7 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    runningWorkTurnAccess = (threadId) => workTurnService.runningTurnAccess(threadId);
     const fileMentionService = new FileMentionService({
       authority: {
         resolveCodeRoot: async (windowId, threadId, checkoutId) => {
@@ -5961,8 +5982,9 @@ export function startOctantServer(
     // by the domain and journaled here.
     // What a Work turn is fixed at, stated once. Work has no shell, Git, or
     // reach outside the Project: every provider driver withholds them from a
-    // Work session rather than asking, and only file writes inside the Project
-    // are approval-gated. This is a fact about the mode and not a grant anyone
+    // Work session rather than asking. File writes inside the Project are
+    // approval-gated unless the thread's access auto-accepts edits (see
+    // workTurnPosture). This is a fact about the mode and not a grant anyone
     // can change.
     const WORK_TURN_POSTURE = {
       filesystem: true,
@@ -5974,6 +5996,17 @@ export function startOctantServer(
       executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
     } as const;
+    const workTurnPosture = (threadId: string) => {
+      const thread = workThreadProjection.read(threadId as never);
+      if (thread === undefined || thread.lifecycle !== "active") return undefined;
+      return {
+        ...WORK_TURN_POSTURE,
+        executionPolicy:
+          thread.access === "auto-accept-edits"
+            ? ("auto-accept-edits" as const)
+            : ("approval-gated" as const),
+      };
+    };
     /** Any registered local window; the ordinary turn path rechecks Project access. */
     const firstRegisteredWindowId = (): WindowId | undefined => {
       for (const windowId of windowAuthorityStore.listWindowIds()) return windowId;
@@ -6010,19 +6043,16 @@ export function startOctantServer(
         });
       },
       threadAuthority: (threadId) => {
-        let thread;
         try {
-          thread = workThreadProjection.read(threadId as never);
+          return workTurnPosture(threadId);
         } catch {
           return undefined;
         }
-        if (thread === undefined || thread.lifecycle !== "active") return undefined;
-        return WORK_TURN_POSTURE;
       },
       // What a Work turn is fixed at. There is no per-turn grant to narrow, so
       // a ceiling asking for less than this is refused when the loop starts
       // rather than quietly ignored on every round.
-      modePosture: () => WORK_TURN_POSTURE,
+      modePosture: (threadId) => workTurnPosture(threadId) ?? WORK_TURN_POSTURE,
       // Between rounds a Work thread has nothing pending. Its approvals are
       // asked inside a running turn, and a turn's open requests are
       // interrupted when its provider session ends, so each round's requests

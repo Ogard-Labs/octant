@@ -84,6 +84,8 @@ import {
   SettingsSection,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
+import { WorkSettingsView } from "../work/WorkSettingsView";
+import type { WorkSettingsController } from "../work/useWorkSettings";
 import {
   AppBackgroundSettings,
   type BackgroundImageLibrary,
@@ -118,6 +120,8 @@ import "../styles/extensions-settings.css";
 
 export interface SettingsViewProps {
   readonly chatController?: ChatController;
+  /** Work's defaults for new threads; absent where no Work host is reachable. */
+  readonly workSettings?: WorkSettingsController;
   readonly codeController?: CodeController;
   readonly nativeBoundsAvailable: boolean;
   readonly onBack?: () => void;
@@ -181,6 +185,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   sidebar: "How the sidebar is laid out and what each thread row in it shows.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
+  work: "Defaults for new Work threads: the model they start on and what they may do without asking.",
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   voice: "The providers that turn speech into text and text into speech.",
@@ -618,6 +623,20 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
+        </div>
+      );
+    case "work":
+      return props.workSettings === undefined ? (
+        <p className="settings-view__empty" role="status">
+          Work settings are unavailable on this host.
+        </p>
+      ) : (
+        <div className="settings-section-stack" id="settings-work">
+          <WorkSettingsView
+            controller={props.workSettings}
+            focusedSetting={focusedSetting}
+            providerSnapshot={props.providerController?.snapshot}
+          />
         </div>
       );
     case "code":

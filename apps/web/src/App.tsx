@@ -12,6 +12,7 @@ import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import { useWorkSettings } from "./work/useWorkSettings";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -203,7 +204,7 @@ import {
   checkoutNotPreparedMessage,
   codeUnavailableMessage,
   resolveDraftProject,
-  resolveWorkProviderChoice,
+  resolveWorkDraftChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
 } from "./shell/draftThreadResolution";
 import type { RepositoryIssueRow } from "./github/readIssuesAcrossRepositories";
@@ -869,6 +870,13 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] = useState<
     import("@octant/contracts/providers").ProviderModelId | undefined
   >(() => readLastModelChoice()?.modelId);
+  // A model picked in the Work composer itself. The shared draft choice above
+  // also follows Chat and Code picks through the remembered choice, and it
+  // must not outrank the Work default from Settings.
+  const [workComposerSelection, setWorkComposerSelection] = useState<{
+    readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
+    readonly modelId: import("@octant/contracts/providers").ProviderModelId;
+  }>();
   const [draftExecutionPolicy, setDraftExecutionPolicy] = useState<
     import("@octant/contracts/providers").ProviderExecutionPolicy | undefined
   >();
@@ -1296,6 +1304,7 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
+  const workSettings = useWorkSettings(workThreadClient, machineChanges.workNavigation);
   const chatController = useChatController({
     client: chatClient,
     navigationRefreshMs: 0,
@@ -2590,11 +2599,17 @@ function LaunchedShell(
       ),
     [workProviderGroups],
   );
-  const workProviderChoice = resolveWorkProviderChoice(
-    workProviderChoices,
-    draftProviderInstanceId,
-    draftModelId,
-  );
+  const workProviderChoice = resolveWorkDraftChoice({
+    choices: workProviderChoices,
+    settingsStatus: workSettings.status,
+    defaults: workSettings.settings,
+    ...(workComposerSelection === undefined ? {} : { workSelection: workComposerSelection }),
+    ...(draftProviderInstanceId === undefined || draftModelId === undefined
+      ? {}
+      : {
+          sharedSelection: { providerInstanceId: draftProviderInstanceId, modelId: draftModelId },
+        }),
+  });
   const draftProviderGroups =
     activeMode === "chat"
       ? chatProviderGroups
@@ -5228,6 +5243,7 @@ function LaunchedShell(
         : { typography: themeController.draft?.typography ?? props.typography })}
       {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
       chatController={chatController}
+      workSettings={workSettings}
       codeController={codeController}
       discoveryController={discoveryController}
       extensionClient={extensionClient}
@@ -6357,6 +6373,12 @@ function LaunchedShell(
                     onDraftSelectProvider={(selection) => {
                       setDraftProviderInstanceId(selection.providerInstanceId);
                       setDraftModelId(selection.modelId);
+                      if (activeMode === "work") {
+                        setWorkComposerSelection({
+                          providerInstanceId: selection.providerInstanceId,
+                          modelId: selection.modelId,
+                        });
+                      }
                     }}
                     onDraftExecutionPolicyChange={(policy, persistence) => {
                       setDraftExecutionPolicy(policy);
