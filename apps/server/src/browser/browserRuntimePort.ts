@@ -75,6 +75,14 @@ export class BrowserNavigationBlockedError extends Error {
   }
 }
 
+/**
+ * What a runtime is told to do to a page. It carries no authority: whoever
+ * owns the context has already decided the action may run, and a runtime only
+ * ever needed the action itself.
+ */
+export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
+  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">>;
+
 export interface BrowserRuntimePort {
   readonly available: () => Promise<boolean>;
   readonly createContext: (
@@ -90,7 +98,7 @@ export interface BrowserRuntimePort {
   ) => Promise<BrowserTargetInspection>;
   readonly act: (
     contextId: BrowserContextId,
-    request: BrowserActionRequest,
+    request: BrowserRuntimeAction,
     signal: AbortSignal,
   ) => Promise<BrowserRuntimeObservation>;
   /**

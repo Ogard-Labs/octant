@@ -464,6 +464,31 @@ describe("ThreadActivityPictureInPicture", () => {
     );
   });
 
+  it("describes an application-session approval in expanded and collapsed PiP", async () => {
+    const user = userEvent.setup();
+    const waiting = computerSession(threadId, "waiting-for-approval", "application-session");
+    const computerUse = {
+      list: vi.fn(async () => [waiting]),
+      decide: vi.fn(async () => waiting),
+      stop: vi.fn(async () => waiting),
+      inspect: vi.fn(async () => waiting),
+    } as unknown as ComputerUseClient;
+
+    render(
+      <ThreadActivityPictureInPicture
+        computerUseClient={computerUse}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Allow app for 5 minutes" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Hide activity preview" }));
+    expect(screen.getByRole("button", { name: "Allow app for 5 minutes" })).toBeVisible();
+  });
+
   it("keeps Computer Use approval and stop controls while the preview is collapsed", async () => {
     const user = userEvent.setup();
     const waiting = computerSession(threadId, "waiting-for-approval");
@@ -750,6 +775,7 @@ it("renders multiple Browser windows as an offset, slanted stack", async () => {
 function computerSession(
   ownedThreadId: string,
   state: ComputerUseSessionView["state"],
+  approvalScope?: "application-session",
 ): ComputerUseSessionView {
   const waiting = state === "waiting-for-approval";
   return {
@@ -776,6 +802,7 @@ function computerSession(
             actionId: "93000000-0000-4000-8000-000000000001" as never,
             expiresAt: "2026-08-10T12:05:00.000Z" as never,
             summary: "click in Preview",
+            ...(approvalScope === undefined ? {} : { scope: approvalScope }),
           },
         }
       : {}),

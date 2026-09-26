@@ -1,5 +1,6 @@
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
 import { OctantButton } from "../ui/base/OctantButton";
+import { computerUseApprovalPrompt, computerUseApproveLabel } from "./computerUseApprovalCopy";
 
 export interface ComputerUseLifecyclePaneProps {
   readonly view: ComputerUseSessionView;
@@ -28,14 +29,12 @@ export function ComputerUseLifecyclePane(props: ComputerUseLifecyclePaneProps) {
 
       {props.view.pendingApproval !== undefined ? (
         <div aria-label="Computer-use approval" role="group">
-          <p>Octant is waiting for a one-time approval.</p>
+          <p>{computerUseApprovalPrompt(props.view.pendingApproval)}</p>
           <strong>{props.view.pendingApproval.summary}</strong>
           <p>This approval is bound to this host, Project, thread, provider, action, and client.</p>
           <div>
             <OctantButton disabled={props.busy} onClick={props.onApprove} type="button">
-              {props.view.pendingApproval.scope === "application-session"
-                ? "Allow app for 5 minutes"
-                : "Approve once"}
+              {computerUseApproveLabel(props.view.pendingApproval)}
             </OctantButton>
             <OctantButton
               disabled={props.busy}

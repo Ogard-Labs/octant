@@ -130,12 +130,19 @@ The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
 material (glass, or the opaque sidebar colour when glass is off or unavailable),
 and the primary workspace, the right dock, the bottom panel, and the Settings
-page sit on it as cards: the card radius, one hairline, no shadow, 8px apart,
+page sit on it as cards: the card radius, one hairline, no shadow, 8px apart
+and 8px from every edge, the sidebar's included,
 all in the workspace colour. Reader pages inside a card use that colour too,
-so every card reads the same. A pane header and the dock head share the 38px
+so every card reads the same. Over an application ground the back is laid only
+in the gutters, so the primary card shows the ground clear, dither and all,
+while the sidebar and gutters frost it. The dither itself is cut to the
+primary card's shape: outside the card the picture shows plain, so the card
+keeps an edge even on a start screen whose page is see-through. A pane header and the dock head share the 38px
 title rail, and the card draws the one hairline under both. Below 681px the
-workspace sidebar is an overlay drawer and the frame stays flat; Settings keeps
-its own narrow layout, a drawer with a flat page, below 960px.
+workspace sidebar is an overlay drawer and the frame stays flat. The drawer
+starts closed on every load, closes on Escape, on a tap outside it, and on
+choosing somewhere to go, and never changes the saved wide-window choice.
+Settings keeps its own narrow layout, a drawer with a flat page, below 960px.
 
 ### Page shell
 
@@ -199,6 +206,12 @@ waits for pending writes, and grants no authority. Profile editing has its own
 Personal settings destination. Code suggestions keep their full descriptions
 visible; Continue retains compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings.
+A Work or Code pane with no thread and no Project asks one centred question
+("Pick a folder to work in"), says in one sentence what choosing a folder
+means, and offers Choose a folder… as the primary action with starting
+without one beside it; once a Project exists the new task leads instead.
+Start-screen composers ask in plain words ("Ask anything…") rather than
+showing a feature tip; tips belong to a thread's follow-up composer.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
@@ -225,6 +238,10 @@ six-colour spectrum and Norway carries red, white, and blue. The semantic accent
 remains the first ink, so overrides still reach the ground. Increased contrast
 turns the ground off; reduced motion holds it still, pulse included. It is
 chosen in Settings › Appearance › Background.
+When the ground runs behind everything, a start screen's reading column
+carries a soft wash of the page colour that fades out before the edges, and a
+conversation pane's title rail shares the conversation's reading surface, so
+no text sits straight on a busy photo.
 
 ## Source of truth and CSS layers
 
@@ -562,8 +579,9 @@ chooser or uploads while refused. Model, access, and destination controls keep
 one type scale and quiet keyboard focus. Access labels read "Plan · read-only"
 and "Ask for approvals" in both new and existing threads.
 Under the Code composer the start screen is an agent home rather than a
-blank prompt: suggested prompts as small cards (a label and the
-sentence they fill in), then three sections that share one card grid, two
+blank prompt: suggested prompts as small hairline cards on the card fill (a
+label and the sentence they fill in), never bare text on the ground; then
+three sections that share one card grid (Continue's rows share one card), two
 across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery
 state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
@@ -620,32 +638,58 @@ Open in, bottom panel, and right dock remain window chrome. Environment is
 opened from the dock tab strip or Add tool. Zen
 remains in the bottom-left identity menu.
 
-Zen arranges itself. A space tiles its cards from their number and the room it
-has, leaving the spaces pill and the Navigator bar their own edges, so two pins
-never land on each other, removing a card closes the gap, and resizing the
-window re-tiles rather than stranding the arrangement. The column count follows
-the card count and drops when the area is too narrow for a readable measure; a
-short last row spreads across the full width instead of leaving one card beside
-dead space. A wall offers no drag, resize grip, nudge, pan, or zoom, because
-each would write a position the wall ignores. Arrange, on the surface itself,
-is the exception: it restores hand placement and every card's stored geometry,
-which a wall never rewrites (0106).
+Zen is a desk. Every card is a window: its title bar moves it, every edge and
+corner resizes it, the arrow keys nudge it and Alt with the arrows resizes it,
+and it stays exactly where it was left. There is no pan or zoom; everything is
+on the one screen. **Tidy**, top right, re-tiles every window in reading order
+into the room the surface has, leaving the spaces pill and the Navigator bar
+their own edges; the column count follows the window count and drops when the
+area is too narrow for a readable measure. A space that has never been arranged
+is tiled once when it opens and that tiling is written down as each window's
+own geometry, so nothing jumps when a person first drags one. (This replaces
+the self-arranging wall of 0106, which refused every drag outside a separate
+Arrange mode.)
+
+A window's title bar is one quiet line: a small mark for its kind, its name,
+how long ago it moved for a thread, and two icons, minimize and remove, that
+brighten on hover. The corner handle shows a small bracket on hover so a person
+can tell windows resize. Windows are glass panes: the regular step of the glass ladder over a lighter
+floor, so the ground's colour reads through the blur, with a one-pixel light
+edge along the top, a hairline stroke, and a long soft shadow; the window in
+front takes a brighter edge and a stronger lift, and reduced transparency or
+increased contrast turns them opaque. A new space stands on a first-party picture rather than
+a flat colour, and a space still carrying the old flat default is shown on that
+picture too. Add terminal and Add browser list the threads they can open in,
+the focused card's first: a terminal runs in a Code thread's checkout and a
+browser in a Work or Code thread's browsing context, under that thread's
+authority. The browser is a window too; it moves by its bar and resizes from
+the edges away from its anchor, for the session.
 
 A card is a reading of one thread. Its head carries the thread's name in the
 interface face at the body size, and beside it how long ago that thread last
 moved; the editor face and the metadata ink are for code, paths, and
-identifiers, not for the one label that says which thread this is. A tiled card
-is flat, with its hairline and no shadow, because nothing on a wall floats over
-anything; an arranged card keeps its elevation. A card that is not streaming
+identifiers, not for the one label that says which thread this is. A card that is not streaming
 reads its host, mode, Project, and the model that answers, in that order. It
 does not print a stored ISO timestamp or a provider instance id.
 
-Zen's own chrome is one bar and one sheet. The bar carries four destinations
-and the way out: Threads, Add, Navigator, Appearance, Exit Zen. Asking the
-Navigator lives in the Navigator panel, which has the field and shows the
-answer. Putting something on the wall is one destination, not two. A panel is a
-page in a sheet, so its title is the page title, it stops above the bar, and its
-rows follow the Settings recipe. Escape closes the open panel and only leaves
+Zen's own chrome is one dock and one sheet. The dock is a row of icon keys,
+each named in a tooltip and to assistive technology: Threads, Add, Navigator,
+Appearance, then Hide and Exit Zen after a divider. Asking the Navigator lives
+in the Navigator panel, which has the field and shows the answer. Putting
+something on the desk is one destination, not two: the Add sheet shows each
+kind of window as a tile (Thread, Terminal, Browser, Notes, Checklist) and the
+two that take a value, a timer's minutes and a link, as one line each. A panel
+is a page in a sheet, so its title is the page title and its close is an icon,
+and it stops above the dock. The dock, the pills, the sheets, and the empty
+space's guidance wear the windows' glass one step lighter and with a larger
+radius, the same step for every floating object. The Appearance sheet reads
+Look (one Dim dial that darkens every ground, window opacity, picture fit),
+Effect (Off, Pixelate, or Dither, with pixel size and tones), then Background
+as one grid of pictures that opens on App background and Your picture. Pixelate
+and Dither print a picture ground at one canvas pixel per cell and upscale it
+without smoothing; dither quantizes each cell through the same ordered
+threshold as the application ground. They print pictures only; the app ground
+keeps its own dither in Settings. Escape closes the open panel and only leaves
 Zen when none is open. Pinning shows no notice: the card that arrives says the
 same thing, and the notice landed on top of it.
 
@@ -779,7 +823,8 @@ tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
 renders Markdown with the preview's own viewer. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
-tool rows; the head's Add tool action appears once a tab is open, since with
+tool rows, grouped under This thread, Workspace, and Devices when more than
+one group has a tool; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
 the same compact tool-tab and Add tool model for Review, Terminal, Browser,
 Files, and Side chat where supported. Selecting a tool removes that presentation from the other

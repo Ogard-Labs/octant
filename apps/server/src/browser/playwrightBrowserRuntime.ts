@@ -20,6 +20,7 @@ import {
   type BrowserPointObservation,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
+  type BrowserRuntimeAction,
   type BrowserTargetInspection,
 } from "./browserRuntimePort";
 import {
@@ -373,7 +374,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
 
   async act(
     contextId: BrowserContextId,
-    request: BrowserActionRequest,
+    request: BrowserRuntimeAction,
     signal: AbortSignal,
   ): Promise<BrowserRuntimeObservation> {
     const page = await this.#page(contextId, signal);

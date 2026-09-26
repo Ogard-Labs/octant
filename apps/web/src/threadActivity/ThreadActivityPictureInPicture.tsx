@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
+import { computerUseApproveLabel } from "../computerUse/computerUseApprovalCopy";
 
 type ActivityKind = "browser" | "computer-use";
 
@@ -308,7 +309,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
                 size="sm"
                 type="button"
               >
-                Approve once
+                {computerUseApproveLabel(currentComputerSession.pendingApproval)}
               </OctantButton>
               <OctantButton
                 disabled={busy}
@@ -522,7 +523,7 @@ function ComputerUseActivityPreview(props: {
             Deny
           </OctantButton>
           <OctantButton disabled={props.busy} onClick={props.onApprove} size="sm" type="button">
-            Approve once
+            {computerUseApproveLabel(props.session.pendingApproval)}
           </OctantButton>
         </div>
       </div>

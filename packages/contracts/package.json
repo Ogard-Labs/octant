@@ -104,6 +104,7 @@
     "./thread-hand-off": "./src/threadHandOff.ts",
     "./zen": "./src/zen.ts",
     "./project-terminals": "./src/projectTerminals.ts",
+    "./project-browser": "./src/projectBrowser.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",
     "./github-issue-context": "./src/githubIssueContext.ts",
     "./tracker-reference": "./src/trackerReference.ts",

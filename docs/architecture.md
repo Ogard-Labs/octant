@@ -325,8 +325,26 @@ deletes its data.
 | Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded, approval-gated writes inside that root; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                               |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded, approval-gated writes inside that root; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                          |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
+
+Work's missing shell and Git are withheld, not approval-gated: a person is
+never asked to approve a command in Work, because approving one would give the
+thread authority its mode does not hold. Every Work turn records that posture
+(`shell: "denied"`, `git: "denied"`). Each provider driver enforces it for a
+session acquired in Work mode, since a provider's own shell tool is outside
+anything the host can gate after the fact. Claude and Pi start without their
+shell tool. OpenCode's session rules deny `bash` and its `task` delegation.
+Codex threads start and resume with `features.shell_tool` and
+`features.unified_exec` off, because a Codex command that only reads runs under
+its read-only sandbox without escalating; a `command` or sandbox-widening `permissions` request that still
+arrives is declined at the agent. An ACP agent's `execute` permission request
+is refused at the agent. The declared kind is all Octant sees of an ACP call,
+and `other` also covers Octant's own managed MCP tools, so an agent that labels
+a command `other` still reaches a person's approval rather than running unasked.
+Octant's own harness gives Work no shell port. File writes inside the Project
+remain approval-gated in every driver. Work that needs a shell or Git is
+promoted to Code (below).
 
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
@@ -554,8 +572,12 @@ flowchart LR
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
-- **Composer feature tips.** Empty Chat, Work, and Code composers show a short
-  tip about a built-in feature instead of a fixed placeholder. A session-local
+- **Composer feature tips.** An empty follow-up composer in a Chat, Work, or
+  Code thread shows a short tip about a built-in feature instead of a fixed
+  placeholder. A start screen's composer asks in plain words instead ("Ask
+  anything…", "Describe the work…", "Describe the change…"): a first-time
+  person meeting "Tip: Press Enter to send" where a prompt belongs could not
+  tell what the box was for. A session-local
   sequence advances when a composer mounts or its thread identity changes,
   including returning to a thread and creating another draft. It stays steady
   through typing and routine updates. Callers offer only mounted capabilities:
@@ -985,15 +1007,23 @@ mechanisms are:
   process did not survive.
 - **Project browsing contexts.** A person may open a browser for a Work or Code
   Project with no thread, under the same separation: it is the person's
-  browser, never an agent's. Its context is its own isolated, ephemeral
-  profile, shared with no thread's browsing context, so a sign-in there never
-  becomes something an agent can act in and no thread's origin approval
-  carries into it. The window's workspace must hold that Project for its mode
-  at the current binding revision; archive or relink stops the context as
-  `authority-revoked`. Like a thread's browsing context it is not journaled,
-  and a paired device may watch it but never create, navigate, or type in it.
-  This context is designed and not yet built: the browser automation service
-  still derives every context's authority from a thread and its provider.
+  browser, never an agent's. Its page lives in its own isolated, ephemeral
+  context, registered with the browser runtime under an owner id derived from
+  the Project (never a thread id), so no thread's surface can attach to it and
+  no thread's origin approval carries into it. A separate Project browser
+  service owns these contexts; the agent's browser tools resolve contexts only
+  through the thread-owned automation service, which never sees them, and the
+  runtime is handed only the page action, never an authority. Only the person
+  at a local window whose workspace holds that Project for its mode may open,
+  read, or close it; a paired device is refused outright, because creating a
+  browsing context is already local-only and a Project page has no thread
+  whose approval could stand in. It opens only http and https addresses; a
+  page on the same site takes a new address in place, and another site starts
+  a fresh context whose allowlist is that site. It carries the host's usual
+  session ceiling and is not journaled, like a thread's browsing context.
+  Archiving the Project, relinking its root, turning its mode off, the window
+  moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
+  host drives a headless page and shows its picture.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent

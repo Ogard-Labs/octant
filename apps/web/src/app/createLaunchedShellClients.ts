@@ -47,6 +47,7 @@ import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-c
 import { createGithubClient } from "@octant/client-runtime/github-client";
 import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
+import { createProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import {
@@ -127,6 +128,7 @@ export interface LaunchedShellClients {
   readonly githubCloneClient: ReturnType<typeof createGithubCloneClient>;
   readonly githubTransport: ReturnType<typeof createGithubClient>;
   readonly goalClient: ReturnType<typeof createGoalClient>;
+  readonly projectBrowserClient: ReturnType<typeof createProjectBrowserClient>;
   readonly projectTerminalClient: ReturnType<typeof createProjectTerminalClient>;
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
@@ -210,6 +212,7 @@ export function createLaunchedShellClients(
     githubCloneClient: createGithubCloneClient(port),
     githubTransport: createGithubClient(port),
     goalClient: createGoalClient(port),
+    projectBrowserClient: createProjectBrowserClient(port),
     projectTerminalClient: createProjectTerminalClient(port),
     goalLoopClient: createGoalLoopClient(port),
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),

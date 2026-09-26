@@ -9,7 +9,7 @@ import {
   ZenViewport,
   ZenAppearance,
   ZenAssistantBinding,
-  ZenResearchDock,
+  ZenDockedResearch,
   ZenSourceContext,
   ZenWidgetRecipeDraft,
   ZenWidgetPrimitive,
@@ -832,14 +832,19 @@ export function bindAssistant(
  */
 export function dockResearch(
   space: ZenSpace,
-  research: ZenResearchDock | null,
+  research: ZenDockedResearch | null,
   expectedVersion: number,
+  localHostId: HostId,
 ): ZenSpace {
   if (expectedVersion !== space.version) {
     reject("stale-version", `Expected version ${expectedVersion} but space is at ${space.version}`);
   }
-  if (research !== null && research.sourceContext.threadKind === "chat") {
-    reject("invalid-source-context", "A Chat thread has no browsing context to dock.");
+  if (research !== null && "sourceContext" in research) {
+    if (research.sourceContext.threadKind === "chat") {
+      reject("invalid-source-context", "A Chat thread has no browsing context to dock.");
+    }
+  } else if (research !== null) {
+    validateLocalHost(research.project.hostId, localHostId);
   }
 
   const now = utcNow();
@@ -1049,7 +1054,7 @@ export function processZenCommand(
     case "bind-assistant":
       return bindAssistant(space, command.assistant, command.expectedVersion);
     case "dock-research":
-      return dockResearch(space, command.research, command.expectedVersion);
+      return dockResearch(space, command.research, command.expectedVersion, localHostId);
     case "save-notes":
       return saveNotes(
         space,

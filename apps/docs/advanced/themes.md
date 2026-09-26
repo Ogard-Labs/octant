@@ -138,18 +138,28 @@ off; a browser without WebGL2 shows a picture but no dots.
 
 ### Zen backgrounds
 
-Zen Appearance can use a first-party still or animated preset, a custom local
-image, a solid color, or a custom linear, radial, or conic gradient. Overlay
-and card opacity stay adjustable. Uploads remain local PNG, JPEG, WebP, or
-GIF. Animated presets and custom animated uploads fall back to a still frame
-under **Reduced Motion**. Built-in loops use animated WebP.
+Zen Appearance has three short sections.
 
-**App background**, above the built-in pictures, stands the space on the same
-ground as the rest of Octant: whatever **Background** is set to in Settings ›
-Appearance, with the dials you set there. It carries none of its own, so
-changing a pattern, built-in image, or photo once changes every space that
-uses it. **Background opacity** still dims it, **Reduced motion** keeps animated
-backgrounds on their still frame, and **Increased contrast** still turns it off.
+- **Look**: **Dim** darkens the ground (one dial for every kind of ground),
+  **Windows** sets how solid the windows are, and **Picture** chooses Fill, Fit,
+  or Tile for a picture.
+- **Effect**: **Pixelate** draws a picture in square cells and **Dither** also
+  prints each cell with a few tones through an ordered pattern, like a
+  halftone. **Pixel size** sets the cell (2–16 px) and **Tones** sets how many
+  steps each colour keeps (2–16; fewer is bolder). The effect works on built-in
+  pictures and your own; an animated picture is printed from its still frame.
+- **Background**: **App background**, **Your picture** (a local PNG, JPEG, WebP,
+  or GIF), the first-party still and animated pictures, and **Custom fill** for
+  a solid color or a linear, radial, or conic gradient. Animated pictures fall
+  back to a still frame under **Reduced Motion**. Built-in loops use animated
+  WebP.
+
+**App background** stands the space on the same ground as the rest of Octant:
+whatever **Background** is set to in Settings › Appearance, with the dials you
+set there, including its own dither. It carries none of its own, so changing a
+pattern, built-in image, or photo once changes every space that uses it.
+**Dim** still darkens it, **Reduced motion** keeps animated backgrounds on
+their still frame, and **Increased contrast** still turns it off.
 
 ### Handing the theme to a project
 

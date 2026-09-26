@@ -1663,6 +1663,56 @@ describe("ACP provider driver profile quirks", () => {
     );
   });
 
+  it.each([
+    ["execute", false],
+    ["edit", true],
+    ["other", true],
+  ] as const)(
+    "in a Work session, whether a %s permission reaches a person: %s",
+    async (toolKind, raised) => {
+      const { driver, client } = fixture(kilo);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "work" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const approvals: ProviderRuntimeEvent[] = [];
+            const runtimeEvents = yield* connection.subscribe;
+            yield* Effect.forkScoped(
+              Stream.runForEach(runtimeEvents, (event) =>
+                Effect.sync(() => {
+                  if (event.kind === "approval-request") approvals.push(event);
+                }),
+              ),
+            );
+            yield* Effect.sleep("1 millis");
+            client.request({
+              kind: "request",
+              id: "work-permission",
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "work-tool", title: "git status", kind: toolKind },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+            expect(approvals.length).toBe(raised ? 1 : 0);
+            if (raised) {
+              expect(client.respondPermission).not.toHaveBeenCalled();
+            } else {
+              expect(client.respondPermission).toHaveBeenCalledWith("work-permission", "reject");
+            }
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+    },
+  );
+
   it("answers single-select questions for agents that support user input", async () => {
     const { driver, client } = fixture(kilo);
     await Effect.runPromise(

@@ -587,7 +587,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
       <nav aria-label="Projects" className="project-nav window-no-drag">
-        {props.projectViewsEnabled === true && projectViewState !== undefined ? (
+        {/* Views sort and filter Projects; with none yet the row only said
+            "All Projects" over a heading that said "Projects" again. */}
+        {props.projectViewsEnabled === true &&
+        projectViewState !== undefined &&
+        props.projects.length > 0 ? (
           <CodeProjectViewSwitcher
             onCreate={() => setProjectViewEditor({ mode: "create" })}
             onDelete={(viewId) =>
@@ -869,6 +873,14 @@ function ProjectGroup(props: {
       {props.projects.length === 0 ? (
         <p className="project-nav__empty" role="status">
           No Projects yet.
+          {props.onAddProject === undefined ? null : (
+            <>
+              {" "}
+              <OctantButton onClick={props.onAddProject} type="button" variant="link">
+                {props.addProjectLabel === "chat-project" ? "Start one" : "Add a folder"}
+              </OctantButton>
+            </>
+          )}
         </p>
       ) : null}
       {props.projects.map((project, index) => {

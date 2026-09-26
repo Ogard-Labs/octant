@@ -97,8 +97,13 @@ behavior:
   focus, except while a text field has focus.
 - Bare **Escape** exits Zen when the Zen background or floating bar owns
   focus.
-- Inside Zen, **Arrow** keys move the active element and **Alt+Arrow**
-  resizes it.
+- Inside Zen, **Arrow** keys move the active window and **Alt+Arrow**
+  resizes it. With a pointer, drag a window by its title bar and resize it
+  from any edge or corner; **Tidy** at the top right lines every window up
+  in a grid.
+- **Add → Add terminal** and **Add → Add browser** list the Code (or Work)
+  threads they can open in, so you do not need to click a thread window
+  first.
 - **⌘/Ctrl+Alt+]** and **⌘/Ctrl+Alt+[** show the next and previous focus
   space, wrapping at both ends.
 
@@ -143,6 +148,14 @@ and no agent can see or type into it. Only this Mac's window can open or use
 it; a paired phone cannot. Archiving the Project or pointing it at another
 folder ends the shell, and so does restarting Octant. **Stop** in the card's
 **…** menu ends it yourself.
+
+**Add** → **Browser in this Project** docks your own browser for the Work or
+Code Project this window is on. It is a private, isolated browser: no agent
+can see or use its page, and it shares no sign-in with any thread's browser.
+Type an address and press **Open**. Opening a different site starts a fresh
+session. Closing the dock, archiving the Project, or pointing it at another
+folder closes the page; it also closes on its own after a while, like every
+Octant browser session.
 
 When Zen state cannot be decoded, a **Recover Zen** path restores the main
 workspace instead of trapping you. Zen rebuilds from the event journal after

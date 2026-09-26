@@ -21,8 +21,14 @@ import type {
   BrowserAutomationService,
 } from "./browser/browserAutomationService";
 import { remoteBrowserActionReach } from "@octant/domain";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import {
+  decodeProjectBrowserCommand,
+  decodeProjectBrowserResult,
+} from "@octant/contracts/project-browser";
+import type { ProjectBrowserService } from "./browser/projectBrowserService";
+import { authenticateRoutePrincipal, readPrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin } from "./shellRoutes";
+import type { WindowId } from "@octant/contracts/shell";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const PREFIX = "/api/browser/";
@@ -38,14 +44,11 @@ export interface BrowserAutomationRouteDependencies {
     Partial<Pick<BrowserAutomationService, "peekThread">>;
   readonly authority: BrowserAuthorityResolver;
   readonly approvals?: {
-    list(
-      windowId: ReturnType<typeof authenticateRouteWindowId>,
-    ): ReadonlyArray<BrowserToolApproval>;
-    decide(
-      windowId: ReturnType<typeof authenticateRouteWindowId>,
-      decision: BrowserToolApprovalDecision,
-    ): boolean;
+    list(windowId: WindowId): ReadonlyArray<BrowserToolApproval>;
+    decide(windowId: WindowId, decision: BrowserToolApprovalDecision): boolean;
   };
+  /** Browsers a Work or Code Project owns without a thread; absent on a host without them. */
+  readonly projectBrowsers?: Pick<ProjectBrowserService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -72,12 +75,15 @@ export function createBrowserAutomationRouteHandler(
     }
 
     let windowId;
+    let callerKind: "local-window" | "remote-device";
     try {
-      windowId = authenticateRouteWindowId({
+      const principal = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: Date.now(),
       });
+      windowId = principal.scopeId;
+      callerKind = principal.principal.kind;
     } catch {
       return failure(
         { category: "unauthorized", message: "Window authority is invalid." },
@@ -101,6 +107,22 @@ export function createBrowserAutomationRouteHandler(
     }
 
     try {
+      if (url.pathname === "/api/browser/project-contexts") {
+        if (dependencies.projectBrowsers === undefined) {
+          return failure(
+            { category: "unavailable", message: "Project browsers are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const command = decodeProjectBrowserCommand(decoded.value);
+        return success(
+          decodeProjectBrowserResult(
+            await dependencies.projectBrowsers.execute(windowId, callerKind, command),
+          ),
+          origin,
+        );
+      }
       if (url.pathname === "/api/browser/approvals") {
         if (dependencies.approvals === undefined) {
           return failure(

@@ -679,6 +679,26 @@
   background: transparent;
 }
 
+/* Start screens set their question and hints straight on the page. Under a
+   ground that runs behind everything, a busy photo ran through the letters:
+   wood grain and the dot cloud sat under a grey sentence that could not be
+   read on a phone. The reading column gets a soft wash of the page colour
+   that fades out well before the edges, so the ground stays visible around
+   it. Only the outermost start screen paints, so a nested one never doubles
+   the wash. The width is in viewport units because Chromium drops the whole
+   declaration when a gradient's size mixes a percentage into clamp(). */
+.shell--app-backdrop.shell-frame
+  :is(.draft-thread, .work-composer-adapter, .code-composer-adapter):not(
+    :is(.draft-thread, .work-composer-adapter, .code-composer-adapter) *
+  ) {
+  background: radial-gradient(
+    ellipse clamp(300px, 40vw, 640px) 440px at 50% 260px,
+    color-mix(in srgb, var(--octant-app-background) 84%, transparent),
+    color-mix(in srgb, var(--octant-app-background) 50%, transparent) 60%,
+    transparent 100%
+  );
+}
+
 /* Reader pages place text directly on the page instead of on conversation
    cards. Keep the selected ground visible without painting it through text. */
 .shell--app-backdrop.shell-frame .surface,
@@ -688,17 +708,33 @@
 
 /* A conversation needs one quiet reading surface: separate reply cards over
    the dither made even short answers compete with the composer (0155).
-   Opaque is the fallback, including when transparency is reduced. */
+   Opaque is the fallback, including when transparency is reduced. The pane's
+   title rail belongs to the same surface; left clear, a stripe of dots ran
+   behind the thread's title above an otherwise calm page. */
 .shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-thread-workspace,
-.shell--app-backdrop.shell-frame .code-thread-workspace {
+.shell--app-backdrop.shell-frame .code-thread-workspace,
+.shell--app-backdrop.shell-frame
+  .workspace-pane:has(
+    > .workspace-pane__panel :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace)
+  )
+  > .workspace-pane__header {
   background: var(--octant-workspace);
 }
 
 @media (prefers-reduced-transparency: no-preference) {
   html:not([data-octant-reduced-transparency="true"])
     .shell--app-backdrop.shell-frame
-    :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
+    :is(
+      .chat-workspace,
+      .work-thread-workspace,
+      .code-thread-workspace,
+      .workspace-pane:has(
+          > .workspace-pane__panel
+            :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace)
+        )
+        > .workspace-pane__header
+    ) {
     background: linear-gradient(
       to right,
       color-mix(in srgb, var(--octant-workspace) 90%, transparent),

@@ -140,6 +140,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     ) ?? [];
   const freshnessStatus = scopedFreshness?.status ?? "loading";
   const hasProjects = scopedProjects.length > 0;
+  // With no Project on GitHub there is nothing to refresh or search; saying
+  // "Refresh to load" beside "No github.com origin" contradicted itself.
+  const onGitHub = scopedProjects.some((project) => project.kind === "connected");
 
   const body = (
     <div
@@ -148,7 +151,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       data-narrow={props.isNarrow === true ? "true" : "false"}
       data-presentation={dock ? "dock" : "page"}
     >
-      {view === undefined || !hasProjects ? null : (
+      {view === undefined || !hasProjects || !onGitHub ? null : (
         <div className="surface-toolbar">
           <label className="surface-toolbar__search code-project-pull-requests__search">
             <Search aria-hidden="true" size={14} strokeWidth={1.7} />
@@ -225,7 +228,36 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             title="No Code Projects yet"
           />
         )
-      ) : (
+      ) : !onGitHub ? (
+        <SurfaceEmpty
+          action={
+            <OctantButton
+              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
+              onClick={() =>
+                void runRefresh(
+                  projectId === undefined
+                    ? { kind: "refresh-all" }
+                    : { kind: "refresh-project", projectId },
+                )
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Check again
+            </OctantButton>
+          }
+          detail="Pull requests show up here once a Project's Git remote points at github.com. Add one, then check again."
+          title={dock ? "This Project isn't on GitHub" : "None of your Code Projects is on GitHub"}
+        />
+      ) : null}
+      {view !== undefined && hasProjects && !onGitHub && workspace.status === "error" ? (
+        // A check that failed must not read as "still not on GitHub".
+        <p className="code-project-pull-requests__status" role="alert">
+          {workspace.message}
+        </p>
+      ) : null}
+      {view === undefined || !hasProjects || !onGitHub ? null : (
         <>
           <p
             className="code-project-pull-requests__status"
@@ -327,9 +359,7 @@ function ProjectGroup(props: {
               {props.project.repositoryOwner}/{props.project.repositoryName}
             </span>
           ) : (
-            <span className="oct-meta">
-              No github.com origin. Add one to list this Project's pull requests.
-            </span>
+            <span className="oct-meta">Not on GitHub</span>
           )}
         </div>
         <div className="code-project-pull-requests__project-actions">

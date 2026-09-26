@@ -1007,6 +1007,8 @@ export function useZenController(options: UseZenControllerOptions) {
         readonly threadId: WorkThreadId | CodeThreadId;
         readonly mode: "work" | "code";
       } | null;
+      /** A Project's own browser instead of a thread's; the thread is then null. */
+      readonly project?: { readonly projectId: ProjectId };
       readonly width?: number;
       readonly collapsed?: boolean;
     }) => {
@@ -1015,6 +1017,7 @@ export function useZenController(options: UseZenControllerOptions) {
       try {
         const result = await client.dockResearch({
           thread: request.thread,
+          ...(request.project === undefined ? {} : { project: request.project }),
           expectedVersion: space.version,
           ...(request.width === undefined ? {} : { width: request.width }),
           ...(request.collapsed === undefined ? {} : { collapsed: request.collapsed }),

@@ -26,7 +26,7 @@ export function draftThreadModePresentation(
       return {
         mode,
         eyebrow: "Octant Chat",
-        heading: "What are you working on?",
+        heading: "What’s on your mind?",
         description:
           "Start a calm, focused conversation. Place it in a virtual Project when it becomes a shared workspace.",
         composerPlaceholder: "Ask anything…",
@@ -81,7 +81,7 @@ export function draftThreadModePresentation(
         heading: "What should we build?",
         description:
           "Start a Code thread in this repository. The thread inherits the current checkout and approval policy.",
-        composerPlaceholder: "What should we build?",
+        composerPlaceholder: "Describe the change…",
         intentCards: [
           {
             id: "implement",

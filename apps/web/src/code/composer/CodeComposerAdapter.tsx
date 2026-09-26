@@ -1,6 +1,5 @@
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
-import { useComposerTip } from "../../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -31,7 +30,11 @@ import type {
   ProviderModelOptionValues,
   PermissionPersistence,
 } from "@octant/contracts/providers";
-import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
+import {
+  draftThreadModePresentation,
+  type CreateHostViewScope,
+  type PickerGroup,
+} from "@octant/domain";
 import {
   defaultDeliveryBranchIntent,
   defaultStartFromOrigin,
@@ -311,14 +314,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
-  });
-  const tip = useComposerTip({
-    scopeKey: "code-draft",
-    threads: threadMentions.composer !== undefined,
-    commands: slash.commandIds,
-    browser: browser.available,
-    computer: computer.available,
-    plan: true,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -758,7 +753,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
-                placeholder={tip}
+                placeholder={draftThreadModePresentation("code").composerPlaceholder}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

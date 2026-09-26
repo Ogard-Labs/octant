@@ -731,6 +731,7 @@ describe("dockResearch", () => {
       makeSpace(),
       { sourceContext: workSource, width: 480, collapsed: false },
       0,
+      localHostId,
     );
     expect(result.research).toEqual({
       sourceContext: workSource,
@@ -744,8 +745,9 @@ describe("dockResearch", () => {
       makeSpace(),
       { sourceContext: workSource, width: 480, collapsed: false },
       0,
+      localHostId,
     );
-    expect(dockResearch(docked, null, docked.version).research).toBeNull();
+    expect(dockResearch(docked, null, docked.version, localHostId).research).toBeNull();
   });
 
   it("refuses to dock onto a Chat thread, which has no browsing context", () => {
@@ -758,12 +760,40 @@ describe("dockResearch", () => {
           collapsed: false,
         },
         0,
+        localHostId,
       ),
     ).toThrow();
   });
 
   it("refuses a dock written against a space that has moved on", () => {
-    expect(() => dockResearch(makeSpace(3), null, 2)).toThrow();
+    expect(() => dockResearch(makeSpace(3), null, 2, localHostId)).toThrow();
+  });
+
+  it("docks a Project's own browser naming the Project and no thread, on this host only", () => {
+    const project = {
+      hostId: localHostId,
+      projectId: makeId("67676767") as never,
+      mode: "code" as const,
+    };
+    const docked = dockResearch(
+      makeSpace(),
+      { project, width: 480, collapsed: false },
+      0,
+      localHostId,
+    );
+    expect(docked.research).toEqual({ project, width: 480, collapsed: false });
+    expect(() =>
+      dockResearch(
+        makeSpace(),
+        {
+          project: { ...project, hostId: makeId("99999999") as never },
+          width: 480,
+          collapsed: false,
+        },
+        0,
+        localHostId,
+      ),
+    ).toThrow(ZenPolicyRejected);
   });
 });
 

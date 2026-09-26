@@ -248,6 +248,35 @@
   font-size: var(--oct-text-xs);
 }
 
+/* The threads a terminal or browser can open in: one quiet row each, the
+   thread's name over its Project and mode. */
+.zen-add-targets {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-3);
+}
+
+.zen-add-target.zen-add-target {
+  display: grid;
+  height: auto;
+  min-height: 0;
+  justify-items: start;
+  gap: 2px;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  text-align: start;
+  white-space: normal;
+}
+
+.zen-add-target__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.zen-add-target__detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 /* ─── floating chrome anchors ──────────────────────────────────────────
    Zen's chrome is anchored by the surface itself (window-drag regions,
    mobile repositioning), so the system bar/pill's self-anchoring is
@@ -588,31 +617,78 @@
   }
 }
 
-.zen-appearance__presets {
-  border: 0;
-  min-width: 0;
-  min-inline-size: 0;
-  padding: 0;
-  margin: var(--oct-space-3) 0 0;
+/* ─── appearance sheet ────────────────────────────────────────────────
+   Three short sections in the order people reach for them: how dark the
+   ground sits and how solid the windows are, how the picture is printed,
+   then which picture. The dials come first because the picture grid is
+   tall; with it on top, every dial sat below the fold. */
+.zen-appearance {
+  display: grid;
+  gap: var(--oct-space-5);
+  padding-block: var(--oct-space-2) var(--oct-space-4);
 }
 
-/* One choice and the sentence that says where it is configured. It stands
-   apart from the picture grid below because it is not a picture: what it
-   shows is whatever the application ground is set to. */
-.zen-appearance__app-ground {
+.zen-appearance__section {
   display: grid;
-  justify-items: start;
-  gap: var(--oct-space-2);
-  border: 0;
+  gap: var(--oct-space-3);
   min-width: 0;
-  min-inline-size: 0;
-  padding: 0;
-  margin: var(--oct-space-3) 0 0;
+}
+
+.zen-appearance__heading {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* A slider row is its name and its value on one line, the track under
+   both, so the number moves with the thumb instead of being guessed. */
+.zen-appearance__slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--oct-space-2) var(--oct-space-3);
+}
+
+.zen-appearance__slider > :last-child {
+  grid-column: 1 / -1;
+}
+
+.zen-appearance__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.zen-appearance__label {
+  font-size: var(--oct-text-sm);
+}
+
+.zen-appearance__readout {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.zen-appearance__segments {
+  background: color-mix(in srgb, var(--oct-fg) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-glass-stroke) 60%, transparent);
+}
+
+.zen-appearance__segments--wide {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.zen-appearance__segments[data-disabled] {
+  opacity: var(--oct-disabled-opacity);
 }
 
 .zen-appearance__note {
   margin: 0;
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
 
@@ -621,11 +697,17 @@
   min-width: 0;
 }
 
-.zen-appearance__group h3 {
-  margin: var(--oct-space-3) 0 var(--oct-space-2);
+.zen-appearance__group {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.zen-appearance__group h4 {
+  margin: 0;
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
   text-transform: capitalize;
-  color: var(--oct-muted);
 }
 
 /* A background picker shows backgrounds. Twenty names stacked one per row
@@ -640,21 +722,82 @@
 
 .zen-appearance__preset-grid > .zen-appearance__preset {
   display: grid;
+  align-content: start;
   height: auto;
   min-width: 0;
   min-height: 0;
-  gap: 4px;
-  padding: 4px;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
   justify-items: stretch;
   text-align: left;
 }
 
 .zen-appearance__thumb {
-  display: block;
+  display: grid;
+  place-items: center;
   width: 100%;
   aspect-ratio: 16 / 10;
   border-radius: var(--oct-radius-sm);
   object-fit: cover;
+  box-shadow: inset 0 0 0 1px var(--oct-glass-stroke);
+  transition: box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+/* An <img> cannot draw an inset ring over itself, so the ring is an outline. */
+img.zen-appearance__thumb {
+  outline: 1px solid var(--oct-glass-stroke);
+  outline-offset: -1px;
+}
+
+.zen-appearance__preset:hover .zen-appearance__thumb {
+  outline-color: var(--oct-glass-stroke-strong);
+  box-shadow: inset 0 0 0 1px var(--oct-glass-stroke-strong);
+}
+
+/* The chosen picture wears a light ring a little outside itself, the way a
+   selected photo does in a system picker; a tick in front of its name was
+   easy to miss at this size. */
+.zen-appearance__preset[aria-pressed="true"] .zen-appearance__thumb,
+.zen-appearance__upload[data-selected="true"] .zen-appearance__thumb {
+  outline: 2px solid var(--oct-fg);
+  outline-offset: 2px;
+}
+
+.zen-appearance__thumb--app {
+  color: var(--oct-muted);
+  background:
+    radial-gradient(color-mix(in srgb, var(--oct-fg) 18%, transparent) 1px, transparent 1.5px) 0 0 /
+      6px 6px,
+    var(--oct-bg);
+}
+
+.zen-appearance__thumb--upload {
+  color: var(--oct-muted);
+  background: color-mix(in srgb, var(--oct-fg) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--oct-glass-stroke-strong);
+}
+
+.zen-appearance__upload {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+  cursor: pointer;
+}
+
+/* The native control is still the one that opens the file picker and names
+   the choice; the tile is what shows. */
+.zen-appearance__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.zen-appearance__upload:focus-within .zen-appearance__thumb {
+  outline: 2px solid var(--oct-fg);
+  outline-offset: 2px;
 }
 
 /* The name still carries the choice for a screen reader and for anyone who
@@ -665,9 +808,15 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   line-height: 1.3;
   white-space: normal;
+}
+
+.zen-appearance__preset[aria-pressed="true"] .zen-appearance__preset-name,
+.zen-appearance__upload[data-selected="true"] .zen-appearance__preset-name {
+  color: var(--oct-fg);
 }
 
 .zen-appearance__preset-motion {
@@ -675,18 +824,15 @@
   font-size: var(--oct-text-xs);
 }
 
-.zen-appearance__preset[aria-pressed="true"] .zen-appearance__preset-name::before {
-  content: "✓ ";
-}
-
-.zen-appearance__custom {
-  margin-top: var(--oct-space-3);
-}
-
 .zen-appearance__custom > summary {
   cursor: pointer;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
+}
+
+.zen-appearance__custom[open] {
+  display: grid;
+  gap: var(--oct-space-2);
 }
 
 /*
@@ -699,22 +845,60 @@
  */
 .zen-research {
   position: absolute;
-  top: 44px;
-  right: 0;
-  bottom: 0;
+  top: 56px;
+  right: 16px;
   z-index: 4;
   display: flex;
+  height: calc(100% - 160px);
   flex-direction: column;
   min-width: 0;
-  border-left: 1px solid var(--oct-border);
+  overflow: hidden;
+  border: 1px solid var(--oct-glass-stroke);
+  border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
+  box-shadow: var(--oct-elev-raised);
+}
+
+/* The browser sizes from the edges away from its anchor: left, bottom, and
+   the corner between them. */
+.zen-research__resize {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+.zen-research__resize--w {
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.zen-research__resize--s {
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.zen-research__resize--sw {
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+.zen-research[data-interacting] {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .zen-research--collapsed {
   width: auto;
+  height: auto;
   padding: var(--oct-space-2);
   background: transparent;
-  border-left: none;
+  border: none;
+  box-shadow: none;
 }
 
 .zen-research__header {
@@ -799,6 +983,17 @@
   height: 100%;
 }
 
+.zen-research__address-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.zen-research__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .zen-research__empty {
   display: flex;
   flex-direction: column;
@@ -851,4 +1046,412 @@
   padding: var(--oct-space-3);
   font-size: var(--oct-text-sm);
   color: var(--oct-muted);
+}
+
+/* ─── windows on the desk ──────────────────────────────────────────────
+   A card is a window: its title bar moves it, every edge and corner sizes
+   it, and it stays where it was left. The bar is one quiet line (kind mark,
+   name, age, two icons); the body is the thread itself, not a second box
+   inside the card. */
+/* A window's corners follow the sheets' larger radius: on a picture the
+   floating panes read as objects, and a softer corner is what says so. */
+.zen-el {
+  border-radius: var(--oct-radius-lg);
+}
+
+/* Windows are glass panes over the picture. The recipe is the regular step of
+   the ladder poured over a lighter floor, so the ground's colour reads through
+   the blur; a one-pixel light edge along the top (the pane catching light), a
+   hairline stroke, and a long soft shadow lift it off the ground. Over a
+   picture the thick step's grey tint read as a solid slab. The floor still
+   sits under every pixel of text, which keeps body copy above its contrast
+   minimum over a bright photo. */
+.zen-surface .zen-el {
+  border-color: var(--oct-glass-stroke);
+  box-shadow:
+    inset 0 1px 0 0 var(--oct-glass-highlight),
+    0 24px 64px -28px color-mix(in srgb, var(--oct-scrim) 80%, transparent),
+    0 2px 8px -2px color-mix(in srgb, var(--oct-scrim) 35%, transparent);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .zen-surface .zen-el,
+  .zen-surface .zen-research:not(.zen-research--collapsed) {
+    background-color: color-mix(in srgb, var(--oct-glass-floor) 78%, transparent);
+    background-image: linear-gradient(var(--oct-glass-regular), var(--oct-glass-regular));
+    backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-regular)) saturate(170%);
+  }
+}
+
+/* The window in front says so with a brighter edge and a stronger lift, not a
+   colour of its own. */
+.zen-surface .zen-el.zen-element--focused {
+  border-color: var(--oct-glass-stroke-strong);
+  box-shadow:
+    inset 0 1px 0 0 var(--oct-glass-highlight),
+    0 32px 80px -28px color-mix(in srgb, var(--oct-scrim) 90%, transparent),
+    0 2px 10px -2px color-mix(in srgb, var(--oct-scrim) 45%, transparent);
+}
+
+/* The title bar is the top of the same pane: a faint wash of light that fades
+   into the body, over a divider that is almost not there. */
+.zen-surface .zen-el .zen-el-head {
+  border-bottom-color: color-mix(in srgb, var(--oct-glass-stroke) 50%, transparent);
+  background-color: transparent;
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--oct-fg) 5%, transparent),
+    color-mix(in srgb, var(--oct-fg) 1%, transparent)
+  );
+}
+
+/* The browser is a window like the cards, so it wears the same frame. */
+.zen-surface .zen-research:not(.zen-research--collapsed) {
+  border-color: var(--oct-glass-stroke);
+  box-shadow:
+    inset 0 1px 0 0 var(--oct-glass-highlight),
+    0 24px 64px -28px color-mix(in srgb, var(--oct-scrim) 80%, transparent),
+    0 2px 8px -2px color-mix(in srgb, var(--oct-scrim) 35%, transparent);
+}
+
+.zen-surface .zen-research__header {
+  border-bottom-color: color-mix(in srgb, var(--oct-glass-stroke) 50%, transparent);
+}
+
+/* Reduced transparency, increased contrast, or no backdrop blur: an opaque
+   window with a plain edge, as every other Zen surface falls back. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .zen-surface .zen-el,
+  .zen-surface .zen-research:not(.zen-research--collapsed) {
+    background-color: var(--oct-surface);
+    background-image: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* The dock, the collapsed pill, the spaces pill, and every sheet are the
+   same glass as the windows, one step lighter: they carry a few words, not
+   a transcript. Rounder than a window and lifted by the same long shadow, so
+   the floating chrome reads as objects on the picture rather than as strips
+   of interface laid over it. */
+.zen-surface .zen-bar,
+.zen-surface .zen-pill,
+.zen-surface .zen-surface__empty,
+.zen-surface [data-slot="card"][data-variant="glass"] {
+  border-color: var(--oct-glass-stroke);
+  box-shadow:
+    inset 0 1px 0 0 var(--oct-glass-highlight),
+    0 0 0 1px var(--oct-glass-stroke),
+    0 24px 64px -28px color-mix(in srgb, var(--oct-scrim) 80%, transparent),
+    0 2px 8px -2px color-mix(in srgb, var(--oct-scrim) 35%, transparent);
+}
+
+.zen-surface [data-slot="card"][data-variant="glass"],
+.zen-surface .zen-surface__empty {
+  border-radius: var(--oct-radius-lg);
+}
+
+/* The empty space's one line of guidance sits on the picture like any other
+   object, so it can be read over a busy or dithered ground. */
+.zen-surface .zen-surface__empty {
+  padding: var(--oct-space-5) var(--oct-space-6);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .zen-surface .zen-bar,
+  .zen-surface .zen-pill,
+  .zen-surface .zen-surface__empty,
+  .zen-surface [data-slot="card"][data-variant="glass"] {
+    background-color: color-mix(in srgb, var(--oct-glass-floor) 72%, transparent);
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--oct-fg) 6%, transparent),
+      color-mix(in srgb, var(--oct-fg) 2%, transparent)
+    );
+    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(180%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .zen-surface .zen-bar,
+  .zen-surface .zen-pill,
+  .zen-surface .zen-surface__empty,
+  .zen-surface [data-slot="card"][data-variant="glass"] {
+    background-color: var(--oct-surface);
+    background-image: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* The dock is a row of round icon keys, the way a system dock is: a word per
+   destination was the loudest thing on a calm surface. */
+.zen-surface .zen-bar,
+.zen-surface .zen-pill {
+  gap: 2px;
+  padding: var(--oct-space-1);
+}
+
+/* The keys keep the ghost recipe's own paint; the dock only sizes them and
+   quiets the glyphs until one is pointed at. */
+.zen-surface .zen-bar__button {
+  width: 36px;
+  height: 36px;
+}
+
+.zen-surface .zen-bar__button svg {
+  color: var(--oct-muted);
+  transition: color var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.zen-surface .zen-bar__button:hover:not([aria-disabled="true"]) svg {
+  color: var(--oct-fg);
+}
+
+.zen-surface .zen-bar-sep {
+  margin-block: 8px;
+  background: color-mix(in srgb, var(--oct-glass-stroke) 70%, transparent);
+}
+
+/* The printed picture lies over the plain CSS picture and stays out of sight
+   until its first frame is drawn, so switching the effect never flashes an
+   empty ground. Its cells are upscaled without smoothing, which is what
+   keeps a pixel a hard square. */
+.zen-ground-effect {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  background-color: inherit;
+  image-rendering: pixelated;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.zen-ground-effect[data-painted="true"] {
+  opacity: 1;
+}
+
+.zen-surface__manual-panel .zen-appearance__upload {
+  margin-top: 0;
+}
+
+.zen-el .zen-el-head {
+  min-height: 34px;
+  padding-inline: var(--oct-space-3) var(--oct-space-1);
+}
+
+.zen-el-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.zen-el .zen-el-actions {
+  gap: 0;
+  opacity: 0.55;
+  transition: opacity var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.zen-el:hover .zen-el-actions,
+.zen-el:focus-within .zen-el-actions,
+.zen-el.zen-element--focused .zen-el-actions {
+  opacity: 1;
+}
+
+.zen-el .zen-el-actions button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+}
+
+/* Edge handles: thin strips along each side and squares at each corner,
+   inside the frame so they never widen the hit area onto a neighbour. */
+.zen-el-resize {
+  position: absolute;
+  z-index: 4;
+  touch-action: none;
+}
+.zen-el-resize--n,
+.zen-el-resize--s {
+  right: 12px;
+  left: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.zen-el-resize--n {
+  top: 0;
+}
+.zen-el-resize--s {
+  bottom: 0;
+}
+.zen-el-resize--e,
+.zen-el-resize--w {
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.zen-el-resize--e {
+  right: 0;
+}
+.zen-el-resize--w {
+  left: 0;
+}
+.zen-el-resize--ne,
+.zen-el-resize--nw,
+.zen-el-resize--se,
+.zen-el-resize--sw {
+  width: 14px;
+  height: 14px;
+}
+.zen-el-resize--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.zen-el-resize--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.zen-el-resize--se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+.zen-el-resize--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+/* The one visible mark: a small corner bracket that appears on hover, so a
+   person can tell a window resizes without every card carrying a grip. */
+.zen-el-resize--se::after {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--oct-meta);
+  border-bottom: 1.5px solid var(--oct-meta);
+  border-radius: 0 0 3px;
+  content: "";
+  opacity: 0;
+  transition: opacity var(--oct-motion-fast) var(--oct-ease-standard);
+}
+.zen-el:hover .zen-el-resize--se::after {
+  opacity: 1;
+}
+
+.zen-el[data-minimized="true"] .zen-el-resize {
+  display: none;
+}
+
+/* While a window moves or sizes, nothing under the pointer selects text. */
+.zen-surface__canvas[data-interacting] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* A live thread fills its window: the transcript is the body, not a well
+   inside it. The workspace inside paints the opaque workspace colour for the
+   main window; in a Zen window that painted a grey slab over the glass. */
+.zen-el .zen-thread-element__surface,
+.zen-el :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace, .workspace-pane) {
+  border-radius: 0;
+  background: transparent;
+}
+
+.zen-bar.zen-surface__controls button {
+  gap: var(--oct-space-1);
+}
+
+/* ─── add sheet ───────────────────────────────────────────────────────
+   Every kind of window is a tile with its mark over its name, the way a
+   launcher shows apps; the three that take a value (a timer's minutes, a
+   link) are one line each rather than labelled forms stacked in a box. */
+.zen-add {
+  display: grid;
+  gap: var(--oct-space-5);
+  padding-block: var(--oct-space-2) var(--oct-space-4);
+}
+
+.zen-add__section {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.zen-add__tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--oct-space-2);
+}
+
+/* The tile is the outline recipe, sized into a square-ish key; its mark
+   is quiet until the tile is pointed at or open. */
+.zen-add__tiles > .zen-add__tile {
+  display: grid;
+  height: auto;
+  min-width: 0;
+  place-items: center;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3) var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-add__tile svg {
+  color: var(--oct-muted);
+}
+
+.zen-add__tile:hover svg,
+.zen-add__tile[aria-expanded="true"] svg {
+  color: var(--oct-fg);
+}
+
+.zen-add__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.zen-add__row > * {
+  min-width: 0;
+}
+
+.zen-add__row--link > input {
+  flex: 3 1 0;
+}
+
+.zen-add__row--link > input + input {
+  flex: 2 1 0;
+}
+
+.zen-add__row-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.zen-surface .zen-add__minutes {
+  width: 72px;
+  flex: none;
+}
+
+.zen-add__unit {
+  flex: 1;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.zen-add__row-action {
+  flex: none;
+}
+
+.zen-add .zen-add-targets {
+  margin-top: 0;
 }

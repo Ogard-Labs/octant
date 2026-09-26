@@ -1,6 +1,5 @@
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
-import { useComposerTip } from "../composer/useComposerTip";
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
@@ -887,11 +886,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
   });
-  const tip = useComposerTip({
-    scopeKey: "chat-draft",
-    computer: computer.available,
-    commands: slash.commandIds,
-  });
   useEffect(() => {
     if (props.pendingMessage === undefined) return;
     setPrompt(props.pendingMessage);
@@ -1032,7 +1026,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={tip}
+                placeholder={presentation.composerPlaceholder}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

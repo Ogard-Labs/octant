@@ -210,6 +210,7 @@ import {
   activeProjectTabId,
   activeSurfaceTitle,
   activeWorkThreadTabId,
+  findWorkspacePane,
   openLocalCodeThreadIds,
   openThreadIds,
 } from "./shell/workspaceTabLifecycle";
@@ -220,6 +221,7 @@ import {
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
+  useSidebarDrawerViewport,
   useBackgroundImageLibrary,
   usePrefersReducedMotion,
   useResolvedMaterial,
@@ -316,6 +318,7 @@ import {
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,
+  ZenProjectResearchDock,
   ZenProjectTerminalCard,
   ZenResearchDock,
   ZenSurface,
@@ -958,17 +961,55 @@ function LaunchedShell(
   // otherwise be dropped on the document body. Remember which control replaces
   // it and focus that one once the new layout has rendered.
   const sidebarToggleFocusRef = useRef<"Hide sidebar" | "Show sidebar" | undefined>(undefined);
-  const setSidebarCollapsedPersistent = useCallback((collapsed: boolean) => {
-    sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
-    setSidebarCollapsed(collapsed);
-    writeSidebarCollapsed(globalThis, collapsed);
-  }, []);
+  // At phone width the sidebar is a drawer over the page. It opened on every
+  // load and covered the whole screen with no way out but its own small hide
+  // button, so there it starts closed, closes on Escape, a tap outside, or
+  // choosing somewhere to go, and never writes the desktop preference.
+  const sidebarIsDrawer = useSidebarDrawerViewport();
+  const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
+  const presentedSidebarCollapsed = sidebarIsDrawer ? !sidebarDrawerOpen : sidebarCollapsed;
+  const setSidebarCollapsedPersistent = useCallback(
+    (collapsed: boolean) => {
+      sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+      if (sidebarIsDrawer) {
+        setSidebarDrawerOpen(!collapsed);
+        return;
+      }
+      setSidebarCollapsed(collapsed);
+      writeSidebarCollapsed(globalThis, collapsed);
+    },
+    [sidebarIsDrawer],
+  );
   useLayoutEffect(() => {
     const label = sidebarToggleFocusRef.current;
     if (label === undefined) return;
     sidebarToggleFocusRef.current = undefined;
     document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)?.focus();
-  }, [sidebarCollapsed]);
+  }, [presentedSidebarCollapsed]);
+  useEffect(() => {
+    if (!sidebarIsDrawer || !sidebarDrawerOpen) return;
+    const close = () => setSidebarCollapsedPersistent(true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      // A menu or dialog opened from the drawer takes Escape first.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("[role='dialog'], [role='menu']") !== null) return;
+      close();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".shell-frame > .sidebar, [role='menu'], [role='dialog']") !== null) {
+        return;
+      }
+      close();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [setSidebarCollapsedPersistent, sidebarDrawerOpen, sidebarIsDrawer]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
@@ -1196,6 +1237,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    projectBrowserClient,
     projectTerminalClient,
     hostControlClient,
     imageGenerationClient,
@@ -3371,6 +3413,40 @@ function LaunchedShell(
     [props.hostBridge],
   );
 
+  // Choosing a thread or destination from the phone drawer is the reason it
+  // was opened; the page it chose should be what the person sees next. The
+  // surface is keyed by its id, not its title: two untitled threads share one.
+  const drawerDestination = [
+    activeMode,
+    controller.workspace === undefined
+      ? ""
+      : String(
+          findWorkspacePane(
+            controller.workspace.layouts[activeMode],
+            controller.workspace.activePaneIds[activeMode],
+          )?.surface.id ?? "",
+        ),
+    searchOpen,
+    projectsListOpen,
+    selectedProjectTabId ?? "",
+    inboxOpen,
+    workBoardOpen,
+    codeBoardOpen,
+    codePullRequestsOpen,
+    githubIssuesOpen,
+    linearIssuesOpen,
+    automationCenterOpen,
+    agentsCenterOpen,
+    artifactLibraryOpen,
+    imageLibraryOpen,
+  ].join(":");
+  const lastDrawerDestination = useRef(drawerDestination);
+  useEffect(() => {
+    if (lastDrawerDestination.current === drawerDestination) return;
+    lastDrawerDestination.current = drawerDestination;
+    setSidebarDrawerOpen(false);
+  }, [drawerDestination]);
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -4949,6 +5025,27 @@ function LaunchedShell(
     await stop();
   }
 
+  // The Project a browser opens for: the one the active mode holds when that
+  // is Work or Code, otherwise the window's Code Project, then its Work one.
+  const zenProjectBrowserTarget = (() => {
+    const workspace = controller.workspace;
+    if (workspace === undefined) return undefined;
+    const modes: ReadonlyArray<"work" | "code"> =
+      workspace.activeMode === "work" ? ["work", "code"] : ["code", "work"];
+    for (const mode of modes) {
+      const projectId = workspace.contextByMode[mode].projectId ?? undefined;
+      if (projectId === undefined) continue;
+      const project = projectController.allProjects.find(
+        (candidate) =>
+          String(candidate.id) === String(projectId) &&
+          candidate.type === mode &&
+          candidate.lifecycle === "active",
+      );
+      if (project !== undefined) return { projectId: project.id, name: project.name };
+    }
+    return undefined;
+  })();
+
   const zenProjectTerminalTarget = (() => {
     const projectId = controller.workspace?.contextByMode.code.projectId ?? undefined;
     if (projectId === undefined) return undefined;
@@ -5223,6 +5320,31 @@ function LaunchedShell(
                 );
               }}
               renderResearchDock={({ dock }) => {
+                if ("project" in dock) {
+                  // A Project's own browser: the person's page, in a context
+                  // no thread shares. The host decides whether this window
+                  // still holds the Project each time the dock asks.
+                  return (
+                    <Suspense fallback={null}>
+                      <ZenProjectResearchDock
+                        client={projectBrowserClient}
+                        dock={dock}
+                        {...(props.hostBridge === undefined
+                          ? {}
+                          : { hostBridge: props.hostBridge })}
+                        onCollapse={(collapsed) =>
+                          void zen.dockResearch({
+                            thread: null,
+                            project: { projectId: dock.project.projectId },
+                            width: dock.width,
+                            collapsed,
+                          })
+                        }
+                        onUndock={() => void zen.dockResearch({ thread: null })}
+                      />
+                    </Suspense>
+                  );
+                }
                 // The dock shows the bound thread's own browsing context. Zen
                 // holds no browser client of its own; it hands over the binding
                 // and the shell's client, and the server decides what that
@@ -5274,10 +5396,17 @@ function LaunchedShell(
               threadQuery={zen.threadQuery}
               onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
               onAddBrowser={addZenBrowser}
+              onLoadThreads={() => void zen.refreshThreads("")}
               {...(zenProjectTerminalTarget === undefined
                 ? {}
                 : { projectTerminalTarget: zenProjectTerminalTarget })}
               onAddProjectTerminal={(projectId) => void addZenProjectTerminal(projectId)}
+              {...(zenProjectBrowserTarget === undefined
+                ? {}
+                : { projectBrowserTarget: zenProjectBrowserTarget })}
+              onAddProjectBrowser={(projectId) =>
+                void zen.dockResearch({ thread: null, project: { projectId } })
+              }
               renderProjectTerminal={({ element, activity }) => (
                 <Suspense fallback={null}>
                   <ZenProjectTerminalCard
@@ -5363,10 +5492,10 @@ function LaunchedShell(
             isNarrow={isNarrow}
             material={material}
             nativeTitlebarInset={hostReservesTitlebarInset}
-            {...(sidebarCollapsed
+            {...(presentedSidebarCollapsed
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            {...(sidebarCollapsed
+            {...(presentedSidebarCollapsed
               ? {
                   onNewThread: () => {
                     if (activeMode === "chat") createChat();
@@ -5390,7 +5519,7 @@ function LaunchedShell(
           void controller.updateSettings({ sidebarWidth: width });
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={presentedSidebarCollapsed}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
