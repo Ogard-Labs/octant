@@ -1,0 +1,413 @@
+/*
+ * The Environment tool reads top to bottom: what the thread works in (the
+ * header), what that checkout holds and what to do about it (one card), then
+ * one list of rows that all share a grammar — glyph, name, the row's state at
+ * the trailing edge, and a chevron where the row opens. It had been built from
+ * a dozen rule sets across the root stylesheet: a header with a state pill, a
+ * four-row table that repeated the header, groups whose titles sat behind a
+ * leading chevron, rows with a glyph beside groups without one, and a Usage
+ * section open by default with its form. Every rule for it now lives here.
+ */
+
+.thread-environment-dock-host,
+.thread-environment-dock {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.thread-environment-dock-host {
+  overflow: auto;
+}
+
+.thread-environment-dock {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--oct-font-display);
+}
+
+/* Name on its own line; the branch and the folder under it. The branch keeps
+   its width before the folder does, since it is the one that changes. */
+.thread-environment-dock__header {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-4) var(--oct-space-4) var(--oct-space-3);
+}
+
+.thread-environment-dock__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-medium);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-environment-dock__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: 16px;
+}
+
+.thread-environment-dock__branch {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg-2);
+}
+
+.thread-environment-dock__branch > svg {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.thread-environment-dock__branch > span,
+.thread-environment-dock__place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-environment-dock__place {
+  flex: 1 1 auto;
+}
+
+.thread-environment-dock__body {
+  display: grid;
+  align-content: start;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-2) var(--oct-space-4);
+}
+
+/* The checkout card: the one bordered object in the tool, because it is the
+   one thing here the reader acts on every turn. */
+.environment-checkout {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+}
+
+.environment-git-group {
+  display: grid;
+  min-width: 0;
+}
+
+.environment-git-group__changes {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0 var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+  text-align: left;
+}
+
+.environment-git-group__icon,
+.environment-git-group__chevron {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.environment-git-group__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Added and removed read as one measurement, in the two inks the composer's
+   checkout bar uses for the same figures. */
+.environment-git-group__diffstat {
+  display: inline-flex;
+  flex: none;
+  gap: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-git-group__insertions {
+  color: var(--oct-success-fg);
+}
+
+.environment-git-group__deletions {
+  color: var(--oct-danger-fg);
+}
+
+.environment-git-group__fact {
+  display: flex;
+  min-width: 0;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-git-group__mono {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-git-group__state {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-git-group__state strong {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.environment-git-group__error {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.environment-checkout__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-2);
+}
+
+.environment-checkout__actions > * {
+  flex: 1 1 0;
+  min-width: max-content;
+}
+
+/* The button recipe shrinks an unsized glyph to 13px, so glyphs inside a
+   row button stood narrower than the same glyph in a plain row and the names
+   beside them fell out of line by 2px. */
+.environment-group__icon,
+.environment-row__icon,
+.environment-git-group__icon {
+  width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
+}
+
+.environment-group__chevron,
+.environment-row__trailing,
+.environment-git-group__chevron {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+}
+
+/* The list. */
+.environment-list {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+/* One row grammar for a group's toggle, a row that opens another tool, and
+   a row with nothing to open. */
+.environment-group__header,
+.environment-link,
+.environment-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+}
+
+.environment-group__icon,
+.environment-row__icon {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+/* Rows answer the pointer by lifting their ink, not with a fill: an open row
+   painted grey read as a selected one, and nothing here is selected. The
+   keyboard gets the same lift plus an underline on the name. */
+.environment-group__header,
+.environment-link {
+  text-decoration: none;
+}
+
+.environment-group__header:hover,
+.environment-link:hover {
+  text-decoration: none;
+}
+
+.environment-group__header:hover .environment-group__icon,
+.environment-group__header:hover .environment-group__chevron,
+.environment-group__header:hover .environment-group__summary,
+.environment-link:hover .environment-row__icon,
+.environment-link:hover .environment-row__trailing,
+.environment-link:hover .environment-row__detail,
+.environment-group__header:focus-visible .environment-group__icon,
+.environment-group__header:focus-visible .environment-group__chevron,
+.environment-group__header:focus-visible .environment-group__summary,
+.environment-link:focus-visible .environment-row__icon,
+.environment-link:focus-visible .environment-row__trailing,
+.environment-link:focus-visible .environment-row__detail {
+  color: var(--oct-fg-2);
+}
+
+.environment-group__header:focus-visible .environment-group__title,
+.environment-link:focus-visible .environment-row__title {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.environment-group__title,
+.environment-row__title {
+  flex: none;
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+}
+
+/* The state yields before the name does, and ends where every other row's
+   state ends, just short of the chevron column. */
+.environment-group__summary,
+.environment-row__detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-inline-start: auto;
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-group__chevron,
+.environment-row__trailing {
+  flex: none;
+  color: var(--oct-muted);
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+/* With no state to show, the chevron still ends the row. */
+.environment-group__title + .environment-group__chevron {
+  margin-inline-start: auto;
+}
+
+.environment-group--open > .environment-group__head .environment-group__chevron {
+  transform: rotate(90deg);
+}
+
+/* A row with no chevron keeps the chevron's column, so its state lines up
+   with the rows that open. */
+.environment-row::after {
+  flex: none;
+  width: 14px;
+  content: "";
+}
+
+.environment-row:has(.environment-row__action)::after {
+  display: none;
+}
+
+.environment-row__action {
+  margin-inline-start: auto;
+}
+
+.environment-group {
+  min-width: 0;
+}
+
+.environment-group__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.environment-group__head > .environment-group__header {
+  flex: 1 1 auto;
+}
+
+.environment-group__head-action {
+  display: inline-flex;
+  flex: none;
+}
+
+/* An open row's content starts under its name, not under its glyph. */
+.environment-group__body {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-3) 32px;
+}
+
+/* A group inside an open row (Other servers) is a plain disclosure there. */
+.environment-group__body .environment-group__header {
+  min-height: 32px;
+  padding: 0;
+}
+
+.environment-group__body .environment-group__body {
+  padding: var(--oct-space-1) 0 var(--oct-space-2);
+}
+
+.environment-group__action,
+.thread-usage__dashboard {
+  justify-self: start;
+}
+
+/* An empty open row still states what is true, in the summaries' register. */
+.thread-environment-dock .environment-subagents__empty {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .environment-group__chevron {
+    transition: none;
+  }
+}

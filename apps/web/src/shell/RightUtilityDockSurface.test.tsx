@@ -31,7 +31,6 @@ describe("the right sidebar surface", () => {
       ".code-diff-pane__toolbar",
       ".browser-workspace__chrome",
       ".side-chat__header",
-      ".thread-environment-dock__header",
     ]) {
       expect(rail?.[1]).toContain(toolbar);
     }

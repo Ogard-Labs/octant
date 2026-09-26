@@ -3,6 +3,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { WorkThread, ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useState, type ReactNode } from "react";
+import { FolderOpen, Repeat } from "lucide-react";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
@@ -124,7 +125,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
              objective until a loop runs it as the prompt of each round. It is
              an autopilot control, so it lives behind a disclosure that mounts
              only when opened rather than greeting every new task with a form. */
-          <EnvironmentGroup title="Keep working on this unattended">
+          <EnvironmentGroup icon={Repeat} title="Keep working on this unattended">
             <ThreadGoalPanel
               client={props.goalClient}
               {...(props.goalLoopClient === undefined ? {} : { loopClient: props.goalLoopClient })}
@@ -134,6 +135,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
         )}
         {thread === undefined ? null : (
           <EnvironmentGroup
+            icon={FolderOpen}
             summary={workingFolderLabel(thread.workingDirectory ?? ".")}
             title="Working folder"
           >

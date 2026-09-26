@@ -1,3 +1,4 @@
+import { GitBranch } from "lucide-react";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
@@ -8,6 +9,8 @@ import type { LocalServerGroupCounts } from "./localServerGroups";
 export interface ThreadEnvironmentSummaryFacts {
   readonly identity: EnvironmentCompactIdentity;
   readonly branch?: string;
+  /** The checkout's folder on disk, shown under the name. */
+  readonly path?: string;
   readonly changes?: "clean" | "dirty";
   readonly workingLocation?: string;
   readonly runningServerCount?: number;
@@ -63,11 +66,12 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      {/* The dock strip's tab already says Environment; the rail names what the
-          thread works in and the heading stays for readers who navigate by
-          heading. It was one dotted sentence of every fact, which a 320px dock
-          cut off mid-word; the name leads now, then the branch and whether the
-          checkout is clean, and the rest lives in its own section below. */}
+      {/* The dock strip's tab already says Environment; the header names
+          what the thread works in — the name on its own line, then where:
+          the branch and the folder. It had carried the name, the branch and a
+          Changes pill, and the section under it then listed the branch and
+          the repository again. Whether the checkout has changes is the
+          Changes card's to say. */}
       <header className="thread-environment-dock__header" title={sentence}>
         <h2 className="visually-hidden">Environment</h2>
         {/* The whole summary stays one sentence for assistive technology;
@@ -76,18 +80,17 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
         <span aria-hidden="true" className="thread-environment-dock__name">
           {props.summary.identity.label}
         </span>
-        {headline.place === undefined ? null : (
-          <span aria-hidden="true" className="thread-environment-dock__place">
-            {headline.place}
-          </span>
-        )}
-        {props.summary.changes === undefined ? null : (
-          <span
-            aria-hidden="true"
-            className="thread-environment-dock__state"
-            data-state={props.summary.changes}
-          >
-            {props.summary.changes === "dirty" ? "Changes" : "Clean"}
+        {headline.branch === undefined && headline.place === undefined ? null : (
+          <span aria-hidden="true" className="thread-environment-dock__meta">
+            {headline.branch === undefined ? null : (
+              <span className="thread-environment-dock__branch">
+                <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span>{headline.branch}</span>
+              </span>
+            )}
+            {headline.place === undefined ? null : (
+              <span className="thread-environment-dock__place">{headline.place}</span>
+            )}
           </span>
         )}
       </header>
@@ -98,11 +101,30 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   return dockHost === null ? isolated : createPortal(isolated, dockHost);
 }
 
-/** The one place fact the header shows beside the name: the branch, or the folder. */
-function headlineFacts(summary: ThreadEnvironmentSummaryFacts): { readonly place?: string } {
-  if (summary.branch !== undefined) return { place: summary.branch };
-  if (summary.identity.detail !== summary.identity.label) return { place: summary.identity.detail };
-  return {};
+/** Where the thread works, under its name: the branch, then the folder. */
+function headlineFacts(summary: ThreadEnvironmentSummaryFacts): {
+  readonly branch?: string;
+  readonly place?: string;
+} {
+  const folder =
+    summary.path !== undefined
+      ? homeRelative(summary.path)
+      : summary.identity.detail !== summary.identity.label
+        ? summary.identity.detail
+        : undefined;
+  return {
+    ...(summary.branch === undefined ? {} : { branch: summary.branch }),
+    ...(folder === undefined ? {} : { place: folder }),
+  };
+}
+
+/**
+ * A home-directory path read from its home: the account folder repeats on
+ * every row and pushed the part that tells two checkouts apart out of a
+ * 320px dock.
+ */
+function homeRelative(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 }
 
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {

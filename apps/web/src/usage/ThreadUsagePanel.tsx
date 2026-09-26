@@ -1,3 +1,4 @@
+import { Gauge } from "lucide-react";
 import { EnvironmentGroup } from "../environment/EnvironmentGroup";
 import {
   decodeAggregateVersion,
@@ -54,27 +55,12 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
     // head. It had its own heading and a centred link between the numbers and
     // the ceiling, belonging to neither.
     <EnvironmentGroup
-      defaultOpen
+      icon={Gauge}
       title="Usage"
       {...(summary === undefined || summary.totals.totalRequests === 0
         ? {}
         : {
             summary: `${compactTokens(summary.totals.totalInputTokens + summary.totals.totalOutputTokens)} tokens`,
-          })}
-      {...(props.onOpenUsageDashboard === undefined
-        ? {}
-        : {
-            action: (
-              <OctantButton
-                aria-label="Open in Usage dashboard"
-                onClick={() => props.onOpenUsageDashboard?.(filter)}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Details
-              </OctantButton>
-            ),
           })}
     >
       <section aria-label="Thread usage" className="thread-usage">
@@ -128,6 +114,21 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
             subjectType={props.subjectType}
             {...(props.projectId === undefined ? {} : { projectId: props.projectId })}
           />
+        )}
+        {/* The way to the full dashboard closes the section it expands: on the
+            row's head it sat after the chevron, where it read as part of the
+            toggle. */}
+        {props.onOpenUsageDashboard === undefined ? null : (
+          <OctantButton
+            aria-label="Open in Usage dashboard"
+            className="thread-usage__dashboard"
+            onClick={() => props.onOpenUsageDashboard?.(filter)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Open Usage dashboard
+          </OctantButton>
         )}
       </section>
     </EnvironmentGroup>

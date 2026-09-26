@@ -851,22 +851,26 @@ launchable tool keeps the dock closed and omits its toggle. Restored presentatio
 for another subject never makes unavailable chrome visible.
 
 Environment is a right-dock tool, opened from the dock's tab strip or Add tool
-and nowhere else; the title band carries no second Environment button. Its
-header shows the name, the branch (or folder), and a clean or changed pill on
-one line, with the full summary (working folder, running servers) kept as one
-sentence for assistive technology; its body is a definition list of git facts,
-Commit or push and Create pull request as two small buttons side by side, and
-collapsible groups on the dock's own ground. Every section shares one 32px
-head: Computer use is a single row with its state or its one action trailing;
-Usage is a group whose head carries a compact token total and Details, with
-label-and-figure rows and a one-line token ceiling form rather than tiles. It summarizes Project, branch, clean/dirty state, working folder,
-changes, local servers, pull-request
-identity, sources, and compact active/completed subagent rows with lifecycle,
-model, and retained final response when authoritative. It stays flat on the dock's own background, with no surrounding card. Checkout
-facts and the existing Commit or push and Create pull request flows come first.
-Other servers stay behind a disclosure; none are stopped or removed by hiding
-them. Empty subagents keep a collapsed count and their Open Agents action.
-Sources list the current thread's journaled image attachments when present.
+and nowhere else; the title band carries no second Environment button. It reads
+top to bottom in three parts. The header names what the thread works in: the
+name on its own line, then the branch and the home-relative folder in mono,
+with the full summary (working folder, running servers) kept as one sentence
+for assistive technology. One bordered card follows — the only bordered object
+in the tool — saying what the checkout holds (Uncommitted changes with its
+added and removed counts, opening Review; No uncommitted changes when clean),
+a detached HEAD or separate worktree when true, and Commit or push and Create
+pull request as two equal buttons. Everything else is one list with one row
+grammar: a 16px glyph, the name, the row's state right-aligned, and a trailing
+chevron where the row opens (an up-right arrow where it opens another tool).
+Rows are 36px, lift their ink on hover rather than taking a fill, and an open
+row's content starts under its name. Order: Local servers (open by default
+only when this checkout is serving something), Subagents (one row with its
+working / to review / done counts that opens the Agents tool — reading and
+steering a subagent belongs there), Computer use, Pull requests, Sources,
+Delivers, Working folder, and Usage (closed by default; totals, the one-line
+token ceiling form, and Open Usage dashboard inside). Other servers stay behind
+a nested disclosure; none are stopped or removed by hiding them. It stays on
+the dock's own background. Sources list the current thread's journaled image attachments when present.
 Computer use offers Picture in Picture show/hide for the same live activity
 preview that floats over the main conversation. The preview never occupies
 Environment, and hiding it never stops its session. Browser stop and computer-use

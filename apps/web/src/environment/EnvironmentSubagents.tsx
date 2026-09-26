@@ -1,15 +1,21 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunConversationResponse } from "@octant/contracts";
-import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { Bot, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
+import { ArrowUpRight, Bot } from "lucide-react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
-import { useAgentRunConversation } from "../agents/useAgentRunConversation";
+import type { AgentHierarchyInputEntry } from "../agents/buildAgentHierarchyModel";
 import { OctantButton } from "../ui/base/OctantButton";
-import { EnvironmentGroup } from "./EnvironmentGroup";
 
 const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
 
+/**
+ * One Environment row that says what this thread's subagents are doing and
+ * opens them in the Agents tool.
+ *
+ * It had been a second, smaller Agents tool — its own Active and Done lists
+ * and an inline transcript — beside the real one a tab away, and the two
+ * disagreed on wording and on which runs they showed. The row keeps the count
+ * in view; reading and steering a subagent belongs to the tool built for it.
+ */
 export function EnvironmentSubagents(props: {
   readonly client: AgentRunClient;
   readonly threadId: string;
@@ -19,195 +25,58 @@ export function EnvironmentSubagents(props: {
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
-  const [selectedRunId, setSelectedRunId] = useState<string>();
-  const [expanded, setExpanded] = useState<boolean>();
-  const conversationState = useAgentRunConversation(
-    props.client,
-    selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
+  // A row that vanished when nothing had been delegated could not be told
+  // apart from a missing feature, so an empty thread says None.
+  const summary = controller.status !== "ready" ? "Reading" : subagentSummary(controller.entries);
+  const content = (
+    <>
+      <Bot aria-hidden="true" className="environment-row__icon" size={16} strokeWidth={1.7} />
+      <span className="environment-row__title">Subagents</span>
+      <span className="environment-row__detail">{summary}</span>
+    </>
   );
-  const active = controller.entries.filter((entry) => ACTIVE.has(entry.lifecycleStatus));
-  const history = controller.entries.filter((entry) => !ACTIVE.has(entry.lifecycleStatus));
-  // A section that disappears when a thread has delegated nothing cannot be
-  // read as "nothing is running" — it reads as a missing feature, and the
-  // reader has no way to tell the two apart. It states the count instead.
-  const summary =
-    controller.status !== "ready"
-      ? "Reading"
-      : `${String(active.length)} active · ${String(history.length)} done`;
 
+  if (props.onOpenAgents === undefined) {
+    return (
+      <section aria-label="Subagents" className="environment-row">
+        {content}
+      </section>
+    );
+  }
   return (
-    <EnvironmentGroup
-      open={expanded ?? controller.entries.length > 0}
-      onOpenChange={setExpanded}
-      summary={summary}
-      title="Subagents"
-      {...(props.onOpenAgents === undefined
-        ? {}
-        : {
-            action: (
-              <OctantButton onClick={props.onOpenAgents} size="sm" type="button" variant="ghost">
-                Open Agents
-              </OctantButton>
-            ),
-          })}
+    <OctantButton
+      aria-label={`Subagents, ${summary}. Open in Agents`}
+      className="environment-link window-no-drag"
+      onClick={props.onOpenAgents}
+      type="button"
+      variant="link"
     >
-      {controller.status !== "ready" ? (
-        <p className="environment-subagents__empty" role="status">
-          Reading delegated runs…
-        </p>
-      ) : controller.entries.length === 0 ? (
-        <p className="environment-subagents__empty">
-          This task has not delegated any work to a subagent.
-        </p>
-      ) : null}
-      <AgentGroup
-        entries={active}
-        label="Active"
-        {...(conversationState.conversation === undefined
-          ? {}
-          : { conversation: conversationState.conversation })}
-        reconnecting={conversationState.reconnecting}
-        loading={conversationState.loading}
-        {...(conversationState.errorMessage === undefined
-          ? {}
-          : { errorMessage: conversationState.errorMessage })}
-        {...(selectedRunId === undefined ? {} : { selectedRunId })}
-        onSelect={setSelectedRunId}
+      {content}
+      <ArrowUpRight
+        aria-hidden="true"
+        className="environment-row__trailing"
+        size={14}
+        strokeWidth={1.8}
       />
-      <AgentGroup
-        entries={history}
-        label="Done"
-        {...(conversationState.conversation === undefined
-          ? {}
-          : { conversation: conversationState.conversation })}
-        reconnecting={conversationState.reconnecting}
-        loading={conversationState.loading}
-        {...(conversationState.errorMessage === undefined
-          ? {}
-          : { errorMessage: conversationState.errorMessage })}
-        {...(selectedRunId === undefined ? {} : { selectedRunId })}
-        onSelect={setSelectedRunId}
-      />
-    </EnvironmentGroup>
+    </OctantButton>
   );
 }
 
-function AgentGroup(props: {
-  readonly entries: ReturnType<typeof useChildRunStatus>["entries"];
-  readonly label: string;
-  readonly conversation?: AgentRunConversationResponse;
-  readonly reconnecting: boolean;
-  readonly loading: boolean;
-  readonly errorMessage?: string;
-  readonly selectedRunId?: string;
-  readonly onSelect: (runId: string | undefined) => void;
-}) {
-  if (props.entries.length === 0) return null;
-  return (
-    <section aria-label={props.label} className="environment-subagents__group">
-      <h4>
-        {props.label} · {props.entries.length}
-      </h4>
-      <ul>
-        {props.entries.map((entry) => {
-          const selected = props.selectedRunId === entry.runId;
-          const model =
-            entry.route?.executionModelId ?? entry.route?.requestedModelId ?? "Model unavailable";
-          return (
-            <li key={entry.runId}>
-              <OctantButton
-                aria-expanded={selected}
-                className="environment-subagents__row"
-                onClick={() => props.onSelect(selected ? undefined : entry.runId)}
-                type="button"
-                variant="ghost"
-              >
-                <Bot aria-hidden="true" size={16} strokeWidth={1.7} />
-                <span>
-                  <strong>{entry.task}</strong>
-                  <small>
-                    {model} · {entry.lifecycleStatus}
-                  </small>
-                </span>
-                <ChevronRight aria-hidden="true" size={14} strokeWidth={1.7} />
-              </OctantButton>
-              {selected ? (
-                <div className="environment-subagents__conversation">
-                  <div>
-                    <span>Task</span>
-                    <p>{entry.task}</p>
-                  </div>
-                  <div>
-                    <span>Response</span>
-                    <ConversationBody
-                      conversation={
-                        props.conversation?.runId === entry.runId ? props.conversation : undefined
-                      }
-                      entry={entry}
-                      reconnecting={props.reconnecting}
-                      loading={props.loading}
-                      {...(props.errorMessage === undefined
-                        ? {}
-                        : { errorMessage: props.errorMessage })}
-                    />
-                    {entry.result?.truncated === true ? <small>Response truncated</small> : null}
-                  </div>
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-function ConversationBody(props: {
-  readonly conversation: AgentRunConversationResponse | undefined;
-  readonly entry: ReturnType<typeof useChildRunStatus>["entries"][number];
-  readonly reconnecting: boolean;
-  readonly loading: boolean;
-  readonly errorMessage?: string;
-}) {
-  const fallback =
-    props.entry.result?.text ??
-    (ACTIVE.has(props.entry.lifecycleStatus)
-      ? "The subagent is still working. Reconnecting to its live response…"
-      : "No retained response is available.");
-  if (props.conversation === undefined) {
-    return (
-      <p>
-        {props.loading
-          ? "Connecting to the subagent’s live response…"
-          : (props.errorMessage ?? fallback)}
-      </p>
-    );
+/** "1 working · 2 to review", in the order a reader acts on them. */
+export function subagentSummary(entries: ReadonlyArray<AgentHierarchyInputEntry>): string {
+  if (entries.length === 0) return "None";
+  let working = 0;
+  let toReview = 0;
+  let done = 0;
+  for (const entry of entries) {
+    if (ACTIVE.has(entry.lifecycleStatus)) working += 1;
+    else if (entry.resultAcknowledgement.required && !entry.resultAcknowledgement.acknowledged) {
+      toReview += 1;
+    } else done += 1;
   }
-  if (props.conversation.status === "unavailable") {
-    return <p>Live response text is unavailable for this execution.</p>;
-  }
-  if (props.conversation.entries.length === 0) {
-    return (
-      <p>
-        {props.conversation.status === "stale"
-          ? (props.conversation.staleReason ??
-            "The child session is stale; no more transcript is available.")
-          : "The subagent has not produced visible response text yet."}
-      </p>
-    );
-  }
-  return (
-    <div>
-      {props.conversation.entries.map((entry) => (
-        <p key={entry.sequence}>{entry.text}</p>
-      ))}
-      {props.conversation.truncated ? <small>Earlier response text was truncated.</small> : null}
-      {props.conversation.status === "stale" ? (
-        <small>{props.conversation.staleReason ?? "The live response is stale."}</small>
-      ) : null}
-      {props.reconnecting ? (
-        <small>Live response disconnected; reconnect to continue.</small>
-      ) : null}
-    </div>
-  );
+  const parts: string[] = [];
+  if (working > 0) parts.push(`${String(working)} working`);
+  if (toReview > 0) parts.push(`${String(toReview)} to review`);
+  if (done > 0) parts.push(`${String(done)} done`);
+  return parts.join(" · ");
 }

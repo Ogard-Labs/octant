@@ -20,7 +20,12 @@ export function ThreadActivityEnvironment() {
   // greyed out for every thread with no session, which read as broken.
   return (
     <section aria-label="Computer use" className="environment-row environment-activity">
-      <PictureInPicture2 aria-hidden="true" className="environment-row__icon" size={14} />
+      <PictureInPicture2
+        aria-hidden="true"
+        className="environment-row__icon"
+        size={16}
+        strokeWidth={1.7}
+      />
       <h3 className="environment-row__title">Computer use</h3>
       {preview.available ? (
         <OctantButton

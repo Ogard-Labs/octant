@@ -339,8 +339,7 @@
     .code-delivery-pane__toolbar,
     .code-diff-pane__toolbar,
     .browser-workspace__chrome,
-    .side-chat__header,
-    .thread-environment-dock__header
+    .side-chat__header
   ) {
   display: flex;
   min-height: var(--oct-title-rail-h);

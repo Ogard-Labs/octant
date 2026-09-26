@@ -14,7 +14,7 @@ import {
   type ProjectSummary,
   type WorkspaceTab,
 } from "@octant/contracts";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeCheckoutBar } from "../code/CodeCheckoutBar";
@@ -311,7 +311,7 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
-  it("renders the authoritative Git facts in the disclosure once opened", async () => {
+  it("names the checkout, its branch, and its folder once, above the changes", async () => {
     render(
       <CodeThreadEnvironment
         environmentOpen
@@ -323,8 +323,11 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
     await openEnvironment();
-    expect(screen.getByTestId("environment-worktree-value")).toBeVisible();
-    expect(screen.getAllByText("Branch").length).toBeGreaterThan(0);
+    const header = screen.getByRole("region", { name: "Environment details" });
+    expect(within(header).getByText("feature/issue-204")).toBeVisible();
+    expect(within(header).getByText("~/Dev/Repos/octant")).toBeVisible();
+    expect(screen.getAllByText("feature/issue-204")).toHaveLength(1);
+    expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent("issue-204");
   });
 
   it("reports an unavailable identity when no project is bound to the tab", () => {

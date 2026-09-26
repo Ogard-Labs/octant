@@ -137,6 +137,7 @@ import {
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
+import "./styles/environment.css";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
