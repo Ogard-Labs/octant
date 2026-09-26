@@ -62,6 +62,9 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
   const [dismissedTurnId, setDismissedTurnId] = useState<string>();
   const requestGeneration = useRef(0);
   const { client, threadId } = props;
+  // The pane can move to another thread while a preview is on its way.
+  const currentThread = useRef(threadId);
+  currentThread.current = threadId;
 
   const load = useCallback(async () => {
     // A response for a thread the composer has left must not paint over the
@@ -112,8 +115,10 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
 
   const choose = async (suggestion: NativeHarnessFollowUpSuggestion) => {
     setError(undefined);
+    const requestedFor = threadId;
     try {
-      const result = await client.preview(threadId, String(suggestion.id));
+      const result = await client.preview(requestedFor, String(suggestion.id));
+      if (currentThread.current !== requestedFor) return;
       if ("wouldCreate" in result) setPreview(result);
       else
         setError(
@@ -122,6 +127,7 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
             : "This follow-up could not be previewed.",
         );
     } catch (failure) {
+      if (currentThread.current !== requestedFor) return;
       setError(
         failure instanceof FollowUpSuggestionClientFailure
           ? failure.message
