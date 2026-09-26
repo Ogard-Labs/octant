@@ -1178,7 +1178,12 @@ export class CodeService {
           checkoutHead,
         });
         const approvalValidated =
-          thread.executionPolicy !== "full-access"
+          thread.executionPolicy !== "full-access" ||
+          this.#projectRemembersFullAccess(
+            command.projectId,
+            managedAuthority.executionPolicy,
+            managedAuthority.permissionPersistence,
+          )
             ? true
             : this.#approvals !== undefined &&
               command.approvalId !== undefined &&
@@ -1503,6 +1508,11 @@ export class CodeService {
         }
         if (
           thread.executionPolicy === "full-access" &&
+          !this.#projectRemembersFullAccess(
+            command.thread.projectId,
+            command.thread.executionPolicy,
+            command.thread.permissionPersistence,
+          ) &&
           checkout !== undefined &&
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
@@ -1664,6 +1674,11 @@ export class CodeService {
         command.executionPolicy === "full-access" &&
         (effectiveCurrent.executionPolicy !== "full-access" ||
           effectiveCurrent.permissionPersistence !== "project-default") &&
+        !this.#projectRemembersFullAccess(
+          current.projectId,
+          command.executionPolicy,
+          command.permissionPersistence,
+        ) &&
         (currentContextDigest === undefined ||
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
@@ -2894,6 +2909,25 @@ export class CodeService {
     // The check is here to stop a profile reaching past the request, not to
     // refuse one for agreeing with it.
     return highestPolicy(standing, requestedExecutionPolicy);
+  }
+
+  /**
+   * Whether a Full-access request was already confirmed by the person on the
+   * host. A remembered per-Project grant is the decision they already made
+   * with `octant project access <name> full-access`; a per-thread native
+   * prompt would re-ask it, and off-desktop hosts have no prompt to ask.
+   * Session-only Full access still needs a per-thread receipt.
+   */
+  #projectRemembersFullAccess(
+    projectId: ProjectId,
+    executionPolicy: ProviderExecutionPolicy,
+    permissionPersistence: PermissionPersistence,
+  ): boolean {
+    if (executionPolicy !== "full-access" || permissionPersistence !== "project-default") {
+      return false;
+    }
+    const project = this.#persistence.readProject?.(projectId);
+    return project?.type === "code" && project.codeAccessPersistence === "project-default";
   }
 
   /**

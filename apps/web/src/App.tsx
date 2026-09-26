@@ -4521,12 +4521,17 @@ function LaunchedShell(
         return false;
       }
       let command = plan.command;
-      if (input.executionPolicy === "full-access") {
+      const projectRemembersFullAccess =
+        input.executionPolicy === "full-access" &&
+        input.permissionPersistence === "project-default" &&
+        project.type === "code" &&
+        project.codeAccessPersistence === "project-default";
+      if (input.executionPolicy === "full-access" && !projectRemembersFullAccess) {
         const requestApproval = props.hostBridge?.requestCodeOperationApproval;
         const presentation = input.presentation;
         if (requestApproval === undefined || presentation === undefined) {
           setDraftError(
-            "Full access needs the native approval surface. Keep Ask for approvals or retry.",
+            "Full access needs the native approval surface. Keep Ask for approvals, or remember Full access for this Project on the host with `octant project access <name> full-access` and choose Remember for this Project.",
           );
           return false;
         }

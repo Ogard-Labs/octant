@@ -84,7 +84,11 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
       id,
       label: `Raise thread · ${CODE_ACCESS_POSTURE_LABEL[id]}`,
       ...(id === "full-access" && !props.nativeConfirmationAvailable
-        ? { disabled: true, disabledReason: "Full access requires native confirmation." }
+        ? {
+            disabled: true,
+            disabledReason:
+              "Full access requires native confirmation. Remembered Project Full access is granted when a thread is created.",
+          }
         : {}),
     })),
   ];
