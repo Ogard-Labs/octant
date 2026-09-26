@@ -25,6 +25,14 @@ export interface ThreadDialogueServiceOptions {
     command: unknown,
     context: { readonly windowId: WindowId; readonly coordinationDepth: number },
   ) => Promise<unknown>;
+  /**
+   * Whether a Chat thread is a Side Chat sidecar. A sidecar exists to read one
+   * source thread, and its composer can `#`-mention that source like any other
+   * thread; without this check the mention granted the dialogue tool and a
+   * Side Chat could append a turn to the thread it promises never to change.
+   * Absent means this host records no sidecars.
+   */
+  readonly isSideChat?: (threadId: string) => boolean;
 }
 
 /** Provider-neutral, one-hop Chat coordination through explicit mention grants. */
@@ -35,6 +43,10 @@ export class ThreadDialogueService {
     this.#options = options;
   }
 
+  #isSideChat(threadId: string): boolean {
+    return this.#options.isSideChat?.(threadId) === true;
+  }
+
   forThread(input: {
     readonly windowId: WindowId;
     readonly sourceThreadId: ChatThreadId;
@@ -43,6 +55,7 @@ export class ThreadDialogueService {
     readonly coordinationDepth?: number;
   }): AppManagedToolSet | undefined {
     if ((input.coordinationDepth ?? 0) > 0 || input.targetThreadIds.length === 0) return undefined;
+    if (this.#isSideChat(String(input.sourceThreadId))) return undefined;
     let sends = 0;
     return {
       definitions: [THREAD_DIALOGUE_TOOL_DEFINITION],
@@ -74,6 +87,21 @@ export class ThreadDialogueService {
         try {
           const request = decodeThreadDialogueMessageInput(JSON.parse(inputJson));
           requestedTargetId = request.targetThreadId;
+          // Checked again at call time, before anything reaches the target:
+          // the tool set may outlive the turn that resolved it, and neither a
+          // sidecar nor a message into one may ever start a turn.
+          if (
+            this.#isSideChat(String(input.sourceThreadId)) ||
+            this.#isSideChat(String(request.targetThreadId))
+          ) {
+            return {
+              result: refusedResult(
+                request.targetThreadId,
+                "A Side Chat can read threads but cannot send them messages.",
+              ),
+              isError: true,
+            };
+          }
           const target = (
             await this.#options.resolveChatTargets(input.windowId, input.targetThreadIds)
           ).find((candidate) => String(candidate.threadId) === String(request.targetThreadId));

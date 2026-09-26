@@ -91,6 +91,7 @@ export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";
 export * from "./threadDraftPresentation";
 export * from "./threadMentionPolicy";
+export * from "./sideChatPolicy";
 export * from "./fileMentionPolicy";
 export * from "./usagePolicy";
 export * from "./spendCeilingPolicy";

@@ -418,9 +418,24 @@ mention completes a path inside the thread's bound root; the host refuses a path
 outside that root before reading it. Chat Projects have no filesystem authority,
 so `@file` is absent there. Unknown `@` text stays ordinary text; `@plugin` /
 `$skill` addressing is unchanged. Side Chat is a Chat-mode sidecar about
-exactly one source thread: ordinary Chat with that thread's bounded context,
-no inherited Work or Code authority, and no path that approves, steers, or
-appends to the source.
+exactly one source thread: ordinary Chat with no inherited Work or Code
+authority and no path that messages, approves, steers, or appends to the
+source. Each turn the host re-resolves the source on the sender's window and
+frames it as the conversation's subject: the newest 40 messages within 32,000
+characters, with truncation stated, plus a current-state section capped at
+8,000 characters. For Code that section names the branch, clean or dirty with
+line totals, up to 50 paths the thread's turns changed, and the delivery
+target; for Work, the Project folder and working folder; for every mode, the
+newest five subagent results. Each state part that cannot be read says so on
+its own; an unreadable transcript refuses the turn. The source block is a
+required context entry, so the planner blocks with its usual remedies rather
+than silently dropping the thread the Side Chat is about. On a provider that
+keeps its own conversation, a byte-identical snapshot whose previous delivery
+completed is replaced by a one-line "unchanged" notice, and the full snapshot
+is resent at least every fifth turn. A Side Chat about a Work or Code thread
+also gets read-only list, search (Code only), and read tools over the
+source's files as app-managed tools; see
+[security and authority](#security-and-authority).
 
 A Chat attempt that fails or is interrupted carries a bounded failure code,
 and the client-safe process diagnostic when the provider supplied one. The
@@ -1086,6 +1101,21 @@ mechanisms are:
   cannot see or signal one another. Ordinary Code threads do not use this
   service yet, so Linux remains an incompatible destination until the AgentRun
   and Station launch paths are wired and revalidated.
+- **Side Chat reads.** A Side Chat may read its source thread's transcript,
+  state, and files; it never inherits the source's Work or Code execution
+  authority. The file tools (`octant_side_chat_list_files`,
+  `octant_side_chat_search_files` for Code, `octant_side_chat_read_file`)
+  are the only tools it gains. Before every call the host checks that the
+  sidecar link still exists and that the caller's window can still Open the
+  source, and the call then runs through the same host read the Files panel
+  uses (Code's checkout listing, search, and file open; Work's folder listing
+  and confined read), which re-authorizes the window against the source's
+  root. Paths are relative and confined; results are bounded and recorded as
+  external content like other app-managed tool results. There is no write,
+  shell, Git, or network tool, and a provider that cannot take app-managed
+  tools gets none and is told the files are unreadable. The `#thread`
+  dialogue tool is refused for a sidecar, in both directions, before anything
+  reaches the target.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
   Each adapter turns its provider's own subagent feature off, because a child

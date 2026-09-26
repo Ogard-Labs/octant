@@ -73,7 +73,11 @@ A chip you can no longer open is marked unavailable and contributes no content. 
 
 ## Side Chat
 
-Side Chat is a separate Chat conversation about one source thread. Open the right sidebar and choose **Side Chat** while that thread is focused. It never replaces the source thread. Switching between visible threads restores each thread's own tools and Side Chat conversation. Side Chat can answer questions using the same bounded excerpt; it cannot approve, steer, change criteria, or write to the source thread. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
+Side Chat is a separate Chat conversation about one source thread. Open the right sidebar and choose **Side Chat** while that thread is focused. It never replaces the source thread. Switching between visible threads restores each thread's own tools and Side Chat conversation.
+
+Every Side Chat turn reads the source thread fresh: its newest 40 messages, and what it has done so far. For a Code thread that includes the branch, uncommitted changes, the files its turns changed, and the delivery target. For a Work thread it includes the Project folder. For every thread it includes the latest subagent results. About a Work or Code thread, Side Chat can also list and read the thread's files (and search them, for Code) when the model supports Octant's tools. Otherwise it says it cannot see the files.
+
+Side Chat can only read. It cannot send the source thread messages, approve, steer, change criteria, or write anything. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
 
 ## Turn actions
 
