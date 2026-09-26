@@ -11,15 +11,20 @@ import {
   FollowUpSuggestionClientFailure,
   type FollowUpSuggestionClient,
 } from "@octant/client-runtime/follow-up-suggestion-client";
+import type { SideTaskClient } from "@octant/client-runtime/side-task-client";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { SideTaskCards } from "./SideTaskCards";
 import "./follow-up-suggestions.css";
 
 export interface FollowUpSuggestionChipsProps {
   readonly client: Pick<FollowUpSuggestionClient, "suggestions" | "preview" | "activate">;
   readonly threadId: string;
   readonly mode: OctantMode;
-  /** Called once a follow-up is confirmed, with the prompt that should wait in its composer. */
+  /**
+   * Called once a follow-up or side task has its thread, with the prompt that
+   * should wait in that thread's composer; empty when it was already sent.
+   */
   readonly onCreated: (input: {
     readonly mode: OctantMode;
     readonly created: NativeHarnessFollowUpCreation;
@@ -28,18 +33,45 @@ export interface FollowUpSuggestionChipsProps {
   readonly refreshIntervalMs?: number;
 }
 
+export interface ComposerOffers extends FollowUpSuggestionChipsProps {
+  readonly sideTaskClient?: Pick<SideTaskClient, "sideTasks" | "start" | "dismiss">;
+}
+
 /**
  * The thread a pane shows, for the composer inside it. Absent where a
  * composer has no thread yet, or where the thread lives on another host.
  */
-export const FollowUpSuggestionContext = createContext<FollowUpSuggestionChipsProps | undefined>(
-  undefined,
-);
+export const FollowUpSuggestionContext = createContext<ComposerOffers | undefined>(undefined);
 
-/** The chips for the thread around this composer, if any. */
+/** The side-task cards and follow-up chips for the thread around this composer, if any. */
 export function ComposerFollowUpSuggestions() {
   const context = useContext(FollowUpSuggestionContext);
-  return context === undefined ? null : <FollowUpSuggestionChips {...context} />;
+  if (context === undefined) return null;
+  const { sideTaskClient, ...chips } = context;
+  return (
+    <>
+      {sideTaskClient === undefined ? null : (
+        <SideTaskCards
+          client={sideTaskClient}
+          onStarted={(started, unsentPrompt) =>
+            context.onCreated({
+              mode: started.mode,
+              created: {
+                kind: "new-thread",
+                mode: started.mode,
+                ...(started.projectId === undefined ? {} : { projectId: started.projectId }),
+                title: started.title,
+                threadId: started.threadId,
+              },
+              prompt: unsentPrompt ?? "",
+            })
+          }
+          threadId={context.threadId}
+        />
+      )}
+      <FollowUpSuggestionChips {...chips} />
+    </>
+  );
 }
 
 function describeCreation(creation: NativeHarnessFollowUpCreation): string {

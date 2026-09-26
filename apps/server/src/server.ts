@@ -616,6 +616,9 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "./followUps/followUpSuggestionRoutes";
 import { ThreadFollowUpSuggestionStore } from "./followUps/threadFollowUpSuggestionStore";
+import { createSideTaskRouteHandler } from "./sideTasks/sideTaskRoutes";
+import { SideTaskStore } from "./sideTasks/sideTaskStore";
+import { createSideTaskTools } from "./sideTasks/sideTaskTools";
 import { NativeHarnessApprovalStore } from "./harness/nativeHarnessApprovals";
 import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
@@ -664,6 +667,10 @@ import {
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
   decodeImageGenerationScopeId,
   decodeNativeHarnessTurnId,
+  decodeCodeOperationId,
+  decodeProviderSessionId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
   decodeMultiModelRoutingVendorId,
   type ChatThreadView,
   type CodeProjectPullRequestRow,
@@ -1766,6 +1773,12 @@ export function startOctantServer(
     // on every provider: any model can end a reply with the block, and the
     // chips it becomes are the thread's, not the harness session's.
     const threadFollowUpSuggestions = new ThreadFollowUpSuggestionStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+    });
+    const sideTasks = new SideTaskStore({
       journal: persistence.journal,
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -4234,6 +4247,16 @@ export function startOctantServer(
             service: agentMessageService,
             senderThreadId: String(thread.id),
           }),
+        sideTasks: ({ thread }) =>
+          createSideTaskTools({
+            store: sideTasks,
+            threadId: String(thread.id),
+            mode: "code",
+            projectId: thread.projectId,
+            suggestedBy: thread,
+            uuid: randomUUID,
+            clock: () => new Date().toISOString(),
+          }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
@@ -4985,16 +5008,28 @@ export function startOctantServer(
     const followUpCreation: { current: FollowUpCreationDependencies | undefined } = {
       current: undefined,
     };
+    const createFollowUpOnHost = (input: Parameters<typeof createFollowUp>[1]) =>
+      followUpCreation.current === undefined
+        ? Promise.resolve({
+            kind: "refused" as const,
+            message: "Follow-up creation is unavailable on this host.",
+          })
+        : createFollowUp(followUpCreation.current, input);
     const followUpActions: FollowUpSuggestionActionDependencies = {
       store: threadFollowUpSuggestions,
-      createFollowUp: (input) =>
-        followUpCreation.current === undefined
-          ? Promise.resolve({
-              kind: "refused" as const,
-              message: "Follow-up creation is unavailable on this host.",
-            })
-          : createFollowUp(followUpCreation.current, input),
+      createFollowUp: createFollowUpOnHost,
     };
+    // Bound once the Chat, Work, and Code turn services exist, like the creator.
+    const sideTaskFirstMessage: {
+      current:
+        | ((input: {
+            readonly windowId: string;
+            readonly mode: OctantMode;
+            readonly threadId: string;
+            readonly prompt: string;
+          }) => Promise<boolean>)
+        | undefined;
+    } = { current: undefined };
     const authorizeFollowUpThread = ({
       threadId,
       windowId,
@@ -5012,6 +5047,14 @@ export function startOctantServer(
       ...followUpActions,
       windowAuthorityStore,
       authorizeThread: authorizeFollowUpThread,
+    });
+    const sideTaskRoutes = createSideTaskRouteHandler({
+      store: sideTasks,
+      windowAuthorityStore,
+      authorizeThread: authorizeFollowUpThread,
+      create: createFollowUpOnHost,
+      sendFirstMessage: (input) => sideTaskFirstMessage.current?.(input) ?? Promise.resolve(false),
+      clock: () => new Date().toISOString(),
     });
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
@@ -5296,6 +5339,15 @@ export function startOctantServer(
                 enqueue: (input) => imageJobService.enqueue(input),
                 listJobs: (scopeId) => imageJobService.listByScope(scopeId),
               },
+            }),
+            createSideTaskTools({
+              store: sideTasks,
+              threadId: String(thread.id),
+              mode: "chat",
+              projectId: thread.projectId,
+              suggestedBy: thread,
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
             }),
           ),
           threadId: thread.id,
@@ -5681,7 +5733,19 @@ export function startOctantServer(
               approvals: requireBrowserToolApprovalService(),
               uuid: randomUUID,
             });
-        if (native === undefined && browser === undefined) return undefined;
+        const sideTaskTools = !browserSupported
+          ? undefined
+          : createSideTaskTools({
+              store: sideTasks,
+              threadId: String(input.thread.id),
+              mode: "work",
+              projectId: input.thread.projectId,
+              suggestedBy: input.thread,
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+            });
+        if (native === undefined && browser === undefined && sideTaskTools === undefined)
+          return undefined;
         const computer =
           input.computerUseSelection === undefined
             ? undefined
@@ -5696,7 +5760,7 @@ export function startOctantServer(
                 }),
                 input.computerUseSelection,
               );
-        return combineAppManagedToolSets(native, browser, computer);
+        return combineAppManagedToolSets(native, browser, computer, sideTaskTools);
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -6070,6 +6134,74 @@ export function startOctantServer(
       threads: workThreadService,
       workflows: workflowService,
     });
+    sideTaskFirstMessage.current = async ({ windowId, mode, threadId, prompt }) => {
+      const window = decodeWindowId(windowId);
+      if (mode === "chat") {
+        const thread = persistence.readChatThread(threadId as never);
+        if (thread === undefined) return false;
+        // A Chat send settles when the reply ends; the side task is started
+        // the moment the message is in, so the new thread opens right away.
+        return await new Promise<boolean>((resolve) => {
+          chatService
+            .execute(
+              {
+                kind: "send-chat-turn",
+                threadId: thread.id,
+                expectedVersion: thread.version,
+                prompt,
+              },
+              { windowId: window, onTurnAccepted: () => resolve(true) },
+            )
+            .then(
+              () => resolve(true),
+              () => resolve(false),
+            );
+        });
+      }
+      if (mode === "work") {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined || thread.bindingRevisionId === undefined) return false;
+        const result = await workTurnService.startFirstTurn(window, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(randomUUID()),
+          threadId: thread.id,
+          turnId: decodeWorkTurnId(randomUUID()),
+          prompt,
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted";
+      }
+      const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+      if (
+        thread === undefined ||
+        routeCodeService.stageEvidence === undefined ||
+        routeCodeService.executeOperation === undefined
+      )
+        return false;
+      // The prompt is staged as evidence first, as the composer does, so the
+      // turn records the bytes it was started with.
+      const evidence = await routeCodeService.stageEvidence(window, thread.id, prompt);
+      const result = await routeCodeService.executeOperation(window, {
+        kind: "start-provider-turn",
+        operationId: decodeCodeOperationId(randomUUID()),
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        sessionId: decodeProviderSessionId(randomUUID()),
+        prompt: evidence,
+      });
+      return (
+        result.kind === "provider-turn-state" &&
+        (result.state === "running" || result.state === "waiting")
+      );
+    };
     followUpCreation.current = {
       chat: chatService,
       work: workThreadServiceWithWorkflows,
@@ -7916,6 +8048,7 @@ export function startOctantServer(
       (await nativeHarnessRoutingRoutes(request)) ??
       (await nativeHarnessSessionRoutes(request)) ??
       (await followUpSuggestionRoutes(request)) ??
+      (await sideTaskRoutes(request)) ??
       (await githubRoutes(request)) ??
       (await integrationRoutes(request)) ??
       (await githubCloneRoutes(request)) ??

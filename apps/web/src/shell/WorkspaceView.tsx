@@ -3,7 +3,7 @@ import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import {
   FollowUpSuggestionContext,
-  type FollowUpSuggestionChipsProps,
+  type ComposerOffers,
 } from "../followUps/FollowUpSuggestionChips";
 import type {
   LayoutNodeId,
@@ -307,7 +307,7 @@ export interface WorkspaceViewProps {
   }) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   /** Offers each local thread pane's follow-up suggestions over its composer. */
-  readonly followUpSuggestions?: Pick<FollowUpSuggestionChipsProps, "client" | "onCreated">;
+  readonly followUpSuggestions?: Pick<ComposerOffers, "client" | "sideTaskClient" | "onCreated">;
   /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
   readonly onSplitPane: (
     paneId: PaneId,
@@ -728,7 +728,7 @@ function SurfaceLinkActionsProvider(props: {
 function followUpSuggestionsFor(
   surface: WorkspaceTab,
   host: WorkspaceViewProps["followUpSuggestions"],
-): FollowUpSuggestionChipsProps | undefined {
+): ComposerOffers | undefined {
   if (host === undefined || !offersThreadComposer(surface)) return undefined;
   if ("hostId" in surface && surface.hostId !== undefined) return undefined;
   if (!("threadId" in surface)) return undefined;
