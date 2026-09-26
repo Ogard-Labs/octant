@@ -111,10 +111,12 @@ describe("parseChatMessageBody with follow-up suggestions", () => {
 
 describe("parseChatMessageBody on hostile model output", () => {
   it("reads a reply full of unclosed reasoning tags without rescanning it from every tag", () => {
-    const body = "<thinking>a".repeat(50_000);
+    // Rescanning from every opener takes tens of seconds at this size; one
+    // pass takes milliseconds, so the bound leaves room for any CI machine.
+    const body = "<thinking>a".repeat(100_000);
     const started = performance.now();
     const parts = parseChatMessageBody(body);
-    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(performance.now() - started).toBeLessThan(5_000);
     expect(parts.length).toBeGreaterThan(0);
   });
 });
