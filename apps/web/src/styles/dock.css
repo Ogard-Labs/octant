@@ -279,6 +279,24 @@
   min-width: 176px;
 }
 
+/* The right dock clips at its own edge, and with two tabs open the plus sits
+   far enough right that a menu hung from it ran past that edge and lost its
+   labels. There the menu hangs from the bar instead, flush with the dock's
+   right edge, so it always opens inside the dock. */
+.right-utility-dock__toolbar {
+  position: relative;
+}
+
+.right-utility-dock__toolbar .dock-utility-launcher {
+  position: static;
+}
+
+.right-utility-dock__toolbar .dock-utility-launcher__disclosure {
+  top: calc(100% + var(--oct-space-1));
+  right: var(--oct-space-2);
+  left: auto;
+}
+
 /* Scroll and padding come from .dock-body. */
 .right-utility-dock__content {
   min-width: 0;
