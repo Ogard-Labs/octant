@@ -70,7 +70,7 @@ describe("the dock tool strip", () => {
         );
         expect(screen.getAllByRole("tab")).toHaveLength(1);
         expect(screen.getByRole("tab", { name: "Tests" })).toBeVisible();
-        expect(screen.getByRole("button", { name: "More tools" })).toBeVisible();
+        expect(screen.getByRole("button", { name: "1 more open tab" })).toBeVisible();
       } finally {
         width.mockRestore();
         scrollWidth.mockRestore();
@@ -112,7 +112,7 @@ describe("the dock tool strip", () => {
       );
       expect(screen.getAllByRole("tab")).toHaveLength(1);
       expect(screen.getByRole("tab", { name: "Terminal" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "More tools" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "4 more open tabs" })).toBeVisible();
     } finally {
       width.mockRestore();
       siblingWidth.mockRestore();
@@ -161,7 +161,7 @@ describe("the dock tool strip", () => {
     expect(onSelect).toHaveBeenLastCalledWith("browser");
   });
 
-  it("moves overflowed tools into a More tools menu instead of dropping them", async () => {
+  it("counts the tabs that do not fit and lists them in a menu instead of dropping them", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
@@ -176,7 +176,7 @@ describe("the dock tool strip", () => {
 
     expect(screen.getByRole("tab", { name: "Browser" })).toBeVisible();
     expect(screen.queryByRole("tab", { name: "Canvas" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "More tools" }));
+    await user.click(screen.getByRole("button", { name: "1 more open tab" }));
     await user.click(screen.getByRole("button", { name: "Canvas" }));
     expect(onSelect).toHaveBeenCalledWith("canvas");
   });

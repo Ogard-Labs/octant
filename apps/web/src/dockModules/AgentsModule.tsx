@@ -6,7 +6,12 @@ import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  "agentRunClient" | "agentRunSettingsClient" | "nativeHarnessClient" | "subject"
+  | "agentRunClient"
+  | "agentRunSettingsClient"
+  | "nativeHarnessClient"
+  | "onAgentRunRequestHandled"
+  | "requestedAgentRunId"
+  | "subject"
 >;
 
 export default function AgentsModule(props: Props) {
@@ -25,6 +30,12 @@ export default function AgentsModule(props: Props) {
         allowCreation
         client={props.agentRunClient}
         parentThreadId={decodeAgentRunParentThreadId(props.subject.threadId)}
+        {...(props.requestedAgentRunId === undefined
+          ? {}
+          : { requestedRunId: props.requestedAgentRunId })}
+        {...(props.onAgentRunRequestHandled === undefined
+          ? {}
+          : { onRequestedRunHandled: props.onAgentRunRequestHandled })}
         {...(props.agentRunSettingsClient === undefined
           ? {}
           : { settingsClient: props.agentRunSettingsClient })}

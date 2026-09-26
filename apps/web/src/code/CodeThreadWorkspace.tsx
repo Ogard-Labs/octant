@@ -26,7 +26,6 @@ import {
   decidesCodeEffectsByApproval,
   type PickerGroup,
 } from "@octant/domain";
-import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { CircleAlert, CirclePause, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -56,7 +55,6 @@ import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
-import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
@@ -145,8 +143,6 @@ interface CodeSteeredMessage {
 }
 
 export interface CodeThreadWorkspaceProps {
-  readonly agentRunClient?: AgentRunClient;
-  readonly onAddAgent?: () => void;
   readonly controller: CodeController;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
@@ -499,24 +495,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     pathMentions.sync(value, caret);
   }
 
-  const childRunStatus =
-    props.agentRunClient === undefined ? undefined : (
-      <ThreadChildRunStatusSlot
-        client={props.agentRunClient}
-        enabled={displayReady}
-        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
-        threadId={String(props.threadId)}
-      />
-    );
-
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
-        {childRunStatus === undefined ? null : (
-          <header className="code-thread-workspace__header">
-            <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
-          </header>
-        )}
         <ShellState
           action={{ label: "Retry Code", onClick: props.controller.retry }}
           eyebrow="Code workspace"
@@ -533,11 +514,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const unavailable = props.controller.errorCategory;
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
-        {childRunStatus === undefined ? null : (
-          <header className="code-thread-workspace__header">
-            <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
-          </header>
-        )}
         <ShellState
           {...(unavailable === undefined
             ? {}
@@ -997,13 +973,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {/* No identity header. The title repeated the pane's own grip, the
           lifecycle badge said "Active" on nearly every thread, the branch is
           the Environment summary's fact, and follow-up is the thread row's
-          right-click menu — leaving a band that cost height and said nothing.
-          Live child runs are the one thing here that has no other home. */}
-      {childRunStatus === undefined ? null : (
-        <header className="code-thread-workspace__header">
-          <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
-        </header>
-      )}
+          right-click menu. Live subagents, the last thing it held, now sit in
+          the composer's tray. */}
 
       {props.controller.errorMessage === undefined ? null : (
         <div className="callout thread-column code-thread-workspace__callout" role="alert">

@@ -185,6 +185,20 @@ stays quiet and separate, without a second provider pill or repeated project lab
 
 ### Welcome and composer
 
+A thread's subagents sit in their own card tucked behind the composer's top
+edge — narrower than the composer by one inset on each side, its lower edge
+hidden under the composer, rising from behind it on arrival — so they read as
+work beside the message rather than part of it: a quiet "Subagents" label, then one row per subagent that is
+working or finished and not yet reviewed — status icon, the task on one line,
+and its state in words ("Working · 12s", "Done — review", "Failed"). Three
+rows show; the rest fold into "+N more". A row opens that subagent in the
+Agents tool; its one trailing action (Stop, or Mark reviewed) appears on hover
+or focus. Stopping one named subagent acts at once; Stop all asks first and
+names how many it reaches. Reviewed and settled subagents leave the tray, so a
+thread with none shows nothing there. There is no strip above the transcript.
+A cross-context notice takes the same place behind the composer and wins while
+it shows.
+
 A reply's suggested follow-ups sit as outline chips at the top of the
 thread composer, inside its surface, with a quiet "Next" label and a dismiss
 control. Choosing one swaps the row for an inline preview of what it would
@@ -851,17 +865,26 @@ launchable tool keeps the dock closed and omits its toggle. Restored presentatio
 for another subject never makes unavailable chrome visible.
 
 Environment is a right-dock tool, opened from the dock's tab strip or Add tool
-and nowhere else; the title band carries no second Environment button. Its
-header names the thread's identity and facts (branch, clean or dirty, working
-folder, running servers), and its body is a definition list of git facts,
-row-styled actions, and collapsible groups on the dock's own ground. It summarizes Project, branch, clean/dirty state, working folder,
-changes, local servers, pull-request
-identity, sources, and compact active/completed subagent rows with lifecycle,
-model, and retained final response when authoritative. It stays flat on the dock's own background, with no surrounding card. Checkout
-facts and the existing Commit or push and Create pull request flows come first.
-Other servers stay behind a disclosure; none are stopped or removed by hiding
-them. Empty subagents keep a collapsed count and their Open Agents action.
-Sources list the current thread's journaled image attachments when present.
+and nowhere else; the title band carries no second Environment button. It reads
+top to bottom in three parts. The header names what the thread works in: the
+name on its own line, then the branch and the home-relative folder in mono,
+with the full summary (working folder, running servers) kept as one sentence
+for assistive technology. One bordered card follows — the only bordered object
+in the tool — saying what the checkout holds (Uncommitted changes with its
+added and removed counts, opening Review; No uncommitted changes when clean),
+a detached HEAD or separate worktree when true, and Commit or push and Create
+pull request as two equal buttons. Everything else is one list with one row
+grammar: a 16px glyph, the name, the row's state right-aligned, and a trailing
+chevron where the row opens (an up-right arrow where it opens another tool).
+Rows are 36px, lift their ink on hover rather than taking a fill, and an open
+row's content starts under its name. Order: Local servers (open by default
+only when this checkout is serving something), Subagents (one row with its
+working / to review / done counts that opens the Agents tool — reading and
+steering a subagent belongs there), Computer use, Pull requests, Sources,
+Delivers, Working folder, and Usage (closed by default; totals, the one-line
+token ceiling form, and Open Usage dashboard inside). Other servers stay behind
+a nested disclosure; none are stopped or removed by hiding them. It stays on
+the dock's own background. Sources list the current thread's journaled image attachments when present.
 Computer use offers Picture in Picture show/hide for the same live activity
 preview that floats over the main conversation. The preview never occupies
 Environment, and hiding it never stops its session. Browser stop and computer-use

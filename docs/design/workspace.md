@@ -115,13 +115,28 @@ clicking the screen or a key button cannot grant it. The host owns observation,
 input, and evidence safety under the [device transport contract](../architecture.md#device-transport-and-evidence).
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
 Environment belongs to a
-thread as a context-aware dock tab opened from the dock tab strip or Add tool. It may
-summarize the active thread's server-authored child AgentRuns, including their
-lifecycle, resolved model, and retained final result; full AgentRun control
-stays in the Agents dock. The workspace-rail Agents Center is that same
+thread as a context-aware dock tab opened from the dock tab strip or Add tool. It
+counts the active thread's server-authored child AgentRuns in one row (working,
+to review, done) that opens the Agents dock; reading, steering, and every other
+AgentRun control stay in the Agents dock. The thread's live subagents (working, or finished
+and awaiting review) also show as a card tucked behind its composer, whose rows open the
+Agents dock on that subagent; see [DESIGN.md](../../DESIGN.md#welcome-and-composer).
+The Agents dock is a list and a page. The list has one title with a New
+control that reveals the New subagent form (open by default only when the
+thread has none), then Working and Finished sections of one-button rows —
+status icon, task, and state, role, model, and age in words — with finished
+rows newest first and an unreviewed result marked "Needs review". A row opens
+that subagent's page in place of the list, with a back control: its task as
+the title, a status line, and a small transcript that starts with the task as
+the brief, then the replies as rendered Markdown and status events as quiet
+lines, live while it runs. When the live read is unavailable or gone after
+completion, the retained final reply stands in; when neither exists the page
+says so. Mark reviewed, Steer, Retry, Resume, and Cancel sit in one bar pinned
+under the transcript. What the host resolved for a new subagent folds under a
+single line naming its model and workspace, in plain access words rather than
+ids or policy keys. The workspace-rail Agents Center is that same
 hierarchy across modes; on a wide window it can draw the current query as a
-forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. Environment may show a compact read-only preview of
-the host's bounded, process-local child conversation read: entries are
+forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized

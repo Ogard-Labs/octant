@@ -2403,20 +2403,6 @@ form > .work-composer-adapter__attachments {
   text-decoration: underline;
 }
 
-.work-thread-workspace__header {
-  display: flex;
-  min-height: 52px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 20px;
-  padding: 8px clamp(16px, 3vw, 28px);
-  border-bottom: 1px solid var(--octant-border);
-}
-
-.work-thread-workspace__header:empty {
-  display: none;
-}
-
 .work-thread-workspace__conversation {
   min-height: 0;
   flex: 1 1 auto;

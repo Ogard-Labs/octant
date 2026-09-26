@@ -24,7 +24,7 @@ import { decodeProviderModelId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { CirclePause } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
 import { ComposerPoolControl } from "../providers/ComposerPoolControl";
@@ -102,11 +102,6 @@ export interface ChatWorkspaceProps {
   readonly onOpenSideChat?: (sidecar: SideChatSidecar) => void;
   /** Called with the thread a branch command created, so the shell can open it. */
   readonly onThreadBranched?: (thread: ChatThread) => void;
-  /**
-   * Compact live child-run chrome for this thread. Rendered in the thread
-   * header so it stays visible with the rest of the thread chrome.
-   */
-  readonly childRunStatus?: ReactNode;
   /** Scroll the transcript to this turn when the thread view is ready. */
   readonly revealTurnId?: ChatTurnId;
 }
@@ -462,9 +457,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
-        {props.childRunStatus === undefined ? null : (
-          <header className="chat-workspace__header thread-column">{props.childRunStatus}</header>
-        )}
         <div className="chat-workspace__load-state">
           <ShellState
             action={{ label: "Retry chat", onClick: props.controller.retry }}
@@ -927,7 +919,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       <div className="chat-workspace__conversation">
         <header className="chat-workspace__header">
           <h1 className="sr-only">{view.thread.title}</h1>
-          {props.childRunStatus}
           <ChatThreadActionsMenu
             connectionStatus={
               props.controller.status === "disconnected" ? "disconnected" : "connected"

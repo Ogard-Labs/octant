@@ -95,12 +95,58 @@ describe("thread utility dock content", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent(/Loading Agents/i);
     expect(
-      await screen.findByRole("heading", { name: "Active / History" }, { timeout: 10_000 }),
+      await screen.findByRole("heading", { name: "Subagents" }, { timeout: 10_000 }),
     ).toBeVisible();
     expect(
       await screen.findByRole("form", { name: "Create subagent" }, { timeout: 10_000 }),
     ).toBeVisible();
     expect(screen.queryByLabelText("Provider instance ID")).not.toBeInTheDocument();
+  });
+
+  it("opens Agents on the subagent a composer tray row asked for", async () => {
+    // The dock hands each tool only its allowlisted inputs; a request the
+    // allowlist did not name reached the Agents tool as nothing, and the tool
+    // opened on its list.
+    const runId = "30000000-0000-4000-8000-000000000003";
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        agentRunClient={
+          {
+            parentSummary: vi.fn(async () => ({
+              parentThreadId: threadId,
+              entries: [
+                {
+                  runId,
+                  requestId: "40000000-0000-4000-8000-000000000004",
+                  parentThreadId: threadId,
+                  role: "review",
+                  task: "Say hello",
+                  lifecycleStatus: "completed",
+                  executionKind: "octant-managed",
+                  usageQuality: "unavailable",
+                  resultAcknowledgement: { required: true, acknowledged: false },
+                  result: { reference: "result", text: "Hello!", truncated: false },
+                  version: 4,
+                  updatedAt: "2026-09-26T19:00:35.599Z",
+                },
+              ],
+            })),
+            conversation: vi.fn(async () => {
+              throw new Error("no live transcript in this fixture");
+            }),
+            preview: vi.fn(async () => ({ status: "refused", reason: "unavailable" })),
+          } as never
+        }
+        onAgentRunRequestHandled={vi.fn()}
+        requestedAgentRunId={runId}
+        surface="agents"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Subagent" }, { timeout: 10_000 }),
+    ).toBeVisible();
   });
 
   it("opens Agents on a zero-child thread and shows the Off refusal without a create form", async () => {
@@ -161,9 +207,9 @@ describe("thread utility dock content", () => {
         surface="agents"
       />,
     );
-    expect(await screen.findAllByText(/posture is Off/i, {}, { timeout: 10_000 })).not.toHaveLength(
-      0,
-    );
+    expect(
+      await screen.findAllByText(/turned off in Settings/i, {}, { timeout: 10_000 }),
+    ).not.toHaveLength(0);
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
   });

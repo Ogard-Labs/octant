@@ -1,3 +1,5 @@
+import { Gauge } from "lucide-react";
+import { EnvironmentGroup } from "../environment/EnvironmentGroup";
 import {
   decodeAggregateVersion,
   type SpendCeilingSnapshot,
@@ -48,66 +50,95 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
   const summary = controller.dashboard?.summary;
 
   return (
-    <section aria-label="Thread usage" className="thread-usage">
-      <h3 className="thread-usage__title">Usage</h3>
+    // A section of the Environment rail like any other: it folds, its title
+    // lines up with theirs, and the way to the full dashboard sits on its
+    // head. It had its own heading and a centred link between the numbers and
+    // the ceiling, belonging to neither.
+    <EnvironmentGroup
+      icon={Gauge}
+      title="Usage"
+      {...(summary === undefined || summary.totals.totalRequests === 0
+        ? {}
+        : {
+            summary: `${compactTokens(summary.totals.totalInputTokens + summary.totals.totalOutputTokens)} tokens`,
+          })}
+    >
+      <section aria-label="Thread usage" className="thread-usage">
+        {controller.status === "loading" ? (
+          <p className="thread-usage__status" role="status">
+            Loading thread usage…
+          </p>
+        ) : null}
 
-      {controller.status === "loading" ? (
-        <p className="thread-usage__status" role="status">
-          Loading thread usage…
-        </p>
-      ) : null}
+        {controller.status === "unauthorized" ||
+        controller.status === "unavailable" ||
+        controller.status === "failure" ? (
+          <p className="thread-usage__status" role="alert">
+            {controller.errorMessage ?? "Thread usage could not be loaded."}
+          </p>
+        ) : null}
 
-      {controller.status === "unauthorized" ||
-      controller.status === "unavailable" ||
-      controller.status === "failure" ? (
-        <p className="thread-usage__status" role="alert">
-          {controller.errorMessage ?? "Thread usage could not be loaded."}
-        </p>
-      ) : null}
+        {summary === undefined ? null : summary.totals.totalRequests === 0 ? (
+          <p className="thread-usage__status" role="note">
+            No usage has been recorded for this thread yet.
+          </p>
+        ) : (
+          // Label and figure on one line each, the same list the checkout facts
+          // use. As four boxed tiles the numbers read as a dashboard inside the
+          // rail, and a count of zero unreported requests took a tile to say so.
+          <dl className="thread-usage__totals">
+            <div>
+              <dt>Requests</dt>
+              <dd>{summary.totals.totalRequests.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Input tokens</dt>
+              <dd>{summary.totals.totalInputTokens.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Output tokens</dt>
+              <dd>{summary.totals.totalOutputTokens.toLocaleString()}</dd>
+            </div>
+            {summary.requestsWithUnavailableUsage === 0 ? null : (
+              <div>
+                <dt>Requests without reported usage</dt>
+                <dd>{summary.requestsWithUnavailableUsage.toLocaleString()}</dd>
+              </div>
+            )}
+          </dl>
+        )}
+        {props.spendCeilingClient === undefined ? null : (
+          <SpendCeilingControls
+            client={props.spendCeilingClient}
+            subjectId={props.subjectId}
+            subjectType={props.subjectType}
+            {...(props.projectId === undefined ? {} : { projectId: props.projectId })}
+          />
+        )}
+        {/* The way to the full dashboard closes the section it expands: on the
+            row's head it sat after the chevron, where it read as part of the
+            toggle. */}
+        {props.onOpenUsageDashboard === undefined ? null : (
+          <OctantButton
+            aria-label="Open in Usage dashboard"
+            className="thread-usage__dashboard"
+            onClick={() => props.onOpenUsageDashboard?.(filter)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Open Usage dashboard
+          </OctantButton>
+        )}
+      </section>
+    </EnvironmentGroup>
+  );
+}
 
-      {summary === undefined ? null : summary.totals.totalRequests === 0 ? (
-        <p className="thread-usage__status" role="note">
-          No usage has been recorded for this thread yet.
-        </p>
-      ) : (
-        <dl className="thread-usage__totals">
-          <div>
-            <dt>Requests</dt>
-            <dd>{summary.totals.totalRequests.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Input tokens</dt>
-            <dd>{summary.totals.totalInputTokens.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Output tokens</dt>
-            <dd>{summary.totals.totalOutputTokens.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Requests without reported usage</dt>
-            <dd>{summary.requestsWithUnavailableUsage.toLocaleString()}</dd>
-          </div>
-        </dl>
-      )}
-
-      {props.onOpenUsageDashboard === undefined ? null : (
-        <OctantButton
-          onClick={() => props.onOpenUsageDashboard?.(filter)}
-          type="button"
-          variant="ghost"
-        >
-          Open in Usage dashboard
-        </OctantButton>
-      )}
-      {props.spendCeilingClient === undefined ? null : (
-        <SpendCeilingControls
-          client={props.spendCeilingClient}
-          subjectId={props.subjectId}
-          subjectType={props.subjectType}
-          {...(props.projectId === undefined ? {} : { projectId: props.projectId })}
-        />
-      )}
-    </section>
+/** "29.9k" for a head that has room for one short figure. */
+function compactTokens(count: number): string {
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
+    count,
   );
 }
 
@@ -211,24 +242,29 @@ function SpendCeilingControls(props: {
 
   return (
     <div className="thread-usage__ceiling">
-      <h4 className="thread-usage__title">Token spend ceiling</h4>
-      {remaining === undefined ? (
-        <p className="thread-usage__status" role="note">
-          No token ceiling is set on this thread. Setting one is a host owner command.
-        </p>
-      ) : (
-        <p className="thread-usage__status" role="status">
-          {remaining.remainingTokens.toLocaleString()} of {remaining.ceilingTokens.toLocaleString()}{" "}
-          tokens remaining
-        </p>
-      )}
+      <div className="thread-usage__ceiling-head">
+        <h4 className="thread-usage__subtitle">Token ceiling</h4>
+        {remaining === undefined ? (
+          <p className="thread-usage__ceiling-value" role="note">
+            None
+          </p>
+        ) : (
+          <p className="thread-usage__ceiling-value" role="status">
+            {remaining.remainingTokens.toLocaleString()} of{" "}
+            {remaining.ceilingTokens.toLocaleString()} tokens remaining
+          </p>
+        )}
+      </div>
       {refusal === undefined ? null : (
         <p className="thread-usage__status" role="alert">
           {refusal.message}
         </p>
       )}
       {scope === undefined ? null : (
+        // One line: the number and what to do with it. The field had sat alone
+        // and unlabelled across the rail with its button wrapped under it.
         <form
+          className="thread-usage__ceiling-form"
           noValidate
           onSubmit={(event) => {
             event.preventDefault();
@@ -239,14 +275,26 @@ function SpendCeilingControls(props: {
             aria-label="Token spend ceiling"
             inputMode="numeric"
             onChange={(event) => setBudget(event.target.value)}
+            placeholder={threadCeilingSet ? "New ceiling in tokens" : "Tokens, e.g. 200000"}
             value={budget}
           />
-          <OctantButton type="submit" variant="outline">
-            {threadCeilingSet ? "Raise token ceiling" : "Set token ceiling"}
+          <OctantButton
+            aria-label={threadCeilingSet ? "Raise token ceiling" : "Set token ceiling"}
+            size="sm"
+            type="submit"
+            variant="outline"
+          >
+            {threadCeilingSet ? "Raise" : "Set"}
           </OctantButton>
           {threadCeilingSet ? (
-            <OctantButton onClick={() => void submit("clear")} type="button" variant="ghost">
-              Clear ceiling
+            <OctantButton
+              aria-label="Clear ceiling"
+              onClick={() => void submit("clear")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Clear
             </OctantButton>
           ) : null}
         </form>

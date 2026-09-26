@@ -356,16 +356,10 @@
 
 .thread-usage {
   display: grid;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1);
   min-width: 0;
+  padding-bottom: var(--oct-space-2);
   color: var(--oct-fg);
-}
-
-.thread-usage__title {
-  margin: 0;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
 }
 
 .thread-usage__status {
@@ -374,32 +368,67 @@
   font-size: var(--oct-text-xs);
 }
 
+/* Label left, figure right, one line each: the checkout facts' list. */
 .thread-usage__totals {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px;
   margin: 0;
-  font-size: var(--oct-text-xs);
 }
 
 .thread-usage__totals div {
-  display: grid;
-  gap: 2px;
-  padding: 6px var(--oct-space-2);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
 }
 
-.thread-usage__totals dt {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+.thread-usage__totals dt,
+.thread-usage__subtitle {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
 }
 
 .thread-usage__totals dd {
   margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
   font-variant-numeric: tabular-nums;
-  font-weight: var(--oct-weight-display);
+}
+
+.thread-usage__ceiling {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.thread-usage__ceiling-head {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.thread-usage__ceiling-value {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.thread-usage__ceiling-form {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.thread-usage__ceiling-form > input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* A floor rather than a complete total is a caveat on every number below it,

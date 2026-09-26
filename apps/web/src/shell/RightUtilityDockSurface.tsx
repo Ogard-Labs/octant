@@ -159,10 +159,12 @@ function DockWorkMap(props: {
   const groups = groupTools(props.surfaces);
   return (
     <section aria-labelledby="dock-work-map-title" className="dock-work-map">
-      <header className="dock-work-map__header">
-        <h2 id="dock-work-map-title">Tools</h2>
-        <p>Available for the active thread.</p>
-      </header>
+      {/* The panel is plainly the list of tools, and the groups plainly go
+          together; a visible "Tools" over "This thread" said both again. The
+          names stay for readers who navigate by heading and group. */}
+      <h2 className="visually-hidden" id="dock-work-map-title">
+        Tools
+      </h2>
       {props.surfaces.length === 0 ? (
         <p className="dock-work-map__empty">This thread has no additional tools available.</p>
       ) : (
@@ -174,25 +176,21 @@ function DockWorkMap(props: {
               key={group.label}
               role={groups.length > 1 ? "group" : undefined}
             >
-              {groups.length > 1 ? (
-                <h3 aria-hidden="true" className="dock-work-map__group-label">
-                  {group.label}
-                </h3>
-              ) : null}
               {group.surfaces.map((surface) => (
+                // One line per tool, what it opens on hover. With a sentence
+                // under every name the list ran two lines a row and the one a
+                // person wanted took reading the whole column.
                 <OctantButton
                   aria-label={surface.label}
                   className="dock-work-map__item"
                   key={surface.id}
                   onClick={() => props.onOpen(surface.id)}
+                  title={workMapDetail(surface.id)}
                   type="button"
                   variant="ghost"
                 >
                   <DockToolIcon surface={surface.id} />
-                  <span className="dock-work-map__copy">
-                    <strong>{surface.label}</strong>
-                    <small>{workMapDetail(surface.id)}</small>
-                  </span>
+                  <span className="dock-work-map__name">{surface.label}</span>
                 </OctantButton>
               ))}
             </div>
@@ -233,7 +231,7 @@ function groupTools(surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>) 
 }
 
 function workMapDetail(surface: RightUtilityDockSurfaceId): string {
-  if (surface === "agents") return "Inspect and control child runs";
+  if (surface === "agents") return "Read and control this thread's subagents";
   if (surface === "environment") return "Inspect this thread's working context";
   if (surface === "browser") return "Inspect live web activity";
   if (surface === "canvas") return "Open the thread Canvas";

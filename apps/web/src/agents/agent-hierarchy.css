@@ -1,191 +1,182 @@
+/* The Agents tool is a list and a form in the dock's own rhythm: section
+   heads over a hairline, rows with a title line and a quiet fact line, and no
+   nested cards. It had two tinted boxes in system colours with rem spacing
+   that matched nothing around it. */
 .agent-hierarchy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  display: grid;
+  gap: var(--oct-space-3);
   min-width: 0;
-  padding: 0.75rem;
-  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-  border-radius: var(--oct-radius-md);
-  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
 }
 
 .agent-hierarchy--reconnecting {
-  outline: 1px dashed color-mix(in srgb, CanvasText 35%, transparent);
-}
-
-.agent-hierarchy__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-}
-
-.agent-hierarchy__eyebrow {
-  margin: 0;
-  font-size: var(--oct-text-detail);
-  letter-spacing: 0;
-  text-transform: none;
-  opacity: 0.7;
-}
-
-.agent-hierarchy__header h2 {
-  margin: 0.15rem 0;
-  font-size: var(--oct-text-lg);
-}
-
-.agent-hierarchy__header p,
-.agent-hierarchy__row-meta,
-.agent-hierarchy__empty,
-.agent-hierarchy__banner {
-  margin: 0;
-  font-size: var(--oct-text-base);
-  opacity: 0.9;
-}
-
-.agent-hierarchy__counts {
-  display: flex;
-  gap: 0.75rem;
-  font-size: var(--oct-text-sm);
-  white-space: nowrap;
-}
-
-.agent-hierarchy__controls {
-  display: grid;
-  grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr);
-  gap: 0.75rem;
-}
-
-.agent-hierarchy__controls label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: var(--oct-text-detail);
-}
-
-.agent-hierarchy__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.agent-hierarchy__row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
-}
-
-.agent-hierarchy__row-main {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.agent-hierarchy__row-main span {
-  font-size: var(--oct-text-sm);
   opacity: 0.8;
 }
 
-.agent-hierarchy__row-meta {
+.agent-hierarchy__header,
+.agent-run-create-form h3 {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
+  min-height: 32px;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding-bottom: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
-@media (max-width: 40rem) {
-  .agent-hierarchy__header {
-    flex-direction: column;
-  }
-  .agent-hierarchy__controls {
-    grid-template-columns: 1fr;
-  }
+.agent-hierarchy__header h2,
+.agent-run-create-form h3 {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.agent-hierarchy__empty,
+.agent-hierarchy__banner {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.agent-hierarchy__section {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.agent-hierarchy__section h3 {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-hierarchy__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-hierarchy__row {
+  min-width: 0;
+}
+
+/* The whole row is one control. The recipe's fixed height and centred
+   single line would clip a two-line task, so the row takes its own height
+   and starts its content at the left edge. */
+.agent-hierarchy__open {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  text-align: start;
+  white-space: normal;
+}
+
+.agent-hierarchy__open > .subagent-status-icon {
+  margin-top: 2px;
+}
+
+.agent-hierarchy__row-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-hierarchy__task {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.agent-hierarchy__meta {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A word, not a badge: the monochrome theme carries no status hue. */
+.agent-hierarchy__flag {
+  flex: 0 0 auto;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
 }
 
 .agent-run-create-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.75rem;
-  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-  border-radius: var(--oct-radius-md);
-  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
-}
-
-.agent-run-create-form h3 {
-  margin: 0;
-  font-size: var(--oct-text-base);
+  display: grid;
+  gap: var(--oct-space-3);
+  padding-top: var(--oct-space-4);
 }
 
 .agent-run-create-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  display: grid;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-sm);
 }
 
 .agent-run-create-form label.agent-run-create-form__context {
-  flex-direction: row;
+  display: flex;
   align-items: center;
+  gap: var(--oct-space-2);
 }
 
 .agent-run-create-form__task {
-  min-height: 5rem;
-}
-
-.agent-run-create-form fieldset {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-  border-radius: var(--oct-radius-sm);
-  padding: 0.5rem 0.75rem;
-}
-
-.agent-run-create-form fieldset label {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.35rem;
+  min-height: 80px;
 }
 
 .agent-run-create-form__hint,
 .agent-run-create-form__disabled {
   margin: 0;
-  font-size: var(--oct-text-sm);
-  opacity: 0.85;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .agent-run-create-form__error {
   margin: 0;
+  color: var(--oct-danger-fg);
   font-size: var(--oct-text-sm);
-  color: color-mix(in srgb, Canvas 15%, red 85%);
+}
+
+/* What the host resolved folds under one line naming model and workspace. */
+.agent-run-create-form__facts-disclosure > summary {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .agent-run-create-form__facts {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-  border-radius: var(--oct-radius-sm);
-}
-
-.agent-run-create-form__facts h4 {
-  margin: 0;
-  font-size: var(--oct-text-sm);
+  display: grid;
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-2);
 }
 
 .agent-run-create-form__facts dl {
   display: grid;
-  gap: 0.25rem 0.75rem;
-  margin: 0;
   grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--oct-space-1) var(--oct-space-3);
+  margin: 0;
 }
 
 .agent-run-create-form__facts div {
@@ -193,14 +184,15 @@
 }
 
 .agent-run-create-form__facts dt {
-  font-size: var(--oct-text-detail);
-  opacity: 0.75;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .agent-run-create-form__facts dd {
   margin: 0;
-  font-size: var(--oct-text-sm);
   overflow-wrap: anywhere;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
 }
 
 .agent-run-settings-panel {
@@ -215,131 +207,290 @@
   opacity: 0.9;
 }
 
-/*
- * Compact current-thread child-run chrome. Stays a single quiet strip
- * on Chat, Work, and Code; the detail list is the existing hierarchy panel.
- */
-.child-run-status {
-  display: grid;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-surface-raised, transparent);
-  font-size: var(--oct-text-sm);
-}
-
-.child-run-status__bar {
+/* One subagent's page in the Agents tool. It fills the tool's height so the
+   conversation scrolls on its own and the action bar stays under it, rather
+   than drifting below the fold as a long reply grows. */
+.agent-run-detail {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--oct-space-3);
 }
 
-.child-run-status__summary {
+.agent-run-detail__nav {
+  display: flex;
+}
+
+.agent-run-detail__header {
   display: grid;
-  flex: 1 1 18rem;
-  gap: 2px;
-  min-width: 0;
+  gap: var(--oct-space-1);
+  padding-bottom: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
-.child-run-status__state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  color: var(--octant-text-primary);
-  font-weight: var(--oct-weight-display);
-}
-
-.child-run-status__detail,
-.child-run-status__task {
-  min-width: 0;
+.agent-run-detail__title {
+  display: -webkit-box;
   margin: 0;
   overflow: hidden;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.agent-run-detail__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.agent-run-detail__state {
+  color: var(--oct-fg-2);
+}
+
+.agent-run-detail__fact,
+.agent-run-detail__note,
+.agent-run-detail__event {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.agent-run-detail__transcript {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: var(--oct-space-3);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The task is what the subagent was handed, so it reads as a brief rather
+   than as one more reply. */
+.agent-run-detail__brief {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+}
+
+.agent-run-detail__brief p {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-run-detail__label {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+/* Replies use the shared reply prose recipe (`chat-rich-text`); this only
+   keeps a long path or URL from widening the dock. */
+.agent-run-detail__message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-run-detail__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.agent-run-detail__steer {
+  display: grid;
+  flex: 1 1 100%;
+  gap: var(--oct-space-2);
+}
+
+.agent-run-detail__steer label {
+  display: grid;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+.agent-run-detail__steer-actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+/* A working subagent's icon turns; the word beside it says the same thing
+   for anyone who cannot see or does not want the motion. */
+.subagent-status-icon {
+  flex: 0 0 auto;
+  color: var(--oct-fg-2);
+}
+
+.subagent-status-icon--working {
+  animation: oct-spin var(--oct-motion-spin) linear infinite;
+}
+
+/*
+ * The composer's workbench tray. It sits at the top of the thread composer,
+ * inside its surface and above the follow-up chips, because delegated work
+ * that is still running or waiting for review is part of what the person
+ * does next — the strip it replaced hung over the transcript, detached.
+ */
+/* The tray is its own card, tucked behind the composer's top edge: the
+   composer is where the person types, and the subagents sat inside it as rows
+   between the chips and the field, where they read as part of the message.
+   Out of the flow it lays over the transcript's last lines the way the
+   composer's notice does, and it rises from behind the composer on arrival. */
+.composer:has(> .composer-subagents) {
+  position: relative;
+  isolation: isolate;
+}
+
+.composer-subagents {
+  position: absolute;
+  z-index: -1;
+  right: var(--oct-space-3);
+  bottom: calc(100% - var(--oct-space-3));
+  left: var(--oct-space-3);
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3) calc(var(--oct-space-3) + var(--oct-space-2));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
+  background: var(--octant-floating);
+  animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
+}
+
+/* A cross-context notice takes the same place; it is brief and must be read,
+   so the tray yields to it and the Agents tool still lists every subagent. */
+.composer--has-notice > .composer-subagents {
+  display: none;
+}
+
+.composer-subagents__head {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.composer-subagents__label {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.composer-subagents__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.composer-subagents__row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.composer-subagents__open {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding-inline: var(--oct-space-1);
+  text-align: start;
+}
+
+.composer-subagents__task {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.child-run-status__task span {
-  margin-right: 6px;
-  color: var(--octant-text-muted);
-}
-
-.child-run-status__task strong {
-  font-weight: 500;
-}
-
-.child-run-status__metrics {
-  display: flex;
+.composer-subagents__meta {
   flex: 0 0 auto;
-  gap: 8px;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: normal;
 }
 
-.child-run-status__metrics > span:not(.sr-only) ~ span:not(.sr-only)::before {
-  margin-right: 8px;
-  color: var(--octant-border-strong);
-  content: "·";
+.composer-subagents__more {
+  padding-inline: var(--oct-space-1);
 }
 
-.child-run-status__actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
+/* The trailing action appears on the row the pointer or focus is on. Hidden
+   rather than transparent: a transparent Stop and a transparent Mark reviewed
+   still took their different widths, so the status words at rest sat at a
+   different edge on every row. Focusing the row's button reveals it, so the
+   next Tab reaches it. */
+.composer-subagents__action {
+  display: none;
+  flex: 0 0 auto;
 }
 
-.child-run-status__notice {
+.composer-subagents__row:hover .composer-subagents__action,
+.composer-subagents__row:focus-within .composer-subagents__action {
+  display: inline-flex;
+}
+
+.composer-subagents__notice,
+.composer-subagents__confirm p {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
-.child-run-status__confirm {
+.composer-subagents__confirm {
   display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--octant-border-strong, var(--octant-border));
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-hairline);
   border-radius: var(--oct-radius-sm);
 }
 
-.child-run-status__confirm p {
-  margin: 0;
+.composer-subagents__confirm p:first-child {
+  color: var(--oct-fg);
 }
 
-.child-run-status__confirm-scope {
-  color: var(--octant-text-muted);
-}
-
-.child-run-status__confirm > div {
+.composer-subagents__confirm-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
-.chat-workspace__header .child-run-status,
-.work-thread-workspace__header .child-run-status,
-.code-thread-workspace__header .child-run-status {
-  flex: 1 1 16rem;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
+/* Touch has no hover, so the action is simply there. */
+@media (hover: none) {
+  .composer-subagents__action {
+    display: inline-flex;
+  }
 }
 
-@media (max-width: 720px) {
-  .child-run-status__bar {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .child-run-status__metrics {
-    order: 3;
-    width: 100%;
-  }
-
-  .child-run-status__actions {
-    margin-left: 0;
+@media (prefers-reduced-motion: reduce) {
+  .subagent-status-icon--working,
+  .composer-subagents {
+    animation: none;
   }
 }

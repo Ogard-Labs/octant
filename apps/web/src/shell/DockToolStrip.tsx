@@ -1,4 +1,4 @@
-import { MoreHorizontal, X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -22,7 +22,7 @@ import type {
 } from "./rightUtilityDockModel";
 
 const UNMEASURED_TOOL_WIDTH = 192;
-const OVERFLOW_SLOT_WIDTH = 32;
+const OVERFLOW_SLOT_WIDTH = 40;
 
 export interface DockToolStripProps {
   readonly active?: string;
@@ -203,14 +203,26 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
       ))}
       {overflow.length === 0 ? null : (
         <span className="dock-tool-strip__overflow" ref={overflowRegion}>
-          <IconButton
+          {/* The tabs that did not fit, counted. A "…" labelled "More tools"
+              read as a second way to add a tool beside the plus; these are
+              tabs already open, so the control says how many. */}
+          <OctantButton
             aria-controls={overflowId}
             aria-expanded={overflowOpen}
-            icon={MoreHorizontal}
-            label="More tools"
+            aria-label={
+              overflow.length === 1 ? "1 more open tab" : `${overflow.length} more open tabs`
+            }
+            className="dock-tool-strip__more window-no-drag"
             onClick={() => setOverflowOpen((open) => !open)}
             ref={overflowTrigger}
-          />
+            size="sm"
+            title="Open tabs that don't fit"
+            type="button"
+            variant="ghost"
+          >
+            <span>{overflow.length}</span>
+            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+          </OctantButton>
           {overflowOpen ? (
             <span
               className="workspace-disclosure dock-tool-strip__overflow-menu"
@@ -222,6 +234,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
                 overflowTrigger.current?.focus();
               }}
             >
+              <span className="workspace-disclosure__caption">Also open</span>
               {overflow.map((tool) => (
                 <span className="dock-tool-strip__overflow-row" key={tool.id}>
                   <OctantButton
