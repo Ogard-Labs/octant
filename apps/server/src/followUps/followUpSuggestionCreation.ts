@@ -16,6 +16,7 @@ import {
   type WindowId,
   type WorkThreadCommandResult,
 } from "@octant/contracts";
+import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import type { ChatService } from "../chat/chatService";
 
 export type FollowUpCreationOutcome =
@@ -168,6 +169,10 @@ async function createCodeThread(
   const threadId = dependencies.uuid();
   const lead = input.view.suggestedBy;
   if (input.placement === "worktree") {
+    // A fresh task starts from the base branch on a branch of its own: the
+    // parent's branch is already checked out in the parent's worktree, and an
+    // open outcome proposal belongs to the parent, not to this thread.
+    const { proposedOutcome: _parentProposal, ...deliveryTarget } = parent.deliveryTarget;
     const result = await dependencies.code.execute(
       input.windowId,
       decodeCodeCommand({
@@ -180,13 +185,20 @@ async function createCodeThread(
         modelId: lead.modelId,
         executionPolicy: "approval-gated",
         permissionPersistence: "current-session",
-        deliveryTarget: { ...parent.deliveryTarget, confirmedAt: now },
-        sourceBranch: parent.deliveryTarget.proposedBaseBranch,
+        deliveryTarget: {
+          ...deliveryTarget,
+          branchIntent: defaultDeliveryBranchIntent(
+            deliveryTarget.proposedBaseBranch,
+            threadId.replace(/-/g, "").slice(0, 12),
+          ),
+          confirmedAt: now,
+        },
+        sourceBranch: deliveryTarget.proposedBaseBranch,
         startFromOrigin: false,
-        remoteName: parent.deliveryTarget.remoteName,
+        remoteName: deliveryTarget.remoteName,
       }),
     );
-    if (result.kind !== "thread-created")
+    if (result.kind !== "managed-thread-created")
       return refused("The host did not create the worktree thread.");
     return { kind: "created", created: { ...input.creation, threadId } };
   }

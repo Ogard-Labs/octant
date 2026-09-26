@@ -204,4 +204,49 @@ describe("follow-up creation", () => {
       },
     });
   });
+
+  it("starts a worktree follow-up from the base branch on a branch of its own and reports it created", async () => {
+    const calls: Array<{ kind: string }> = [];
+    const deps = dependencies({
+      readCodeThread: () =>
+        ({
+          id: parentThreadId,
+          projectId,
+          deliveryTarget: {
+            branchIntent: "feature/parent",
+            remoteName: "origin",
+            proposedBaseRepository: "octant/octant",
+            proposedBaseBranch: "main",
+            outcomeKind: "local-implementation",
+            proposedOutcome: "pull-request",
+            confirmedAt: now,
+          },
+        }) as never,
+      code: {
+        execute: (_windowId, command) => {
+          calls.push(command);
+          return command.kind === "prepare-code-project-checkout"
+            ? ({
+                kind: "checkout-prepared",
+                bindingRevisionId: "00000000-0000-4000-8000-0000000000c1",
+              } as never)
+            : ({ kind: "managed-thread-created", thread: { id: "created" } } as never);
+        },
+      },
+    });
+    const outcome = await createFollowUp(deps, {
+      windowId,
+      view: view("code"),
+      creation: { kind: "new-worktree", mode: "code", projectId, title: "Add tests" } as never,
+    });
+    expect(outcome).toMatchObject({ kind: "created" });
+    const created = calls.at(-1) as unknown as {
+      deliveryTarget: { branchIntent: string; proposedOutcome?: string };
+      sourceBranch: string;
+    };
+    expect(created).toMatchObject({ kind: "create-managed-code-thread", sourceBranch: "main" });
+    expect(created.deliveryTarget.branchIntent).not.toBe("feature/parent");
+    expect(created.deliveryTarget.branchIntent).toMatch(/^octant\//);
+    expect(created.deliveryTarget.proposedOutcome).toBeUndefined();
+  });
 });
