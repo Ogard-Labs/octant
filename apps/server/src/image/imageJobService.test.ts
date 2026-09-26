@@ -15,6 +15,7 @@ import {
 import { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { readUsageDashboard } from "../usageDashboardService";
@@ -611,8 +612,14 @@ describe("image job service", () => {
       projections: restartedRuntime.projections,
       clock: () => now,
     });
-    for (const event of restartedJournal.replay({ afterSequence: 0, limit: 1000 } as never)) {
-      restartedRuntime.imageJobProjection.apply(first.connection, event);
+    // Catch up every projection from its stored checkpoint, as host startup does.
+    for (const projection of restartedRuntime.projections.all()) {
+      catchUpProjection({
+        connection: first.connection,
+        journal: restartedJournal,
+        projection,
+        clock: () => now,
+      });
     }
     expect(restartedRuntime.imageJobProjection.getById(queued.id)?.status).toBe("running");
 

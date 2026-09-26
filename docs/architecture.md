@@ -512,9 +512,11 @@ flowchart LR
   (`persistence/*Projection.ts`, `*PersistenceSchema.ts`). Projections are
   checkpointed by sequence, detect lag, and can be rebuilt individually or
   wholesale (`db:status`, `db:verify`, `db:rebuild`). A projection whose state
-  lives only in process memory (AgentRuns) declares `holdsStateInMemory` and
-  replays from the start of the journal at every host start, because its
-  stored checkpoint describes the previous process rather than this one.
+  lives only in process memory (AgentRuns, Canvases, image jobs, managed
+  GitHub clones) declares `holdsStateInMemory` and replays from the start of
+  the journal at every host start, because its stored checkpoint describes the
+  previous process rather than this one. Automations are also in memory; the
+  host rebuilds them with a fail-closed hydration after catch-up instead.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a

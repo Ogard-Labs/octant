@@ -30,6 +30,9 @@ const ACTIVE_STATES: ReadonlySet<GithubCloneOperation["state"]> = new Set([
 export class GithubCloneProjection implements Projection {
   readonly name = "github-clones";
   readonly dependencies: ReadonlyArray<string> = [];
+  // Operations live only in this map, so every host start must replay them
+  // all: resuming from the stored checkpoint hid the clones recovery fails.
+  readonly holdsStateInMemory = true as const;
   readonly #byRequestId = new Map<string, GithubCloneOperation>();
 
   reset(_connection: SqliteConnection): void {

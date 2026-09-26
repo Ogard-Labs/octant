@@ -23,7 +23,7 @@ import {
 } from "../persistence/githubCloneProjection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
-import { ProjectionRegistry } from "../persistence/projection";
+import { catchUpProjection, ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import type { ManagedCloneResult, ManagedGitResult } from "./managedCloneProcessPort";
 import { ManagedRepositoryInventory } from "./managedRepositoryInventory";
@@ -179,6 +179,7 @@ function createHarness(options: HarnessOptions = {}) {
   const quarantinePath = join(inventoryPath, ".octant-quarantine", requestId);
   return {
     service,
+    connection,
     journal,
     projection,
     directory,
@@ -913,6 +914,25 @@ describe("managed clone restart recovery", () => {
     expect(recovered?.failure).toEqual({ code: "restart-interrupted" });
     expect(existsSync(harness.stagingPath)).toBe(false);
     expect(existsSync(harness.quarantinePath)).toBe(true);
+  });
+
+  it("still finds an interrupted clone after a host restart resumes from stored checkpoints", async () => {
+    const harness = createHarness({ clone: () => new Promise(() => {}) });
+    await requestOperation(harness);
+    appendTransition(harness, "awaiting-confirmation", "reserved", 2);
+    appendTransition(harness, "reserved", "cloning", 3);
+
+    // A new process: a fresh projection caught up the way host startup does
+    // it. Recovery walks this list to fail clones the restart interrupted.
+    const restarted = new GithubCloneProjection();
+    catchUpProjection({
+      connection: harness.connection,
+      journal: harness.journal,
+      projection: restarted,
+      clock: () => NOW_ISO,
+    });
+
+    expect(restarted.getByRequestId(requestId)?.state).toBe("cloning");
   });
 
   it("marks a possibly promoted operation as recovery-required and allows cancel", async () => {
