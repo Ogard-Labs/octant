@@ -97,6 +97,11 @@ describe("side tasks", () => {
       inputJson: JSON.stringify({ ...offer, target: "new-worktree" }),
     });
     expect(worktree).toMatchObject({ isError: true, result: { status: "refused" } });
+    const notAnObject = await tools.execute({ name: "octant_offer_side_task", inputJson: '"x"' });
+    expect(notAnObject).toMatchObject({
+      isError: true,
+      result: { message: expect.stringContaining("must be an object") },
+    });
 
     for (let index = 0; index < MAX_OPEN_SIDE_TASKS; index += 1) {
       await tools.execute({ name: "octant_offer_side_task", inputJson: JSON.stringify(offer) });

@@ -72,13 +72,17 @@ export function createSideTaskTools(input: {
     definitions: [definition(worktree)],
     execute: async ({ inputJson, signal }) => {
       if (signal?.aborted) return refused("The turn was cancelled.");
-      let parsed: Record<string, unknown>;
+      let raw: unknown;
       try {
-        parsed = (JSON.parse(inputJson) ?? {}) as Record<string, unknown>;
+        raw = JSON.parse(inputJson);
       } catch {
         return refused("The tool input is not valid JSON.");
       }
-      const target = parsed.target ?? (worktree ? "new-worktree" : "new-thread");
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        return refused("The tool input must be an object with a title, reason, and prompt.");
+      }
+      const parsed = new Map<string, unknown>(Object.entries(raw));
+      const target = parsed.get("target") ?? (worktree ? "new-worktree" : "new-thread");
       if (target === "new-worktree" && !worktree) {
         return refused('A worktree is only available in a Code thread; use "new-thread".');
       }
@@ -93,9 +97,9 @@ export function createSideTaskTools(input: {
             providerInstanceId: input.suggestedBy.providerInstanceId,
             modelId: input.suggestedBy.modelId,
           },
-          title: typeof parsed.title === "string" ? parsed.title.trim() : "",
-          reason: typeof parsed.reason === "string" ? parsed.reason.trim() : "",
-          prompt: typeof parsed.prompt === "string" ? parsed.prompt.trim() : "",
+          title: stringField(parsed, "title"),
+          reason: stringField(parsed, "reason"),
+          prompt: stringField(parsed, "prompt"),
           target,
           offeredAt: input.clock(),
         });
@@ -119,4 +123,9 @@ export function createSideTaskTools(input: {
       };
     },
   };
+}
+
+function stringField(fields: ReadonlyMap<string, unknown>, key: string): string {
+  const value = fields.get(key);
+  return typeof value === "string" ? value.trim() : "";
 }
