@@ -290,8 +290,8 @@
   bottom: calc(100% - var(--oct-space-3));
   left: var(--oct-space-3);
   display: grid;
-  gap: var(--oct-space-1);
-  padding: var(--oct-space-2) var(--oct-space-3) calc(var(--oct-space-3) + var(--oct-space-2));
+  gap: 2px;
+  padding: var(--oct-space-1) var(--oct-space-2) calc(var(--oct-space-3) + var(--oct-space-1));
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
   background: var(--octant-floating);
@@ -304,6 +304,11 @@
   display: none;
 }
 
+/* Folded, the card is a tab just wide enough for its head. */
+.composer-subagents[data-open="false"] {
+  right: auto;
+}
+
 .composer-subagents__head {
   display: flex;
   min-height: 24px;
@@ -312,16 +317,50 @@
   gap: var(--oct-space-2);
 }
 
+.composer-subagents__toggle {
+  gap: var(--oct-space-2);
+  height: 24px;
+  padding-inline: var(--oct-space-1);
+  text-decoration: none;
+}
+
+.composer-subagents__toggle:hover {
+  text-decoration: none;
+}
+
 .composer-subagents__label {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+  font-weight: normal;
 }
 
+.composer-subagents__count {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: normal;
+}
+
+.composer-subagents__chevron {
+  color: var(--oct-muted);
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+.composer-subagents[data-open="false"] .composer-subagents__chevron {
+  transform: rotate(180deg);
+}
+
+/* Three rows, then the list scrolls: a thread that delegates a lot does not
+   grow a tall card over its own transcript. */
 .composer-subagents__list {
   display: grid;
+  max-height: 72px;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
+  scrollbar-width: thin;
 }
 
 .composer-subagents__row {
@@ -360,15 +399,9 @@
   font-weight: normal;
 }
 
-.composer-subagents__more {
-  padding-inline: var(--oct-space-1);
-}
-
-/* The trailing action appears on the row the pointer or focus is on. Hidden
-   rather than transparent: a transparent Stop and a transparent Mark reviewed
-   still took their different widths, so the status words at rest sat at a
-   different edge on every row. Focusing the row's button reveals it, so the
-   next Tab reaches it. */
+/* Stop appears on the row the pointer or focus is on. Hidden rather than
+   transparent, so the status words at rest end at one edge. Focusing the
+   row's button reveals it, so the next Tab reaches it. */
 .composer-subagents__action {
   display: none;
   flex: 0 0 auto;
@@ -412,6 +445,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .subagent-status-icon--working,
+  .composer-subagents__chevron,
   .composer-subagents {
     animation: none;
   }

@@ -1,25 +1,31 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { ArrowUpRight, Bot } from "lucide-react";
+import { Bot } from "lucide-react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
-import type { AgentHierarchyInputEntry } from "../agents/buildAgentHierarchyModel";
+import {
+  isActiveAgentHierarchyStatus,
+  type AgentHierarchyInputEntry,
+} from "../agents/buildAgentHierarchyModel";
+import {
+  SubagentStatusIcon,
+  subagentNeedsReview,
+  subagentStatusWord,
+} from "../agents/subagentStatus";
 import { OctantButton } from "../ui/base/OctantButton";
-
-const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
+import { EnvironmentGroup } from "./EnvironmentGroup";
 
 /**
- * One Environment row that says what this thread's subagents are doing and
- * opens them in the Agents tool.
+ * Every subagent this thread's agent delegated, working and finished, as one
+ * Environment row that opens into the list.
  *
- * It had been a second, smaller Agents tool — its own Active and Done lists
- * and an inline transcript — beside the real one a tab away, and the two
- * disagreed on wording and on which runs they showed. The row keeps the count
- * in view; reading and steering a subagent belongs to the tool built for it.
+ * The composer's card shows only what is running, so this is where a finished
+ * one — reviewed or waiting for review — is found again. A row opens that
+ * subagent's page in the Agents tool, where its conversation and controls are.
  */
 export function EnvironmentSubagents(props: {
   readonly client: AgentRunClient;
   readonly threadId: string;
-  readonly onOpenAgents?: () => void;
+  readonly onOpenAgents?: (runId?: string) => void;
 }) {
   const controller = useChildRunStatus({
     client: props.client,
@@ -28,37 +34,81 @@ export function EnvironmentSubagents(props: {
   // A row that vanished when nothing had been delegated could not be told
   // apart from a missing feature, so an empty thread says None.
   const summary = controller.status !== "ready" ? "Reading" : subagentSummary(controller.entries);
-  const content = (
-    <>
-      <Bot aria-hidden="true" className="environment-row__icon" size={16} strokeWidth={1.7} />
-      <span className="environment-row__title">Subagents</span>
-      <span className="environment-row__detail">{summary}</span>
-    </>
+  const working = controller.entries.filter((entry) =>
+    isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
+  const finished = controller.entries
+    .filter((entry) => !isActiveAgentHierarchyStatus(entry.lifecycleStatus))
+    .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 
-  if (props.onOpenAgents === undefined) {
-    return (
-      <section aria-label="Subagents" className="environment-row">
-        {content}
-      </section>
-    );
-  }
   return (
-    <OctantButton
-      aria-label={`Subagents, ${summary}. Open in Agents`}
-      className="environment-link window-no-drag"
-      onClick={props.onOpenAgents}
-      type="button"
-      variant="link"
-    >
-      {content}
-      <ArrowUpRight
-        aria-hidden="true"
-        className="environment-row__trailing"
-        size={14}
-        strokeWidth={1.8}
-      />
-    </OctantButton>
+    <EnvironmentGroup icon={Bot} summary={summary} title="Subagents">
+      {controller.entries.length === 0 ? (
+        <p className="environment-subagents__empty">
+          None yet. They appear when the agent hands off part of its work.
+        </p>
+      ) : (
+        <>
+          <SubagentList
+            entries={working}
+            label="Working"
+            {...(props.onOpenAgents === undefined ? {} : { onOpen: props.onOpenAgents })}
+          />
+          <SubagentList
+            entries={finished}
+            label="Finished"
+            {...(props.onOpenAgents === undefined ? {} : { onOpen: props.onOpenAgents })}
+          />
+        </>
+      )}
+    </EnvironmentGroup>
+  );
+}
+
+function SubagentList(props: {
+  readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
+  readonly label: string;
+  readonly onOpen?: (runId: string) => void;
+}) {
+  if (props.entries.length === 0) return null;
+  return (
+    <section aria-label={props.label} className="environment-subagents__section">
+      <h4 className="environment-subagents__label">
+        {props.label} · {props.entries.length}
+      </h4>
+      <ul className="environment-subagents__list">
+        {props.entries.map((entry) => {
+          const state = subagentNeedsReview(entry)
+            ? "To review"
+            : subagentStatusWord(entry.lifecycleStatus);
+          const content = (
+            <>
+              <SubagentStatusIcon lifecycleStatus={entry.lifecycleStatus} />
+              <span className="environment-subagents__task">{entry.task}</span>
+              <span className="environment-subagents__state">{state}</span>
+            </>
+          );
+          return (
+            <li key={entry.runId}>
+              {props.onOpen === undefined ? (
+                <span className="environment-subagent">{content}</span>
+              ) : (
+                <OctantButton
+                  aria-label={`${entry.task}. ${state}. Open in Agents`}
+                  className="environment-subagent window-no-drag"
+                  onClick={() => props.onOpen?.(entry.runId)}
+                  title={entry.task}
+                  type="button"
+                  variant="link"
+                >
+                  {content}
+                </OctantButton>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -69,10 +119,9 @@ export function subagentSummary(entries: ReadonlyArray<AgentHierarchyInputEntry>
   let toReview = 0;
   let done = 0;
   for (const entry of entries) {
-    if (ACTIVE.has(entry.lifecycleStatus)) working += 1;
-    else if (entry.resultAcknowledgement.required && !entry.resultAcknowledgement.acknowledged) {
-      toReview += 1;
-    } else done += 1;
+    if (isActiveAgentHierarchyStatus(entry.lifecycleStatus)) working += 1;
+    else if (subagentNeedsReview(entry)) toReview += 1;
+    else done += 1;
   }
   const parts: string[] = [];
   if (working > 0) parts.push(`${String(working)} working`);

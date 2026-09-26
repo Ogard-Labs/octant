@@ -185,18 +185,18 @@ stays quiet and separate, without a second provider pill or repeated project lab
 
 ### Welcome and composer
 
-A thread's subagents sit in their own card tucked behind the composer's top
-edge — narrower than the composer by one inset on each side, its lower edge
+A thread's working subagents sit in their own card tucked behind the composer's
+top edge — narrower than the composer by one inset on each side, its lower edge
 hidden under the composer, rising from behind it on arrival — so they read as
-work beside the message rather than part of it: a quiet "Subagents" label, then one row per subagent that is
-working or finished and not yet reviewed — status icon, the task on one line,
-and its state in words ("Working · 12s", "Done — review", "Failed"). Three
-rows show; the rest fold into "+N more". A row opens that subagent in the
-Agents tool; its one trailing action (Stop, or Mark reviewed) appears on hover
-or focus. Stopping one named subagent acts at once; Stop all asks first and
-names how many it reaches. Reviewed and settled subagents leave the tray, so a
-thread with none shows nothing there. There is no strip above the transcript.
-A cross-context notice takes the same place behind the composer and wins while
+work beside the message rather than part of it. Only running subagents show
+there; finished ones, reviewed or not, are listed in Environment and Agents, so
+a thread that delegates a lot never grows a tall card. The head ("Subagents ·
+N working") folds the card to a one-line tab and the fold is remembered per
+viewer; open, the rows are 24px and scroll past three. A row (status icon, the
+task on one line, "Working · 12s") opens that subagent in the Agents tool, and
+Stop appears on hover or focus. Stopping one named subagent acts at once; Stop
+all asks first and names how many it reaches. There is no strip above the
+transcript. A cross-context notice takes the same place behind the composer and wins while
 it shows.
 
 A reply's suggested follow-ups sit as outline chips at the top of the

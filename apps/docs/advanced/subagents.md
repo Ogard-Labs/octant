@@ -17,13 +17,13 @@ server-authoritative child-creation posture: **Off**, **Only when I start
 them** (Ask), or **Automatically**. Role cards and mixed-vendor routing per
 role remain planned.
 
-A thread's subagents that are working, or finished and not yet reviewed, show
-in its composer in Chat, Work, and Code: one row each with its task and its
-state in words, such as "Working · 12s" or "Done — review". Hover or focus a
-row to **Stop** a working subagent or **Mark reviewed** a finished one;
-**Stop all** asks first and cancels only that thread's subagents. Choosing a
-row opens the **Agents** dock tool on that subagent. Once a subagent is
-reviewed it leaves the composer and stays in Agents.
+A thread's working subagents show in a small card behind its composer in
+Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
+card's head to fold it to a tab; Octant remembers that. Hover or focus a row to
+**Stop** it; **Stop all** asks first and cancels only that thread's subagents.
+Choosing a row opens the **Agents** dock tool on that subagent. Finished
+subagents leave the card: **Environment → Subagents** lists every one, working
+and finished, and marks results you have not reviewed **To review**.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
 **Finished**, marks results you have not reviewed with **Needs review**, and
