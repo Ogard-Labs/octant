@@ -270,12 +270,15 @@ export function createCodeOperationApprovalViewController<TWindow>(
     1 + (queuedByWindow.get(windowId)?.length ?? 0);
 
   const place = (pending: PendingApproval<TWindow>): void => {
-    if (pending.view === undefined || pending.anchor === undefined) return;
-    const bounds = options.host.boundsForAnchor(
-      pending.window,
-      pending.anchor,
-      pendingCount(pending.windowId),
-    );
+    if (pending.view === undefined) return;
+    const bounds =
+      pending.anchor === undefined
+        ? options.host.fallbackBounds?.(pending.window, pendingCount(pending.windowId))
+        : options.host.boundsForAnchor(
+            pending.window,
+            pending.anchor,
+            pendingCount(pending.windowId),
+          );
     if (bounds === undefined) return;
     pending.view.setBounds(bounds);
   };

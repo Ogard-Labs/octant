@@ -538,23 +538,31 @@ describe("Code operation approval view controller", () => {
   it("uses an owner-window fallback for dock operations when the composer is unmounted", async () => {
     const fixture = makeFixture();
     fixture.host.fallbackBounds.mockReturnValue({ x: 300, y: 500, width: 500, height: 200 });
-    const result = fixture.controller.request({
+    const input = {
       window: fixture.window,
       windowId: "window-1",
       windowCapability: "window-capability",
       request,
-    });
+    };
+    const result = fixture.controller.request(input);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    const queued = fixture.controller.request(input);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.host.fallbackBounds).toHaveBeenLastCalledWith(fixture.window, 2);
     await expect(
       fixture.controller.decision({
         senderId: 41,
         token: "approval-view-token",
         challengeId: ids.challenge,
-        decision: "approve",
+        decision: "cancel",
       }),
-    ).resolves.toBe(ids.approval);
-    await expect(result).resolves.toBe(ids.approval);
-    expect(fixture.host.createView).toHaveBeenCalledOnce();
+    ).resolves.toBeUndefined();
+    await expect(result).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.host.fallbackBounds).toHaveBeenLastCalledWith(fixture.window, 1);
+    fixture.controller.closeWindow("window-1");
+    await expect(queued).resolves.toBeUndefined();
+    expect(fixture.host.createView).toHaveBeenCalledTimes(2);
   });
 
   it("revokes a visible approval when the composer moves to another thread", async () => {
