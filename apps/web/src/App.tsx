@@ -1468,6 +1468,10 @@ function LaunchedShell(
     [hostFederationLifecycle, federationRevision],
   );
   const hosts = lifecycleHostIdentities.length > 0 ? lifecycleHostIdentities : observedHosts;
+  const environmentNames = useMemo(
+    () => new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const)),
+    [hosts],
+  );
   const federatedHostStates = useMemo(
     () => hostFederationLifecycle?.toFederatedHostStates() ?? [],
     [hostFederationLifecycle, federationRevision],
@@ -5988,9 +5992,7 @@ function LaunchedShell(
                 automationCenterVisible={automationCenterVisible}
                 automationEditorCatalog={automationEditorCatalog}
                 automationClient={automationClient}
-                environmentNames={
-                  new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const))
-                }
+                environmentNames={environmentNames}
                 localHostId={String(LOCAL_HOST_ID)}
                 isNarrow={isNarrow}
                 notificationClient={automationNotificationClient}
@@ -6351,6 +6353,7 @@ function LaunchedShell(
                     workProviderGroups={workProviderGroups}
                     providerByThreadId={providerByThreadId}
                     showProviderIcons={controller.settings.showThreadProviderIcons}
+                    environmentNames={environmentNames}
                     {...(projectController.activeProject === undefined
                       ? {}
                       : { draftProjectName: projectController.activeProject.name })}

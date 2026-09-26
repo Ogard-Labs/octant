@@ -375,6 +375,8 @@ export interface WorkspaceViewProps {
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** Mirrors the sidebar preference for the compact pane tab mark. */
   readonly showProviderIcons?: boolean;
+  /** Host names by host id, for the pane title's environment mark. */
+  readonly environmentNames?: ReadonlyMap<string, string>;
   readonly draftProjectName?: string;
   readonly draftProjectRoot?: string;
   readonly draftBranchName?: string;
@@ -602,6 +604,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             ? {}
             : { onCloseContentTab: props.onCloseContentTab })}
           {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+          {...(props.environmentNames === undefined
+            ? {}
+            : { environmentNames: props.environmentNames })}
           paneFactsByThreadId={paneFactsByThreadId}
           drag={props.drag}
           layout={props.layout}
