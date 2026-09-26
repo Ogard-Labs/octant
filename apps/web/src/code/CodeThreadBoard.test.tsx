@@ -463,7 +463,7 @@ describe("CodeThreadBoard", () => {
           id: "01",
           status: "waiting",
           title: "Blocked thread",
-          blockingReason: "Waiting for your answer.",
+          blockingReason: "Waiting for a decision or answer.",
         }),
       ]),
     );
@@ -477,7 +477,7 @@ describe("CodeThreadBoard", () => {
     );
 
     expect(await screen.findByText("Blocked thread")).toBeVisible();
-    expect(screen.getByText("Waiting for your answer.")).toBeVisible();
+    expect(screen.getByText("Waiting for a decision or answer.")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Ready (0)" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Waiting (1)" })).toHaveClass(
       "code-board__list-group",

@@ -1985,7 +1985,7 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.boardActivity()).toMatchObject({
       executing: false,
       awaitingInput: true,
-      blockingReason: "Waiting for your answer.",
+      blockingReason: "Octant could not confirm how the last step ended.",
     });
     fixture.close();
   });
@@ -2197,7 +2197,7 @@ describe("CodeOperationRuntime", () => {
     });
     expect(fixture.boardActivity()).toMatchObject({
       awaitingInput: true,
-      blockingReason: "Waiting for your answer.",
+      blockingReason: "Waiting for a decision or answer.",
     });
 
     approved = true;

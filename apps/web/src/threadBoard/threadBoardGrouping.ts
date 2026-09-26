@@ -43,7 +43,7 @@ const STATUS_LABELS: Record<ThreadBoardStatus, string> = {
 const STATUS_REASON_LABELS: Record<ThreadBoardReason, string> = {
   "delivery-satisfied": "Done: what you asked for is finished",
   executing: "An agent is working on it",
-  "awaiting-input": "Waiting for your answer",
+  "awaiting-input": "Waiting for a decision or answer",
   interrupted: "The agent stopped partway through",
   recovering: "Catching up after a restart",
   "delivery-waiting": "Checking whether it is finished",

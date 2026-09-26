@@ -250,7 +250,14 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           detail="Pull requests show up here once a Project's Git remote points at github.com. Add one, then check again."
           title={dock ? "This Project isn't on GitHub" : "None of your Code Projects is on GitHub"}
         />
-      ) : (
+      ) : null}
+      {view !== undefined && hasProjects && !onGitHub && workspace.status === "error" ? (
+        // A check that failed must not read as "still not on GitHub".
+        <p className="code-project-pull-requests__status" role="alert">
+          {workspace.message}
+        </p>
+      ) : null}
+      {view === undefined || !hasProjects || !onGitHub ? null : (
         <>
           <p
             className="code-project-pull-requests__status"

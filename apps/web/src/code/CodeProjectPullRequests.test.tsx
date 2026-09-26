@@ -470,6 +470,25 @@ describe("CodeProjectPullRequests", () => {
     expect(screen.queryByText("List active pull requests")).toBeNull();
   });
 
+  it("says so when checking an off-GitHub Project again fails", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        presentation="dock"
+        projectId={projectBId}
+        refresh={async () => {
+          throw new Error("offline");
+        }}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The pull-request list could not be refreshed.",
+    );
+  });
+
   it("filters the cached snapshot locally and clears the query without contacting GitHub", async () => {
     const user = userEvent.setup();
     const { load, refresh } = renderWorkspace();

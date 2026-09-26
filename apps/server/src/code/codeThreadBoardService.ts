@@ -103,9 +103,9 @@ export function boardRuntimeActivityFromWorks(
     (entry) => entry.work.kind !== "provider-turn" || entry === latestTurn,
   );
   const executing = contributing.some((entry) => entry.work.state === "running");
-  const awaitingInput = contributing.some(
-    (entry) => entry.work.state === "waiting" || entry.work.state === "ambiguous",
-  );
+  const asking = contributing.some((entry) => entry.work.state === "waiting");
+  const unconfirmed = contributing.some((entry) => entry.work.state === "ambiguous");
+  const awaitingInput = asking || unconfirmed;
   const interrupted = latestTurn !== undefined && latestTurn.work.state === "interrupted";
   const waiting = awaitingInput || interrupted;
   return {
@@ -114,9 +114,14 @@ export function boardRuntimeActivityFromWorks(
     interrupted,
     ...(waiting && !executing
       ? {
-          blockingReason: awaitingInput
-            ? "Waiting for your answer."
-            : "The last agent turn was interrupted.",
+          // An operation whose outcome could not be established (a push the
+          // remote never confirmed) has no question to answer; saying so
+          // would point at a control the thread does not have.
+          blockingReason: asking
+            ? "Waiting for a decision or answer."
+            : unconfirmed
+              ? "Octant could not confirm how the last step ended."
+              : "The last agent turn was interrupted.",
         }
       : {}),
   };
@@ -330,7 +335,7 @@ function waitingReasonLabel(reason: CodeBoardCard["statusReason"]): string | und
     case "recovering":
       return "Catching up after a restart.";
     case "awaiting-input":
-      return "Waiting for your answer.";
+      return "Waiting for a decision or answer.";
     case "interrupted":
       return "The last agent turn was interrupted.";
     case "delivery-waiting":

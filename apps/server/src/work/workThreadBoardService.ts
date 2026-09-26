@@ -106,7 +106,7 @@ export function boardRuntimeActivityFromTurnsAndSignals(input: {
     ...(waiting && !executing
       ? {
           blockingReason: awaitingInput
-            ? "Waiting for your answer."
+            ? "Waiting for a decision or answer."
             : "The last agent turn was interrupted.",
         }
       : {}),
@@ -266,7 +266,7 @@ function waitingReasonLabel(reason: WorkBoardCard["statusReason"]): string | und
     case "recovering":
       return "Catching up after a restart.";
     case "awaiting-input":
-      return "Waiting for your answer.";
+      return "Waiting for a decision or answer.";
     case "interrupted":
       return "The last agent turn was interrupted.";
     case "delivery-waiting":

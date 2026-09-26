@@ -210,6 +210,7 @@ import {
   activeProjectTabId,
   activeSurfaceTitle,
   activeWorkThreadTabId,
+  findWorkspacePane,
   openLocalCodeThreadIds,
   openThreadIds,
 } from "./shell/workspaceTabLifecycle";
@@ -3413,14 +3414,17 @@ function LaunchedShell(
   );
 
   // Choosing a thread or destination from the phone drawer is the reason it
-  // was opened; the page it chose should be what the person sees next.
+  // was opened; the page it chose should be what the person sees next. The
+  // surface is keyed by its id, not its title: two untitled threads share one.
   const drawerDestination = [
     activeMode,
     controller.workspace === undefined
       ? ""
-      : activeSurfaceTitle(
-          controller.workspace.layouts[activeMode],
-          controller.workspace.activePaneIds[activeMode],
+      : String(
+          findWorkspacePane(
+            controller.workspace.layouts[activeMode],
+            controller.workspace.activePaneIds[activeMode],
+          )?.surface.id ?? "",
         ),
     searchOpen,
     projectsListOpen,
