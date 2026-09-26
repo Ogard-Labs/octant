@@ -1,4 +1,8 @@
-import { decodeCodeAttachmentId, decodeCodeRelativePath } from "@octant/contracts/code";
+import {
+  decodeCodeAttachmentId,
+  decodeCodeRelativePath,
+  type CodeApprovalId,
+} from "@octant/contracts/code";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeAttachmentId, CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -1467,6 +1471,80 @@ describe("CodeThreadWorkspace", () => {
       permissionPersistence: "current-session",
       approvalId: "approval-1",
     });
+  });
+
+  it("keeps the access picker disabled while the native Full access confirmation is open", async () => {
+    const user = userEvent.setup();
+    const approval = deferred<CodeApprovalId | undefined>();
+    const requestFullAccessApproval = vi.fn(() => approval.promise);
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const pickerController = controller({ execute });
+    render(
+      <CodeThreadWorkspace
+        controller={pickerController}
+        requestFullAccessApproval={requestFullAccessApproval}
+        threadId={threadId}
+      />,
+    );
+
+    const picker = screen.getByRole("button", { name: "Next turn access" });
+    await user.click(picker);
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
+    );
+    expect(picker).toBeDisabled();
+
+    approval.resolve("40000000-0000-4000-8000-000000000001" as CodeApprovalId);
+    await waitFor(() => expect(picker).toBeEnabled());
+  });
+
+  it("attributes a confirmation cancelled by leaving the thread to the thread that asked", async () => {
+    const user = userEvent.setup();
+    const approval = deferred<CodeApprovalId | undefined>();
+    const requestFullAccessApproval = vi.fn(() => approval.promise);
+    const cancelApproval = vi.fn(async () => undefined);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        requestFullAccessApproval={requestFullAccessApproval}
+        cancelApproval={cancelApproval}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
+    );
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({}, anotherThreadId)}
+        requestFullAccessApproval={requestFullAccessApproval}
+        cancelApproval={cancelApproval}
+        threadId={anotherThreadId}
+      />,
+    );
+    approval.resolve(undefined);
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Full access confirmation was cancelled when you left this thread."),
+      ).not.toBeInTheDocument(),
+    );
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller()}
+        requestFullAccessApproval={requestFullAccessApproval}
+        cancelApproval={cancelApproval}
+        threadId={threadId}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Full access confirmation was cancelled when you left this thread. It keeps its current access.",
+      ),
+    ).toBeVisible();
   });
 
   it("resets one-shot access as soon as the host accepts the start", async () => {
@@ -3202,6 +3280,14 @@ function controller(
     retry: vi.fn(),
     ...overrides,
   } as never;
+}
+
+function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
+  let resolveValue: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    resolveValue = resolve;
+  });
+  return { promise, resolve: resolveValue };
 }
 
 function withPlan(ui: ReactElement): ReactElement {
