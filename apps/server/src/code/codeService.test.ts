@@ -1774,6 +1774,41 @@ describe("CodeService replay and files", () => {
     }).rejects.toMatchObject({ failure: { category: "stale" } });
   });
 
+  it("lowering a session Full access thread to Ask for approvals revokes only this window's grant without confirmation", async () => {
+    const persisted = thread({
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+    const otherWindow = decodeWindowId(testUuid(9001));
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(ids.window, persisted.id);
+    sessionAuthority.grantFullAccess(otherWindow, persisted.id);
+    const fixture = serviceFixture({ threads: [persisted], sessionAuthority });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+    if (result.kind !== "thread-updated") throw new Error("expected a thread update");
+    expect(result.thread.executionPolicy).toBe("approval-gated");
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledOnce();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventName: "code.thread-updated@1" })],
+      }),
+    );
+    expect(sessionAuthority.effectiveThread(ids.window, persisted).executionPolicy).toBe(
+      "approval-gated",
+    );
+    expect(sessionAuthority.effectiveThread(otherWindow, persisted).executionPolicy).toBe(
+      "full-access",
+    );
+  });
+
   it("rejects a per-thread cursor ahead of the current thread head", async () => {
     const fixture = serviceFixture();
 

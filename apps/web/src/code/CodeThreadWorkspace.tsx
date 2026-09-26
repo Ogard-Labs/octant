@@ -1707,6 +1707,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               ceiling={thread.executionPolicy}
               disabled={accessChanging}
               nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              onLowerThread={(next) => void changeAccess(next)}
               onRaiseThread={(next) => void changeAccess(next)}
               onSelect={setTurnAccessOverride}
               value={nextTurnAccess}

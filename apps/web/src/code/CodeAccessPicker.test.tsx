@@ -12,6 +12,7 @@ describe("CodeAccessPicker", () => {
         autoApprove={{ checked: false, onChange }}
         ceiling="approval-gated"
         nativeConfirmationAvailable
+        onLowerThread={vi.fn()}
         onRaiseThread={vi.fn()}
         onSelect={vi.fn()}
         value="approval-gated"
@@ -34,6 +35,7 @@ describe("CodeAccessPicker", () => {
       <CodeAccessPicker
         ceiling="approval-gated"
         nativeConfirmationAvailable
+        onLowerThread={vi.fn()}
         onRaiseThread={onRaiseThread}
         onSelect={onSelect}
         value="approval-gated"
@@ -56,6 +58,7 @@ describe("CodeAccessPicker", () => {
       autoApprove: { checked: true, onChange: vi.fn() },
       ceiling: "full-access" as const,
       nativeConfirmationAvailable: true,
+      onLowerThread: vi.fn(),
       onRaiseThread: vi.fn(),
       onSelect: vi.fn(),
     };
@@ -78,6 +81,7 @@ describe("CodeAccessPicker", () => {
       <CodeAccessPicker
         ceiling="full-access"
         nativeConfirmationAvailable
+        onLowerThread={vi.fn()}
         onRaiseThread={vi.fn()}
         onSelect={onSelect}
         value="full-access"
@@ -97,6 +101,7 @@ describe("CodeAccessPicker", () => {
       <CodeAccessPicker
         ceiling="approval-gated"
         nativeConfirmationAvailable
+        onLowerThread={vi.fn()}
         onRaiseThread={onRaiseThread}
         onSelect={onSelect}
         value="approval-gated"
@@ -118,6 +123,7 @@ describe("CodeAccessPicker", () => {
       <CodeAccessPicker
         ceiling="plan"
         nativeConfirmationAvailable
+        onLowerThread={vi.fn()}
         onRaiseThread={onRaiseThread}
         onSelect={vi.fn()}
         value="plan"
@@ -140,6 +146,7 @@ describe("CodeAccessPicker", () => {
       <CodeAccessPicker
         ceiling="approval-gated"
         nativeConfirmationAvailable={false}
+        onLowerThread={vi.fn()}
         onRaiseThread={vi.fn()}
         onSelect={vi.fn()}
         value="approval-gated"
@@ -150,5 +157,55 @@ describe("CodeAccessPicker", () => {
     expect(
       await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
     ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("offers to lower a Full access thread back to Ask for approvals", async () => {
+    const user = userEvent.setup();
+    const onLowerThread = vi.fn();
+    const onSelect = vi.fn();
+    const onRaiseThread = vi.fn();
+    render(
+      <CodeAccessPicker
+        ceiling="full-access"
+        nativeConfirmationAvailable
+        onLowerThread={onLowerThread}
+        onRaiseThread={onRaiseThread}
+        onSelect={onSelect}
+        value="full-access"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Lower thread · Ask for approvals" }),
+    );
+    expect(onLowerThread).toHaveBeenCalledWith("approval-gated");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onRaiseThread).not.toHaveBeenCalled();
+  });
+
+  it("does not offer to lower an approval-gated or Plan thread", async () => {
+    const user = userEvent.setup();
+    const props = {
+      nativeConfirmationAvailable: true,
+      onLowerThread: vi.fn(),
+      onRaiseThread: vi.fn(),
+      onSelect: vi.fn(),
+    };
+    const { rerender } = render(
+      <CodeAccessPicker {...props} ceiling="approval-gated" value="approval-gated" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Lower thread · Ask for approvals" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+
+    rerender(<CodeAccessPicker {...props} ceiling="plan" value="plan" />);
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Lower thread · Ask for approvals" }),
+    ).not.toBeInTheDocument();
   });
 });
