@@ -78,7 +78,102 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Appearance",
       scope: "app",
       keywords:
-        "appearance theme sidebar glass translucency layout width material background mode switcher reading transcript",
+        "appearance theme glass translucency material background typography font reading transcript accessibility",
+      settings: [
+        {
+          id: settingId("sidebar-material"),
+          label: "Glass",
+          scope: "app",
+          keywords:
+            "glass translucent translucency sidebar material vibrancy subtle strong frosted system opaque",
+        },
+        {
+          id: settingId("glass-tint"),
+          label: "Glass tint",
+          scope: "app",
+          keywords: "glass tint opacity transparency see-through darkness sidebar gutters vibrancy",
+        },
+        {
+          id: settingId("workspace-material"),
+          label: "Glass cards",
+          scope: "app",
+          keywords: "translucent workspace window material vibrancy glass system opaque",
+        },
+        {
+          id: settingId("transcript-text-size"),
+          label: "Transcript text size",
+          scope: "app",
+          keywords: "transcript conversation text font size small medium large",
+        },
+        {
+          id: settingId("transcript-width"),
+          label: "Transcript width",
+          scope: "app",
+          keywords: "transcript conversation composer width narrow medium wide centered",
+        },
+        {
+          id: settingId("app-background"),
+          label: "Background",
+          scope: "app",
+          keywords:
+            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
+        },
+        {
+          id: settingId("appearance.scheme.light-preset"),
+          label: "Light preset",
+          scope: "app",
+          keywords: "color colour scheme system light dark theme mode preset octant palette",
+        },
+        {
+          id: settingId("appearance.scheme.dark-preset"),
+          label: "Dark preset",
+          scope: "app",
+          keywords: "color colour scheme system light dark theme mode preset octant palette",
+        },
+        {
+          id: settingId("appearance.typography.ui.family"),
+          label: "Interface font",
+          scope: "app",
+          keywords: "interface typography font family size prose ui",
+        },
+        {
+          id: settingId("appearance.typography.editor.family"),
+          label: "Code font",
+          scope: "app",
+          keywords: "code editor typography font line height ligatures",
+        },
+        {
+          id: settingId("appearance.typography.terminal.family"),
+          label: "Terminal font",
+          scope: "app",
+          keywords: "terminal typography font line height ligatures",
+        },
+        {
+          id: settingId("appearance.accessibility.increased-contrast"),
+          label: "Accessibility",
+          scope: "app",
+          keywords: "accessibility increased contrast reduced motion reduced transparency",
+        },
+        {
+          id: settingId("appearance.theme-import-export"),
+          label: "Import or export theme",
+          scope: "app",
+          keywords: "theme json import export vscode safe",
+        },
+        {
+          id: settingId("reset-appearance"),
+          label: "Reset appearance",
+          scope: "app",
+          keywords: "reset appearance defaults theme restore",
+        },
+      ],
+    },
+    {
+      id: "sidebar",
+      label: "Sidebar",
+      scope: "app",
+      keywords:
+        "sidebar width destinations more row mode switcher provider icons thread rows background layout",
       settings: [
         {
           id: settingId("sidebar-width"),
@@ -99,35 +194,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "sidebar more row hidden menu destinations account customize reveal expand",
         },
         {
-          id: settingId("sidebar-material"),
-          label: "Glass",
-          scope: "app",
-          keywords:
-            "glass translucent translucency sidebar material vibrancy subtle strong frosted system opaque",
-        },
-        {
-          id: settingId("workspace-material"),
-          label: "Glass cards",
-          scope: "app",
-          keywords: "translucent workspace window material vibrancy glass system opaque",
-        },
-        {
           id: settingId("mode-switcher"),
           label: "Mode switcher",
           scope: "app",
           keywords: "mode switcher compact buttons dropdown sidebar navigation",
-        },
-        {
-          id: settingId("transcript-text-size"),
-          label: "Transcript text size",
-          scope: "app",
-          keywords: "transcript conversation text font size small medium large",
-        },
-        {
-          id: settingId("transcript-width"),
-          label: "Transcript width",
-          scope: "app",
-          keywords: "transcript conversation composer width narrow medium wide centered",
         },
         {
           id: settingId("thread-provider-icons"),
@@ -200,61 +270,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Sidebar background",
           scope: "app",
           keywords: "sidebar background preset gradient overlay color opacity",
-        },
-        {
-          id: settingId("app-background"),
-          label: "Background",
-          scope: "app",
-          keywords:
-            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
-        },
-        {
-          id: settingId("appearance.scheme.light-preset"),
-          label: "Light preset",
-          scope: "app",
-          keywords: "color colour scheme system light dark theme mode preset octant palette",
-        },
-        {
-          id: settingId("appearance.scheme.dark-preset"),
-          label: "Dark preset",
-          scope: "app",
-          keywords: "color colour scheme system light dark theme mode preset octant palette",
-        },
-        {
-          id: settingId("appearance.typography.ui.family"),
-          label: "Interface font",
-          scope: "app",
-          keywords: "interface typography font family size prose ui",
-        },
-        {
-          id: settingId("appearance.typography.editor.family"),
-          label: "Code font",
-          scope: "app",
-          keywords: "code editor typography font line height ligatures",
-        },
-        {
-          id: settingId("appearance.typography.terminal.family"),
-          label: "Terminal font",
-          scope: "app",
-          keywords: "terminal typography font line height ligatures",
-        },
-        {
-          id: settingId("appearance.accessibility.increased-contrast"),
-          label: "Accessibility",
-          scope: "app",
-          keywords: "accessibility increased contrast reduced motion reduced transparency",
-        },
-        {
-          id: settingId("appearance.theme-import-export"),
-          label: "Import or export theme",
-          scope: "app",
-          keywords: "theme json import export vscode safe",
-        },
-        {
-          id: settingId("reset-appearance"),
-          label: "Reset appearance",
-          scope: "app",
-          keywords: "reset appearance defaults theme restore",
         },
       ],
     },

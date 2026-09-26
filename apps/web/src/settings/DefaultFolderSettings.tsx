@@ -14,6 +14,15 @@ export interface DefaultFolderSettingsProps {
 }
 
 /**
+ * The folder always sits inside the home folder, and the home prefix is what
+ * pushed its own name past the ellipsis ("/Users/henrik/Documents/Oc…"). Shown
+ * home-relative the part that differs fits; the full path stays in the title.
+ */
+function homeRelativePath(folder: string): string {
+  return folder.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
+}
+
+/**
  * Where threads started without a Project, and the files Octant produces,
  * live. The host judges the path — it has to sit inside the home folder — so
  * a refused path stays in the field with the reason beside it rather than
@@ -32,7 +41,7 @@ export function DefaultFolderSettings(props: DefaultFolderSettingsProps) {
     return (
       <div className="default-folder-settings">
         <code className="default-folder-settings__path" title={props.folder}>
-          {props.folder ?? "Not set"}
+          {props.folder === undefined ? "Not set" : homeRelativePath(props.folder)}
         </code>
         <OctantButton onClick={() => setEditing(true)} size="sm" type="button" variant="secondary">
           Change

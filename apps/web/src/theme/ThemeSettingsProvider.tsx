@@ -1,4 +1,4 @@
-import type { ThemeSettings } from "@octant/contracts/theme";
+import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import { getThemePreset, MAX_THEME_PATTERN_INKS } from "@octant/theme";
@@ -44,10 +44,23 @@ export function ThemeSettingsProvider(props: {
         root.style.setProperty(`--octant-${alias}`, color);
       }
       if (role === "sidebar" || role === "workspace") {
+        const defaults = GLASS_TINT_DEFAULTS[resolved.mode];
+        // A tint the person set replaces every level's for the sidebar and
+        // the gutters it shares a back with; glass cards keep their own.
+        // Increased contrast keeps enough of the colour under sidebar text.
+        const chosen = role === "sidebar" ? accessible.glassTint : undefined;
+        const tint =
+          chosen === undefined
+            ? undefined
+            : accessible.increasedContrast
+              ? Math.max(chosen, 80)
+              : chosen;
         const opacity =
-          resolved.mode === "light"
-            ? { regular: 86, subtle: 78, strong: 62 }
-            : { regular: 80, subtle: 58, strong: 32 };
+          tint !== undefined
+            ? { regular: tint, subtle: tint, strong: tint }
+            : resolved.mode === "light"
+              ? { regular: 86, ...defaults }
+              : { regular: 80, ...defaults };
         root.style.setProperty(
           `--octant-${role}-translucent`,
           `color-mix(in srgb, ${color} ${opacity.regular}%, transparent)`,

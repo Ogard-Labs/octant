@@ -28,7 +28,7 @@ and color when you create or edit it.
 **Sidebar destinations** controls where navigation destinations live: as a
 sidebar row, under the sidebar's More row, in the account menu, or nowhere.
 Open **Customize sidebar** from the More row or the account menu, or use
-**Settings → Appearance → Sidebar destinations**. Use the visibility control to
+**Settings → Sidebar → Sidebar destinations**. Use the visibility control to
 choose **Always show**, **Menu only** where the destination offers that
 placement, or **Don't show**, and use the chevrons to move it up or down.
 **Reset sidebar destinations** restores the untouched placement and order.
@@ -83,14 +83,19 @@ from the font picker as System interface.
 
 **Glass** is the frosted material behind the sidebar and around the workspace
 cards: **Off** paints it solid, **Subtle** or **Strong** uses the system
-material at that strength. **Glass cards** lets the glass show through the
+material at that strength. **Tint** (0–90%) sets how much colour lies over
+the glass behind the sidebar and around the cards; lower is more see-through,
+and until you move it the slider shows the level's own tint. In the desktop app
+the glass frosts your desktop; with a background shown everywhere it frosts
+that instead. Increased contrast keeps the tint at 80% or more, and Reduced
+transparency makes it solid. **Glass cards** lets the glass show through the
 cards as well. When the material resolves to opaque — for accessibility or
 performance reasons — the interface says so honestly. **Reduced
 Transparency** and **Increased Contrast** resolve the sidebar to opaque.
 
 ### Sidebar background
 
-Under **Background**, the sidebar can use a built-in preset or no background,
+On **Settings → Sidebar**, the sidebar can use a built-in preset or no background,
 with overlay color and opacity. Presets cover gradients, shapes, dev-inspired
 patterns, and subtle ambient textures — all static in V1. **Reduced
 Transparency** disables the background entirely; **Increased Contrast** clamps
@@ -98,27 +103,38 @@ overlay opacity to at least 80%.
 
 ### Background
 
-The app sits on a ground of its own. **Theme pattern** (the default) is an
-ordered-dither cloud drawn from the theme's bounded pattern palette. Most themes
+The app sits on a background of its own, set in three choices.
+
+**Background** is what sits behind Octant. **Dot pattern** (the default) is an
+ordered-dither field drawn from the theme's bounded pattern palette. Most themes
 use the accent alone; Pride uses a six-colour spectrum and Norway uses red,
 white, and blue. The resolved accent remains the first ink, so switching presets
-or overriding the accent recolours the leading ink at once. **Built-in** uses the same still or
-animated first-party image catalog as Zen, with a preview tile for every
-choice. **Photo** prints a picture of yours through the same dither, with the
-cloud over it; upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels, or
-pick one already on this host. The sidebar and the ground share one photo
-library, and a photo in use cannot be deleted. **None** keeps the plain page.
+or overriding the accent recolours the leading ink at once. **Built-in picture**
+uses the same still or animated first-party image catalog as Zen; the current
+picture stands for the set until you choose **Change**. **Your photo** uses a
+picture of yours: upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels,
+or pick one already on this host, and **Photo strength** sets how strongly it
+shows. The sidebar and the background share one photo library, and a photo in
+use cannot be deleted. **None** keeps the plain page.
 
-**Show behind** puts the ground behind the start screens only, where it is
-masked away behind the composer and fades out below it, or behind everything,
+**Effect** prints a picture: **Off** shows it as it is, **Pixelate** draws it in
+square pixels, and **Dither** does that with fewer colours, like a print.
+**Pixel size** (2–16 px) and **Colours** (2–16, fewer is bolder) tune it. An
+animated built-in is printed from its still frame. A photo saved before this
+choice existed keeps its original two-pixel, four-colour dither.
+
+**Motion** is what moves: **Still** holds everything, **Pulse** lets the
+background slowly breathe a little brighter and back, and **Wave** rolls soft
+bands of dots across it, with **Wave speed**, **Dot strength**, and **Dot
+density**. The dot pattern keeps its dots whatever moves; over a picture they
+are the Wave.
+
+**Show behind** puts the background behind the start screens only, where it is
+masked away behind the composer and fades out below it, or behind every page,
 where the workspace stays transparent over it and transcript responses carry
-their own reading cards; **Cover the sidebar** extends an everything ground
-under the sidebar. **Show pattern** is the direct on/off switch for the cloud,
-while **Pattern opacity**, **Pattern speed**, and **Pattern intensity** remain
-its tuning dials. For a photo, **Dither photo** keeps or removes the
-ordered-dither print treatment and **Photo opacity** dims the image. Reduced
-motion holds the cloud still; Increased contrast turns the ground off; a
-browser without WebGL2 shows a photo but no cloud.
+their own reading cards; **Cover the sidebar** extends it under the sidebar.
+Reduced motion holds everything still; Increased contrast turns the background
+off; a browser without WebGL2 shows a picture but no dots.
 
 ### Zen backgrounds
 
@@ -168,8 +184,9 @@ Type-scale variables travel with the export.
 
 ## Keyboard and navigation
 
-Appearance and layout choices, including the mode switcher presentation, are
-keyboard-navigable. See [Keyboard workflows](/advanced/keyboard-workflows)
+Appearance and Sidebar choices, including the mode switcher presentation, are
+keyboard-navigable. The sidebar's width, destinations, More row, mode switcher,
+provider icons, background, and thread-row details live on **Settings → Sidebar**. See [Keyboard workflows](/advanced/keyboard-workflows)
 for navigation and the Zen focus surface.
 
 ## Current status

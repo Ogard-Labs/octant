@@ -611,6 +611,35 @@
   image-rendering: pixelated;
 }
 
+/* Pulse: the picture breathes, a little brighter and a hair larger and back,
+   so the ground feels alive without anything travelling across it. The
+   resolver turns it off under reduced motion; the media query is the
+   second guard for a system preference that changes while the page is up. */
+@keyframes app-backdrop-breathe {
+  0%,
+  100% {
+    filter: brightness(0.9);
+    transform: scale(1);
+  }
+
+  50% {
+    filter: brightness(1.08);
+    transform: scale(1.015);
+  }
+}
+
+.app-backdrop[data-pulse="true"]
+  > :is(.app-backdrop__builtin, .app-backdrop__photo, .app-backdrop__pattern) {
+  animation: app-backdrop-breathe var(--oct-motion-breathe) var(--oct-ease-standard) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop[data-pulse="true"]
+    > :is(.app-backdrop__builtin, .app-backdrop__photo, .app-backdrop__pattern) {
+    animation: none;
+  }
+}
+
 /* Screen lifts the accent out of a dark ground; multiply presses it into a
    light one. Either way the cloud tints the page instead of covering it.
    Both layers take their opacity from the setting, inline. */

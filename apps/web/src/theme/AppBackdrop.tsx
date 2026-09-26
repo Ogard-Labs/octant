@@ -2,8 +2,7 @@ import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import {
   decodePhoto,
-  drawDitheredPhoto,
-  drawPhoto,
+  drawPrinted,
   watchDisplayPixelRatio,
   type DecodedPhoto,
 } from "./appBackdropPhoto";
@@ -112,6 +111,14 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
   const photoId = resolved.kind === "photo" ? resolved.backgroundId : null;
+  // A built-in printed through an effect is drawn on the canvas from its
+  // still frame, like a photo; left plain it stays a CSS image, which keeps
+  // an animated preset moving.
+  const printedBuiltinUrl =
+    resolved.kind === "builtin" && resolved.effect.kind !== "none"
+      ? resolved.backgroundStillUrl
+      : null;
+  const pictureSource = photoId ?? printedBuiltinUrl;
   const showPattern = resolved.patternEnabled && patternSupported && resolved.patternOpacity > 0;
 
   useEffect(() => {
@@ -155,13 +162,20 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   }, [resolved.patternIntensity]);
 
   useEffect(() => {
-    if (photoId === null) {
+    if (pictureSource === null) {
       setPhoto(null);
       return;
     }
     let cancelled = false;
     let decoded: DecodedPhoto | null = null;
-    fetcher(photoId)
+    const read =
+      photoId !== null
+        ? fetcher(photoId)
+        : fetch(pictureSource).then((response) => {
+            if (!response.ok) throw new Error("The built-in background could not be read.");
+            return response.blob();
+          });
+    read
       .then(decodePhoto)
       .then((result) => {
         if (cancelled) {
@@ -179,7 +193,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       decoded?.release();
       setPhoto(null);
     };
-  }, [fetcher, photoId]);
+  }, [fetcher, photoId, pictureSource]);
 
   useEffect(() => {
     const canvas = photoCanvas.current;
@@ -187,11 +201,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
     const paint = () => {
       const rect = canvas.getBoundingClientRect();
       const viewport = { width: rect.width, height: rect.height };
-      if (resolved.photoDithered) {
-        drawDitheredPhoto(canvas, photo.source, photo.size, viewport);
-      } else {
-        drawPhoto(canvas, photo.source, photo.size, viewport);
-      }
+      drawPrinted(canvas, photo.source, photo.size, viewport, resolved.effect);
     };
     paint();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(paint);
@@ -201,11 +211,12 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       observer?.disconnect();
       stopPixelRatio();
     };
-  }, [photo, resolved.photoDithered]);
+  }, [photo, resolved.effect.kind, resolved.effect.cell, resolved.effect.levels]);
 
   if (!active) return null;
 
-  const builtinUrl = resolved.kind === "builtin" ? resolved.backgroundUrl : null;
+  const builtinUrl =
+    resolved.kind === "builtin" && printedBuiltinUrl === null ? resolved.backgroundUrl : null;
 
   return (
     <div
@@ -214,6 +225,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       data-animated={resolved.animated ? "true" : "false"}
       data-octant-app-backdrop={resolved.kind}
       data-placement={placement}
+      data-pulse={resolved.pulse ? "true" : "false"}
     >
       {builtinUrl === null ? null : (
         <div
@@ -223,13 +235,16 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           style={{ backgroundImage: `url("${builtinUrl}")` }}
         />
       )}
-      {photoId === null ? null : (
+      {pictureSource === null ? null : (
         <canvas
           className="app-backdrop__photo"
-          data-dithered={resolved.photoDithered ? "true" : "false"}
+          data-dithered={resolved.effect.kind === "none" ? "false" : "true"}
+          data-effect={resolved.effect.kind}
           data-photo-ready={photo !== null}
           ref={photoCanvas}
-          style={{ opacity: resolved.photoOpacity }}
+          // A photo sits under the page at its own strength; a built-in fills
+          // the ground the way its plain CSS image does.
+          style={{ opacity: photoId === null ? 1 : resolved.photoOpacity }}
         />
       )}
       {showPattern ? (

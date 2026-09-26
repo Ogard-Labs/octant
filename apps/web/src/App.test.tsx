@@ -2128,7 +2128,7 @@ describe("App", () => {
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "300px" });
   });
 
-  it("hides and restores a sidebar thread-row property through Appearance settings", async () => {
+  it("hides and restores a sidebar thread-row property through Sidebar settings", async () => {
     const user = userEvent.setup();
     const shellApi = client();
     const codeApi = codes();
@@ -2161,11 +2161,11 @@ describe("App", () => {
     expect(within(row).getByText("feature/sidebar")).toBeVisible();
 
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
-    const branchSwitch = await screen.findByRole("switch", {
+    fireEvent.click(await screen.findByRole("button", { name: "Sidebar" }));
+    const branchSwitch = await screen.findByRole("checkbox", {
       name: "Branch on Projects rows",
     });
-    expect(branchSwitch).toHaveAttribute("aria-checked", "true");
+    expect(branchSwitch).toBeChecked();
     await user.click(branchSwitch);
     const defaults = settingsPastFirstRun().sidebarRowProperties;
     expect(shellApi.execute).toHaveBeenCalledWith(
@@ -2192,9 +2192,9 @@ describe("App", () => {
     // The saved choice comes back with the page, so the switch is a persisted
     // setting rather than renderer state that dies with the surface.
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
-    const saved = await screen.findByRole("switch", { name: "Branch on Projects rows" });
-    expect(saved).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(await screen.findByRole("button", { name: "Sidebar" }));
+    const saved = await screen.findByRole("checkbox", { name: "Branch on Projects rows" });
+    expect(saved).not.toBeChecked();
     await user.click(saved);
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     await waitFor(() =>
@@ -4186,6 +4186,9 @@ describe("App", () => {
     // Search "mode switcher" and deep-link to the control, then mutate it.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "mode switcher");
     const modeListbox = await screen.findByRole("listbox", { name: "Settings search results" });
+    // The list debounces, so wait for this search's own result rather than
+    // acting on the one the previous search left behind.
+    await within(modeListbox).findByRole("option", { name: /Mode switcher/ });
     modeListbox.focus();
     fireEvent.keyDown(modeListbox, { key: "ArrowDown" });
     fireEvent.keyDown(modeListbox, { key: "Enter" });

@@ -165,8 +165,15 @@ behaves for you), Modes (each mode's defaults), Models (which provider or model
 answers each job), Agents (what a running agent may do), Integrations, and
 System (the running host, its data, remote access, and usage). A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
-to its old page. Rows in Settings are `SettingRow`; rows everywhere else are
-`surface-row`. Both draw the same hairline.
+to its old page. Personal holds Appearance (theme, window glass, background,
+text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
+background, and a thread-row grid of detail by list); Appearance had grown to
+twelve sections. A page names its scope once, under its title, and a row names
+its own only when it differs. Settings folds long choices it does not need
+open: the built-in background pictures sit behind the current one and a
+Change action, and the pattern dials appear only while the pattern is drawn.
+Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
+draw the same hairline.
 
 ### Content tabs
 
@@ -217,20 +224,25 @@ discrete stops, and filled range. Explicit model and reasoning choices are remem
 locally for new threads; reasoning is keyed by provider/model and restored only while
 supported. Existing thread selections remain authoritative.
 
-The screen sits on the application ground (0091, 0129): an ordered-dither cloud
-drawn from the theme's bounded pattern palette at one cell per three pixels, one of the
-first-party Zen backgrounds with its still-frame fallback, a person's photo
-printed through the same dither with the cloud over it, or the plain page.
-Behind a start screen the ground is masked away behind the composer and fades
-out below it, so the prompt and the recent-thread list read on the plain
-page. A person may instead put the ground behind everything, sidebar
-included. Conversations soften it beneath one continuous reading background
-so agent replies remain bare prose (0155). The pattern's opacity, speed, and
-intensity and a photo's opacity are dials on the same row. Most presets use the
-resolved accent alone; Pride carries a six-colour spectrum and Norway carries
-red, white, and blue. The semantic accent remains the first ink, so overrides
-still reach the ground. Increased contrast turns the ground off; reduced motion
-holds it still. It is chosen in Settings › Appearance › Background.
+The screen sits on the application ground (0091, 0129), set as three plain
+choices. What: the dot pattern (ordered dither in the theme's bounded pattern
+palette at one cell per three pixels), one of the first-party Zen pictures, a
+person's photo, or the plain page. Effect: a picture is shown as it is,
+pixelated, or dithered, at a chosen pixel size and colour count, and an
+animated picture is printed from its still frame. Motion: still, a slow pulse
+in which the ground breathes a little brighter and larger and back, or a wave
+of soft dither bands rolling across it on a shallow diagonal (the old cloud
+appeared and vanished in blotches; a wave reads as one calm movement). The
+pattern's dots stay whatever moves; over a picture they are the wave. Behind a
+start screen the ground is masked away behind the composer and fades out below
+it, so the prompt and the recent-thread list read on the plain page. A person
+may instead put the ground behind everything, sidebar included. Conversations
+soften it beneath one continuous reading background so agent replies remain
+bare prose (0155). Most presets use the resolved accent alone; Pride carries a
+six-colour spectrum and Norway carries red, white, and blue. The semantic accent
+remains the first ink, so overrides still reach the ground. Increased contrast
+turns the ground off; reduced motion holds it still, pulse included. It is
+chosen in Settings › Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
 carries a soft wash of the page colour that fades out before the edges, and a
 conversation pane's title rail shares the conversation's reading surface, so
@@ -700,7 +712,7 @@ Project; Work and Code call it Recents. Rows are hairline rails, never cards;
 provider marks are fixed-size inline and can be hidden without changing row
 height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
-view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
+view's own choice, edited in Settings › Sidebar › Thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
 rather than left as a gap. The Project tree and the Activity feed draw the same
 row: the provider mark in the icon column every navigation row uses, the title

@@ -1,4 +1,4 @@
-import type { ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
+import type { AppBackgroundEffect, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
 import { getZenBuiltinBackground } from "@octant/contracts/zen";
 import { resolveTypographyProjection } from "@octant/theme/typography";
 
@@ -79,8 +79,16 @@ export interface ResolvedAppBackground {
   readonly backgroundStillUrl: string | null;
   /** Whether the selected built-in asset is allowed to animate. */
   readonly backgroundAnimated: boolean;
-  /** Whether the pattern layer is enabled independent of its opacity dial. */
+  /** Whether the pattern layer is drawn, independent of its opacity dial. */
   readonly patternEnabled: boolean;
+  /** How a picture ground is printed; always `none` for the pattern and the plain page. */
+  readonly effect: {
+    readonly kind: AppBackgroundEffect;
+    readonly cell: number;
+    readonly levels: number;
+  };
+  /** Whether the picture breathes slowly; false whenever motion is held still. */
+  readonly pulse: boolean;
   /** The pattern drifts only while nothing has asked Octant to hold still. */
   readonly animated: boolean;
   /** 0..1, ready for the renderer. */
@@ -106,12 +114,35 @@ export function resolveAppBackground(
   systemPrefersReducedMotion = false,
 ): ResolvedAppBackground {
   const background = settings.appBackground;
+  const picture = background.kind === "builtin" || background.kind === "photo";
+  // Rows written before the effect and motion choices existed read their
+  // older switches: a dithered photo keeps its original two-pixel, four-tone
+  // print, and a ground that drew the pattern keeps drawing it.
+  const legacyPhotoDither =
+    background.effect === undefined && background.kind === "photo" && background.photoDithered;
+  const effect = !picture
+    ? { kind: "none" as const, cell: background.effectCell, levels: background.effectTones }
+    : legacyPhotoDither
+      ? { kind: "dither" as const, cell: 2, levels: 4 }
+      : {
+          kind: background.effect ?? ("none" as const),
+          cell: background.effectCell,
+          levels: background.effectTones,
+        };
+  const motion = background.motion ?? (background.patternEnabled ? "wave" : "still");
+  // The theme pattern is the picture itself, so it is drawn whatever moves;
+  // over a photo or a built-in it is the Wave motion.
+  const patternDrawn =
+    background.kind === "theme"
+      ? background.motion !== undefined || background.patternEnabled
+      : motion === "wave";
   const tuning = {
-    patternEnabled: background.patternEnabled,
+    patternEnabled: patternDrawn,
+    effect,
     patternOpacity: background.patternOpacity / 100,
     patternSpeed: background.patternSpeed / 50,
     patternIntensity: background.patternIntensity / 100,
-    photoDithered: background.photoDithered,
+    photoDithered: effect.kind === "dither",
     photoOpacity: background.photoOpacity / 100,
     scope: background.scope,
     coversSidebar: background.scope === "everywhere" && background.coversSidebar,
@@ -125,10 +156,17 @@ export function resolveAppBackground(
       backgroundStillUrl: null,
       backgroundAnimated: false,
       animated: false,
+      pulse: false,
     };
   }
   const motionAllowed = !settings.reducedMotion && !systemPrefersReducedMotion;
-  const animated = background.patternEnabled && motionAllowed && background.patternSpeed > 0;
+  // Still and Pulse hold the theme pattern's frame; only Wave drifts it.
+  const animated =
+    patternDrawn &&
+    motionAllowed &&
+    background.patternSpeed > 0 &&
+    (background.kind !== "theme" || background.motion === undefined || motion === "wave");
+  const pulse = motion === "pulse" && motionAllowed;
   if (background.kind === "builtin") {
     const preset = getZenBuiltinBackground(background.presetId);
     const stillUrl = "stillSrc" in preset ? preset.stillSrc : preset.src;
@@ -141,6 +179,7 @@ export function resolveAppBackground(
       backgroundStillUrl: stillUrl,
       backgroundAnimated,
       animated,
+      pulse,
     };
   }
   if (background.kind === "photo") {
@@ -152,6 +191,7 @@ export function resolveAppBackground(
       backgroundStillUrl: null,
       backgroundAnimated: false,
       animated,
+      pulse,
     };
   }
   return {
@@ -162,5 +202,6 @@ export function resolveAppBackground(
     backgroundStillUrl: null,
     backgroundAnimated: false,
     animated,
+    pulse,
   };
 }
