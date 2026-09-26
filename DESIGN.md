@@ -130,9 +130,14 @@ The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
 material (glass, or the opaque sidebar colour when glass is off or unavailable),
 and the primary workspace, the right dock, the bottom panel, and the Settings
-page sit on it as cards: the card radius, one hairline, no shadow, 8px apart,
+page sit on it as cards: the card radius, one hairline, no shadow, 8px apart
+and 8px from every edge, the sidebar's included,
 all in the workspace colour. Reader pages inside a card use that colour too,
-so every card reads the same. A pane header and the dock head share the 38px
+so every card reads the same. Over an application ground the back is laid only
+in the gutters, so the primary card shows the ground clear, dither and all,
+while the sidebar and gutters frost it. The dither itself is cut to the
+primary card's shape: outside the card the picture shows plain, so the card
+keeps an edge even on a start screen whose page is see-through. A pane header and the dock head share the 38px
 title rail, and the card draws the one hairline under both. Below 681px the
 workspace sidebar is an overlay drawer and the frame stays flat; Settings keeps
 its own narrow layout, a drawer with a flat page, below 960px.
