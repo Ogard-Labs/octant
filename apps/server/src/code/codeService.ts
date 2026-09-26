@@ -2017,7 +2017,7 @@ export class CodeService {
         if (event.aggregateVersion !== threadCursor + 1) {
           throw this.#failure("stale", "Code replay requires a snapshot.");
         }
-        const frame = this.#publicFrame(threadId, event);
+        const frame = this.#publicFrame(authenticatedWindowId, threadId, event);
         if (frame !== undefined) {
           threadCursor = event.aggregateVersion;
           yield frame;
@@ -2769,22 +2769,35 @@ export class CodeService {
     });
   }
 
-  #publicFrame(threadId: CodeThreadId, event: EventEnvelope): CodeEventFrame | undefined {
+  #publicFrame(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    event: EventEnvelope,
+  ): CodeEventFrame | undefined {
     if (event.aggregateType !== "code-thread" || String(event.aggregateId) !== String(threadId)) {
       return undefined;
     }
+    // Session grants live outside the journal; frames must match reads.
     if (event.eventName === "code.thread-created@1") {
+      const created = decodeCodeThreadCreated(event.payload);
       return decodeCodeEventFrame({
         threadId,
         sequence: event.aggregateVersion,
-        event: decodeCodeThreadCreated(event.payload),
+        event: {
+          ...created,
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, created.thread),
+        },
       });
     }
     if (event.eventName === "code.thread-updated@1") {
+      const updated = decodeCodeThreadUpdated(event.payload);
       return decodeCodeEventFrame({
         threadId,
         sequence: event.aggregateVersion,
-        event: decodeCodeThreadUpdated(event.payload),
+        event: {
+          ...updated,
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, updated.thread),
+        },
       });
     }
     return undefined;
