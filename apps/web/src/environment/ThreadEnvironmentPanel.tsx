@@ -33,6 +33,8 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   const active = props.active !== false;
   const shown = active && props.open;
   const facts = summaryFacts(props.summary);
+  const headline = headlineFacts(props.summary);
+  const sentence = [props.summary.identity.label, ...facts].join(" · ");
 
   // The dock host can mount after the panel opens, and the dock replaces it
   // whenever it re-keys the tool body — the tool tab and the pane's
@@ -61,17 +63,46 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      <header className="thread-environment-dock__header">
-        {/* The dock strip's tab already says Environment; the rail shows the
-            facts and the heading stays for readers who navigate by heading. */}
+      {/* The dock strip's tab already says Environment; the rail names what the
+          thread works in and the heading stays for readers who navigate by
+          heading. It was one dotted sentence of every fact, which a 320px dock
+          cut off mid-word; the name leads now, then the branch and whether the
+          checkout is clean, and the rest lives in its own section below. */}
+      <header className="thread-environment-dock__header" title={sentence}>
         <h2 className="visually-hidden">Environment</h2>
-        <span>{[props.summary.identity.label, ...facts].join(" · ")}</span>
+        {/* The whole summary stays one sentence for assistive technology;
+            the visible parts are its layout. */}
+        <span className="visually-hidden">{sentence}</span>
+        <span aria-hidden="true" className="thread-environment-dock__name">
+          {props.summary.identity.label}
+        </span>
+        {headline.place === undefined ? null : (
+          <span aria-hidden="true" className="thread-environment-dock__place">
+            {headline.place}
+          </span>
+        )}
+        {props.summary.changes === undefined ? null : (
+          <span
+            aria-hidden="true"
+            className="thread-environment-dock__state"
+            data-state={props.summary.changes}
+          >
+            {props.summary.changes === "dirty" ? "Changes" : "Clean"}
+          </span>
+        )}
       </header>
       <div className="thread-environment-dock__body">{props.children}</div>
     </section>
   );
   const isolated = <DockModuleBoundary>{content}</DockModuleBoundary>;
   return dockHost === null ? isolated : createPortal(isolated, dockHost);
+}
+
+/** The one place fact the header shows beside the name: the branch, or the folder. */
+function headlineFacts(summary: ThreadEnvironmentSummaryFacts): { readonly place?: string } {
+  if (summary.branch !== undefined) return { place: summary.branch };
+  if (summary.identity.detail !== summary.identity.label) return { place: summary.identity.detail };
+  return {};
 }
 
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {

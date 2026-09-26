@@ -43,18 +43,15 @@ export function AgentHierarchyPanel(props: {
       aria-label="Agents hierarchy"
       className={`agent-hierarchy ${props.reconnecting ? "agent-hierarchy--reconnecting" : ""}`}
     >
+      {/* One title and its counts. The head had carried an eyebrow, a
+          second title ("Active / History"), and a line of host vocabulary
+          ("Server-authored child runs only. Posture: ask") above a list that
+          was often empty. */}
       <header className="agent-hierarchy__header">
-        <div>
-          <p className="agent-hierarchy__eyebrow">Agents</p>
-          <h2>Active / History</h2>
-          <p>
-            Server-authored child runs only. Posture: <strong>{model.creationPosture}</strong>
-          </p>
-        </div>
-        <div className="agent-hierarchy__counts" aria-live="polite">
-          <span>{model.activeCount} active</span>
-          <span>{model.historyCount} history</span>
-        </div>
+        <h2>Subagents</h2>
+        <p className="agent-hierarchy__counts" aria-live="polite">
+          {model.activeCount} active · {model.historyCount} done
+        </p>
       </header>
 
       <div className="agent-hierarchy__controls">
@@ -78,14 +75,14 @@ export function AgentHierarchyPanel(props: {
             aria-label="Search child agents"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Filter by task, role, status"
+            placeholder="Search subagents"
           />
         </label>
       </div>
 
       {props.reconnecting ? (
         <p className="agent-hierarchy__banner" role="status">
-          Reconnecting… showing last server-authored hierarchy.
+          Reconnecting… showing the last list the host sent.
         </p>
       ) : null}
 
@@ -127,10 +124,15 @@ export function AgentHierarchyPanel(props: {
                       : { errorMessage: props.conversationError })}
                   />
                 ) : null}
-                <span>usage: {row.usageQuality}</span>
-                {row.routeLabel ? <span>route: {row.routeLabel}</span> : null}
-                {row.routeReason ? <span>{row.routeReason}</span> : null}
-                {row.recoveryReason ? <span>recovery: {row.recoveryReason}</span> : null}
+                {row.routeLabel ? (
+                  <span className="agent-hierarchy__fact">{row.routeLabel}</span>
+                ) : null}
+                {row.routeReason ? (
+                  <span className="agent-hierarchy__fact">{row.routeReason}</span>
+                ) : null}
+                {row.recoveryReason ? (
+                  <span className="agent-hierarchy__fact">{row.recoveryReason}</span>
+                ) : null}
                 {row.needsAcknowledgement ? (
                   <OctantButton
                     type="button"

@@ -259,17 +259,6 @@ export function AgentRunHierarchy(props: {
           {errorMessage}
         </p>
       )}
-      {props.allowCreation ? (
-        <AgentRunCreateForm
-          posture={effectivePosture}
-          submitting={creating}
-          factsStatus={factsStatus}
-          {...(facts === undefined ? {} : { facts })}
-          {...(creationError === undefined ? {} : { errorMessage: creationError })}
-          onRoleChange={setRole}
-          onSubmit={(values) => void createChild(values)}
-        />
-      ) : null}
       <AgentHierarchyPanel
         creationPosture={effectivePosture}
         entries={entries}
@@ -291,6 +280,18 @@ export function AgentRunHierarchy(props: {
           setConversationRunId((current) => (current === runId ? undefined : runId))
         }
       />
+      {/* The list of what is running leads; starting another one follows it. */}
+      {props.allowCreation ? (
+        <AgentRunCreateForm
+          posture={effectivePosture}
+          submitting={creating}
+          factsStatus={factsStatus}
+          {...(facts === undefined ? {} : { facts })}
+          {...(creationError === undefined ? {} : { errorMessage: creationError })}
+          onRoleChange={setRole}
+          onSubmit={(values) => void createChild(values)}
+        />
+      ) : null}
     </>
   );
 }

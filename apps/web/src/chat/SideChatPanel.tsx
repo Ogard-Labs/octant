@@ -90,7 +90,7 @@ export function SideChatPanel(props: SideChatPanelProps) {
         </p>
       </header>
       <p className="side-chat__notice">
-        Ordinary Chat. It reads this thread and cannot steer, approve, or change it.
+        Ask about this thread. It can read it, but can&rsquo;t steer, approve, or change it.
       </p>
       {renderBody(state, props, () => setRetryToken((current) => current + 1))}
     </section>

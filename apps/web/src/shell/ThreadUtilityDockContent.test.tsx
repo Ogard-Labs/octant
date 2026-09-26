@@ -95,7 +95,7 @@ describe("thread utility dock content", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent(/Loading Agents/i);
     expect(
-      await screen.findByRole("heading", { name: "Active / History" }, { timeout: 10_000 }),
+      await screen.findByRole("heading", { name: "Subagents" }, { timeout: 10_000 }),
     ).toBeVisible();
     expect(
       await screen.findByRole("form", { name: "Create subagent" }, { timeout: 10_000 }),
@@ -161,9 +161,9 @@ describe("thread utility dock content", () => {
         surface="agents"
       />,
     );
-    expect(await screen.findAllByText(/posture is Off/i, {}, { timeout: 10_000 })).not.toHaveLength(
-      0,
-    );
+    expect(
+      await screen.findAllByText(/turned off in Settings/i, {}, { timeout: 10_000 }),
+    ).not.toHaveLength(0);
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
   });

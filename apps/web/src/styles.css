@@ -2911,27 +2911,62 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .thread-environment-dock {
   font-family: var(--oct-font-display);
 }
+/* Name, then the branch (or folder), then whether the checkout is clean:
+   the name keeps its width, the place gives way first, and the state is a
+   small pill that never wraps. */
 .thread-environment-dock__header {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  min-height: 40px;
+  align-items: center;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2) var(--oct-space-4);
+  padding: 0 var(--oct-space-4);
   border-bottom: 1px solid var(--oct-hairline);
 }
-.thread-environment-dock__header h2 {
-  margin: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-}
-.thread-environment-dock__header span {
+.thread-environment-dock__name,
+.thread-environment-dock__place {
   min-width: 0;
   overflow: hidden;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.thread-environment-dock__name {
+  flex: 0 1 auto;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-environment-dock__place {
+  flex: 0 10 auto;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock__state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+/* A dot in the ink the rail already uses for the same idea: added lines for
+   uncommitted work, a quiet mark for a clean checkout. */
+.thread-environment-dock__state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+  opacity: 0.6;
+}
+.thread-environment-dock__state[data-state="dirty"] {
+  color: var(--oct-fg-2);
+}
+.thread-environment-dock__state[data-state="dirty"]::before {
+  background: var(--oct-success-fg);
+  opacity: 1;
 }
 .thread-environment-dock__body {
   display: grid;
@@ -2946,25 +2981,38 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .environment-checkout {
   min-width: 0;
 }
-.environment-quick-action {
+.environment-checkout__actions {
   display: flex;
-  width: 100%;
-  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: var(--oct-space-2);
-  min-height: 32px;
-  padding: 0;
-  font-weight: var(--oct-weight-regular);
+  padding: 0 0 var(--oct-space-3);
 }
-.environment-quick-action__detail {
+/* A section with one fact and no body: the same 32px row, icon, and title a
+   group header uses, with its state or its one action at the trailing edge. */
+.environment-row {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+.environment-row__icon {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+.environment-row__title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+.environment-row__detail {
   margin-inline-start: auto;
-  color: var(--oct-meta);
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
-.environment-section-label {
-  margin: 0 0 6px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-regular);
+.environment-row__action {
+  margin-inline-start: auto;
 }
 .environment-changes-action {
   min-height: 28px;

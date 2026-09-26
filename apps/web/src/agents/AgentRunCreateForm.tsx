@@ -62,7 +62,7 @@ export function AgentRunCreateForm(props: {
   if (props.factsStatus === "loading" && props.facts === undefined) {
     return (
       <p className="agent-run-create-form__disabled" role="status">
-        Loading server-derived child facts…
+        Checking what a subagent can use here…
       </p>
     );
   }
@@ -84,7 +84,7 @@ export function AgentRunCreateForm(props: {
       <h3>New subagent</h3>
       {props.posture === "ask" ? (
         <p className="agent-run-create-form__hint">
-          Creation posture is Ask: submitting this form is the explicit confirmation.
+          Nothing starts until you create it; that is the confirmation.
         </p>
       ) : null}
       {props.errorMessage === undefined ? null : (
@@ -135,62 +135,68 @@ export function AgentRunCreateForm(props: {
   );
 }
 
+/** What the subagent may do, in the words the access menus use. */
+function accessLabel(authority: AgentRunControlResolvedFacts["authority"]): string {
+  const policy =
+    authority.executionPolicy === "plan"
+      ? "Read only"
+      : authority.executionPolicy === "approval-gated"
+        ? "Asks first"
+        : authority.executionPolicy === "auto-accept-edits"
+          ? "Edits without asking"
+          : "Full access";
+  const reach = [
+    authority.filesystem ? "files" : undefined,
+    authority.shell ? "commands" : undefined,
+    authority.git ? "Git" : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return reach.length === 0 ? policy : `${policy} · ${reach.join(", ")}`;
+}
+
+/**
+ * What the host resolved for a new subagent, folded under one line naming the
+ * model and the workspace. It had been a second card of raw identifiers
+ * (Project and provider ids, policy keys) open under every form.
+ */
 function ResolvedFacts(props: { readonly facts: AgentRunControlResolvedFacts }) {
   const facts = props.facts;
+  const runsIn =
+    facts.executionKind === "provider-native" ? "The provider itself" : "Octant-managed";
   return (
-    <section aria-label="Resolved child facts" className="agent-run-create-form__facts">
-      <h4>Resolved by the host</h4>
-      <dl>
-        <div>
-          <dt>Mode</dt>
-          <dd>{facts.mode}</dd>
-        </div>
-        {facts.projectId === undefined ? null : (
+    <details className="agent-run-create-form__facts-disclosure">
+      <summary>
+        Runs on {String(facts.modelId)} · {factLabel(facts.workspaceKind)}
+      </summary>
+      <section aria-label="Resolved child facts" className="agent-run-create-form__facts">
+        <dl>
           <div>
-            <dt>Project</dt>
-            <dd>{String(facts.projectId)}</dd>
+            <dt>Model</dt>
+            <dd>
+              {String(facts.modelId)}
+              {facts.reasoning === undefined ? "" : ` · ${facts.reasoning}`}
+            </dd>
           </div>
-        )}
-        <div>
-          <dt>Provider</dt>
-          <dd>{String(facts.providerInstanceId)}</dd>
-        </div>
-        <div>
-          <dt>Model</dt>
-          <dd>{String(facts.modelId)}</dd>
-        </div>
-        {facts.reasoning === undefined ? null : (
           <div>
-            <dt>Reasoning</dt>
-            <dd>{facts.reasoning}</dd>
+            <dt>Workspace</dt>
+            <dd>{factLabel(facts.workspaceKind)}</dd>
           </div>
+          <div>
+            <dt>Access</dt>
+            <dd>{accessLabel(facts.authority)}</dd>
+          </div>
+          <div>
+            <dt>Runs in</dt>
+            <dd>{runsIn}</dd>
+          </div>
+        </dl>
+        {facts.nativeFallbackReason === undefined ? null : (
+          // The host's reason code stays out of the sentence; it names a
+          // capability check, not something the person can act on.
+          <p className="agent-run-create-form__hint" role="status">
+            The provider can&rsquo;t run this subagent natively, so Octant runs it instead.
+          </p>
         )}
-        <div>
-          <dt>Workspace</dt>
-          <dd>{factLabel(facts.workspaceKind)}</dd>
-        </div>
-        <div>
-          <dt>Maximum authority</dt>
-          <dd>
-            {facts.authority.executionPolicy}
-            {facts.authority.filesystem ? " · filesystem" : ""}
-            {facts.authority.shell ? " · shell" : ""}
-            {facts.authority.git ? " · git" : ""}
-          </dd>
-        </div>
-        <div>
-          <dt>Execution</dt>
-          <dd>
-            {facts.executionKind === "provider-native" ? "Provider-native" : "Octant-managed"}
-          </dd>
-        </div>
-      </dl>
-      {facts.nativeFallbackReason === undefined ? null : (
-        <p className="agent-run-create-form__hint" role="status">
-          Native execution is ineligible ({facts.nativeFallbackReason}). This child will run as
-          Octant-managed.
-        </p>
-      )}
-    </section>
+      </section>
+    </details>
   );
 }

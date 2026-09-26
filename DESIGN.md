@@ -852,9 +852,14 @@ for another subject never makes unavailable chrome visible.
 
 Environment is a right-dock tool, opened from the dock's tab strip or Add tool
 and nowhere else; the title band carries no second Environment button. Its
-header names the thread's identity and facts (branch, clean or dirty, working
-folder, running servers), and its body is a definition list of git facts,
-row-styled actions, and collapsible groups on the dock's own ground. It summarizes Project, branch, clean/dirty state, working folder,
+header shows the name, the branch (or folder), and a clean or changed pill on
+one line, with the full summary (working folder, running servers) kept as one
+sentence for assistive technology; its body is a definition list of git facts,
+Commit or push and Create pull request as two small buttons side by side, and
+collapsible groups on the dock's own ground. Every section shares one 32px
+head: Computer use is a single row with its state or its one action trailing;
+Usage is a group whose head carries a compact token total and Details, with
+label-and-figure rows and a one-line token ceiling form rather than tiles. It summarizes Project, branch, clean/dirty state, working folder,
 changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
 model, and retained final response when authoritative. It stays flat on the dock's own background, with no surrounding card. Checkout

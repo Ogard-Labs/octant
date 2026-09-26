@@ -625,7 +625,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
     expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
     expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
-    expect(cssRule(".thread-environment-dock__header span")).toContain("color: var(--oct-muted);");
+    expect(cssRule(".thread-environment-dock__place", 1)).toContain("color: var(--oct-muted);");
     expect(cssRule(".thread-environment-dock__body")).toContain("gap: 0;");
     expect(styles).not.toContain(".thread-environment-summary");
     expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(

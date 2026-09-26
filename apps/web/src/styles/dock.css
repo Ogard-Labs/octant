@@ -160,117 +160,93 @@
   gap: var(--oct-space-2);
 }
 
-/* "Current work" is a section label over a hairline, the head every list
-   surface gives a group, with its one line of help under it. */
+/* One left edge for everything in the launcher: the title, the group labels,
+   and the row icons all start 9px in (the rows' 1px ghost border plus 8px),
+   so nothing steps in or out down the column. */
 .dock-work-map__header {
-  display: grid;
-  gap: 2px;
-  padding: 0 10px 10px;
-  /* The rows below are buttons, and the ghost recipe gives each a 1px
-     transparent border. Carry the same border here so the section label
-     starts on the pixel the tool names start on, not 1px to their left. */
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  padding: 0 var(--oct-space-2);
   border-inline: 1px solid transparent;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
 .dock-work-map__header h2,
-.dock-work-map__header p,
 .dock-work-map__empty {
   margin: 0;
 }
 
 .dock-work-map__header h2 {
-  color: var(--oct-muted);
+  color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-snug);
+  font-weight: var(--oct-weight-medium);
   line-height: 1.3;
 }
 
-.dock-work-map__header p,
 .dock-work-map__empty {
+  padding: 0 var(--oct-space-2);
+  border-inline: 1px solid transparent;
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
 }
 
-.dock-work-map__empty {
-  padding: 0 10px;
-  border-inline: 1px solid transparent;
-}
-
 .dock-work-map__groups {
   display: grid;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-2);
 }
 
 .dock-work-map__list {
   display: grid;
-  gap: 1px;
+  gap: 0;
 }
 
-/* Inset to the row icons' edge (a row's 1px ghost border plus its padding),
-   within a pixel, on the spacing scale. */
 .dock-work-map__group-label {
+  display: flex;
+  min-height: 24px;
+  align-items: flex-end;
   margin: 0;
-  padding: 0 var(--oct-space-3) var(--oct-space-1);
+  padding: 0 var(--oct-space-2) var(--oct-space-1);
+  border-inline: 1px solid transparent;
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-regular);
   line-height: 1.3;
 }
 
-/* A launcher row: a 16px tool icon, the tool's name, and up to two lines saying
-   what it opens. The name and its description need about 42px between them,
-   so the row is sized by what it holds; the button recipe's own `height`
-   would otherwise clamp it to 44px, spilling the description past the hover
-   fill and pushing the icon 6px below the row's centre. */
+/* A launcher row: the tool's icon and its name on one 32px line. */
 .dock-work-map__item {
-  display: grid;
-  height: auto;
-  min-height: 44px;
-  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr);
+  display: flex;
+  height: 32px;
   align-items: center;
-  justify-content: stretch;
-  gap: 10px;
-  padding: 6px 10px;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
+  font-weight: var(--oct-weight-regular);
   text-align: left;
 }
 
 .dock-work-map__item > svg {
+  flex: 0 0 auto;
   width: var(--oct-icon-md);
   height: var(--oct-icon-md);
+  color: var(--oct-muted);
 }
 
-.dock-work-map__copy {
-  display: grid;
+.dock-work-map__name {
   min-width: 0;
-  gap: 2px;
-}
-
-.dock-work-map__copy strong {
   overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dock-work-map__copy strong {
+.dock-work-map__item:hover .dock-work-map__name {
   color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
-}
-
-.dock-work-map__copy small {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
-  font-weight: 400;
-  white-space: normal;
 }
 
 .right-utility-dock__tool[hidden] {
@@ -415,6 +391,26 @@
 .right-utility-dock__tool .side-chat__notice {
   margin: 0;
   padding: var(--oct-space-2) var(--oct-space-3) 0;
+}
+
+/* The side conversation's own thread menu joins the Side Chat rail at its
+   trailing edge. Left in the embedded chat's header, it sat alone on a row of
+   its own between the notice and the conversation. */
+.right-utility-dock__tool .side-chat {
+  position: relative;
+}
+
+.right-utility-dock__tool .side-chat .chat-workspace__header {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: var(--oct-space-2);
+  display: flex;
+  height: var(--oct-title-rail-h);
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .bottom-utility-panel {

@@ -87,9 +87,7 @@ describe("AgentRunHierarchy", () => {
         parentThreadId={parentThreadId}
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Active / History" })).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(requestRun).not.toHaveBeenCalled();
   });
@@ -129,9 +127,7 @@ describe("AgentRunHierarchy", () => {
     render(
       <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="ask" />,
     );
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Active / History" })).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
     await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
@@ -157,7 +153,7 @@ describe("AgentRunHierarchy", () => {
       />,
     );
     await waitFor(() => expect(screen.getByRole("heading")).toBeVisible());
-    expect(screen.getAllByText(/posture is Off/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/turned off in Settings/i).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
   });
 

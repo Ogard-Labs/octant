@@ -78,7 +78,7 @@ describe("AgentRunCreateForm", () => {
     expect(facts).toHaveTextContent("Research-only virtual workspace");
     expect(facts).toHaveTextContent("gpt-4o");
     expect(facts).toHaveTextContent("Octant-managed");
-    expect(screen.getByRole("status")).toHaveTextContent(/Native execution is ineligible/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/can.t run this subagent natively/i);
   });
 
   it("offers Implement and Review for Code and shows an isolated worktree", async () => {
@@ -124,7 +124,7 @@ describe("AgentRunCreateForm", () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.getByText(/explicit confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing starts until you create it/i)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Posture rejected.");
   });
 

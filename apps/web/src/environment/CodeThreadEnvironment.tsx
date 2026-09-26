@@ -202,27 +202,28 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {...(props.onOpenChanges === undefined ? {} : { onOpenChanges: props.onOpenChanges })}
             status={controller.status}
           />
-          {props.onOpenGit === undefined ? null : (
-            <OctantButton
-              className="environment-quick-action"
-              onClick={props.onOpenGit}
-              variant="ghost"
-              type="button"
-            >
-              <GitCommitHorizontal aria-hidden="true" size={16} />
-              <span>Commit or push</span>
-            </OctantButton>
-          )}
-          {props.onCreatePullRequest === undefined ? null : (
-            <OctantButton
-              className="environment-quick-action"
-              onClick={props.onCreatePullRequest}
-              variant="ghost"
-              type="button"
-            >
-              <GitPullRequest aria-hidden="true" size={16} />
-              <span>Create pull request</span>
-            </OctantButton>
+          {props.onOpenGit === undefined && props.onCreatePullRequest === undefined ? null : (
+            // The two things a checkout's facts lead to, side by side under
+            // them; as full-width rows they read as two more facts.
+            <div className="environment-checkout__actions">
+              {props.onOpenGit === undefined ? null : (
+                <OctantButton onClick={props.onOpenGit} size="sm" type="button" variant="outline">
+                  <GitCommitHorizontal aria-hidden="true" size={14} />
+                  <span>Commit or push</span>
+                </OctantButton>
+              )}
+              {props.onCreatePullRequest === undefined ? null : (
+                <OctantButton
+                  onClick={props.onCreatePullRequest}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <GitPullRequest aria-hidden="true" size={14} />
+                  <span>Create pull request</span>
+                </OctantButton>
+              )}
+            </div>
           )}
         </section>
         {props.deliveryOutcome === undefined ||

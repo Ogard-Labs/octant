@@ -15,24 +15,28 @@ export function ThreadActivityEnvironment() {
   const preview = useContext(ThreadActivityPreviewContext);
   if (preview === null) return null;
   const action = preview.hidden ? "Show" : "Hide";
+  // One row in the rail's rhythm: what it is on the left, what it is doing on
+  // the right. It had been a section label over a full-width button that sat
+  // greyed out for every thread with no session, which read as broken.
   return (
-    <section aria-label="Computer use" className="environment-activity">
-      <h3 className="environment-section-label">Computer use</h3>
-      <OctantButton
-        aria-label={`${action} Picture in Picture`}
-        aria-expanded={preview.available && !preview.hidden}
-        className="environment-quick-action"
-        disabled={!preview.available}
-        onClick={() => preview.setHidden(!preview.hidden)}
-        type="button"
-        variant="ghost"
-      >
-        <PictureInPicture2 aria-hidden="true" size={16} />
-        <span>Picture in Picture</span>
-        <span className="environment-quick-action__detail">
-          {preview.available ? action : "No active session"}
-        </span>
-      </OctantButton>
+    <section aria-label="Computer use" className="environment-row environment-activity">
+      <PictureInPicture2 aria-hidden="true" className="environment-row__icon" size={14} />
+      <h3 className="environment-row__title">Computer use</h3>
+      {preview.available ? (
+        <OctantButton
+          aria-expanded={!preview.hidden}
+          aria-label={`${action} Picture in Picture`}
+          className="environment-row__action"
+          onClick={() => preview.setHidden(!preview.hidden)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {action} preview
+        </OctantButton>
+      ) : (
+        <span className="environment-row__detail">No active session</span>
+      )}
     </section>
   );
 }

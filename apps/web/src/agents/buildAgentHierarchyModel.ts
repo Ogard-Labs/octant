@@ -115,10 +115,10 @@ export function buildAgentHierarchyModel(input: {
       ? {
           emptyReason:
             creationPosture === "off"
-              ? "Subagent creation posture is Off."
+              ? "Subagents are turned off in Settings."
               : filter === "history"
-                ? "No completed or terminal child runs yet."
-                : "No active child runs.",
+                ? "No finished subagents yet."
+                : "No subagents running.",
         }
       : {}),
   };

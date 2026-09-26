@@ -70,7 +70,7 @@ describe("SideChatPanel", () => {
     const panel = screen.getByRole("region", { name: "Side Chat" });
     expect(panel).toHaveTextContent("Side Chat about Release notes");
     expect(panel).toHaveTextContent(
-      "Ordinary Chat. It reads this thread and cannot steer, approve, or change it.",
+      "Ask about this thread. It can read it, but can’t steer, approve, or change it.",
     );
     await waitFor(() => expect(screen.getByText(/sidecar surface/)).toBeVisible());
   });
