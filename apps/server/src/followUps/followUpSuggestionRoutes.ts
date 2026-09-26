@@ -19,7 +19,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const PREFIX = "/api/follow-up-suggestions/";
 
 export interface FollowUpSuggestionActionDependencies {
-  readonly store: Pick<ThreadFollowUpSuggestionStore, "read" | "activate">;
+  readonly store: Pick<ThreadFollowUpSuggestionStore, "read" | "activate" | "activation">;
   /**
    * Creates what a confirmed follow-up names, on the confirming window. Absent
    * on a host that only records the activation.
@@ -92,6 +92,10 @@ export async function settleFollowUpSuggestion(
       body: { error: "Follow-up activation requires an explicit confirmation." },
     };
   }
+  // A confirmation retried after its answer was lost gets that same answer,
+  // so the created thread still opens with the prompt waiting.
+  const previous = dependencies.store.activation(input.threadId, String(suggestion.id));
+  if (previous !== undefined) return { status: 200, body: activated(suggestion.id, previous) };
   // Refuse a repeat before anything is created, not after — including a
   // second request that arrives while the first is still creating.
   const activationKey = `${input.threadId}:${String(suggestion.id)}`;
@@ -106,7 +110,7 @@ export async function settleFollowUpSuggestion(
   try {
     creation =
       dependencies.createFollowUp === undefined
-        ? { kind: "created", created }
+        ? { kind: "created", created, onSuggestingModel: true }
         : await dependencies.createFollowUp({ windowId: input.windowId, view, creation: created });
   } finally {
     activating.delete(activationKey);
@@ -120,20 +124,18 @@ export async function settleFollowUpSuggestion(
     };
     return { status: 409, body: result };
   }
-  const outcome = dependencies.store.activate(
-    input.threadId,
-    activation.suggestionId,
-    creation.created,
-  );
-  if (outcome !== "activated") {
-    return { status: 409, body: refused(String(suggestion.id), outcome) };
-  }
-  const result: NativeHarnessFollowUpActivationResult = {
-    kind: "follow-up-activated",
-    suggestionId: suggestion.id,
-    created: creation.created,
-  };
-  return { status: 200, body: result };
+  // A later reply may have replaced the set while the thread was being
+  // created. The thread exists either way, so the person still gets it; only
+  // the record of which chip made it has nowhere to go.
+  dependencies.store.activate(input.threadId, activation.suggestionId, creation.created);
+  return { status: 200, body: activated(suggestion.id, creation.created) };
+}
+
+function activated(
+  suggestionId: NativeHarnessFollowUpActivationResult["suggestionId"],
+  created: NativeHarnessFollowUpCreation,
+): NativeHarnessFollowUpActivationResult {
+  return { kind: "follow-up-activated", suggestionId, created };
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {

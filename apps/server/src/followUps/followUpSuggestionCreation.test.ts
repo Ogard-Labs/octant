@@ -94,11 +94,32 @@ describe("follow-up creation", () => {
         title: "Add tests",
         threadId: "00000000-0000-4000-8000-000000000099",
       },
+      onSuggestingModel: true,
     });
     expect(calls).toMatchObject([
       { kind: "create-chat-thread", title: "Add tests", projectId },
       { kind: "change-chat-provider", modelId: "frontier-large", expectedVersion: 1 },
     ]);
+  });
+
+  it("says when a new Chat thread could not take the suggesting model", async () => {
+    const outcome = await createFollowUp(
+      dependencies({
+        chat: {
+          execute: async (command: unknown) => {
+            const { kind, threadId } = command as { kind: string; threadId: string };
+            if (kind === "change-chat-provider") throw new Error("Provider is unavailable.");
+            return { kind: "thread-created", thread: { id: threadId, version: 1 } } as never;
+          },
+        },
+      }),
+      {
+        windowId,
+        view: view("chat"),
+        creation: { kind: "new-thread", mode: "chat", projectId, title: "Add tests" } as never,
+      },
+    );
+    expect(outcome).toMatchObject({ kind: "created", onSuggestingModel: false });
   });
 
   it("creates a Work thread on the Project's current binding and refuses without a Project", async () => {
