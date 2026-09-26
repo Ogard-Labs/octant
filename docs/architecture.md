@@ -964,6 +964,9 @@ mechanisms are:
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  The access picker also offers "Lower thread" to durably return a thread to
+  approval-gated and revoke a session-only Full-access grant for that window
+  without confirmation.
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
   (`docs/decisions/0110`); that planned path does not yet run.
