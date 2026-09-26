@@ -293,9 +293,7 @@ function isMissingError(error: unknown): boolean {
   return isRecord(error) && error.code === "ENOENT";
 }
 
-function isExecFailure(
-  error: unknown,
-): error is {
+function isExecFailure(error: unknown): error is {
   readonly code?: string | number;
   readonly stdout?: string;
   readonly stderr?: string;
