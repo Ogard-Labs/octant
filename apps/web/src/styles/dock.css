@@ -95,7 +95,7 @@
 }
 
 .dock-tool-strip:has(.dock-tool-strip__overflow) > .dock-tool-strip__tab {
-  max-width: min(12rem, calc(100% - 34px));
+  max-width: min(12rem, calc(100% - 42px));
 }
 
 .dock-tool-strip__select > span {
@@ -132,6 +132,14 @@
   position: relative;
   display: inline-flex;
   flex: none;
+}
+
+.dock-tool-strip__more {
+  width: 40px;
+  gap: 2px;
+  padding-inline: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .dock-tool-strip__overflow-menu {
