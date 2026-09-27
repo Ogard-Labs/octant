@@ -43,7 +43,13 @@ export function EnvironmentSubagents(props: {
 
   return (
     <EnvironmentGroup icon={Bot} summary={summary} title="Subagents">
-      {controller.entries.length === 0 ? (
+      {/* Before the first read answers the list is empty but unknown; saying
+          None there hid runs that existed and contradicted the header. */}
+      {controller.status !== "ready" ? (
+        <p className="environment-subagents__empty" role="status">
+          Reading subagents…
+        </p>
+      ) : controller.entries.length === 0 ? (
         <p className="environment-subagents__empty">
           None yet. They appear when the agent hands off part of its work.
         </p>

@@ -125,12 +125,14 @@ clicking the screen or a key button cannot grant it. The host owns observation,
 input, and evidence safety under the [device transport contract](../architecture.md#device-transport-and-evidence).
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
 Environment belongs to a
-thread as a context-aware dock tab opened from the dock tab strip or Add tool. It
-counts the active thread's server-authored child AgentRuns in one row (working,
-to review, done) that opens the Agents dock; reading, steering, and every other
-AgentRun control stay in the Agents dock. The thread's live subagents (working, or finished
-and awaiting review) also show as a card tucked behind its composer, whose rows open the
-Agents dock on that subagent; see [DESIGN.md](../../DESIGN.md#welcome-and-composer).
+thread as a context-aware dock tab opened from the dock tab strip or Add tool. Its
+Subagents row counts the active thread's server-authored child AgentRuns
+(working, to review, done) and opens into the full list, working and finished;
+a row opens that subagent in the Agents dock, where reading, steering, and every
+other AgentRun control stay. The thread's running subagents also show as a card
+tucked behind its composer, whose rows open the Agents dock on that subagent;
+finished ones, reviewed or not, stay in Environment and Agents. See
+[DESIGN.md](../../DESIGN.md#welcome-and-composer).
 The Agents dock is a list and a page, and it shows and controls subagents
 without starting them: only the thread's agent starts one, through the Octant
 Harness `delegate` tool, and collects its result. The list has one title, then
