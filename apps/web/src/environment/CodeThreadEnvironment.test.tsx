@@ -325,7 +325,7 @@ describe("CodeThreadEnvironment", () => {
     await openEnvironment();
     const header = screen.getByRole("region", { name: "Environment details" });
     expect(within(header).getByText("feature/issue-204")).toBeVisible();
-    expect(within(header).getByText("~/Dev/Repos/octant")).toBeVisible();
+    expect(within(header).getByText("~/Dev/Repos/octant/.worktrees/issue-204")).toBeVisible();
     expect(screen.getAllByText("feature/issue-204")).toHaveLength(1);
     expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent("issue-204");
   });

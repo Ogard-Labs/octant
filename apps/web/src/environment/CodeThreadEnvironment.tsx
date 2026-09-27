@@ -196,7 +196,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     ? readyObservation.branch.name
                     : `Detached ${readyObservation.branch.oid.slice(0, 7)}`,
                 changes: readyObservation.changes,
-                path: readyObservation.repositoryRoot,
+                // The folder the thread works in: a separate worktree's own
+                // path, not the repository it was cut from.
+                path: readyObservation.worktreeRoot,
               }),
           ...(workingDirectory === undefined ? {} : { workingLocation: String(workingDirectory) }),
           ...(runningServerCounts === undefined ? {} : { runningServerCounts }),
