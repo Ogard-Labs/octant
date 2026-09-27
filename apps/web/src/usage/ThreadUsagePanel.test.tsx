@@ -1,11 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as renderElement, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { UsageDashboardRequest, UsageDashboardResponse } from "@octant/contracts";
 import { UsageDashboardClientFailure, type UsageDashboardClient } from "@octant/client-runtime";
 import { ThreadUsagePanel } from "./ThreadUsagePanel";
 
-function dashboard(totalRequests: number): UsageDashboardResponse {
+function dashboard(
+  totalRequests: number,
+  requestsWithUnavailableUsage = 1,
+): UsageDashboardResponse {
   return {
     summary: {
       totals: {
@@ -18,7 +22,7 @@ function dashboard(totalRequests: number): UsageDashboardResponse {
         staleCount: 0,
         unavailableCount: 0,
       },
-      requestsWithUnavailableUsage: 1,
+      requestsWithUnavailableUsage,
       coverage: [],
       excludedRecordCount: 0,
     },
@@ -37,7 +41,7 @@ function dashboard(totalRequests: number): UsageDashboardResponse {
 describe("ThreadUsagePanel", () => {
   it("reads the host with the thread pre-filtered", async () => {
     const load = vi.fn().mockResolvedValue(dashboard(4));
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         subjectId="thread-1"
@@ -55,7 +59,7 @@ describe("ThreadUsagePanel", () => {
 
   it("shows the host totals for the thread", async () => {
     const load = vi.fn().mockResolvedValue(dashboard(4));
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         subjectId="thread-1"
@@ -68,10 +72,37 @@ describe("ThreadUsagePanel", () => {
     expect(screen.getByText("Requests without reported usage")).toBeInTheDocument();
   });
 
+  it("totals the thread's tokens on the folded section only when every request reported usage", async () => {
+    const complete = vi.fn().mockResolvedValue(dashboard(4, 0));
+    const { unmount } = renderElement(
+      <ThreadUsagePanel
+        client={{ load: complete } as UsageDashboardClient}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(document.querySelector(".environment-group__summary")).toHaveTextContent("tokens"),
+    );
+    unmount();
+
+    const partial = vi.fn().mockResolvedValue(dashboard(4, 1));
+    renderElement(
+      <ThreadUsagePanel
+        client={{ load: partial } as UsageDashboardClient}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() => expect(partial).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText(/Loading thread usage/)).toBeNull());
+    expect(document.querySelector(".environment-group__summary")).toBeNull();
+  });
+
   it("hands the same filter to the full dashboard", async () => {
     const load = vi.fn().mockResolvedValue(dashboard(4));
     const onOpenUsageDashboard = vi.fn();
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         onOpenUsageDashboard={onOpenUsageDashboard}
@@ -90,7 +121,7 @@ describe("ThreadUsagePanel", () => {
 
   it("says a thread has no recorded usage yet", async () => {
     const load = vi.fn().mockResolvedValue(dashboard(0));
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         subjectId="thread-1"
@@ -118,7 +149,7 @@ describe("ThreadUsagePanel", () => {
           "This thread's token spend ceiling has 0 tokens remaining of 1,000. Raise or clear the ceiling, open Usage for this thread, or pause work.",
       },
     });
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
@@ -155,7 +186,7 @@ describe("ThreadUsagePanel", () => {
         version: 9,
       },
     });
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute } as never}
@@ -193,7 +224,7 @@ describe("ThreadUsagePanel", () => {
         version: 9,
       },
     });
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute } as never}
@@ -219,7 +250,7 @@ describe("ThreadUsagePanel", () => {
 
   it("reports a host failure instead of an empty total", async () => {
     const load = vi.fn().mockRejectedValue(new UsageDashboardClientFailure("Host is down.", 0));
-    render(
+    await renderOpen(
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         subjectId="thread-1"
@@ -231,3 +262,9 @@ describe("ThreadUsagePanel", () => {
     expect(screen.queryByText("800")).not.toBeInTheDocument();
   });
 });
+
+/** Usage is a closed Environment row until the reader opens it. */
+async function renderOpen(element: ReactElement): Promise<void> {
+  renderElement(element);
+  await userEvent.click(screen.getByRole("button", { name: /^Usage/ }));
+}

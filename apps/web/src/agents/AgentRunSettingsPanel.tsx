@@ -1,48 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AgentRunCreationPosture } from "@octant/contracts/agent-run";
-import type { AgentRunPolicySettings } from "@octant/contracts";
+import type { AgentRunPolicySettings, AgentRunSelectableCreationPosture } from "@octant/contracts";
 import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
 import { SettingRow } from "../settings/primitives";
-import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import "./agent-hierarchy.css";
 
-const POSTURES: ReadonlyArray<{
-  readonly value: AgentRunCreationPosture;
-  readonly label: string;
-  readonly description: string;
-}> = [
-  // The descriptions say what each choice does, not what it was meant to
-  // do: under Ask a person starting a helper from the Agents dock is the
-  // confirmation (there is no separate prompt), and only the Harness model's
-  // delegate tool is refused.
-  {
-    value: "off",
-    label: "Off",
-    description:
-      "Nobody can start a helper agent, including Add agent in the Agents dock. Existing ones stay viewable.",
-  },
-  {
-    value: "ask",
-    label: "Only when I start them",
-    description:
-      "You start helpers from the Agents dock. The model can suggest one but cannot start it.",
-  },
-  {
-    value: "automatic",
-    label: "Automatically",
-    description:
-      "The model can start helpers on its own, within the thread's access and capacity limits.",
-  },
-];
+// The description says what the choice does, not what it was meant to do.
+// Subagents start only when the thread's agent delegates part of its work, so
+// Off is the only way to hold them back; there is no manual start to fall
+// back on.
+const DESCRIPTION: Readonly<Record<AgentRunSelectableCreationPosture, string>> = {
+  automatic:
+    "The agent can hand part of its work to a subagent and gets the result back, within the thread's access and capacity limits.",
+  off: "The agent does all of its work itself. Subagents it already started stay viewable.",
+};
 
 /**
- * Settings → Octant Harness › Helper agents: server-authoritative Off / Ask /
- * Automatic creation posture. Reads and writes go straight through
- * `AgentRunSettingsClient`; there is no local override or cache that could
- * drift from the server's own event-sourced state.
+ * Settings → Octant Harness › Helper agents: whether the thread's agent may
+ * start subagents, as the server-authoritative Off / Automatic posture. Reads
+ * and writes go straight through `AgentRunSettingsClient`; there is no local
+ * override or cache that could drift from the server's own event-sourced
+ * state.
  */
 export function AgentRunSettingsPanel(props: {
   readonly client: AgentRunSettingsClient;
@@ -75,7 +56,7 @@ export function AgentRunSettingsPanel(props: {
   }, [load]);
 
   const choose = useCallback(
-    async (posture: AgentRunCreationPosture) => {
+    async (posture: AgentRunSelectableCreationPosture) => {
       if (settings === undefined || saving) return;
       setSaving(true);
       setMessage(undefined);
@@ -114,8 +95,8 @@ export function AgentRunSettingsPanel(props: {
     );
   }
 
-  const current =
-    POSTURES.find((posture) => posture.value === settings?.creationPosture) ?? POSTURES[1];
+  // The host reads a stored Ask as Off, so anything but Automatic is Off.
+  const on = settings?.creationPosture === "automatic";
 
   return (
     <section aria-label="Agents" className="agent-run-settings-panel">
@@ -123,23 +104,17 @@ export function AgentRunSettingsPanel(props: {
         <h2>Helper agents</h2>
         <div className="setgroup">
           <SettingRow
-            description={current?.description}
-            label="Let the model start helper agents"
+            description={DESCRIPTION[on ? "automatic" : "off"]}
+            label="Let the agent start subagents"
             focused={props.focused === true}
             scope="app"
             settingId="subagent-creation-posture"
           >
-            <OctantSelectField
-              aria-label="Let the model start helper agents"
+            <OctantSwitch
+              checked={on}
               disabled={saving}
-              onValueChange={(value) => {
-                const posture = POSTURES.find((entry) => entry.value === value);
-                if (posture !== undefined && posture.value !== settings?.creationPosture) {
-                  void choose(posture.value);
-                }
-              }}
-              options={POSTURES.map((posture) => ({ id: posture.value, label: posture.label }))}
-              value={current?.value ?? "ask"}
+              label="Let the agent start subagents"
+              onCheckedChange={(checked) => void choose(checked ? "automatic" : "off")}
             />
           </SettingRow>
         </div>

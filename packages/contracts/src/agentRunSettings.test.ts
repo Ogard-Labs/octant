@@ -26,8 +26,8 @@ describe("AgentRunPolicySettings", () => {
     ).toThrow();
   });
 
-  it("defaults to Ask, matching the approved design's default posture", () => {
-    expect(DEFAULT_AGENT_RUN_POLICY_SETTINGS.creationPosture).toBe("ask");
+  it("lets the thread's agent start subagents unless a person turned them off", () => {
+    expect(DEFAULT_AGENT_RUN_POLICY_SETTINGS.creationPosture).toBe("automatic");
   });
 });
 
@@ -39,6 +39,12 @@ describe("UpdateAgentRunPolicySettings", () => {
     });
     expect(decoded.creationPosture).toBe("off");
     expect(decoded.expectedVersion).toBe(2);
+  });
+
+  it("refuses Ask as a choice now that no one starts a subagent by hand", () => {
+    expect(() =>
+      decodeUpdateAgentRunPolicySettings({ creationPosture: "ask", expectedVersion: 2 }),
+    ).toThrow();
   });
 
   it("rejects excess properties", () => {

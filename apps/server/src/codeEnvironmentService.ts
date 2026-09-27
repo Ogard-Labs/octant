@@ -7,7 +7,7 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
-import type { GitEnvironmentPort } from "./gitEnvironmentPort";
+import type { GitEnvironmentChangedFiles, GitEnvironmentPort } from "./gitEnvironmentPort";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 
 export interface CodeEnvironmentServiceApi {
@@ -102,7 +102,7 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     };
     return decodeCodeEnvironmentObservation(
       result.status === "ready"
-        ? { ...base, ...result }
+        ? { ...base, ...withoutChangedFiles(result) }
         : {
             ...base,
             status: result.status,
@@ -121,6 +121,26 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     signal?: AbortSignal,
     fresh = false,
   ): Promise<CodeEnvironmentObservation> {
+    return (await this.observeThreadChanges(windowId, projectId, threadId, signal, fresh))
+      .observation;
+  }
+
+  /**
+   * The thread's checkout observation together with the uncommitted paths
+   * behind it. Same authority and the same cached Git read as
+   * `observeThread`; the path list stays host-side because the Environment
+   * contract never carried it.
+   */
+  async observeThreadChanges(
+    windowId: WindowId,
+    projectId: ProjectId,
+    threadId: CodeThreadId,
+    signal?: AbortSignal,
+    fresh = false,
+  ): Promise<{
+    readonly observation: CodeEnvironmentObservation;
+    readonly changedFiles?: GitEnvironmentChangedFiles;
+  }> {
     const code = this.options.code;
     if (code === undefined)
       throw new ProjectServiceError({
@@ -176,18 +196,22 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
       threadVersion: thread.version,
       observedAt: this.options.clock(),
     };
-    return decodeCodeEnvironmentObservation(
-      result.status === "ready"
-        ? { ...base, ...result }
-        : {
-            ...base,
-            status: result.status,
-            reason:
-              result.status === "unavailable"
-                ? "Git is not initialized or the Code thread checkout is unavailable."
-                : "Octant could not inspect the Code thread checkout.",
-          },
-    );
+    if (result.status === "ready") {
+      return {
+        observation: decodeCodeEnvironmentObservation({ ...base, ...withoutChangedFiles(result) }),
+        ...(result.changedFiles === undefined ? {} : { changedFiles: result.changedFiles }),
+      };
+    }
+    return {
+      observation: decodeCodeEnvironmentObservation({
+        ...base,
+        status: result.status,
+        reason:
+          result.status === "unavailable"
+            ? "Git is not initialized or the Code thread checkout is unavailable."
+            : "Octant could not inspect the Code thread checkout.",
+      }),
+    };
   }
 
   #observeGit(root: string, fresh = false): ReturnType<GitEnvironmentPort["observe"]> {
@@ -233,6 +257,14 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     );
     return observation;
   }
+}
+
+/** The observation as the strict Environment contract carries it. */
+function withoutChangedFiles(
+  result: Extract<Awaited<ReturnType<GitEnvironmentPort["observe"]>>, { status: "ready" }>,
+) {
+  const { changedFiles: _changedFiles, ...observation } = result;
+  return observation;
 }
 
 function waitForGitObservation(

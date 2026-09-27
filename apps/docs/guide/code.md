@@ -125,11 +125,13 @@ Images stay readable in the transcript after a restart. Removing a chip before s
 
 ## Thread environment
 
-Each Code thread owns an Environment tab in the right dock. It shows repository
-identity, branch, clean or dirty state, the current working folder, and how many
-local servers are running. Open it from the title-bar shortcut or **Add tool**;
-the tab contains checkout facts, grouped local servers, and **Change working
-folder**. Switching the active pane shows that pane's Environment instead of
+Each Code thread owns an Environment tab in the right dock. Open it from the
+dock's tab strip or **Add tool**. The top names the repository, its branch, and
+its folder. A card under it says whether the checkout has uncommitted changes
+(click it to open Review) and offers **Commit or push** and **Create pull
+request**. Below that, one list: local servers, subagents (opens the Agents
+tool), computer use, pull requests, what the thread delivers, the working folder
+(with **Change working folder**), and usage. Switching the active pane shows that pane's Environment instead of
 leaving the previous thread's facts in place.
 
 Local servers are compact rows grouped by process and port, with this checkout
@@ -156,7 +158,7 @@ Code exposes repository-valid engineering surfaces:
 - Files/Explorer, which follows the checkout live: when the agent or anything else changes a file, the tree relists and an open editor reloads. A file you have edited but not saved is never overwritten — Octant reports the external change as a conflict instead.
 - Review, beside the thread, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git surfaces
-- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` names a file in this checkout.
+- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn. It reads the thread's conversation, branch and changes, files, and subagent results, and cannot change any of them. Type `#` in the composer to mention another thread as read-only context; `@` names a file in this checkout.
 - Browser surfaces
 - iOS Simulator and Android emulator device panes, when the host has those destinations
 - Extension-contributed surfaces approved by effective activation policy

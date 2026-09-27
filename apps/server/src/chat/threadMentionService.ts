@@ -7,6 +7,7 @@ import {
   decodeThreadMentionCommandResult,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_THREAD_MENTION_CANDIDATES,
+  MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
   MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
   type ChatThreadId,
   type CodeOperationId,
@@ -29,6 +30,7 @@ import {
 } from "@octant/contracts";
 import {
   activeChatTurns,
+  boundSideChatSourceTranscript,
   boundThreadMentionTranscript,
   chatTurnAnsweredAttempt,
   rankThreadMentionCandidates,
@@ -65,11 +67,35 @@ export interface ThreadMentionDirectoryThread {
 export interface ThreadMentionDirectory {
   readonly mode: OctantMode;
   listOpenable(windowId: WindowId): Promise<ReadonlyArray<ThreadMentionDirectoryThread>>;
+  /**
+   * `maxEntries` is the caller's window: a directory that pays per entry to
+   * read (Code reads evidence per turn) stops reading older turns past it.
+   * Absent means the mention window.
+   */
   readTranscript(
     windowId: WindowId,
     threadId: MentionableThreadId,
+    options?: { readonly maxEntries?: number },
   ): Promise<ReadonlyArray<ThreadMentionTranscriptEntry> | undefined>;
 }
+
+/**
+ * A Side Chat's source thread as this principal may read it now: the same
+ * identity a mention resolves, with the larger Side Chat transcript window.
+ */
+export type SideChatSourceResolution =
+  | {
+      readonly kind: "resolved";
+      readonly source: {
+        readonly threadId: MentionableThreadId;
+        readonly mode: OctantMode;
+        readonly title: string;
+        readonly placement: ThreadMentionPlacement;
+        readonly transcript: ReadonlyArray<ThreadMentionTranscriptEntry>;
+        readonly truncated: boolean;
+      };
+    }
+  | { readonly kind: "unreadable" };
 
 /**
  * Mints the Chat-mode sidecar thread for a Side Chat. Kept a port so the
@@ -173,9 +199,65 @@ export class ThreadMentionService {
     const directory = this.#directories.find((candidate) => candidate.mode === "chat");
     if (directory === undefined || threadIds.length === 0) return [];
     const allowed = new Set(threadIds.map((threadId) => String(threadId)));
-    return (await directory.listOpenable(windowId)).filter((thread) =>
-      allowed.has(String(thread.threadId)),
+    // A sidecar is not mentionable, so it is not a dialogue target either:
+    // messaging one would append turns to a Side Chat from outside it.
+    const hidden = this.#sidecars.hiddenThreadIds();
+    return (await directory.listOpenable(windowId)).filter(
+      (thread) => allowed.has(String(thread.threadId)) && !hidden.has(String(thread.threadId)),
     );
+  }
+
+  /**
+   * The thread as this window may Open it right now, or `undefined`. Side Chat
+   * file reads ask this before every call, so a source the principal lost
+   * access to mid-conversation stops being readable at the next call rather
+   * than at the next turn.
+   */
+  async openableThread(
+    windowId: WindowId,
+    threadId: MentionableThreadId,
+  ): Promise<ThreadMentionDirectoryThread | undefined> {
+    return (await this.#openable(windowId)).get(String(threadId));
+  }
+
+  /**
+   * Resolve a Side Chat's source thread with the Side Chat window.
+   *
+   * Authority is the mention path's, unchanged: the source must be among the
+   * threads this window can Open, and its transcript is read through the
+   * owning mode's own reader. Only the window differs, because here the
+   * thread is the conversation's subject rather than an aside. Anything short
+   * of a readable transcript is `unreadable`, which the Side Chat turn refuses.
+   */
+  async resolveSideChatSource(
+    windowId: WindowId,
+    sourceThreadId: MentionableThreadId,
+  ): Promise<SideChatSourceResolution> {
+    const thread = (await this.#openable(windowId)).get(String(sourceThreadId));
+    if (thread === undefined) return { kind: "unreadable" };
+    const directory = this.#directories.find((candidate) => candidate.mode === thread.mode);
+    if (directory === undefined) return { kind: "unreadable" };
+    let entries: ReadonlyArray<ThreadMentionTranscriptEntry> | undefined;
+    try {
+      entries = await directory.readTranscript(windowId, sourceThreadId, {
+        maxEntries: MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
+      });
+    } catch {
+      entries = undefined;
+    }
+    if (entries === undefined) return { kind: "unreadable" };
+    const bounded = boundSideChatSourceTranscript(entries);
+    return {
+      kind: "resolved",
+      source: {
+        threadId: thread.threadId,
+        mode: thread.mode,
+        title: thread.title,
+        placement: thread.placement,
+        transcript: bounded.transcript,
+        truncated: bounded.truncated,
+      },
+    };
   }
 
   async #openable(windowId: WindowId): Promise<ReadonlyMap<string, ThreadMentionDirectoryThread>> {
@@ -708,42 +790,15 @@ export function createCodeThreadMentionDirectory(input: {
           modelId: thread.modelId,
         }));
     },
-    async readTranscript(windowId, mentionableThreadId) {
+    async readTranscript(windowId, mentionableThreadId, options) {
       const threadId = decodeCodeThreadId(String(mentionableThreadId));
-      let turns: ReadonlyArray<Awaited<ReturnType<typeof input.conversation>>["turns"][number]> =
-        [];
-      try {
-        // The Code conversation reader is forward-only, so the newest turns are
-        // reachable only by walking to the end. Stopping early would hand a
-        // stale window to another model while claiming it is recent, so an
-        // unfinished walk fails closed instead.
-        let cursor = 0;
-        let pages = 0;
-        const collected: Array<Awaited<ReturnType<typeof input.conversation>>["turns"][number]> =
-          [];
-        for (;;) {
-          const page = await input.conversation(
-            windowId,
-            threadId,
-            cursor,
-            MAX_CODE_CONVERSATION_PAGE_SIZE,
-          );
-          collected.push(...page.turns);
-          if (!page.hasMore) break;
-          pages += 1;
-          if (page.nextCursor <= cursor || pages >= MAX_CODE_MENTION_CONVERSATION_PAGES) {
-            return undefined;
-          }
-          cursor = page.nextCursor;
-        }
-        turns = collected;
-      } catch {
-        return undefined;
-      }
+      const turns = await walkCodeConversation(input.conversation, windowId, threadId);
+      if (turns === undefined) return undefined;
       const entries: ThreadMentionTranscriptEntry[] = [];
-      // Only the tail can survive the mention window, and every entry costs an
+      // Only the tail can survive the window, and every entry costs an
       // evidence read, so older turns are dropped before any content is read.
-      for (const turn of turns.slice(-MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES)) {
+      const window = options?.maxEntries ?? MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES;
+      for (const turn of turns.slice(-window)) {
         const prompt = await readCodeEvidenceText(input, windowId, threadId, turn.operationId, [
           turn.prompt.contentId,
         ]);
@@ -768,6 +823,48 @@ export function createCodeThreadMentionDirectory(input: {
       return entries;
     },
   };
+}
+
+/**
+ * Every turn of a Code thread, in order, read through the operation-scoped
+ * conversation reader that re-authorizes the thread on each page, or
+ * `undefined` when the walk could not reach the newest turn.
+ *
+ * The reader is forward-only, so the newest turns are reachable only by walking
+ * to the end. Stopping early would hand a stale window to another model while
+ * claiming it is recent, so an unfinished walk fails closed instead.
+ */
+export async function walkCodeConversation<Turn>(
+  conversation: (
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    afterCursor: number,
+    limit: number,
+  ) => Promise<{
+    readonly turns: ReadonlyArray<Turn>;
+    readonly nextCursor: number;
+    readonly hasMore: boolean;
+  }>,
+  windowId: WindowId,
+  threadId: CodeThreadId,
+): Promise<ReadonlyArray<Turn> | undefined> {
+  try {
+    let cursor = 0;
+    let pages = 0;
+    const collected: Turn[] = [];
+    for (;;) {
+      const page = await conversation(windowId, threadId, cursor, MAX_CODE_CONVERSATION_PAGE_SIZE);
+      collected.push(...page.turns);
+      if (!page.hasMore) return collected;
+      pages += 1;
+      if (page.nextCursor <= cursor || pages >= MAX_CODE_MENTION_CONVERSATION_PAGES) {
+        return undefined;
+      }
+      cursor = page.nextCursor;
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 /**

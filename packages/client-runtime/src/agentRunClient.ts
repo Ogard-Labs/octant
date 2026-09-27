@@ -1,8 +1,5 @@
 import {
   decodeAgentRunCommandResult,
-  decodeAgentRunControlPreviewRequest,
-  decodeAgentRunControlPreviewResult,
-  decodeAgentRunControlRequest,
   decodeAgentRunCanvasSnapshotRequest,
   decodeAgentRunCanvasSnapshotResult,
   decodeAgentRunCenterResponse,
@@ -13,28 +10,17 @@ import {
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
   decodeAgentRunSteerRequest,
-  decodeAgentRunWorkspaceConfirmationRequest,
-  decodeAgentRunWorkspaceConfirmationResult,
-  decodeAgentRunWorkspacePreparationRequest,
-  decodeAgentRunWorkspacePreparationResult,
   type AgentRunCanvasSnapshotResult,
   type AgentRunCenterQuery,
   type AgentRunCenterResponse,
   type AgentRunConversationResponse,
   type AgentRunConversationStreamFrame,
   type AgentRunCommandResult,
-  type AgentRunControlPreviewRequest,
-  type AgentRunControlPreviewResult,
-  type AgentRunControlRequest,
   type AgentRunId,
   type AgentRunParentThreadId,
   type AgentRunResumeRequest,
   type AgentRunRetryRequest,
   type AgentRunSteerRequest,
-  type AgentRunWorkspaceConfirmationRequest,
-  type AgentRunWorkspaceConfirmationResult,
-  type AgentRunWorkspacePreparationRequest,
-  type AgentRunWorkspacePreparationResult,
 } from "@octant/contracts";
 
 /**
@@ -146,18 +132,6 @@ export interface AgentRunClient {
     readonly runId: AgentRunId;
     readonly expectedVersion: number;
   }): Promise<AgentRunCommandResult>;
-  /** Server-owned child workspace prepare. Never sends or returns absolute paths. */
-  prepareWorkspace(
-    input: AgentRunWorkspacePreparationRequest,
-  ): Promise<AgentRunWorkspacePreparationResult>;
-  /** Confirms a prepared Code child worktree receipt. */
-  confirmWorkspace(
-    input: AgentRunWorkspaceConfirmationRequest,
-  ): Promise<AgentRunWorkspaceConfirmationResult>;
-  /** Reads server-derived parent facts for a child the user may create. */
-  preview(input: AgentRunControlPreviewRequest): Promise<AgentRunControlPreviewResult>;
-  /** Creates a bounded child from a role and task; the server derives the rest. */
-  requestRun(input: AgentRunControlRequest): Promise<AgentRunClientCommandResult>;
   /** Cancels a run, its subtree, or its whole hierarchy leaf-first. */
   cancel(input: {
     readonly runId: AgentRunId;
@@ -296,104 +270,6 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         );
       }
     },
-    async prepareWorkspace(input) {
-      let validated: AgentRunWorkspacePreparationRequest;
-      try {
-        validated = decodeAgentRunWorkspacePreparationRequest(input);
-      } catch {
-        throw new AgentRunClientFailure(
-          "invalid",
-          "AgentRun workspace prepare request is invalid.",
-        );
-      }
-      const body = await requestJson(
-        options.fetch,
-        new URL("/api/agent-runs/workspaces/prepare", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
-        { structuredWorkspaceResult: true },
-      );
-      try {
-        return decodeAgentRunWorkspacePreparationResult(body);
-      } catch {
-        throw new AgentRunClientFailure("unavailable", "AgentRun workspace prepare is malformed.");
-      }
-    },
-    async confirmWorkspace(input) {
-      let validated: AgentRunWorkspaceConfirmationRequest;
-      try {
-        validated = decodeAgentRunWorkspaceConfirmationRequest(input);
-      } catch {
-        throw new AgentRunClientFailure(
-          "invalid",
-          "AgentRun workspace confirm request is invalid.",
-        );
-      }
-      const body = await requestJson(
-        options.fetch,
-        new URL("/api/agent-runs/workspaces/confirm", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
-        { structuredWorkspaceResult: true },
-      );
-      try {
-        return decodeAgentRunWorkspaceConfirmationResult(body);
-      } catch {
-        throw new AgentRunClientFailure("unavailable", "AgentRun workspace confirm is malformed.");
-      }
-    },
-    async preview(input) {
-      let validated: AgentRunControlPreviewRequest;
-      try {
-        validated = decodeAgentRunControlPreviewRequest(input);
-      } catch {
-        throw new AgentRunClientFailure("invalid", "AgentRun control preview request is invalid.");
-      }
-      const url = new URL("/api/agent-runs/control-preview", options.baseUrl);
-      url.searchParams.set("parentThreadId", String(validated.parentThreadId));
-      if (validated.role !== undefined) url.searchParams.set("role", validated.role);
-      const body = await requestJson(
-        options.fetch,
-        url.toString(),
-        { method: "GET", headers },
-        {
-          structuredWorkspaceResult: true,
-        },
-      );
-      try {
-        return decodeAgentRunControlPreviewResult(body);
-      } catch {
-        throw new AgentRunClientFailure("unavailable", "AgentRun control preview is malformed.");
-      }
-    },
-    async requestRun(input) {
-      let validated: AgentRunControlRequest;
-      try {
-        validated = decodeAgentRunControlRequest(input);
-      } catch {
-        throw new AgentRunClientFailure("invalid", "AgentRun creation request is invalid.");
-      }
-      const body = await requestJson(
-        options.fetch,
-        new URL("/api/agent-runs/request", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
-        { structuredCommandResult: true },
-      );
-      if (!isRecord(body) || typeof body.kind !== "string") {
-        throw new AgentRunClientFailure("unavailable", "AgentRun creation response is malformed.");
-      }
-      return body as unknown as AgentRunClientCommandResult;
-    },
     async cancel(input) {
       const body = await requestJson(
         options.fetch,
@@ -460,10 +336,7 @@ async function requestJson(
   fetchImpl: typeof globalThis.fetch,
   url: string,
   init: RequestInit,
-  options: {
-    readonly structuredCommandResult?: boolean;
-    readonly structuredWorkspaceResult?: boolean;
-  } = {},
+  options: { readonly structuredCommandResult?: boolean } = {},
 ): Promise<unknown> {
   let response: Response;
   try {
@@ -480,18 +353,12 @@ async function requestJson(
   if (response.status === 401) {
     throw new AgentRunClientFailure("unauthorized", "AgentRun request is unauthorized.");
   }
-  // Command routes (request/cancel) encode denial as a structured
+  // Command routes (cancel/steer/retry/resume) encode denial as a structured
   // `run-command-failed` result with an explicit `reason` rather than a bare
   // conflict; surface that to the caller instead of collapsing it into a
-  // generic thrown failure that would lose the reason (e.g. "posture-rejected"
-  // vs. "limit-reached" vs. a stale-version race).
+  // generic thrown failure that would lose the reason (e.g. "limit-reached"
+  // vs. a stale-version race).
   if (options.structuredCommandResult && response.status === 409) {
-    return body;
-  }
-  if (
-    options.structuredWorkspaceResult &&
-    (response.status === 200 || response.status === 400 || response.status === 403)
-  ) {
     return body;
   }
   if (response.status === 409) {

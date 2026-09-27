@@ -31,7 +31,6 @@ describe("the right sidebar surface", () => {
       ".code-diff-pane__toolbar",
       ".browser-workspace__chrome",
       ".side-chat__header",
-      ".thread-environment-dock__header",
     ]) {
       expect(rail?.[1]).toContain(toolbar);
     }
@@ -80,11 +79,13 @@ describe("the right sidebar surface", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Tools" })).toBeVisible();
-    expect(screen.getByText("Available for the active thread.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Browser" })).toHaveTextContent(
+    // One line per tool; what it opens is the row's hover description.
+    expect(screen.getByRole("button", { name: "Browser" })).toHaveAttribute(
+      "title",
       "Inspect live web activity",
     );
-    expect(screen.getByRole("button", { name: "Files" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
+      "title",
       "Browse the active checkout",
     );
     // The body already lists every tool; a second entry point beside an
@@ -207,8 +208,7 @@ describe("the right sidebar surface", () => {
     // "Tests: Open this tool" beside twelve rows that each name what they do
     // reads as a row nobody finished.
     const row = screen.getByRole("button", { name: "Tests" });
-    expect(row).toHaveTextContent("Run this checkout's tests");
-    expect(row).not.toHaveTextContent("Open this tool");
+    expect(row).toHaveAttribute("title", "Run this checkout's tests");
   });
 
   it("uses a generic detail for an unknown launchable tool", () => {
@@ -223,7 +223,10 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Custom tool" })).toHaveTextContent("Open this tool");
+    expect(screen.getByRole("button", { name: "Custom tool" })).toHaveAttribute(
+      "title",
+      "Open this tool",
+    );
     expect(screen.queryByText("Run discovered repository tests")).not.toBeInTheDocument();
   });
 });

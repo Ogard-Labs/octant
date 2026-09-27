@@ -215,7 +215,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
           if (mounted.current) {
             setFailure({
               parentThreadId,
-              message: "Child runs could not be stopped. They are still running.",
+              message: "Subagents could not be stopped. They are still running.",
             });
             refresh();
           }
@@ -227,7 +227,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
         if (mounted.current) {
           setFailure({
             parentThreadId,
-            message: "Child runs could not be stopped. They are still running.",
+            message: "Subagents could not be stopped. They are still running.",
           });
         }
         return false;
@@ -249,11 +249,19 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
     async (input: { readonly runId: string; readonly version: number }) => {
       if (client === undefined) return;
       try {
-        await client.acknowledge({ runId: input.runId as never, expectedVersion: input.version });
+        const result = await client.acknowledge({
+          runId: input.runId as never,
+          expectedVersion: input.version,
+        });
+        // A refused receipt is a recorded outcome, not a review: the row would
+        // otherwise stay put with nothing saying why.
+        if (result.kind === "run-command-failed" && mounted.current) {
+          setFailure({ parentThreadId, message: result.message });
+        }
         if (mounted.current) refresh();
       } catch {
         if (mounted.current) {
-          setFailure({ parentThreadId, message: "The result could not be acknowledged." });
+          setFailure({ parentThreadId, message: "The subagent could not be marked reviewed." });
         }
       }
     },

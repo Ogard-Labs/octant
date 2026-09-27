@@ -1,159 +1,109 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunConversationResponse } from "@octant/contracts";
-import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { Bot, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
+import { Bot } from "lucide-react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
-import { useAgentRunConversation } from "../agents/useAgentRunConversation";
+import {
+  isActiveAgentHierarchyStatus,
+  type AgentHierarchyInputEntry,
+} from "../agents/buildAgentHierarchyModel";
+import {
+  SubagentStatusIcon,
+  subagentNeedsReview,
+  subagentStatusWord,
+} from "../agents/subagentStatus";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 
-const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
-
+/**
+ * Every subagent this thread's agent delegated, working and finished, as one
+ * Environment row that opens into the list.
+ *
+ * The composer's card shows only what is running, so this is where a finished
+ * one — reviewed or waiting for review — is found again. A row opens that
+ * subagent's page in the Agents tool, where its conversation and controls are.
+ */
 export function EnvironmentSubagents(props: {
   readonly client: AgentRunClient;
   readonly threadId: string;
-  readonly onOpenAgents?: () => void;
+  readonly onOpenAgents?: (runId?: string) => void;
 }) {
   const controller = useChildRunStatus({
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
-  const [selectedRunId, setSelectedRunId] = useState<string>();
-  const [expanded, setExpanded] = useState<boolean>();
-  const conversationState = useAgentRunConversation(
-    props.client,
-    selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
+  // A row that vanished when nothing had been delegated could not be told
+  // apart from a missing feature, so an empty thread says None.
+  const summary = controller.status !== "ready" ? "Reading" : subagentSummary(controller.entries);
+  const working = controller.entries.filter((entry) =>
+    isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
-  const active = controller.entries.filter((entry) => ACTIVE.has(entry.lifecycleStatus));
-  const history = controller.entries.filter((entry) => !ACTIVE.has(entry.lifecycleStatus));
-  // A section that disappears when a thread has delegated nothing cannot be
-  // read as "nothing is running" — it reads as a missing feature, and the
-  // reader has no way to tell the two apart. It states the count instead.
-  const summary =
-    controller.status !== "ready"
-      ? "Reading"
-      : `${String(active.length)} active · ${String(history.length)} done`;
+  const finished = controller.entries
+    .filter((entry) => !isActiveAgentHierarchyStatus(entry.lifecycleStatus))
+    .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 
   return (
-    <EnvironmentGroup
-      open={expanded ?? controller.entries.length > 0}
-      onOpenChange={setExpanded}
-      summary={summary}
-      title="Subagents"
-      {...(props.onOpenAgents === undefined
-        ? {}
-        : {
-            action: (
-              <OctantButton onClick={props.onOpenAgents} size="sm" type="button" variant="ghost">
-                Open Agents
-              </OctantButton>
-            ),
-          })}
-    >
-      {controller.status !== "ready" ? (
-        <p className="environment-subagents__empty" role="status">
-          Reading delegated runs…
-        </p>
-      ) : controller.entries.length === 0 ? (
+    <EnvironmentGroup icon={Bot} summary={summary} title="Subagents">
+      {controller.entries.length === 0 ? (
         <p className="environment-subagents__empty">
-          This task has not delegated any work to a subagent.
+          None yet. They appear when the agent hands off part of its work.
         </p>
-      ) : null}
-      <AgentGroup
-        entries={active}
-        label="Active"
-        {...(conversationState.conversation === undefined
-          ? {}
-          : { conversation: conversationState.conversation })}
-        reconnecting={conversationState.reconnecting}
-        loading={conversationState.loading}
-        {...(conversationState.errorMessage === undefined
-          ? {}
-          : { errorMessage: conversationState.errorMessage })}
-        {...(selectedRunId === undefined ? {} : { selectedRunId })}
-        onSelect={setSelectedRunId}
-      />
-      <AgentGroup
-        entries={history}
-        label="Done"
-        {...(conversationState.conversation === undefined
-          ? {}
-          : { conversation: conversationState.conversation })}
-        reconnecting={conversationState.reconnecting}
-        loading={conversationState.loading}
-        {...(conversationState.errorMessage === undefined
-          ? {}
-          : { errorMessage: conversationState.errorMessage })}
-        {...(selectedRunId === undefined ? {} : { selectedRunId })}
-        onSelect={setSelectedRunId}
-      />
+      ) : (
+        <>
+          <SubagentList
+            entries={working}
+            label="Working"
+            {...(props.onOpenAgents === undefined ? {} : { onOpen: props.onOpenAgents })}
+          />
+          <SubagentList
+            entries={finished}
+            label="Finished"
+            {...(props.onOpenAgents === undefined ? {} : { onOpen: props.onOpenAgents })}
+          />
+        </>
+      )}
     </EnvironmentGroup>
   );
 }
 
-function AgentGroup(props: {
-  readonly entries: ReturnType<typeof useChildRunStatus>["entries"];
+function SubagentList(props: {
+  readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly label: string;
-  readonly conversation?: AgentRunConversationResponse;
-  readonly reconnecting: boolean;
-  readonly loading: boolean;
-  readonly errorMessage?: string;
-  readonly selectedRunId?: string;
-  readonly onSelect: (runId: string | undefined) => void;
+  readonly onOpen?: (runId: string) => void;
 }) {
   if (props.entries.length === 0) return null;
   return (
-    <section aria-label={props.label} className="environment-subagents__group">
-      <h4>
+    <section aria-label={props.label} className="environment-subagents__section">
+      <h4 className="environment-subagents__label">
         {props.label} · {props.entries.length}
       </h4>
-      <ul>
+      <ul className="environment-subagents__list">
         {props.entries.map((entry) => {
-          const selected = props.selectedRunId === entry.runId;
-          const model =
-            entry.route?.executionModelId ?? entry.route?.requestedModelId ?? "Model unavailable";
+          const state = subagentNeedsReview(entry)
+            ? "To review"
+            : subagentStatusWord(entry.lifecycleStatus);
+          const content = (
+            <>
+              <SubagentStatusIcon lifecycleStatus={entry.lifecycleStatus} />
+              <span className="environment-subagents__task">{entry.task}</span>
+              <span className="environment-subagents__state">{state}</span>
+            </>
+          );
           return (
             <li key={entry.runId}>
-              <OctantButton
-                aria-expanded={selected}
-                className="environment-subagents__row"
-                onClick={() => props.onSelect(selected ? undefined : entry.runId)}
-                type="button"
-                variant="ghost"
-              >
-                <Bot aria-hidden="true" size={16} strokeWidth={1.7} />
-                <span>
-                  <strong>{entry.task}</strong>
-                  <small>
-                    {model} · {entry.lifecycleStatus}
-                  </small>
-                </span>
-                <ChevronRight aria-hidden="true" size={14} strokeWidth={1.7} />
-              </OctantButton>
-              {selected ? (
-                <div className="environment-subagents__conversation">
-                  <div>
-                    <span>Task</span>
-                    <p>{entry.task}</p>
-                  </div>
-                  <div>
-                    <span>Response</span>
-                    <ConversationBody
-                      conversation={
-                        props.conversation?.runId === entry.runId ? props.conversation : undefined
-                      }
-                      entry={entry}
-                      reconnecting={props.reconnecting}
-                      loading={props.loading}
-                      {...(props.errorMessage === undefined
-                        ? {}
-                        : { errorMessage: props.errorMessage })}
-                    />
-                    {entry.result?.truncated === true ? <small>Response truncated</small> : null}
-                  </div>
-                </div>
-              ) : null}
+              {props.onOpen === undefined ? (
+                <span className="environment-subagent">{content}</span>
+              ) : (
+                <OctantButton
+                  aria-label={`${entry.task}. ${state}. Open in Agents`}
+                  className="environment-subagent window-no-drag"
+                  onClick={() => props.onOpen?.(entry.runId)}
+                  title={entry.task}
+                  type="button"
+                  variant="link"
+                >
+                  {content}
+                </OctantButton>
+              )}
             </li>
           );
         })}
@@ -162,52 +112,20 @@ function AgentGroup(props: {
   );
 }
 
-function ConversationBody(props: {
-  readonly conversation: AgentRunConversationResponse | undefined;
-  readonly entry: ReturnType<typeof useChildRunStatus>["entries"][number];
-  readonly reconnecting: boolean;
-  readonly loading: boolean;
-  readonly errorMessage?: string;
-}) {
-  const fallback =
-    props.entry.result?.text ??
-    (ACTIVE.has(props.entry.lifecycleStatus)
-      ? "The subagent is still working. Reconnecting to its live response…"
-      : "No retained response is available.");
-  if (props.conversation === undefined) {
-    return (
-      <p>
-        {props.loading
-          ? "Connecting to the subagent’s live response…"
-          : (props.errorMessage ?? fallback)}
-      </p>
-    );
+/** "1 working · 2 to review", in the order a reader acts on them. */
+export function subagentSummary(entries: ReadonlyArray<AgentHierarchyInputEntry>): string {
+  if (entries.length === 0) return "None";
+  let working = 0;
+  let toReview = 0;
+  let done = 0;
+  for (const entry of entries) {
+    if (isActiveAgentHierarchyStatus(entry.lifecycleStatus)) working += 1;
+    else if (subagentNeedsReview(entry)) toReview += 1;
+    else done += 1;
   }
-  if (props.conversation.status === "unavailable") {
-    return <p>Live response text is unavailable for this execution.</p>;
-  }
-  if (props.conversation.entries.length === 0) {
-    return (
-      <p>
-        {props.conversation.status === "stale"
-          ? (props.conversation.staleReason ??
-            "The child session is stale; no more transcript is available.")
-          : "The subagent has not produced visible response text yet."}
-      </p>
-    );
-  }
-  return (
-    <div>
-      {props.conversation.entries.map((entry) => (
-        <p key={entry.sequence}>{entry.text}</p>
-      ))}
-      {props.conversation.truncated ? <small>Earlier response text was truncated.</small> : null}
-      {props.conversation.status === "stale" ? (
-        <small>{props.conversation.staleReason ?? "The live response is stale."}</small>
-      ) : null}
-      {props.reconnecting ? (
-        <small>Live response disconnected; reconnect to continue.</small>
-      ) : null}
-    </div>
-  );
+  const parts: string[] = [];
+  if (working > 0) parts.push(`${String(working)} working`);
+  if (toReview > 0) parts.push(`${String(toReview)} to review`);
+  if (done > 0) parts.push(`${String(done)} done`);
+  return parts.join(" · ");
 }

@@ -1,5 +1,6 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import { useComposerNotice } from "./ComposerNotice";
+import { ComposerSubagents } from "./ComposerSubagents";
 import type { ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
@@ -158,11 +159,13 @@ export function ThreadComposer(props: ThreadComposerProps) {
     props.ariaLabel === undefined ? (
       <div className={frameClassName}>
         {notice}
+        <ComposerSubagents />
         {body}
       </div>
     ) : (
       <section aria-label={props.ariaLabel} className={frameClassName}>
         {notice}
+        <ComposerSubagents />
         {body}
       </section>
     );

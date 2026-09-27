@@ -107,7 +107,7 @@ export type RightUtilityDockResolution =
  * memory in Overview, Navigator on the profile control. Plan and Delivery are
  * still mode-valid here; presence is gated by the thread's current artifact or
  * enabled target, not by this catalog. Agents is conditional: it appears when
- * children exist or the user invokes Add agent. Review is the local-diff tool.
+ * subagents exist or a composer tray row asks for one. Review is the local-diff tool.
  */
 /**
  * Surfaces a reader can hold several of at once. A second browser is a second

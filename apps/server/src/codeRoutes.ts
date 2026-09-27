@@ -114,6 +114,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import type { CodeService } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
@@ -333,6 +334,11 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     input: CodeFileListingInput,
   ) => Promise<CodeFileListingResult> | CodeFileListingResult;
+  /**
+   * Read one checkout file without the file helper. Host-internal: no route
+   * serves it; Side Chat's read tool calls it. Optional like `listFiles`.
+   */
+  readonly readFile?: CodeService["readFile"];
   /**
    * Bounded search of the thread's checkout by path or by content. Optional
    * for the same reason as `listFiles`.

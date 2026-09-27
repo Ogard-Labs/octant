@@ -1,4 +1,5 @@
 import {
+  decodeCodeRelativePath,
   decodeAgentProfile,
   decodeProviderObservedState,
   decodeCodeCheckoutIdentity,
@@ -28,6 +29,9 @@ import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remot
 import { CodeProjectAccess } from "../codeProjectAccess";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
@@ -3358,6 +3362,68 @@ describe("CodeService.listFiles", () => {
       checkoutId: checkout.id,
     });
     expect(result).toMatchObject({ status: "failed", failure: { category: "unavailable" } });
+  });
+});
+
+describe("CodeService.readFile", () => {
+  it("reads a listed file on a host with no file helper, where the editor open fails", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-code-read-")));
+    try {
+      writeFileSync(join(root, "NOTES.md"), "# QA notes\nsecond line\n");
+      const fixture = serviceFixture();
+      // What every `octant web` host wires: no helper, so every open refuses.
+      fixture.files.open.mockResolvedValue({
+        status: "failed",
+        failure: { category: "unavailable", code: "helper-unavailable" },
+      });
+      fixture.roots.resolve.mockResolvedValue({
+        fileId: ids.file,
+        rootPath: root,
+        rootIdentity: { device: "7", inode: "8" },
+      });
+      const input = {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: decodeCodeRelativePath("NOTES.md"),
+      };
+
+      const opened = await fixture.service.openFile(ids.window, input);
+      const read = await fixture.service.readFile(ids.window, { ...input, maximumBytes: 1_024 });
+
+      expect(opened.result).toMatchObject({ status: "failed" });
+      expect(read).toMatchObject({ status: "read" });
+      if (read.status !== "read") throw new Error("expected bytes");
+      expect(new TextDecoder().decode(read.bytes)).toBe("# QA notes\nsecond line\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a symlink that leads out of the checkout", async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-code-read-")));
+    try {
+      const root = join(parent, "checkout");
+      mkdirSync(root);
+      writeFileSync(join(parent, "secret.txt"), "secret");
+      symlinkSync(join(parent, "secret.txt"), join(root, "link.txt"));
+      const fixture = serviceFixture();
+      fixture.roots.resolve.mockResolvedValue({
+        fileId: ids.file,
+        rootPath: root,
+        rootIdentity: { device: "7", inode: "8" },
+      });
+
+      const read = await fixture.service.readFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: decodeCodeRelativePath("link.txt"),
+        maximumBytes: 1_024,
+      });
+
+      expect(read).toEqual({ status: "refused", reason: "outside-root" });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 });
 

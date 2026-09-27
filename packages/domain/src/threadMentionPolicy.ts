@@ -186,11 +186,23 @@ export function boundThreadMentionTranscript(
       MAX_THREAD_MENTION_TRANSCRIPT_CHARACTERS,
     ),
   );
+  return boundTranscriptWindow(entries, maxEntries, maxCharacters);
+}
+
+/**
+ * Keep the newest entries that fit both bounds. Shared by the mention window
+ * and the larger Side Chat source window so the two cannot disagree about
+ * which end of a transcript survives or when `truncated` is reported.
+ */
+export function boundTranscriptWindow(
+  entries: ReadonlyArray<ThreadMentionTranscriptEntry>,
+  maxEntries: number,
+  maxCharacters: number,
+): BoundedThreadMentionTranscript {
   const window: ThreadMentionTranscriptEntry[] = [];
   let characters = 0;
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
+  for (const entry of [...entries].reverse()) {
     if (window.length >= maxEntries) break;
-    const entry = entries[index]!;
     if (characters + entry.text.length > maxCharacters) break;
     characters += entry.text.length;
     window.unshift(entry);

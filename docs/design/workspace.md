@@ -99,7 +99,11 @@ The top-right control reveals the dock only when the active pane has a bound thr
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Document shows the
+Tests, iOS Simulator, and Android emulator, as mode and capability allow. Side
+Chat is a Chat conversation about the pane's thread: it reads that thread's
+conversation, current state, files, and subagent results, and changes none of
+them ([authority](../architecture.md#security-and-authority)). Its notice says
+what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
 Chat-authored Canvas) in the dock once per document, never after the person
@@ -121,13 +125,28 @@ clicking the screen or a key button cannot grant it. The host owns observation,
 input, and evidence safety under the [device transport contract](../architecture.md#device-transport-and-evidence).
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
 Environment belongs to a
-thread as a context-aware dock tab opened from the dock tab strip or Add tool. It may
-summarize the active thread's server-authored child AgentRuns, including their
-lifecycle, resolved model, and retained final result; full AgentRun control
-stays in the Agents dock. The workspace-rail Agents Center is that same
+thread as a context-aware dock tab opened from the dock tab strip or Add tool. It
+counts the active thread's server-authored child AgentRuns in one row (working,
+to review, done) that opens the Agents dock; reading, steering, and every other
+AgentRun control stay in the Agents dock. The thread's live subagents (working, or finished
+and awaiting review) also show as a card tucked behind its composer, whose rows open the
+Agents dock on that subagent; see [DESIGN.md](../../DESIGN.md#welcome-and-composer).
+The Agents dock is a list and a page, and it shows and controls subagents
+without starting them: only the thread's agent starts one, through the Octant
+Harness `delegate` tool, and collects its result. The list has one title, then
+Working and Finished sections of one-button rows —
+status icon, task, and state, role, model, and age in words — with finished
+rows newest first and an unreviewed result marked "Needs review". A row opens
+that subagent's page in place of the list, with a back control: its task as
+the title, a status line, and a small transcript that starts with the task as
+the brief, then the replies as rendered Markdown and status events as quiet
+lines, live while it runs. When the live read is unavailable or gone after
+completion, the retained final reply stands in; when neither exists the page
+says so. Mark reviewed, Steer, Retry, Resume, and Cancel sit in one bar pinned
+under the transcript. A thread with none says subagents appear when the agent
+hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes; on a wide window it can draw the current query as a
-forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. Environment may show a compact read-only preview of
-the host's bounded, process-local child conversation read: entries are
+forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized

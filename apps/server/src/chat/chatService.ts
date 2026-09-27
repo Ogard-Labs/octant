@@ -31,6 +31,9 @@ import {
   decodeProviderModelId,
   decodeProviderSessionId,
   MAX_PROVIDER_TOOLS,
+  SIDE_CHAT_LIST_FILES_TOOL_NAME,
+  SIDE_CHAT_READ_FILE_TOOL_NAME,
+  SIDE_CHAT_SEARCH_FILES_TOOL_NAME,
   decodeChatThreadId,
   decodeChatThread,
   decodeChatTurn,
@@ -148,6 +151,7 @@ import {
 import {
   defaultShellSettings,
   reapsStaleProviderSession,
+  SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
@@ -226,6 +230,18 @@ const EMPTY_HIDDEN_THREAD_IDS: ReadonlySet<string> = new Set();
  */
 const SIDE_CHAT_SOURCE_UNREADABLE =
   "The thread this Side Chat is about can no longer be read, so this Side Chat cannot answer about it.";
+/**
+ * Consecutive turns a Side Chat may say "unchanged" before the full snapshot
+ * is sent again. A provider that keeps its own history may also compact it,
+ * and a snapshot summarized away would leave the model answering from a
+ * paraphrase; resending now and then bounds how stale that can get.
+ */
+const MAX_SIDE_CHAT_UNCHANGED_TURNS = 4;
+const SIDE_CHAT_READ_TOOL_NAMES: ReadonlySet<string> = new Set([
+  SIDE_CHAT_LIST_FILES_TOOL_NAME,
+  SIDE_CHAT_SEARCH_FILES_TOOL_NAME,
+  SIDE_CHAT_READ_FILE_TOOL_NAME,
+]);
 const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
 const CHAT_EVENT_NAMES = new Set([
@@ -546,6 +562,11 @@ export interface ChatServiceOptions {
   readonly resolveSideChatSourceContext?: (input: {
     readonly sidecarThreadId: ChatThreadId;
     readonly windowId?: WindowId;
+    /**
+     * Names of the read-only source file tools this turn actually offers, so
+     * the framing never promises a tool the provider was not given.
+     */
+    readonly readToolNames?: ReadonlyArray<string>;
   }) => Promise<SideChatSourceContext | undefined>;
   /**
    * Resolves the `#thread` mentions a turn names.
@@ -707,6 +728,20 @@ export class ChatService {
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
+  /**
+   * The Side Chat source snapshot each sidecar last prepared, by sidecar
+   * thread id. In memory on purpose: after a restart the next turn simply
+   * sends the full snapshot again, which is always correct.
+   */
+  readonly #sideChatSourceSent = new Map<
+    string,
+    {
+      readonly digest: string;
+      /** The last attempt that existed when this snapshot was prepared. */
+      readonly priorAttemptId: string | undefined;
+      readonly unchangedTurns: number;
+    }
+  >();
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
@@ -2899,7 +2934,24 @@ export class ChatService {
       probe,
       decodeProviderModelId(thread.modelId),
     );
-    const sideChatSourceContext = await this.#resolveSideChatSource(thread, executionContext);
+    const sideChatSource = await this.#resolveSideChatSource(
+      thread,
+      executionContext,
+      (tools?.definitions ?? [])
+        .map((definition) => definition.name)
+        .filter((name) => SIDE_CHAT_READ_TOOL_NAMES.has(name)),
+    );
+    const sideChatSourceContext =
+      sideChatSource === undefined
+        ? undefined
+        : this.#sideChatSourceForTurn(thread.id, sideChatSource, {
+            // Only a fresh send on a provider-owned session can lean on what
+            // the session already holds. A host-owned conversation rebuilds
+            // its context every turn and never saw the earlier snapshot, and
+            // an edit, retry, or resume may rewind the session behind it.
+            reusable: nativeConversation && extensionPhase === "send" && historyTurns === undefined,
+            previous,
+          });
     const threadMentionContexts = await this.#resolveThreadMentions(
       threadMentionIds,
       executionContext,
@@ -3070,6 +3122,7 @@ export class ChatService {
   async #resolveSideChatSource(
     thread: ChatThread,
     executionContext: ChatServiceExecutionContext | undefined,
+    readToolNames: ReadonlyArray<string>,
   ): Promise<string | undefined> {
     if (this.#resolveSideChatSourceContext === undefined) return undefined;
     let source: SideChatSourceContext | undefined;
@@ -3077,6 +3130,7 @@ export class ChatService {
       source = await this.#resolveSideChatSourceContext({
         sidecarThreadId: thread.id,
         ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        readToolNames,
       });
     } catch {
       // A resolver that throws says nothing about whether this thread is a
@@ -3094,6 +3148,45 @@ export class ChatService {
       });
     }
     return source.text;
+  }
+
+  /**
+   * The source snapshot this Side Chat turn sends, or a one-line "unchanged"
+   * when the provider session already holds an identical one.
+   *
+   * A provider that owns its conversation stores every turn's context in its
+   * own history, so resending a byte-identical snapshot of up to forty messages
+   * each turn grew that history by the same block over and over. The snapshot
+   * counts as held only when the attempt that carried it completed: a failed or
+   * interrupted attempt may never have reached the session, and the next turn
+   * then sends it in full.
+   */
+  #sideChatSourceForTurn(
+    threadId: ChatThreadId,
+    text: string,
+    options: {
+      readonly reusable: boolean;
+      readonly previous: { readonly id: string; readonly outcome: string } | undefined;
+    },
+  ): string {
+    const key = String(threadId);
+    const digest = createHash("sha256").update(text).digest("hex");
+    const sent = this.#sideChatSourceSent.get(key);
+    const priorAttemptId = options.previous === undefined ? undefined : String(options.previous.id);
+    const held =
+      options.reusable &&
+      sent !== undefined &&
+      sent.digest === digest &&
+      sent.unchangedTurns < MAX_SIDE_CHAT_UNCHANGED_TURNS &&
+      options.previous !== undefined &&
+      options.previous.outcome === "completed" &&
+      priorAttemptId !== sent.priorAttemptId;
+    this.#sideChatSourceSent.set(key, {
+      digest,
+      priorAttemptId,
+      unchangedTurns: held ? (sent?.unchangedTurns ?? 0) + 1 : 0,
+    });
+    return held ? SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT : text;
   }
 
   /**
@@ -4042,10 +4135,12 @@ export class ChatService {
     const extensionEntries = extensionContextEntries.map((entry) =>
       contextEntry(entry.contextEntry, entry.providerContext),
     );
-    // A sidecar's source thread is workspace context like any other selection:
-    // compressible, so the planner can compact or omit it under budget
-    // pressure rather than pushing out the conversation it is meant to
-    // support, and never `required`.
+    // A sidecar's source thread is the subject of every one of its turns, so
+    // it is `required`: planned as compressible, the planner dropped it under
+    // budget pressure and the Side Chat answered about a thread it was no
+    // longer shown, which is the silent version of the unreadable refusal.
+    // Its size is bounded by the Side Chat transcript and state caps, so a
+    // model too small to hold it blocks with the planner's remedies instead.
     const sideChatSourceEntries =
       sideChatSourceContext === undefined || sideChatSourceContext.length === 0
         ? []
@@ -4056,7 +4151,7 @@ export class ChatService {
                 "workspace-context",
                 sideChatSourceContext,
                 Math.max(16, Math.ceil(sideChatSourceContext.length / 4)),
-                "compressible",
+                "required",
                 { kind: "message", referenceId: `side-chat-source:${thread.id}` },
               ),
               { kind: "user-message", text: sideChatSourceContext },

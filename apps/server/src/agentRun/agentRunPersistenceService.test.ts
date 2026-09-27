@@ -24,7 +24,7 @@ import { purgeThreadContent } from "../persistence/chatProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
-import { ProjectionRegistry } from "../persistence/projection";
+import { catchUpProjection, ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
   AGENT_RUN_REQUESTED,
@@ -707,6 +707,49 @@ describe("AgentRunPersistenceService", () => {
     });
     durable.rebuildFromJournal();
     expect(durableProjection.getById(accepted.run.id)?.lifecycleStatus).toBe("interrupted");
+  });
+
+  it("still lists a parent's children after a host restart resumes from stored checkpoints", () => {
+    const connection = openConnection();
+    const registry = new EventRegistry()
+      .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
+      .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
+      .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged);
+    // As the host wires it: the projection is registered with the journal,
+    // so every append also advances its stored checkpoint.
+    const liveProjection = new AgentRunProjection();
+    const journal = new Journal({
+      connection,
+      registry,
+      projections: new ProjectionRegistry()
+        .register(new AggregateHeadsProjection())
+        .register(liveProjection),
+      clock: () => now,
+    });
+    const store = new AgentRunEventStore({ journal, uuid: () => ids.run, actor });
+    const live = new AgentRunPersistenceService({
+      store,
+      projection: liveProjection,
+      uuid: () => ids.run,
+      clock: () => later,
+      connection,
+    });
+    expect(
+      live.requestRun({ command: requestCommand(), parentAuthority, confirmed: true }).kind,
+    ).toBe("run-accepted");
+
+    // A new process: a fresh projection caught up the way startup does it.
+    const restartedProjection = new AgentRunProjection();
+    catchUpProjection({ connection, journal, projection: restartedProjection, clock: () => later });
+    const restarted = new AgentRunPersistenceService({
+      store,
+      projection: restartedProjection,
+      uuid: () => ids.run,
+      clock: () => later,
+      connection,
+    });
+
+    expect(restarted.parentSummary(ids.thread).map((entry) => entry.runId)).toEqual([ids.run]);
   });
 
   it("keeps ambiguous waiting runs non-completed on restart", () => {

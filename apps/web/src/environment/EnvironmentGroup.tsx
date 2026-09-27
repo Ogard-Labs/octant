@@ -1,9 +1,11 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface EnvironmentGroupProps {
   readonly title: string;
+  /** The row's glyph; every Environment row leads with one so titles align. */
+  readonly icon?: LucideIcon;
   /** Short trailing summary shown on the header row (e.g. "+102 −0"). */
   readonly summary?: ReactNode;
   readonly defaultOpen?: boolean;
@@ -44,18 +46,28 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
           className="environment-group__header window-no-drag"
           onClick={toggle}
           type="button"
-          variant="ghost"
+          variant="link"
         >
-          <ChevronRight
-            aria-hidden="true"
-            className="environment-group__chevron"
-            size={14}
-            strokeWidth={2}
-          />
+          {props.icon === undefined ? null : (
+            <props.icon
+              aria-hidden="true"
+              className="environment-group__icon"
+              size={16}
+              strokeWidth={1.7}
+            />
+          )}
           <span className="environment-group__title">{props.title}</span>
           {props.summary === undefined ? null : (
             <span className="environment-group__summary"> {props.summary}</span>
           )}
+          {/* Trailing, where the eye ends the row: a leading chevron pushed
+              every title a step right of the rows that have none. */}
+          <ChevronRight
+            aria-hidden="true"
+            className="environment-group__chevron"
+            size={14}
+            strokeWidth={1.8}
+          />
         </OctantButton>
         {props.action === undefined ? null : (
           <span className="environment-group__head-action">{props.action}</span>

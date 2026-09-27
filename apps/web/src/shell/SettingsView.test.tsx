@@ -139,7 +139,7 @@ describe("SettingsView", () => {
   it("puts the helper-agent posture on the Octant Harness page and offers no Agents page", async () => {
     const agentRunSettingsClient = {
       current: vi.fn(async () => ({
-        creationPosture: "ask" as const,
+        creationPosture: "automatic" as const,
         version: 1 as never,
         updatedAt: now as never,
       })),
@@ -150,8 +150,8 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "harness" },
     });
     expect(
-      await screen.findByRole("combobox", { name: "Let the model start helper agents" }),
-    ).toHaveTextContent("Only when I start them");
+      await screen.findByRole("switch", { name: "Let the agent start subagents" }),
+    ).toBeChecked();
     expect(screen.getByRole("button", { name: "Octant Harness" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -162,7 +162,7 @@ describe("SettingsView", () => {
   it("does not render the helper-agent posture without an AgentRunSettingsClient", () => {
     renderSettings({ initialDeepLink: { section: "harness" } });
     expect(
-      screen.queryByRole("combobox", { name: "Let the model start helper agents" }),
+      screen.queryByRole("switch", { name: "Let the agent start subagents" }),
     ).not.toBeInTheDocument();
   });
 

@@ -49,6 +49,50 @@ describe("ThreadDialogueService", () => {
     );
   });
 
+  it("never offers a Side Chat a way to message the thread it is about", () => {
+    const executeChat = vi.fn(async () => ({ kind: "turn-created", turn: { id: targetTurnId } }));
+    const service = new ThreadDialogueService({
+      resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
+      readChatThread: () => targetView(),
+      executeChat,
+      isSideChat: (threadId) => threadId === String(sourceThreadId),
+    });
+
+    const tools = service.forThread({
+      windowId,
+      sourceThreadId,
+      sourceTitle: "Side Chat about Target Chat",
+      targetThreadIds: [targetThreadId],
+    });
+
+    expect(tools).toBeUndefined();
+    expect(executeChat).not.toHaveBeenCalled();
+  });
+
+  it("refuses to start a turn in a Side Chat even when it was mentioned", async () => {
+    const executeChat = vi.fn(async () => ({ kind: "turn-created", turn: { id: targetTurnId } }));
+    const service = new ThreadDialogueService({
+      resolveChatTargets: async () => [{ threadId: targetThreadId, title: "Target Chat" }],
+      readChatThread: () => targetView(),
+      executeChat,
+      isSideChat: (threadId) => threadId === String(targetThreadId),
+    });
+    const tools = service.forThread({
+      windowId,
+      sourceThreadId,
+      sourceTitle: "Source Chat",
+      targetThreadIds: [targetThreadId],
+    });
+
+    const result = await tools?.execute({
+      name: "octant_thread_message",
+      inputJson: JSON.stringify({ targetThreadId, message: "Append this." }),
+    });
+
+    expect(result).toMatchObject({ isError: true, result: { status: "refused" } });
+    expect(executeChat).not.toHaveBeenCalled();
+  });
+
   it("refuses a target that was not explicitly mentioned", async () => {
     const executeChat = vi.fn(async () => ({ kind: "turn-created", turn: { id: targetTurnId } }));
     const service = new ThreadDialogueService({

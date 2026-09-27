@@ -1,3 +1,4 @@
+import { GitBranch } from "lucide-react";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
@@ -8,6 +9,8 @@ import type { LocalServerGroupCounts } from "./localServerGroups";
 export interface ThreadEnvironmentSummaryFacts {
   readonly identity: EnvironmentCompactIdentity;
   readonly branch?: string;
+  /** The checkout's folder on disk, shown under the name. */
+  readonly path?: string;
   readonly changes?: "clean" | "dirty";
   readonly workingLocation?: string;
   readonly runningServerCount?: number;
@@ -33,6 +36,8 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   const active = props.active !== false;
   const shown = active && props.open;
   const facts = summaryFacts(props.summary);
+  const headline = headlineFacts(props.summary);
+  const sentence = [props.summary.identity.label, ...facts].join(" · ");
 
   // The dock host can mount after the panel opens, and the dock replaces it
   // whenever it re-keys the tool body — the tool tab and the pane's
@@ -61,17 +66,65 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      <header className="thread-environment-dock__header">
-        {/* The dock strip's tab already says Environment; the rail shows the
-            facts and the heading stays for readers who navigate by heading. */}
+      {/* The dock strip's tab already says Environment; the header names
+          what the thread works in — the name on its own line, then where:
+          the branch and the folder. It had carried the name, the branch and a
+          Changes pill, and the section under it then listed the branch and
+          the repository again. Whether the checkout has changes is the
+          Changes card's to say. */}
+      <header className="thread-environment-dock__header" title={sentence}>
         <h2 className="visually-hidden">Environment</h2>
-        <span>{[props.summary.identity.label, ...facts].join(" · ")}</span>
+        {/* The whole summary stays one sentence for assistive technology;
+            the visible parts are its layout. */}
+        <span className="visually-hidden">{sentence}</span>
+        <span aria-hidden="true" className="thread-environment-dock__name">
+          {props.summary.identity.label}
+        </span>
+        {headline.branch === undefined && headline.place === undefined ? null : (
+          <span aria-hidden="true" className="thread-environment-dock__meta">
+            {headline.branch === undefined ? null : (
+              <span className="thread-environment-dock__branch">
+                <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span>{headline.branch}</span>
+              </span>
+            )}
+            {headline.place === undefined ? null : (
+              <span className="thread-environment-dock__place">{headline.place}</span>
+            )}
+          </span>
+        )}
       </header>
       <div className="thread-environment-dock__body">{props.children}</div>
     </section>
   );
   const isolated = <DockModuleBoundary>{content}</DockModuleBoundary>;
   return dockHost === null ? isolated : createPortal(isolated, dockHost);
+}
+
+/** Where the thread works, under its name: the branch, then the folder. */
+function headlineFacts(summary: ThreadEnvironmentSummaryFacts): {
+  readonly branch?: string;
+  readonly place?: string;
+} {
+  const folder =
+    summary.path !== undefined
+      ? homeRelative(summary.path)
+      : summary.identity.detail !== summary.identity.label
+        ? summary.identity.detail
+        : undefined;
+  return {
+    ...(summary.branch === undefined ? {} : { branch: summary.branch }),
+    ...(folder === undefined ? {} : { place: folder }),
+  };
+}
+
+/**
+ * A home-directory path read from its home: the account folder repeats on
+ * every row and pushed the part that tells two checkouts apart out of a
+ * 320px dock.
+ */
+function homeRelative(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 }
 
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {

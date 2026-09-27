@@ -70,9 +70,13 @@ describe("SideChatPanel", () => {
     const panel = screen.getByRole("region", { name: "Side Chat" });
     expect(panel).toHaveTextContent("Side Chat about Release notes");
     expect(panel).toHaveTextContent(
-      "Ordinary Chat. It reads this thread and cannot steer, approve, or change it.",
+      "Ask about this thread. It can read it but can’t change, steer, or approve anything.",
     );
     await waitFor(() => expect(screen.getByText(/sidecar surface/)).toBeVisible());
+    // Once the host names the source, the notice says what that source offers.
+    expect(panel).toHaveTextContent(
+      "Ask about this thread: its conversation, folder, files, and subagent results. It can read them but can’t change, steer, or approve anything.",
+    );
   });
 
   it("asks for a thread when none is open rather than inventing a sidecar", () => {

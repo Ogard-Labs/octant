@@ -1,5 +1,5 @@
 import { decodeProjectId, type CodeEnvironmentObservation } from "@octant/contracts";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
@@ -25,55 +25,35 @@ function renderGroup(overrides: Partial<React.ComponentProps<typeof EnvironmentG
   );
 }
 
-function row(label: string): HTMLElement {
-  return screen.getByText(label, { selector: "dt" }).parentElement!;
-}
-
-function expectRowOrder(): void {
-  expect(screen.getAllByRole("term").map((term) => term.textContent)).toEqual([
-    "Changes",
-    "Branch",
-    "Repository",
-    "Worktree",
-  ]);
-}
-
 describe("EnvironmentGitGroup", () => {
-  it("maps a ready observation to truthful Git rows in fixed order", () => {
+  it("says what the checkout holds and names a worktree that lives somewhere else", () => {
     renderGroup();
 
-    expectRowOrder();
-    expect(within(row("Changes")).getByText("Uncommitted changes")).toBeVisible();
+    expect(screen.getByText("Uncommitted changes")).toBeVisible();
+    const worktree = screen.getByTitle(readyObservation.worktreeRoot);
+    expect(worktree).toHaveTextContent("Worktree");
+    expect(worktree).toHaveTextContent("issue-52-reference-faithful-shell");
+    // The header names the repository and branch; the card does not repeat them.
+    expect(screen.queryByText("Octant")).not.toBeInTheDocument();
+    expect(screen.queryByText("feature/issue-52-reference-faithful-shell")).not.toBeInTheDocument();
+  });
 
-    const worktree = within(row("Worktree"));
-    expect(worktree.getByText("issue-52-reference-faithful-shell")).toHaveClass(
-      "environment-git-group__identity-primary",
-    );
-    expect(worktree.getByText(readyObservation.worktreeRoot)).toHaveClass(
-      "environment-git-group__identity-secondary",
-    );
-    expect(worktree.getByTitle(readyObservation.worktreeRoot)).toBeVisible();
+  it("does not mention a worktree when the thread works in the checkout itself", () => {
+    renderGroup({
+      observation: { ...readyObservation, worktreeRoot: readyObservation.repositoryRoot },
+    });
 
-    expect(
-      within(row("Branch")).getByText("feature/issue-52-reference-faithful-shell"),
-    ).toBeVisible();
-
-    const repository = within(row("Repository"));
-    expect(repository.getByText("Octant")).toHaveClass("environment-git-group__identity-primary");
-    expect(repository.getByText(readyObservation.repositoryRoot)).toHaveClass(
-      "environment-git-group__identity-secondary",
-    );
-    expect(repository.getByTitle(readyObservation.repositoryRoot)).toBeVisible();
+    expect(screen.queryByText("Worktree")).not.toBeInTheDocument();
   });
 
   it.each([
-    ["clean", "Clean working tree"],
+    ["clean", "No uncommitted changes"],
     ["dirty", "Uncommitted changes"],
   ] as const)("says what a %s tree is without inventing counts", (changes, expected) => {
     renderGroup({ observation: { ...readyObservation, changes } });
 
-    expect(within(row("Changes")).getByText(expected)).toBeVisible();
-    expect(screen.queryByText(/[+\u2212]\d/)).not.toBeInTheDocument();
+    expect(screen.getByText(expected)).toBeVisible();
+    expect(screen.queryByText(/[+−]\d/)).not.toBeInTheDocument();
   });
 
   it("states how much a dirty tree changed once the host has measured it", () => {
@@ -83,9 +63,8 @@ describe("EnvironmentGitGroup", () => {
       observation: { ...readyObservation, changes: "dirty", insertions: 2087, deletions: 621 },
     });
 
-    const changes = within(row("Changes"));
-    expect(changes.getByText(`+${(2087).toLocaleString()}`)).toBeVisible();
-    expect(changes.getByText(`\u2212${(621).toLocaleString()}`)).toBeVisible();
+    expect(screen.getByText(`+${(2087).toLocaleString()}`)).toBeVisible();
+    expect(screen.getByText(`−${(621).toLocaleString()}`)).toBeVisible();
   });
 
   it("keeps a clean tree clean even when the host reported zero counts", () => {
@@ -93,17 +72,34 @@ describe("EnvironmentGitGroup", () => {
       observation: { ...readyObservation, changes: "clean", insertions: 0, deletions: 0 },
     });
 
-    expect(within(row("Changes")).getByText("Clean working tree")).toBeVisible();
+    expect(screen.getByText("No uncommitted changes")).toBeVisible();
+    expect(screen.queryByText("+0")).not.toBeInTheDocument();
+  });
+
+  it("opens the changes from a dirty tree, and offers nothing to open on a clean one", async () => {
+    const onOpenChanges = vi.fn();
+    const { rerender } = renderGroup({ onOpenChanges });
+
+    await userEvent.click(screen.getByRole("button", { name: "View changes" }));
+    expect(onOpenChanges).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <EnvironmentGitGroup
+        observation={{ ...readyObservation, changes: "clean" }}
+        onOpenChanges={onOpenChanges}
+        status="ready"
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "View changes" })).not.toBeInTheDocument();
   });
 
   it("renders detached HEAD with a short display OID and discoverable full OID", () => {
     const oid = "0123456789abcdef0123456789abcdef01234567";
     renderGroup({ observation: { ...readyObservation, branch: { kind: "detached", oid } } });
 
-    expectRowOrder();
-    expect(within(row("Branch")).getByText("Detached HEAD")).toBeVisible();
-    expect(within(row("Branch")).getByTitle(oid)).toHaveTextContent("0123456789ab");
-    expect(within(row("Branch")).getByLabelText(`Full commit ${oid}`)).toBeInTheDocument();
+    expect(screen.getByText("Detached HEAD")).toBeVisible();
+    expect(screen.getByTitle(oid)).toHaveTextContent("0123456789ab");
+    expect(screen.getByLabelText(`Full commit ${oid}`)).toBeInTheDocument();
   });
 
   it("shows one concise state while loading", () => {

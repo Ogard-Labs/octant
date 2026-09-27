@@ -33,7 +33,6 @@ function stubClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
       entries: [summaryEntry("a", "running"), summaryEntry("b", "waiting")],
     }),
     acknowledge: vi.fn().mockResolvedValue({ kind: "run-updated" }),
-    requestRun: vi.fn(),
     cancel: vi.fn().mockResolvedValue({ results: [] }),
     ...overrides,
   } as unknown as AgentRunClient;
@@ -158,7 +157,7 @@ describe("useChildRunStatus", () => {
 
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Child runs could not be stopped. They are still running.",
+        "Subagents could not be stopped. They are still running.",
       ),
     );
     expect(screen.getByLabelText("stopped")).toHaveTextContent("failed");
@@ -184,7 +183,7 @@ describe("useChildRunStatus", () => {
 
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Child runs could not be stopped. They are still running.",
+        "Subagents could not be stopped. They are still running.",
       ),
     );
     expect(screen.getByLabelText("stopped")).toHaveTextContent("failed");
@@ -200,7 +199,7 @@ describe("useChildRunStatus", () => {
 
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Child runs could not be stopped. They are still running.",
+        "Subagents could not be stopped. They are still running.",
       ),
     );
   });
@@ -276,7 +275,7 @@ describe("useChildRunStatus", () => {
     await user.click(screen.getByRole("button", { name: "stop" }));
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Child runs could not be stopped. They are still running.",
+        "Subagents could not be stopped. They are still running.",
       ),
     );
 

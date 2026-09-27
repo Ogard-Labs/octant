@@ -12,7 +12,7 @@ const scope = {
   } as never,
 };
 
-function port(posture: "off" | "ask" | "automatic", admitted: unknown[] = []) {
+function port(posture: "off" | "automatic", admitted: unknown[] = []) {
   return createNativeHarnessDelegatePort(
     {
       admission: {
@@ -67,15 +67,6 @@ describe("native harness delegate port", () => {
     });
     expect(outcome).toMatchObject({ status: "refused", reason: "creation-posture-off" });
     expect(touched).toEqual([]);
-  });
-
-  it("tells the model a person must confirm under the Ask posture", async () => {
-    const outcome = await port("ask").start({
-      role: "research",
-      task: "Look",
-      includeParentContext: false,
-    });
-    expect(outcome).toMatchObject({ status: "refused", reason: "creation-posture-ask" });
   });
 
   it("admits through the shared path under Automatic and reports its refusal honestly", async () => {

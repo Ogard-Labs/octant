@@ -47,6 +47,10 @@ const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const surfaceStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
 const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
+const environmentStyles = readFileSync(
+  resolve(process.cwd(), "src/styles/environment.css"),
+  "utf8",
+);
 const projectStyles = readFileSync(
   resolve(process.cwd(), "src/styles/project-threads.css"),
   "utf8",
@@ -58,7 +62,14 @@ const projectStyles = readFileSync(
  * the assertion then silently moved on to the next rule sharing that selector,
  * usually one inside a media query.
  */
-const styles = [rootStyles, shellStyles, dockStyles, surfaceStyles, projectStyles]
+const styles = [
+  rootStyles,
+  shellStyles,
+  dockStyles,
+  environmentStyles,
+  surfaceStyles,
+  projectStyles,
+]
   .join("\n")
   .replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -560,14 +571,8 @@ describe("WindowChrome", () => {
     // so the dock and dialog stay workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
-    expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
-    expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
-    expect(cssRule(".environment-git-group dl")).toContain("border-radius: 0;");
-    expect(cssRule(".environment-git-group__row")).toContain("min-height: 32px;");
-    expect(cssRule(".environment-git-group__row + .environment-git-group__row")).toContain(
-      "border-top: 1px solid var(--octant-border);",
-    );
-    expect(cssRule(".environment-git-group__identity-secondary", 1)).toContain(
+    expect(cssRule(".environment-checkout", 1)).toContain("border: 1px solid var(--oct-hairline);");
+    expect(cssRule(".thread-environment-dock__meta")).toContain(
       "font-family: var(--oct-font-mono);",
     );
 
@@ -583,7 +588,7 @@ describe("WindowChrome", () => {
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
     expect(styles).toContain("@media (prefers-contrast: more)");
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
-    expect(styles).toContain(".environment-git-group dl,");
+    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".environment-checkout");
     expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
       "background: var(--octant-control-hover);",
     );
@@ -612,25 +617,18 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("keeps the environment disclosure compact, neutral, and interface-typed", () => {
-    expect(cssRule(".thread-environment-disclosure")).toContain(
-      "width: min(320px, calc(100vw - 24px));",
-    );
-    expect(cssRule(".thread-environment-disclosure")).toContain(
-      "border-radius: var(--oct-radius-lg);",
-    );
-    expect(cssRule(".thread-environment-disclosure__header")).toContain("min-height: 44px;");
+  it("keeps every Environment row on one unfilled grammar", () => {
+    // An open row painted grey read as selected; rows lift their ink instead.
+    for (const selector of [".environment-group__header,", ".environment-link,"]) {
+      expect(styles).toContain(selector);
+    }
+    const row = cssRule(".environment-row");
+    expect(row).not.toContain("background");
+    expect(cssRule(".environment-group__body")).toContain("32px;");
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
-    expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
-    expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
-    expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
-    expect(cssRule(".thread-environment-dock__header span")).toContain("color: var(--oct-muted);");
-    expect(cssRule(".thread-environment-dock__body")).toContain("gap: 0;");
+    expect(styles).not.toContain(".thread-environment-disclosure");
     expect(styles).not.toContain(".thread-environment-summary");
-    expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(
-      "font-family: var(--oct-font-display);",
-    );
   });
 
   it("makes room for thread row actions only while they show, and bounds the context menu", () => {

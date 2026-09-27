@@ -389,13 +389,18 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
-A child AgentRun receives a server-prepared workspace: Chat a research-only
-virtual workspace, Work the current confined Project root and binding revision,
-and Code an isolated managed worktree that is confirmed before admission.
-Renderers supply only receipt ids — never absolute paths or a claimed
-`verified` flag. Admission, restart, and replay refuse stale, expired,
-foreign-thread, foreign-Project, parent-checkout, unavailable, or
-wider-than-parent grants.
+A child AgentRun starts only when the thread's agent delegates to it through the
+Octant Harness `delegate` tool, and its result returns to that agent through
+`collect`; the host's AgentRun routes read and control existing runs but start
+none. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
+on the server: Chat a research-only virtual workspace, Work the current
+confined Project root and binding revision, and Code an isolated managed
+worktree that is confirmed before admission. No client supplies a path, a
+receipt, or a claimed `verified` flag. Admission, restart, and replay refuse
+stale, expired, foreign-thread, foreign-Project, parent-checkout, unavailable,
+or wider-than-parent grants. Whether the agent may delegate is one host
+setting, on by default; a stored Ask from the retired "only when I start them"
+choice reads as off.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
@@ -418,9 +423,25 @@ mention completes a path inside the thread's bound root; the host refuses a path
 outside that root before reading it. Chat Projects have no filesystem authority,
 so `@file` is absent there. Unknown `@` text stays ordinary text; `@plugin` /
 `$skill` addressing is unchanged. Side Chat is a Chat-mode sidecar about
-exactly one source thread: ordinary Chat with that thread's bounded context,
-no inherited Work or Code authority, and no path that approves, steers, or
-appends to the source.
+exactly one source thread: ordinary Chat with no inherited Work or Code
+authority and no path that messages, approves, steers, or appends to the
+source. Each turn the host re-resolves the source on the sender's window and
+frames it as the conversation's subject: the newest 40 messages within 32,000
+characters, with truncation stated, plus a current-state section capped at
+8,000 characters. For Code that section names the branch, clean or dirty with
+line totals, up to 50 uncommitted paths from Git (status joined with numstat
+against HEAD, untracked files included), up to 50 paths the thread's turns
+changed, and the delivery target; for Work, the Project folder and working folder; for every mode, the
+newest five subagent results. Each state part that cannot be read says so on
+its own; an unreadable transcript refuses the turn. The source block is a
+required context entry, so the planner blocks with its usual remedies rather
+than silently dropping the thread the Side Chat is about. On a provider that
+keeps its own conversation, a byte-identical snapshot whose previous delivery
+completed is replaced by a one-line "unchanged" notice, and the full snapshot
+is resent at least every fifth turn. A Side Chat about a Work or Code thread
+also gets read-only list, search (Code only), and read tools over the
+source's files as app-managed tools; see
+[security and authority](#security-and-authority).
 
 A Chat attempt that fails or is interrupted carries a bounded failure code,
 and the client-safe process diagnostic when the provider supplied one. The
@@ -495,7 +516,10 @@ flowchart LR
 - **Projections.** Each feature owns its projection and persistence schema
   (`persistence/*Projection.ts`, `*PersistenceSchema.ts`). Projections are
   checkpointed by sequence, detect lag, and can be rebuilt individually or
-  wholesale (`db:status`, `db:verify`, `db:rebuild`).
+  wholesale (`db:status`, `db:verify`, `db:rebuild`). A projection whose state
+  lives only in process memory (AgentRuns) declares `holdsStateInMemory` and
+  replays from the start of the journal at every host start, because its
+  stored checkpoint describes the previous process rather than this one.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
@@ -761,7 +785,8 @@ native harness in `apps/server/src/harness`:
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
   and a per-slot circuit breaker. Child runs take their model from the role's
-  slot through the shared `admitAgentRunControlRequest` path.
+  slot through `admitAgentRunControlRequest`, the one path that starts a
+  subagent.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
   the questions a lead asked with how each was
@@ -1098,6 +1123,24 @@ mechanisms are:
   cannot see or signal one another. Ordinary Code threads do not use this
   service yet, so Linux remains an incompatible destination until the AgentRun
   and Station launch paths are wired and revalidated.
+- **Side Chat reads.** A Side Chat may read its source thread's transcript,
+  state, and files; it never inherits the source's Work or Code execution
+  authority. The file tools (`octant_side_chat_list_files`,
+  `octant_side_chat_search_files` for Code, `octant_side_chat_read_file`)
+  are the only tools it gains. Before every call the host checks that the
+  sidecar link still exists and that the caller's window can still Open the
+  source, and the call then runs through the same host read the Files panel
+  uses (Code's checkout listing and search; Work's folder listing and
+  confined read), which re-authorizes the window against the source's root. A
+  Code read goes through `CodeService.readFile`, the same checkout authority
+  and confinement sequence without the desktop file helper that the editor's
+  open needs, and Code calls wait briefly while the host is still resolving a
+  `waiting` checkout. Paths are relative and confined; results are bounded and recorded as
+  external content like other app-managed tool results. There is no write,
+  shell, Git, or network tool, and a provider that cannot take app-managed
+  tools gets none and is told the files are unreadable. The `#thread`
+  dialogue tool is refused for a sidecar, in both directions, before anything
+  reaches the target.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
   Each adapter turns its provider's own subagent feature off, because a child

@@ -4,27 +4,40 @@ description: Child agent runs, their hierarchy, isolation, recovery, and how res
 
 # Subagents
 
-Subagents are child agent runs that a thread can start to delegate research,
-implementation, or review. They are one durable **AgentRun** each and inherit
-the parent thread's provider, model, and authority ceiling.
+Subagents are child agent runs that a thread's agent starts to delegate
+research, implementation, or review. They are one durable **AgentRun** each and
+inherit the parent thread's provider, model, and authority ceiling.
+
+Only the thread's agent starts a subagent: the Octant Harness hands it a
+bounded task with its `delegate` tool, and the subagent's result returns to that
+agent through `collect`. You watch and control subagents from the composer and
+the **Agents** dock tool, but you do not start them there; a subagent a person
+started by hand would have no agent to hand its result back to.
 
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the
 orchestration service, process supervision, and packaged child smoke — is on
-`main`. **Settings → Octant Harness → Helper agents** holds the
-server-authoritative child-creation posture: **Off**, **Only when I start
-them** (Ask), or **Automatically**. Role cards,
-mixed-vendor routing per role, and a child-creation form remain planned; the
-**Add agent** action in a Chat, Work, or Code thread opens the Agents dock tool. The dock is also available on an existing thread before the first child exists. Off posture still opens Agents and shows a visible refusal instead of a create form. What you can use today is compact child-run status on a live
-parent thread in Chat, Work, or Code — how many children are working, waiting,
-or blocked, with a stop control that cancels only that thread's children — and
-the read-only
-**Agents** hierarchy panel in Code threads, which shows active and history
-runs, posture, usage quality, recovery state, and an **"Acknowledge result"**
-button. Opening the list from the header chrome uses that same hierarchy, not
-a second surface. Rows carry a "native read-only" marker when the child runs
-inside the provider's own runtime.
+`main`. **Settings → Octant Harness → Helper agents** holds one
+server-authoritative switch, **Let the agent start subagents**: on (the
+default) or off. Role cards and mixed-vendor routing per role remain planned.
+
+A thread's working subagents show in a small card behind its composer in
+Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
+card's head to fold it to a tab; Octant remembers that. Hover or focus a row to
+**Stop** it; **Stop all** asks first and cancels only that thread's subagents.
+Choosing a row opens the **Agents** dock tool on that subagent. Finished
+subagents leave the card: **Environment → Subagents** lists every one, working
+and finished, and marks results you have not reviewed **To review**.
+
+The **Agents** dock tool lists the thread's subagents under **Working** and
+**Finished** and marks results you have not reviewed with **Needs review**. On
+a thread with none it says they appear when the agent hands off part of its
+work, or that subagents are turned off in Settings. Choosing a row opens its page: the task as the brief,
+then its replies, live while it runs, or its retained final reply once the live
+conversation is gone. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
+**Cancel** sit under the conversation when they apply. A subagent that runs
+inside the provider's own runtime says so on its page.
 
 **Agents** on the workspace rail is the same hierarchy across Chat, Work, and
 Code. On a wide window it can switch between **List** and **Graph**. Graph
@@ -38,11 +51,8 @@ on List.
 This page documents the designed behavior so you know where the product is
 going. Where a control is not yet available, the page says so explicitly.
 
-Compact child-run status on the parent thread is current. The read-only
-**Agents** hierarchy panel in Code is also current. The approved later
-placement keeps that compact header status and opens Agents as a right-dock
-tool only when children exist or you explicitly add an agent; it is not a
-generic Thread-tab accordion.
+The composer tray and the Agents dock tool are current. Agents is a
+right-dock tool, not a generic Thread-tab accordion.
 
 ## Roles and execution kinds
 
@@ -61,11 +71,12 @@ that run only; your `CODEX_HOME` and `config.toml` are left as they are.
 
 ## Posture and clamps
 
-Creation postures are **Off**, **Only when I start them** (Ask, the default),
-and **Automatically** within policy. Off also refuses **Add agent** in the
-Agents dock. Under Ask, starting a helper from the dock is the confirmation;
-there is no separate prompt, and only the Octant Harness model's `delegate` tool
-is refused. Provider-native subagents are not governed by this posture: Octant
+**Let the agent start subagents** is on by default: the agent's `delegate`
+calls start subagents within the thread's access and the clamps below. Turned
+off, every `delegate` call is refused and the agent does its work itself;
+subagents it already started stay readable and controllable. A host that had
+chosen the retired **Only when I start them** reads as off, because nothing else
+could start a subagent under it. Provider-native subagents are not governed by this posture: Octant
 keeps them off where the provider allows it. The server enforces hard clamps:
 
 - At most **4 concurrently running children** globally.

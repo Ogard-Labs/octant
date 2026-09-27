@@ -38,7 +38,8 @@ type SideChatState =
  * Chat-mode sidecar the host gets-or-creates. It is not a second orchestration
  * surface — it cannot steer, approve, or append to the source thread, and it
  * holds no Work or Code filesystem, shell, Git, or worktree authority even
- * when the source thread is Work or Code. Sidecar identity is entirely the
+ * when the source thread is Work or Code. The host lets it read the source's
+ * conversation, state, and files through re-authorized read-only reads. Sidecar identity is entirely the
  * host's: this panel asks for it and renders whatever it is told, including
  * "unavailable" when the Open check fails.
  */
@@ -90,11 +91,30 @@ export function SideChatPanel(props: SideChatPanelProps) {
         </p>
       </header>
       <p className="side-chat__notice">
-        Ordinary Chat. It reads this thread and cannot steer, approve, or change it.
+        {sideChatNotice(state.kind === "open" ? state.sidecar.sourceMode : undefined)}
       </p>
       {renderBody(state, props, () => setRetryToken((current) => current + 1))}
     </section>
   );
+}
+
+/**
+ * What this Side Chat can read, said per source mode once the host has named
+ * the source. A Chat thread has no files or checkout, so claiming them there
+ * would promise answers the Side Chat cannot give.
+ */
+function sideChatNotice(sourceMode: SideChatSidecar["sourceMode"] | undefined): string {
+  const limits = "It can read them but can\u2019t change, steer, or approve anything.";
+  if (sourceMode === "code") {
+    return `Ask about this thread: its conversation, changes, files, and subagent results. ${limits}`;
+  }
+  if (sourceMode === "work") {
+    return `Ask about this thread: its conversation, folder, files, and subagent results. ${limits}`;
+  }
+  if (sourceMode === "chat") {
+    return `Ask about this thread: its conversation and subagent results. ${limits}`;
+  }
+  return "Ask about this thread. It can read it but can\u2019t change, steer, or approve anything.";
 }
 
 function renderBody(state: SideChatState, props: SideChatPanelProps, retry: () => void): ReactNode {

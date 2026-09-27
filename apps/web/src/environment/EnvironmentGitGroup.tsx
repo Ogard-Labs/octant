@@ -1,6 +1,5 @@
 import type { CodeEnvironmentObservation } from "@octant/contracts";
-import { Files, FolderGit2, GitBranch, GitCommitHorizontal, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronRight, FileDiff, Files, GitBranch } from "lucide-react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -53,97 +52,68 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
       </div>
     );
   }
-  const content = gitContent(props.observation);
-  // A thread bound to the checkout itself worktrees nowhere, so the two rows
-  // carried the same repository name over the same path twice and read as a
-  // rendering fault. Only a checkout that really is somewhere else is a fact.
-  const separateWorktree = props.observation.worktreeRoot !== props.observation.repositoryRoot;
+  const observation = props.observation;
+  // A thread bound to the checkout itself worktrees nowhere; only a checkout
+  // that really is somewhere else is worth a line.
+  const separateWorktree = observation.worktreeRoot !== observation.repositoryRoot;
+  const changesLine = (
+    <>
+      <FileDiff aria-hidden="true" className="environment-git-group__icon" size={16} />
+      <span className="environment-git-group__label">
+        {observation.changes === "clean" ? "No uncommitted changes" : "Uncommitted changes"}
+      </span>
+      <ChangeCount observation={observation} />
+    </>
+  );
 
+  // The name, branch and folder lead the Environment header, so this card
+  // says only what the checkout holds and what to do about it. It had been a
+  // four-row table whose Branch and Repository rows repeated that header.
   return (
     <div className="environment-git-group">
-      <dl>
-        <GitRow
-          icon={GitCommitHorizontal}
-          label="Changes"
-          value={
-            props.onOpenChanges === undefined ? (
-              content.changes
-            ) : (
-              <OctantButton
-                aria-label="View changes"
-                className="environment-changes-action"
-                onClick={props.onOpenChanges}
-                variant="ghost"
-                type="button"
-              >
-                {content.changes}
-              </OctantButton>
-            )
-          }
-        />
-        <GitRow icon={GitBranch} label="Branch" value={content.branch} />
-        <GitRow icon={FolderGit2} label="Repository" value={content.repository} />
-        {separateWorktree ? (
-          <GitRow icon={Files} label="Worktree" value={content.worktree} />
-        ) : null}
-      </dl>
-    </div>
-  );
-}
-
-function GitRow(props: {
-  readonly icon: LucideIcon;
-  readonly label: string;
-  readonly value: ReactNode;
-}) {
-  const Icon = props.icon;
-  return (
-    <div className="environment-git-group__row">
-      <dt>
-        <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
-        {props.label}
-      </dt>
-      <dd>{props.value}</dd>
-    </div>
-  );
-}
-
-function gitContent(
-  observation: Extract<CodeEnvironmentObservation, { readonly status: "ready" }>,
-): {
-  readonly changes: ReactNode;
-  readonly branch: ReactNode;
-  readonly repository: ReactNode;
-  readonly worktree: ReactNode;
-} {
-  return {
-    changes: <ChangeCount observation={observation} />,
-    worktree: (
-      <PathIdentity
-        path={observation.worktreeRoot}
-        primary={pathBasename(observation.worktreeRoot)}
-        testId="environment-worktree-value"
-      />
-    ),
-    branch:
-      observation.branch.kind === "named" ? (
-        observation.branch.name
+      {props.onOpenChanges === undefined || observation.changes === "clean" ? (
+        <p className="environment-git-group__changes">{changesLine}</p>
       ) : (
-        <span className="environment-git-group__detached">
+        <OctantButton
+          aria-label="View changes"
+          className="environment-git-group__changes environment-changes-action"
+          onClick={props.onOpenChanges}
+          type="button"
+          variant="ghost"
+        >
+          {changesLine}
+          <ChevronRight
+            aria-hidden="true"
+            className="environment-git-group__chevron"
+            size={14}
+            strokeWidth={1.8}
+          />
+        </OctantButton>
+      )}
+      {observation.branch.kind === "named" ? null : (
+        <p className="environment-git-group__fact">
+          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
           <span>Detached HEAD</span>
-          <span aria-label={`Full commit ${observation.branch.oid}`} title={observation.branch.oid}>
+          <span
+            aria-label={`Full commit ${observation.branch.oid}`}
+            className="environment-git-group__mono"
+            title={observation.branch.oid}
+          >
             {observation.branch.oid.slice(0, 12)}
           </span>
-        </span>
-      ),
-    repository: (
-      <PathIdentity
-        path={observation.repositoryRoot}
-        primary={observation.projectName}
-        testId="environment-repository-value"
-      />
-    ),
-  };
+        </p>
+      )}
+      {separateWorktree ? (
+        <p className="environment-git-group__fact" title={observation.worktreeRoot}>
+          <Files aria-hidden="true" size={12} strokeWidth={1.8} />
+          <span>Worktree</span>
+          <span className="environment-git-group__mono">
+            {pathBasename(observation.worktreeRoot)}
+          </span>
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -157,25 +127,13 @@ function ChangeCount(props: {
   readonly observation: Extract<CodeEnvironmentObservation, { readonly status: "ready" }>;
 }) {
   const { insertions, deletions } = props.observation;
-  if (props.observation.changes === "clean") return "Clean working tree";
-  if (insertions === undefined || deletions === undefined) return "Uncommitted changes";
+  // The label beside the count already says clean or uncommitted.
+  if (props.observation.changes === "clean") return null;
+  if (insertions === undefined || deletions === undefined) return null;
   return (
     <span className="environment-git-group__diffstat">
       <span className="environment-git-group__insertions">{`+${insertions.toLocaleString()}`}</span>
       <span className="environment-git-group__deletions">{`\u2212${deletions.toLocaleString()}`}</span>
-    </span>
-  );
-}
-
-function PathIdentity(props: {
-  readonly path: string;
-  readonly primary: string;
-  readonly testId: string;
-}) {
-  return (
-    <span className="environment-git-group__path" data-testid={props.testId} title={props.path}>
-      <span className="environment-git-group__identity-primary">{props.primary}</span>
-      <span className="environment-git-group__identity-secondary">{props.path}</span>
     </span>
   );
 }

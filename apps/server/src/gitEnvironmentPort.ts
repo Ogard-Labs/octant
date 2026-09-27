@@ -7,7 +7,12 @@ import {
   type GitSeatbeltPortOptions,
 } from "./process/gitSeatbeltLaunch";
 import { SeatbeltConfinementError } from "./process/seatbeltProfile";
-import { parseNumstat } from "./code/gitObservationPort";
+import {
+  parseNumstat,
+  parseStatus,
+  parseTreeNumstat,
+  type GitTreeChange,
+} from "./code/gitObservationPort";
 
 export type GitEnvironmentResult =
   | {
@@ -21,9 +26,33 @@ export type GitEnvironmentResult =
       /** Absent when the counts could not be read, which is not the same as zero. */
       readonly insertions?: number;
       readonly deletions?: number;
+      /**
+       * The paths behind "dirty", from the same status and numstat reads.
+       * Absent when either could not be parsed; host-internal, never part of
+       * the Environment contract.
+       */
+      readonly changedFiles?: GitEnvironmentChangedFiles;
     }
   | { readonly status: "unavailable" }
   | { readonly status: "failed" };
+
+/** Paths one observation lists before it says the list is truncated. */
+export const MAX_GIT_ENVIRONMENT_CHANGED_FILES = 200;
+
+export interface GitEnvironmentChangedFile {
+  readonly path: string;
+  readonly change: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+  /** Absent for a path Git does not diff against HEAD, such as an untracked file. */
+  readonly insertions?: number;
+  readonly deletions?: number;
+  readonly binary?: boolean;
+}
+
+export interface GitEnvironmentChangedFiles {
+  readonly files: ReadonlyArray<GitEnvironmentChangedFile>;
+  readonly total: number;
+  readonly truncated: boolean;
+}
 
 interface CommandResult {
   readonly exitCode: number;
@@ -189,7 +218,7 @@ export class GitEnvironmentPort {
       const [worktrees, symbolic, status, numstat] = await Promise.all([
         run(["-C", canonicalRoot, "worktree", "list", "--porcelain"]),
         run(["-C", canonicalRoot, "symbolic-ref", "--quiet", "--short", "HEAD"]),
-        run(["-C", canonicalRoot, "status", "--porcelain=v1", "--untracked-files=normal"]),
+        run(["-C", canonicalRoot, "status", "--porcelain=v1", "-z", "--untracked-files=normal"]),
         // Against HEAD, so the totals are what this tree has changed and not
         // yet committed — the same thing "dirty" is claiming.
         run([
@@ -198,6 +227,9 @@ export class GitEnvironmentPort {
           "diff",
           "--numstat",
           "-z",
+          // One row per path, so the per-file rows below parse; a rename then
+          // reads as the path that went and the path that came.
+          "--no-renames",
           "--no-ext-diff",
           "--no-color",
           "HEAD",
@@ -245,6 +277,10 @@ export class GitEnvironmentPort {
       // A repository with no commits has no HEAD to diff against, and a failed
       // count is reported as absent rather than as zero.
       const lineCounts = numstat.exitCode === 0 ? parseNumstat(numstat.stdout) : undefined;
+      const changedFiles = listChangedFiles(
+        status.stdout,
+        numstat.exitCode === 0 ? numstat.stdout : undefined,
+      );
       return {
         status: "ready",
         repositoryRoot,
@@ -254,6 +290,7 @@ export class GitEnvironmentPort {
         ...(lineCounts === undefined
           ? {}
           : { insertions: lineCounts.insertions, deletions: lineCounts.deletions }),
+        ...(changedFiles === undefined ? {} : { changedFiles }),
       };
     } catch {
       return { status: "failed" };
@@ -313,4 +350,70 @@ export class GitEnvironmentPort {
       this.#activeCommands.delete(execution);
     }
   }
+}
+
+/**
+ * Join status (which paths differ, including untracked ones a diff never
+ * names) with numstat (how many lines each tracked path changed against HEAD).
+ * Status is the list: a file nobody has added yet is still an uncommitted
+ * change. A numstat that failed or did not parse leaves the counts absent
+ * rather than zero.
+ */
+function listChangedFiles(
+  statusOutput: string,
+  numstatOutput: string | undefined,
+): GitEnvironmentChangedFiles | undefined {
+  const entries = parseStatus(statusOutput);
+  if (entries === undefined) return undefined;
+  const counts = new Map(
+    (numstatOutput === undefined ? [] : (parseTreeNumstat(numstatOutput) ?? [])).map((row) => [
+      row.path,
+      row,
+    ]),
+  );
+  const files = entries.slice(0, MAX_GIT_ENVIRONMENT_CHANGED_FILES).map((entry) => {
+    // Numstat runs with --no-renames, so a rename arrives as an insertion row
+    // for the new path and a deletion row for the old one. Reading only the
+    // new path dropped the deletions the checkout's totals still count.
+    const count =
+      entry.index === "R" && entry.originalPath !== undefined
+        ? combineCounts(counts.get(entry.path), counts.get(entry.originalPath))
+        : counts.get(entry.path);
+    return {
+      path: entry.path,
+      change: changeKind(entry.index, entry.worktree),
+      ...(count === undefined
+        ? {}
+        : {
+            insertions: count.insertions,
+            deletions: count.deletions,
+            ...(count.binary ? { binary: true } : {}),
+          }),
+    } satisfies GitEnvironmentChangedFile;
+  });
+  return { files, total: entries.length, truncated: files.length < entries.length };
+}
+
+function combineCounts(
+  current: GitTreeChange | undefined,
+  original: GitTreeChange | undefined,
+): GitTreeChange | undefined {
+  if (current === undefined || original === undefined) return current ?? original;
+  return {
+    path: current.path,
+    insertions: current.insertions + original.insertions,
+    deletions: current.deletions + original.deletions,
+    binary: current.binary || original.binary,
+  };
+}
+
+function changeKind(index: string, worktree: string): GitEnvironmentChangedFile["change"] {
+  if (index === "?" && worktree === "?") return "untracked";
+  if (index === "U" || worktree === "U" || (index === "A" && worktree === "A")) {
+    return "conflicted";
+  }
+  if (index === "R" || index === "C") return "renamed";
+  if (index === "A") return "added";
+  if (index === "D" || worktree === "D") return "deleted";
+  return "modified";
 }
