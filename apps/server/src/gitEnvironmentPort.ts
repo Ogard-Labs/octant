@@ -7,7 +7,12 @@ import {
   type GitSeatbeltPortOptions,
 } from "./process/gitSeatbeltLaunch";
 import { SeatbeltConfinementError } from "./process/seatbeltProfile";
-import { parseNumstat, parseStatus, parseTreeNumstat } from "./code/gitObservationPort";
+import {
+  parseNumstat,
+  parseStatus,
+  parseTreeNumstat,
+  type GitTreeChange,
+} from "./code/gitObservationPort";
 
 export type GitEnvironmentResult =
   | {
@@ -367,7 +372,13 @@ function listChangedFiles(
     ]),
   );
   const files = entries.slice(0, MAX_GIT_ENVIRONMENT_CHANGED_FILES).map((entry) => {
-    const count = counts.get(entry.path);
+    // Numstat runs with --no-renames, so a rename arrives as an insertion row
+    // for the new path and a deletion row for the old one. Reading only the
+    // new path dropped the deletions the checkout's totals still count.
+    const count =
+      entry.index === "R" && entry.originalPath !== undefined
+        ? combineCounts(counts.get(entry.path), counts.get(entry.originalPath))
+        : counts.get(entry.path);
     return {
       path: entry.path,
       change: changeKind(entry.index, entry.worktree),
@@ -381,6 +392,19 @@ function listChangedFiles(
     } satisfies GitEnvironmentChangedFile;
   });
   return { files, total: entries.length, truncated: files.length < entries.length };
+}
+
+function combineCounts(
+  current: GitTreeChange | undefined,
+  original: GitTreeChange | undefined,
+): GitTreeChange | undefined {
+  if (current === undefined || original === undefined) return current ?? original;
+  return {
+    path: current.path,
+    insertions: current.insertions + original.insertions,
+    deletions: current.deletions + original.deletions,
+    binary: current.binary || original.binary,
+  };
 }
 
 function changeKind(index: string, worktree: string): GitEnvironmentChangedFile["change"] {
