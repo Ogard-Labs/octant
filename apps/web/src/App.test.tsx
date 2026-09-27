@@ -1998,9 +1998,10 @@ describe("App", () => {
     await user.click(meter);
     const popover = screen.getByRole("dialog", { name: "Context window" });
     expect(popover).toHaveTextContent("Context window104 / 1K (10%)");
+    await user.click(within(popover).getByRole("button", { name: "Context breakdown" }));
     expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
     expect(popover).toHaveTextContent("Free space79680%");
-    expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
+    expect(popover).toHaveTextContent(/Tools2 loaded · 6 deferred/);
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
     await user.click(screen.getByRole("button", { name: "Inspect context" }));
