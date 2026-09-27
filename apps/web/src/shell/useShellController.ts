@@ -310,11 +310,12 @@ export function useShellController(options: ShellControllerOptions) {
 
   const load = useCallback(
     (
-      reason: "bootstrap" | "retry" | "command-recovery" | "conflict-reload" = "retry",
+      reason: "bootstrap" | "retry" | "command-recovery" | "conflict-reload" | "refresh" = "retry",
     ): Promise<void> => {
       const generation = ++requestGeneration.current;
       const isCommandReload = reason === "command-recovery" || reason === "conflict-reload";
-      setStatus(isCommandReload ? "conflict-reload" : "loading");
+      // A refresh reconciles quietly — the person did not ask for a reload.
+      if (reason !== "refresh") setStatus(isCommandReload ? "conflict-reload" : "loading");
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
       const task = (async () => {
@@ -373,6 +374,13 @@ export function useShellController(options: ShellControllerOptions) {
       bootstrapTimers.current.clear();
     };
   }, [load]);
+
+  // Settings answers "what did the host remember" — a grant journaled by the
+  // server itself (an always-allow browser approval) reaches this window only
+  // through a fresh bootstrap, so opening Settings re-reads before showing it.
+  useEffect(() => {
+    if (settingsOpen) void load("refresh");
+  }, [load, settingsOpen]);
 
   /**
    * Resolves to whether the mutation actually committed.
