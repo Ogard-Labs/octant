@@ -179,8 +179,9 @@ describe("SplitWorkspace", () => {
       const handle = screen.getByTitle("Drag to move or split");
       expect(within(handle).getByRole("img", { name: "Runs on this computer" })).toBeVisible();
       if (multiple) {
-        // The tabs carry the titles, so the Project chip has no title to follow.
-        expect(screen.queryByText("repro-work")).not.toBeInTheDocument();
+        // The tabs carry the titles, but the Project chip names the pane's
+        // execution context rather than the active tab, so it still shows.
+        expect(within(handle).getByText("repro-work")).toBeVisible();
         expect(screen.getByRole("tab", { name: "A thread" })).toContainElement(
           screen.getByTitle("Claude"),
         );
@@ -243,6 +244,33 @@ describe("SplitWorkspace", () => {
 
     expect(screen.queryByRole("img", { name: /^Runs on/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Octant")).not.toBeInTheDocument();
+  });
+
+  it("claims no environment for a Browser utility opened for a thread", () => {
+    // A Browser tab optionally carries the threadId it was opened for
+    // (BrowserWorkspaceTab), but the tab itself is a utility, not the
+    // thread's own pane, so it must not pick up the thread's mark.
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "browser",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        title: "Browser",
+        threadId: "00000000-0000-4000-8000-000000000614",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    expect(screen.queryByRole("img", { name: /^Runs on/ })).not.toBeInTheDocument();
   });
 
   it("opens the pull request a pane tab names in the dock", async () => {

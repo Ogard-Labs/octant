@@ -1512,13 +1512,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project (and branch) the thread works in. Capped at 45% of the handle,
-   it truncates before it can take the title's room, and it then shrinks in
-   step with the title rather than first: a chip made to give way entirely
-   measured down to "o…", and a floor (a min-width) widened a short chip
-   past its own name and cut a title that had room. */
+/* The Project (and branch) the thread works in. Capped at 45% of the handle
+   so it can never crowd out the title, and given a much higher flex-shrink
+   than the title (docs/design/workspace.md: "The chip truncates before the
+   title does") so it absorbs the pane narrowing first; the title only gives
+   up room once the chip has already shrunk to its own floor. No min-width
+   floor on the chip itself — that widened a short chip past its own name and
+   cut into a title that had room. */
 .workspace-pane__context {
-  flex: 0 1 auto;
+  flex: 0 20 auto;
   min-width: 0;
   max-width: 45%;
   overflow: hidden;

@@ -302,13 +302,35 @@ function clampSplitRatio(value: number): number {
 }
 
 /**
+ * The surface kinds that are themselves a thread's pane, as opposed to a
+ * utility opened alongside one. A Browser tab optionally carries a
+ * `threadId` naming the thread it was opened for (`packages/contracts/src/
+ * shell.ts`'s `BrowserWorkspaceTab`), so checking for that property alone
+ * would mark a Browser utility as if it were the thread pane itself.
+ */
+const THREAD_SURFACE_KINDS: ReadonlySet<WorkspaceTab["kind"]> = new Set([
+  "chat-thread",
+  "work-thread",
+  "code-overview",
+  "code-file",
+  "code-terminal",
+  "code-test",
+  "code-git",
+  "code-pr",
+  "code-local-review",
+  "apple-workbench",
+]);
+
+/**
  * Where the pane's thread runs. Only a thread has an environment; a surface
- * that is not one (Settings, a start screen, the board) claims none.
+ * that is not one (Settings, a start screen, the board, or a thread utility
+ * such as Browser) claims none.
  */
 function paneEnvironment(
   surface: WorkspaceTab,
   environmentNames: ReadonlyMap<string, string> | undefined,
 ): EnvironmentMarkProps | undefined {
+  if (!THREAD_SURFACE_KINDS.has(surface.kind)) return undefined;
   if (!("threadId" in surface) || surface.threadId === undefined) return undefined;
   if (!("hostId" in surface) || surface.hostId === undefined) return { kind: "local" };
   if (String(surface.hostId) === String(LOCAL_HOST_ID)) return { kind: "local" };
@@ -439,7 +461,10 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 )}
                 {showTabs ? null : <span className="workspace-pane__title">{title}</span>}
-                {showTabs || path === undefined ? null : (
+                {path === undefined ? null : (
+                  // Tabs replace the redundant title text, but the Project
+                  // chip names the pane's execution context rather than the
+                  // active tab, so it stays even when content tabs are open.
                   <span className="workspace-pane__context" title={path}>
                     {path}
                   </span>
