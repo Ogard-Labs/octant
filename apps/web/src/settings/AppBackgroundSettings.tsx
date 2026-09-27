@@ -1,7 +1,6 @@
 import type {
   AppBackground,
   AppBackgroundEffect,
-  AppBackgroundMotion,
   AppBackgroundPercent,
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
@@ -33,8 +32,12 @@ export interface AppBackgroundSettingsProps {
   readonly onChange: (next: AppBackground) => void;
 }
 
-type Choice = AppBackground["kind"];
-type Dial = "patternOpacity" | "patternSpeed" | "patternIntensity" | "photoOpacity";
+type Choice = "builtin" | "photo" | "none";
+
+/** A ground saved as the retired dot pattern draws nothing, and says so. */
+function choiceFor(kind: AppBackground["kind"]): Choice {
+  return kind === "theme" ? "none" : kind;
+}
 
 const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp";
 const LIMITS = "PNG, JPEG, or WebP up to 8 MiB and 4096×4096";
@@ -57,8 +60,8 @@ function presetName(title: string): string {
   return title.replace(/\s+animated$/i, "");
 }
 
-/** The dials and where the ground shows travel with every kind, so a
- * switch between pattern, photo, and none never loses them. */
+/** Every stored dial travels with every kind, so a switch between a
+ * built-in, a photo, and none never loses one. */
 function carry(background: AppBackground) {
   return {
     patternEnabled: background.patternEnabled,
@@ -82,32 +85,15 @@ function currentEffect(background: AppBackground): AppBackgroundEffect {
   return background.kind === "photo" && background.photoDithered ? "dither" : "none";
 }
 
-/** The motion a row shows: a ground saved before the choice existed reads its pattern switch. */
-function currentMotion(background: AppBackground): AppBackgroundMotion {
-  return background.motion ?? (background.patternEnabled ? "wave" : "still");
-}
-
 const EFFECTS = [
   { id: "none", label: "Off" },
   { id: "pixelate", label: "Pixelate" },
   { id: "dither", label: "Dither" },
 ] as const satisfies ReadonlyArray<{ id: AppBackgroundEffect; label: string }>;
 
-const MOTIONS = [
-  { id: "still", label: "Still" },
-  { id: "pulse", label: "Pulse" },
-  { id: "wave", label: "Wave" },
-] as const satisfies ReadonlyArray<{ id: AppBackgroundMotion; label: string }>;
-
-const MOTION_NOTES: Readonly<Record<AppBackgroundMotion, string>> = {
-  still: "Nothing moves.",
-  pulse: "The background slowly breathes, a little brighter and back.",
-  wave: "Soft bands of dots roll slowly across the background.",
-};
-
 /**
  * Settings › Appearance › Background as an open section of shared setting
- * rows: the source, scope, pattern, and photo controls each place a label and
+ * rows: the source, scope, effect, and photo controls each place a label and
  * one-line description on the left and their control on the right, and the
  * built-in catalog is the one compound block, spanning the column under its
  * own quiet grouped headings.
@@ -116,7 +102,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   // Choosing "Photo" shows the photo controls; the setting itself only
   // changes once a photo exists, because a photo ground without a photo is
   // nothing.
-  const [choice, setChoice] = useState<Choice>(props.background.kind);
+  const [choice, setChoice] = useState<Choice>(choiceFor(props.background.kind));
   const [photos, setPhotos] = useState<ReadonlyArray<SidebarBackgroundMetadata>>([]);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -130,7 +116,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const [catalogOpen, setCatalogOpen] = useState(selectedPresetId === null);
   const showPhoto = choice === "photo" || selectedId !== null;
   const showBuiltin = choice === "builtin" || selectedPresetId !== null;
-  const showDials = background.kind !== "none";
+  const showDials = choiceFor(background.kind) !== "none";
   const picture = background.kind === "builtin" || background.kind === "photo";
   const effect = currentEffect(background);
   // A photo dithered before the effect choice existed prints at 2 px and 4
@@ -140,13 +126,9 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const legacyPrint = background.effect === undefined && effect === "dither";
   const printCell = legacyPrint ? 2 : background.effectCell;
   const printTones = legacyPrint ? 4 : background.effectTones;
-  const motion = currentMotion(background);
-  // The theme pattern is the picture itself, so its dots are always there to
-  // tune; over a picture they are the Wave.
-  const dotsShown = background.kind === "theme" || motion === "wave";
 
   useEffect(() => {
-    setChoice(background.kind);
+    setChoice(choiceFor(background.kind));
   }, [background.kind]);
 
   useEffect(() => {
@@ -173,7 +155,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   }, [library, showPhoto]);
 
   const choose = (kind: string) => {
-    if (kind === "theme" || kind === "none") {
+    if (kind === "none") {
       setChoice(kind);
       setStatus(undefined);
       props.onChange({ ...carry(background), kind });
@@ -198,9 +180,9 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     props.onChange({ ...carry(background), kind: "photo", backgroundId: photo.id });
   };
 
-  const dial = (name: Dial, value: number) => {
+  const setPhotoOpacity = (value: number) => {
     const percent = Math.round(Math.min(100, Math.max(0, value))) as AppBackgroundPercent;
-    props.onChange({ ...background, [name]: percent });
+    props.onChange({ ...background, photoOpacity: percent });
   };
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -226,7 +208,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="What sits behind Octant: the theme's dot pattern, a built-in picture, your own photo, or nothing."
+          description="A picture behind Octant: a built-in one, your own photo, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -238,7 +220,6 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             className="settings-view__select"
             onValueChange={choose}
             options={[
-              { id: "theme", label: "Dot pattern" },
               { id: "builtin", label: "Built-in picture" },
               { id: "photo", label: "Your photo" },
               { id: "none", label: "None" },
@@ -393,7 +374,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   className="settings-view__range"
                   max={100}
                   min={0}
-                  onChange={(event) => dial("photoOpacity", Number(event.currentTarget.value))}
+                  onChange={(event) => setPhotoOpacity(Number(event.currentTarget.value))}
                   step={1}
                   format={(value) => `${String(value)}%`}
                   value={background.photoOpacity}
@@ -444,7 +425,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           ) : null}
           {picture ? (
             <SettingRow
-              description="Print the picture in square pixels, or in pixels with fewer colours."
+              description="Show the picture as it is, in square pixels, or dithered with fewer colours."
               label="Effect"
               scope="app"
               settingId="app-background-effect"
@@ -516,91 +497,6 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 value={printTones}
               />
             </SettingRow>
-          ) : null}
-          <SettingRow
-            description={MOTION_NOTES[motion]}
-            label="Motion"
-            scope="app"
-            settingId="app-background-pattern"
-          >
-            <OctantToggleGroup<AppBackgroundMotion>
-              aria-label="Background motion"
-              onValueChange={(value) => {
-                const next = value[0];
-                if (next === undefined) return;
-                // The older switch follows along, so a client built before
-                // the motion choice still draws what this one does.
-                props.onChange({
-                  ...background,
-                  motion: next,
-                  patternEnabled: background.kind === "theme" || next === "wave",
-                });
-              }}
-              value={[motion]}
-            >
-              {MOTIONS.map((option) => (
-                <OctantToggleGroupItem key={option.id} value={option.id}>
-                  {option.label}
-                </OctantToggleGroupItem>
-              ))}
-            </OctantToggleGroup>
-          </SettingRow>
-          {motion === "wave" ? (
-            <SettingRow
-              description="How fast the bands roll."
-              label="Wave speed"
-              scope="app"
-              settingId="app-background-pattern-speed"
-            >
-              <SliderField
-                aria-label="Wave speed"
-                className="settings-view__range"
-                max={100}
-                min={0}
-                onChange={(event) => dial("patternSpeed", Number(event.currentTarget.value))}
-                step={1}
-                format={(value) => `${String(value)}%`}
-                value={background.patternSpeed}
-              />
-            </SettingRow>
-          ) : null}
-          {dotsShown ? (
-            <>
-              <SettingRow
-                description="How strongly the dots show."
-                label="Dot strength"
-                scope="app"
-                settingId="app-background-pattern-opacity"
-              >
-                <SliderField
-                  aria-label="Dot strength"
-                  className="settings-view__range"
-                  max={100}
-                  min={0}
-                  onChange={(event) => dial("patternOpacity", Number(event.currentTarget.value))}
-                  step={1}
-                  format={(value) => `${String(value)}%`}
-                  value={background.patternOpacity}
-                />
-              </SettingRow>
-              <SettingRow
-                description="How much of the background the dots fill."
-                label="Dot density"
-                scope="app"
-                settingId="app-background-pattern-intensity"
-              >
-                <SliderField
-                  aria-label="Dot density"
-                  className="settings-view__range"
-                  max={100}
-                  min={0}
-                  onChange={(event) => dial("patternIntensity", Number(event.currentTarget.value))}
-                  step={1}
-                  format={(value) => `${String(value)}%`}
-                  value={background.patternIntensity}
-                />
-              </SettingRow>
-            </>
           ) : null}
         </div>
       ) : null}

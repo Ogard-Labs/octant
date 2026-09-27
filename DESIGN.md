@@ -45,8 +45,9 @@ Avoid dashboard walls, decorative gradients, neon developer styling, permanent
 low-frequency controls, oversized setup cards, pill-shaped everything, and
 invented data. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
-to be decorative is the application ground (0091): the theme's own dither, or
-a person's photo under it, behind the start screens or behind everything.
+to be decorative is the application ground (0091): a first-party picture or a
+person's photo, shown plain or through one still print effect, behind the
+start screens or inside the primary card.
 
 ## Language
 
@@ -133,11 +134,13 @@ and the primary workspace, the right dock, the bottom panel, and the Settings
 page sit on it as cards: the card radius, one hairline, no shadow, 8px apart
 and 8px from every edge, the sidebar's included,
 all in the workspace colour. Reader pages inside a card use that colour too,
-so every card reads the same. Over an application ground the back is laid only
-in the gutters, so the primary card shows the ground clear, dither and all,
-while the sidebar and gutters frost it. The dither itself is cut to the
-primary card's shape: outside the card the picture shows plain, so the card
-keeps an edge even on a start screen whose page is see-through. A pane header and the dock head share the 38px
+so every card reads the same. Behind every page the application ground lives
+inside the primary card, cut to the card's rounded rectangle; the sidebar and
+gutters keep the back's own material, so the picture never reads as a second
+copy beside the cards. With Cover the sidebar on, the ground runs under the
+whole window and one frost lies over it with the card's rectangle cut out, so
+the sidebar and gutters frost as one piece with no seam where they meet; the
+dither stays inside the card either way. A pane header and the dock head share the 38px
 title rail, and the card draws the one hairline under both. Below 681px the
 workspace sidebar is an overlay drawer and the frame stays flat. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
@@ -228,25 +231,22 @@ discrete stops, and filled range. Explicit model and reasoning choices are remem
 locally for new threads; reasoning is keyed by provider/model and restored only while
 supported. Existing thread selections remain authoritative.
 
-The screen sits on the application ground (0091, 0129), set as three plain
-choices. What: the dot pattern (ordered dither in the theme's bounded pattern
-palette at one cell per three pixels), one of the first-party Zen pictures, a
-person's photo, or the plain page. Effect: a picture is shown as it is,
-pixelated, or dithered, at a chosen pixel size and colour count, and an
-animated picture is printed from its still frame. Motion: still, a slow pulse
-in which the ground breathes a little brighter and larger and back, or a wave
-of soft dither bands rolling across it on a shallow diagonal (the old cloud
-appeared and vanished in blotches; a wave reads as one calm movement). The
-pattern's dots stay whatever moves; over a picture they are the wave. Behind a
+The screen sits on the application ground (0091, 0129), set as two plain
+choices. What: one of the first-party Zen pictures, a person's photo, or the
+plain page (the default). Effect: the picture is shown as it is, pixelated, or
+dithered, at a chosen pixel size and colour count; an animated picture is
+printed from its still frame. Nothing is drawn over the picture and nothing
+moves across it: the drawn dot pattern and its pulse and wave motions read as
+noise behind the work and were removed, and a ground saved with them resolves
+to the plain page. Behind a
 start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page. A person
-may instead put the ground behind everything, sidebar included. Conversations
+may instead put the ground behind every page, inside the primary card, and
+under the sidebar too when they ask for it (see Shapes and depth). Conversations
 soften it beneath one continuous reading background so agent replies remain
-bare prose (0155). Most presets use the resolved accent alone; Pride carries a
-six-colour spectrum and Norway carries red, white, and blue. The semantic accent
-remains the first ink, so overrides still reach the ground. Increased contrast
-turns the ground off; reduced motion holds it still, pulse included. It is
-chosen in Settings › Appearance › Background.
+bare prose (0155). Increased contrast turns the ground off; reduced motion
+shows an animated picture's still frame. It is chosen in Settings ›
+Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
 carries a soft wash of the page colour that fades out before the edges, and a
 conversation pane's title rail shares the conversation's reading surface, so
@@ -1009,10 +1009,9 @@ interfaces. Revealing them must not move the transcript.
 ## Motion and interaction
 
 Functional feedback uses 120–160ms transitions; the base system duration is
-200ms. Use standard easing and no decorative entrance animation. The
-application ground's cloud (0091) is the one ambient motion: at most 24
-frames a second, paused while the document is hidden or the pane is off
-screen, still under reduced motion or at speed zero. Running state
+200ms. Use standard easing and no decorative entrance animation. There is no
+ambient motion behind the work; an animated built-in picture is the one
+moving ground, and reduced motion shows its still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.

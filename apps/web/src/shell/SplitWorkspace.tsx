@@ -378,6 +378,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
         data-active={active ? "true" : "false"}
         data-focused={focused ? "true" : "false"}
         data-header={showHeader ? "true" : "false"}
+        data-surface-kind={surface.kind}
         data-workspace-can-split={canSplit ? "true" : "false"}
         data-workspace-pane-id={pane.paneId}
         onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
