@@ -18,7 +18,8 @@ export interface ChatThreadEnvironmentProps {
   readonly tab: ChatThreadWorkspaceTab;
   readonly active?: boolean;
   readonly agentRunClient?: AgentRunClient;
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentOpen?: boolean;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;

@@ -1045,6 +1045,203 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("stops a provider turn whose tool requests were denied for the third time", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(130);
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+    for (const requestId of ["denied-1", "denied-2", "denied-3"])
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: `Modify src/${requestId}.ts`,
+          }),
+        ),
+      );
+
+    let approvals: Array<
+      OperationFrame & { event: { kind: "approval-requested"; approvalId: string } }
+    > = [];
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      approvals = frames.filter(
+        (
+          frame,
+        ): frame is OperationFrame & {
+          event: { kind: "approval-requested"; approvalId: string };
+        } => frame.event.kind === "approval-requested",
+      );
+      expect(approvals).toHaveLength(3);
+    });
+
+    for (const [index, approval] of approvals.slice(0, 2).entries()) {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(131 + index),
+          threadId,
+          checkoutId,
+          approvalId: approval.event.approvalId,
+          decision: "denied",
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    }
+    expect(connection.interrupt).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(133),
+        threadId,
+        checkoutId,
+        approvalId: approvals[2]!.event.approvalId,
+        decision: "denied",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+
+    expect(connection.answerApproval).toHaveBeenCalledTimes(3);
+    expect(connection.answerApproval).toHaveBeenLastCalledWith({
+      sessionId,
+      requestId: "denied-3",
+      approved: false,
+    });
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      const terminal = frames.filter(
+        (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
+      );
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]).toMatchObject({
+        event: {
+          state: "interrupted",
+          failure: {
+            category: "failed",
+            message:
+              "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
+          },
+        },
+      });
+    });
+    fixture.close();
+  });
+
+  it("stops a provider turn whose browser tool requests were denied for the third time", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const ready = decodeBrowserAutomationSnapshot({
+      status: "ready",
+      threadId,
+      evidence: [],
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ready,
+        create: vi.fn(async () => ready),
+        act: vi.fn(async () => ready),
+        releaseThread: vi.fn(async () => ready),
+      },
+    });
+    const operation = operationId(140);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+
+    for (const index of [0, 1, 2]) {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: `browser-${index}`,
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
+        approval = frames
+          .map((frame) => frame.event)
+          .filter((event) => event.kind === "approval-requested")[index];
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected browser approval");
+      const answer = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(141 + index),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "denied",
+      });
+      if (index < 2) {
+        expect(answer).toMatchObject({ kind: "provider-turn-state", state: "running" });
+        expect(provider.interrupt).not.toHaveBeenCalled();
+      } else {
+        expect(answer).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      }
+    }
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
+      const terminal = frames.filter(
+        (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
+      );
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]).toMatchObject({
+        event: {
+          state: "interrupted",
+          failure: {
+            category: "failed",
+            message:
+              "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
+          },
+        },
+      });
+    });
+    fixture.close();
+  });
+
   it("reports a thread as executing for exactly as long as its provider turn runs", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

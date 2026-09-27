@@ -6,7 +6,10 @@ import type { UsageDashboardRequest, UsageDashboardResponse } from "@octant/cont
 import { UsageDashboardClientFailure, type UsageDashboardClient } from "@octant/client-runtime";
 import { ThreadUsagePanel } from "./ThreadUsagePanel";
 
-function dashboard(totalRequests: number): UsageDashboardResponse {
+function dashboard(
+  totalRequests: number,
+  requestsWithUnavailableUsage = 1,
+): UsageDashboardResponse {
   return {
     summary: {
       totals: {
@@ -19,7 +22,7 @@ function dashboard(totalRequests: number): UsageDashboardResponse {
         staleCount: 0,
         unavailableCount: 0,
       },
-      requestsWithUnavailableUsage: 1,
+      requestsWithUnavailableUsage,
       coverage: [],
       excludedRecordCount: 0,
     },
@@ -67,6 +70,33 @@ describe("ThreadUsagePanel", () => {
     await waitFor(() => expect(screen.getByText("800")).toBeInTheDocument());
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getByText("Requests without reported usage")).toBeInTheDocument();
+  });
+
+  it("totals the thread's tokens on the folded section only when every request reported usage", async () => {
+    const complete = vi.fn().mockResolvedValue(dashboard(4, 0));
+    const { unmount } = renderElement(
+      <ThreadUsagePanel
+        client={{ load: complete } as UsageDashboardClient}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(document.querySelector(".environment-group__summary")).toHaveTextContent("tokens"),
+    );
+    unmount();
+
+    const partial = vi.fn().mockResolvedValue(dashboard(4, 1));
+    renderElement(
+      <ThreadUsagePanel
+        client={{ load: partial } as UsageDashboardClient}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() => expect(partial).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText(/Loading thread usage/)).toBeNull());
+    expect(document.querySelector(".environment-group__summary")).toBeNull();
   });
 
   it("hands the same filter to the full dashboard", async () => {

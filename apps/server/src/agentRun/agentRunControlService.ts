@@ -3,7 +3,6 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   type AgentRunAuthority,
-  type AgentRunControlPreviewResult,
   type AgentRunControlRequest,
   type AgentRunControlResolvedFacts,
   type AgentRunCreationRequest,
@@ -173,22 +172,6 @@ export function resolveAgentRunControlFacts(input: {
     capabilityDegradations: [...execution.capabilityDegradations],
     creationPosture: input.creationPosture,
   };
-}
-
-export function previewAgentRunControl(input: {
-  readonly parent: AgentRunControlParentFacts;
-  readonly role?: AgentRunRole;
-  readonly creationPosture: AgentRunControlResolvedFacts["creationPosture"];
-  readonly nativeEvidence: AgentRunNativeCapabilityEvidence;
-}): AgentRunControlPreviewResult {
-  try {
-    return { status: "ready", facts: resolveAgentRunControlFacts(input) };
-  } catch (error) {
-    if (error instanceof AgentRunControlRefused) {
-      return { status: "refused", reason: error.reason };
-    }
-    throw error;
-  }
 }
 
 export async function prepareAdmittedControlWorkspace(input: {

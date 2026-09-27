@@ -22,6 +22,7 @@ import type {
   ProviderExecutionPolicy,
 } from "@octant/contracts";
 import {
+  ACCESS_POSTURE_RANK,
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   type PickerGroup,
@@ -61,6 +62,7 @@ import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments, type StagedCodeAttachment } from "./useCodeAttachments";
+import type { CodeThreadControllers } from "./codeThreadControllers";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
@@ -81,6 +83,7 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
+import { observeComposerPlacement } from "./codeWorkspaceApprovals";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
@@ -143,6 +146,7 @@ interface CodeSteeredMessage {
 
 export interface CodeThreadWorkspaceProps {
   readonly controller: CodeController;
+  readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
    * Whether the thread's provider advertises native harness-delegated
@@ -184,6 +188,12 @@ export interface CodeThreadWorkspaceProps {
     readonly expectedVersion: number;
     readonly permissionPersistence: "current-session" | "project-default";
   }) => Promise<CodeApprovalId | undefined>;
+  /**
+   * The Project's remembered Full-access decision, recorded on the host. Lets
+   * Full access be raised without the native confirmation, matching the
+   * server gate.
+   */
+  readonly projectRemembersFullAccess?: boolean;
   /** Positions the desktop-owned approval view beside this thread's composer. */
   readonly updateApprovalAnchor?: (bounds: {
     readonly x: number;
@@ -314,7 +324,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
-  const [accessMessage, setAccessMessage] = useState<string>();
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -334,7 +343,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const resize = new ResizeObserver(sync);
     const scroll = () => sync();
     const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
-    if (composer !== undefined && composer !== null) resize.observe(composer);
+    if (composer !== undefined && composer !== null) {
+      observeComposerPlacement(composer, resize);
+    }
     window.addEventListener("resize", sync);
     window.addEventListener("scroll", scroll, true);
     sync();
@@ -422,7 +433,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }, [composerReady, props.threadId]);
   useEffect(() => {
     setTurnAccessOverride(undefined);
-  }, [props.threadId, view?.thread.executionPolicy]);
+  }, [props.threadId]);
+  useEffect(() => {
+    const nextCeiling = view?.thread.executionPolicy;
+    if (nextCeiling === undefined) return;
+    setTurnAccessOverride((current) =>
+      current !== undefined && ACCESS_POSTURE_RANK[current] > ACCESS_POSTURE_RANK[nextCeiling]
+        ? undefined
+        : current,
+    );
+  }, [view?.thread.executionPolicy]);
 
   // §8.1: `#` must open the same cross-mode picker here as in Chat. The host
   // owns which threads are mentionable and how much of each transcript rides
@@ -889,28 +909,35 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   async function changeAccess(next: ProviderExecutionPolicy) {
     if (next === thread.executionPolicy) return;
-    setAccessMessage(undefined);
-    let approvalId: CodeApprovalId | undefined;
-    if (next === "full-access") {
-      approvalId = await props.requestFullAccessApproval?.({
-        kind: "change-thread-full-access",
-        threadId: thread.id,
-        expectedVersion: thread.version,
-        permissionPersistence: thread.permissionPersistence,
-      });
-      if (approvalId === undefined) {
-        setAccessMessage("Full access was not confirmed. This thread keeps its current access.");
-        return;
-      }
-    }
+    const originThreadKey = activeThreadKeyRef.current;
+    props.controller.setAccessNotice(undefined);
+    const remembered = next === "full-access" && props.projectRemembersFullAccess === true;
     setAccessChanging(true);
     try {
+      let approvalId: CodeApprovalId | undefined;
+      if (next === "full-access" && !remembered) {
+        approvalId = await props.requestFullAccessApproval?.({
+          kind: "change-thread-full-access",
+          threadId: thread.id,
+          expectedVersion: thread.version,
+          permissionPersistence: thread.permissionPersistence,
+        });
+        if (approvalId === undefined) {
+          const text =
+            !mountedRef.current || activeThreadKeyRef.current !== originThreadKey
+              ? "Full access confirmation was cancelled when you left this thread. It keeps its current access."
+              : "Full access was not confirmed. This thread keeps its current access.";
+          if (props.holdAccessNotice === undefined) props.controller.setAccessNotice(text);
+          else props.holdAccessNotice(thread.id, text);
+          return;
+        }
+      }
       await props.controller.execute({
         kind: "change-code-thread-access",
         threadId: thread.id,
         expectedVersion: thread.version,
         executionPolicy: next,
-        permissionPersistence: thread.permissionPersistence,
+        permissionPersistence: remembered ? "project-default" : thread.permissionPersistence,
         ...(approvalId === undefined ? {} : { approvalId }),
       });
     } finally {
@@ -920,7 +947,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   async function changeAutoApprove(next: boolean) {
     if (thread.autoApprove === next) return;
-    setAccessMessage(undefined);
+    props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
     try {
       await props.controller.execute({
@@ -1677,7 +1704,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {...(profileName === undefined ? {} : { profileName })}
               ceiling={thread.executionPolicy}
               disabled={accessChanging}
-              nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              nativeConfirmationAvailable={
+                props.requestFullAccessApproval !== undefined ||
+                props.projectRemembersFullAccess === true
+              }
+              onLowerThread={(next) => void changeAccess(next)}
               onRaiseThread={(next) => void changeAccess(next)}
               onSelect={setTurnAccessOverride}
               value={nextTurnAccess}
@@ -1708,9 +1739,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {providerChanging ? "Checking the selected provider…" : "Queued"}
               </span>
             ) : null}
-            {accessMessage === undefined ? null : (
-              <span className="code-thread-workspace__hint" role="status" title={accessMessage}>
-                {accessMessage}
+            {props.controller.accessNotice === undefined ? null : (
+              <span
+                className="code-thread-workspace__hint"
+                role="status"
+                title={props.controller.accessNotice}
+              >
+                {props.controller.accessNotice}
               </span>
             )}
             {/*

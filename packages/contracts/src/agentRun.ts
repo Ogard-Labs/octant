@@ -75,6 +75,12 @@ export type AgentRunAdmittedContext = typeof AgentRunAdmittedContext.Type;
 export const AgentRunRole = Schema.Literal("research", "implementation", "review", "custom");
 export type AgentRunRole = typeof AgentRunRole.Type;
 
+/**
+ * `ask` is no longer a choice a person can make: it meant "only when I start
+ * them", and nobody starts a subagent by hand any more. It stays in this
+ * literal because journaled settings and AgentRun requests recorded it, and
+ * replay must still decode them; the settings store reads it back as `off`.
+ */
 export const AgentRunCreationPosture = Schema.Literal("off", "ask", "automatic");
 export type AgentRunCreationPosture = typeof AgentRunCreationPosture.Type;
 

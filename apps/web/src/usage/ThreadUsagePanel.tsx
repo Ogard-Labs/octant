@@ -57,7 +57,11 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
     <EnvironmentGroup
       icon={Gauge}
       title="Usage"
-      {...(summary === undefined || summary.totals.totalRequests === 0
+      // A request with no reported usage is not zero usage, so a total that
+      // leaves some out is not shown folded, where the caveat is hidden.
+      {...(summary === undefined ||
+      summary.totals.totalRequests === 0 ||
+      summary.requestsWithUnavailableUsage > 0
         ? {}
         : {
             summary: `${compactTokens(summary.totals.totalInputTokens + summary.totals.totalOutputTokens)} tokens`,

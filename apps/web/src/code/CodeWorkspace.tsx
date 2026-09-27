@@ -38,6 +38,7 @@ import { CodePullRequestPane } from "./CodePullRequestPane";
 import { CodeReviewPane, type CodeReviewTarget } from "./CodeReviewPane";
 import { CodeTestPane } from "./CodeTestPane";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
+import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -116,8 +117,10 @@ export interface CodeWorkspaceProps {
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
+  readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
+  readonly projectRemembersFullAccess?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
@@ -188,6 +191,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <CodeThreadWorkspace
         controller={props.controller}
+        {...(props.holdAccessNotice === undefined
+          ? {}
+          : { holdAccessNotice: props.holdAccessNotice })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(props.browserAvailable === undefined
           ? {}
@@ -215,6 +221,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
+        {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}

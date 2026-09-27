@@ -2,6 +2,16 @@ import type { CodeThreadView } from "@octant/contracts/code";
 import type { CodeOperationApprovalAnchor, OctantHostBridge } from "../shell/hostBridge";
 import type { CodeWorkspaceApprovals } from "./CodeWorkspace";
 
+export function observeComposerPlacement(composer: HTMLElement, observer: ResizeObserver): void {
+  // Opening a dock pane shrinks an ancestor column and shifts the composer
+  // without resizing it, so its own ResizeObserver never fires.
+  let current: HTMLElement | null = composer;
+  while (current !== null) {
+    observer.observe(current);
+    current = current.parentElement;
+  }
+}
+
 export function nativeCodeWorkspaceApprovals(
   hostBridge: OctantHostBridge | undefined,
   view: CodeThreadView | undefined,

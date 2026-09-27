@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -21,10 +21,6 @@ function environmentClient(
     parentSummary: input.parentSummary,
     center: unusedClientMethod,
     acknowledge: unusedClientMethod,
-    prepareWorkspace: unusedClientMethod,
-    confirmWorkspace: unusedClientMethod,
-    preview: unusedClientMethod,
-    requestRun: unusedClientMethod,
     cancel: unusedClientMethod,
     steer: unusedClientMethod,
     retry: unusedClientMethod,
@@ -35,6 +31,7 @@ function environmentClient(
 
 describe("EnvironmentSubagents", () => {
   it("says None rather than vanishing when the thread has delegated nothing", async () => {
+    const user = userEvent.setup();
     render(
       <EnvironmentSubagents
         client={environmentClient({
@@ -46,10 +43,11 @@ describe("EnvironmentSubagents", () => {
     );
 
     expect(await screen.findByText("None")).toBeVisible();
-    expect(screen.getByRole("region", { name: "Subagents" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Subagents/ }));
+    expect(screen.getByText(/They appear when the agent hands off part of its work/)).toBeVisible();
   });
 
-  it("counts working, to-review, and finished subagents and opens them in Agents", async () => {
+  it("lists every subagent, working and finished, and opens the chosen one in Agents", async () => {
     const user = userEvent.setup();
     const onOpenAgents = vi.fn();
     render(
@@ -71,12 +69,20 @@ describe("EnvironmentSubagents", () => {
     );
 
     expect(await screen.findByText("1 working · 1 to review · 1 done")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Subagents/ }));
+    expect(
+      within(screen.getByRole("region", { name: "Working" })).getAllByRole("listitem"),
+    ).toHaveLength(1);
+    expect(
+      within(screen.getByRole("region", { name: "Finished" })).getAllByRole("listitem"),
+    ).toHaveLength(2);
+
     await user.click(
       screen.getByRole("button", {
-        name: "Subagents, 1 working · 1 to review · 1 done. Open in Agents",
+        name: `Task ${String(reviewRunId)}. To review. Open in Agents`,
       }),
     );
-    expect(onOpenAgents).toHaveBeenCalledTimes(1);
+    expect(onOpenAgents).toHaveBeenCalledWith(String(reviewRunId));
   });
 });
 

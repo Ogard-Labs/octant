@@ -78,6 +78,29 @@ const checkout = decodeCodeCheckoutIdentity({
   observedAt: now,
 });
 
+const rememberedFullAccessProject = {
+  id: ids.project,
+  type: "code",
+  name: "Repository",
+  lifecycle: "active",
+  pinned: false,
+  rank: "0/1" as never,
+  version: 1 as never,
+  createdAt: now as never,
+  updatedAt: now as never,
+  binding: { canonicalRoot: "/repo" },
+  bindingHistory: [
+    {
+      revisionId: ids.binding,
+      revision: 1,
+      currentBinding: { canonicalRoot: "/repo" },
+      actor: { kind: "local-user", actorId: ids.window as never },
+      changedAt: now as never,
+    },
+  ],
+  codeAccessPersistence: "project-default",
+} as never;
+
 describe("codeNavigationCheckoutChip", () => {
   it("names the branch for both existing and managed worktrees", () => {
     expect(codeNavigationCheckoutChip(checkout)).toEqual({
@@ -1112,17 +1135,10 @@ describe("CodeService commands", () => {
     ).resolves.toMatchObject({
       thread: { executionPolicy: "full-access", permissionPersistence: "current-session" },
     });
-    // The confirmation was granted for the duration the person was shown. The
-    // profile shortens it afterwards, so the effect put to the approval store
-    // has to stay the requested one or the granted receipt stops matching.
-    expect(fixture.approvals.validate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        effect: {
-          kind: "create-thread-full-access",
-          thread: expect.objectContaining({ permissionPersistence: "project-default" }),
-        },
-      }),
-    );
+    // The Project remembers Full access, so the remembered grant confirms the
+    // request without a per-thread native receipt: the approval store is not
+    // consulted at all.
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
       expect.objectContaining({
         events: [
@@ -1464,7 +1480,7 @@ describe("CodeService commands", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
-  it("requires a fresh native approval when making session Full access durable", async () => {
+  it("makes session Full access durable through the Project's remembered grant", async () => {
     const current = thread({ executionPolicy: "approval-gated" });
     const sessionAuthority = new CodeSessionAuthorityStore();
     sessionAuthority.grantFullAccess(ids.window, current.id);
@@ -1472,28 +1488,7 @@ describe("CodeService commands", () => {
       threads: [current],
       approve: false,
       sessionAuthority,
-      project: {
-        id: ids.project,
-        type: "code",
-        name: "Repository",
-        lifecycle: "active",
-        pinned: false,
-        rank: "0/1" as never,
-        version: 1 as never,
-        createdAt: now as never,
-        updatedAt: now as never,
-        binding: { canonicalRoot: "/repo" },
-        bindingHistory: [
-          {
-            revisionId: ids.binding,
-            revision: 1,
-            currentBinding: { canonicalRoot: "/repo" },
-            actor: { kind: "local-user", actorId: ids.window as never },
-            changedAt: now as never,
-          },
-        ],
-        codeAccessPersistence: "project-default",
-      },
+      project: rememberedFullAccessProject,
     });
 
     await expect(
@@ -1503,10 +1498,76 @@ describe("CodeService commands", () => {
         expectedVersion: 1,
         executionPolicy: "full-access",
         permissionPersistence: "project-default",
-        approvalId: "00000000-0000-0000-0000-000000000088" as never,
       }),
-    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
-    expect(fixture.approvals.validate).toHaveBeenCalledOnce();
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        version: 2,
+      },
+    });
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+  });
+
+  it("raises an approval-gated thread to remembered Full access without a fresh receipt", async () => {
+    const current = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({
+      threads: [current],
+      approve: false,
+      project: rememberedFullAccessProject,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        version: 2,
+      },
+    });
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+  });
+
+  it("creates a Full-access thread without a native receipt when the Project remembers Full access", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      approve: false,
+      project: rememberedFullAccessProject,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toEqual({ kind: "thread-created", thread: created });
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+  });
+
+  it("still needs a native receipt for session-only Full access when the Project remembers it", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      permissionPersistence: "current-session",
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      approve: false,
+      project: rememberedFullAccessProject,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toThrow(/Full access requires native confirmation/);
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
@@ -1776,6 +1837,85 @@ describe("CodeService replay and files", () => {
         // Drain to surface the cursor failure.
       }
     }).rejects.toMatchObject({ failure: { category: "stale" } });
+  });
+
+  it("lowering a session Full access thread to Ask for approvals revokes only this window's grant without confirmation", async () => {
+    const persisted = thread({
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+    const otherWindow = decodeWindowId(testUuid(9001));
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(ids.window, persisted.id);
+    sessionAuthority.grantFullAccess(otherWindow, persisted.id);
+    const fixture = serviceFixture({ threads: [persisted], sessionAuthority });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+    if (result.kind !== "thread-updated") throw new Error("expected a thread update");
+    expect(result.thread.executionPolicy).toBe("approval-gated");
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledOnce();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventName: "code.thread-updated@1" })],
+      }),
+    );
+    expect(sessionAuthority.effectiveThread(ids.window, persisted).executionPolicy).toBe(
+      "approval-gated",
+    );
+    expect(sessionAuthority.effectiveThread(otherWindow, persisted).executionPolicy).toBe(
+      "full-access",
+    );
+  });
+
+  it("streams a session-only Full access grant to the granting window as full-access", async () => {
+    const current = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({ threads: [current], approve: true });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).resolves.toMatchObject({ thread: { executionPolicy: "full-access" } });
+
+    const persisted = thread({ executionPolicy: "approval-gated", version: 2 as never });
+    fixture.persistence.readCodeThread.mockReturnValue(persisted);
+    fixture.persistence.readCodeThreadView.mockReturnValue({
+      thread: persisted,
+      checkout,
+      lastSequence: persisted.version,
+    });
+    fixture.persistence.journal.replayAggregate.mockReturnValue([
+      eventEnvelope(42, "code.thread-updated@1", { kind: "thread-updated", thread: persisted }, 2),
+    ]);
+
+    const grantingWindowFrames: CodeEventFrame[] = [];
+    for await (const frame of fixture.service.subscribe(ids.window, ids.thread, 1)) {
+      grantingWindowFrames.push(frame);
+    }
+    expect(grantingWindowFrames).toMatchObject([
+      { event: { thread: { executionPolicy: "full-access" } } },
+    ]);
+
+    const otherWindow = decodeWindowId(testUuid(9001));
+    const otherWindowFrames: CodeEventFrame[] = [];
+    for await (const frame of fixture.service.subscribe(otherWindow, ids.thread, 1)) {
+      otherWindowFrames.push(frame);
+    }
+    expect(otherWindowFrames).toMatchObject([
+      { event: { thread: { executionPolicy: "approval-gated" } } },
+    ]);
   });
 
   it("rejects a per-thread cursor ahead of the current thread head", async () => {

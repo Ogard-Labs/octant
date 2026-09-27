@@ -273,7 +273,8 @@ export interface WorkspaceViewProps {
     readonly threadId: string;
     readonly mode: "work" | "code";
   }) => void;
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentDockOpen?: boolean;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
@@ -941,6 +942,7 @@ function renderCodeTab(
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(browserAutomationClient === undefined ? {} : { browserAvailable: true })}
         controller={codeController}
+        holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenSurface === undefined
@@ -969,6 +971,9 @@ function renderCodeTab(
                 }),
             })}
         tab={tab}
+        {...(project?.type === "code" && project.codeAccessPersistence === "project-default"
+          ? { projectRemembersFullAccess: true }
+          : {})}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}
@@ -2081,7 +2086,8 @@ function ChatThreadWorkspace(props: {
   readonly providerController: ProviderController;
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentOpen?: boolean;
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
   readonly usageDashboardClient?: UsageDashboardClient;

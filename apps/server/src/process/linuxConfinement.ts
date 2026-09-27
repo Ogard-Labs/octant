@@ -145,7 +145,13 @@ export function buildLinuxConfinementLaunch(
   if (input.networkEgress === "allow") {
     args.push("--share-net");
   }
-  args.push("--new-session", "--die-with-parent");
+  // An interactive shell keeps its controlling tty: `--new-session` calls
+  // setsid, and measured on bwrap 0.6.1 the confined `bash -l` then printed
+  // "cannot set terminal process group" and "no job control", refusing `fg`.
+  if (input.terminal === undefined) {
+    args.push("--new-session");
+  }
+  args.push("--die-with-parent");
 
   args.push("--proc", "/proc", "--dev", "/dev");
 

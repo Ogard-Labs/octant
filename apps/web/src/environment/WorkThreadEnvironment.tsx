@@ -25,7 +25,8 @@ export interface WorkThreadEnvironmentProps {
   readonly initialThread?: WorkThread;
   readonly children: ReactNode;
   readonly agentRunClient?: AgentRunClient;
-  readonly onOpenAgents?: () => void;
+  /** Opens the Agents tool; with a run id, on that subagent. */
+  readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentOpen?: boolean;
   readonly goalClient?: GoalClient;
   readonly goalLoopClient?: GoalLoopClient;
