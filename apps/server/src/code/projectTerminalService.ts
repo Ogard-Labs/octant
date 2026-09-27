@@ -260,7 +260,10 @@ export class ProjectTerminalService {
         credentialReferences: [],
         executionPolicy: posture,
       });
-    } catch {
+    } catch (error) {
+      console.warn(
+        `Octant Project terminal could not start: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return refused("unavailable", "The terminal could not start.");
     }
     const owner: Owner = {

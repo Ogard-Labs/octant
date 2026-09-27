@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import { CodeClientFailure } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
@@ -192,8 +193,15 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         setResult({ ...next, operationId: result.operationId });
       }
       if (next.kind === "operation-failed") setFailure(next.failure.message);
-    } catch {
-      setFailure("Terminal command failed. Reconnect and retry.");
+    } catch (error) {
+      // A dropped keystroke is otherwise invisible except as missing
+      // characters (observed `HEAD` -> `HED` on the Linux ADE host), and the
+      // transport category tells whether it was disconnected vs unauthorized.
+      setFailure(
+        error instanceof CodeClientFailure
+          ? `Terminal input was not delivered: ${error.message}${kind === "write" ? " Retype the last keystroke." : ""}`
+          : "Terminal command failed. Reconnect and retry.",
+      );
     }
   };
 

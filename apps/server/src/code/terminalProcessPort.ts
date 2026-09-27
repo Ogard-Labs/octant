@@ -13,7 +13,6 @@ import {
 } from "../process/nodeOwnedProcessReceipt";
 import {
   makeSeatbeltConfinementLive,
-  escapeSeatbeltPath,
   SeatbeltConfinementError,
   type SeatbeltConfinementPort,
 } from "../process/seatbeltProfile";
@@ -207,24 +206,6 @@ export function shellConfigurationReadRoots(
   return SHELL_CONFIGURATION_HOME_PATHS.map((entry) => join(homeDirectory, entry)).filter(exists);
 }
 
-export const TERMINAL_TTY_RULES: ReadonlyArray<string> = [
-  '(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
-  "(allow pseudo-tty)",
-];
-
-function shellStateAncestorMetadataRules(directory: string): ReadonlyArray<string> {
-  const rules: string[] = [];
-  // mkdir -p checks each ancestor even when it already exists. Denying the
-  // shared state's metadata made shell-framework cache setup try to create
-  // that parent and print "Operation not permitted". Literal metadata reads
-  // allow that walk without listing the base or reading sibling histories.
-  for (let ancestor = dirname(realpathSync(directory)); ancestor !== dirname(ancestor);) {
-    rules.push(`(allow file-read-metadata (literal "${escapeSeatbeltPath(ancestor)}"))`);
-    ancestor = dirname(ancestor);
-  }
-  return rules;
-}
-
 export class TerminalProcessPort {
   readonly #ownedRoots = new Map<number, Promise<string | undefined>>();
 
@@ -363,11 +344,7 @@ export class TerminalProcessPort {
         additionalWriteRoots: [shellState],
         networkEgress: this.#dependencies.networkEgress,
         allowFileReadStar: true,
-        // The shell claims its pseudo-terminal's foreground process group
-        // through a tty ioctl. With that denied, zsh printed "can't set tty
-        // pgrp: operation not permitted", ran without job control, and echoed
-        // every command line twice. Only the pty devices are opened up.
-        extraRules: [...TERMINAL_TTY_RULES, ...shellStateAncestorMetadataRules(shellState)],
+        terminal: { shellStateDirectory: shellState },
         // Deny the whole shared base, not the siblings that happen to exist
         // now: another repository's state directory may be created after this
         // profile is generated, and this shell must never gain it. The allow

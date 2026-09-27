@@ -3,9 +3,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { SeatbeltConfinementError } from "../process/seatbeltProfile";
+import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
 import {
   ensureNodePtySpawnHelperExecutable,
   shellStateEnvironment,
@@ -358,6 +366,47 @@ describe("TerminalProcessPort", () => {
       expect(run("/usr/bin/touch", [join(sibling, "changed")]).status).not.toBe(0);
     },
   );
+
+  it("starts the shell through bubblewrap on Linux", () => {
+    const pty = fakePty();
+    const spawn = vi.fn(() => pty);
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-linux-terminal-")));
+    directories.push(root);
+    const bwrapPath = join(root, "bwrap");
+    writeFileSync(bwrapPath, '#!/bin/sh\nexec "$@"\n', { mode: 0o700 });
+    chmodSync(bwrapPath, 0o700);
+    const temporaryDirectory = join(root, "tmp");
+    const shellStateDirectory = join(root, "terminal-shell");
+    const cwd = join(root, "repo");
+    mkdirSync(temporaryDirectory);
+    mkdirSync(cwd);
+    const port = new TerminalProcessPort({
+      spawn,
+      killProcessGroup: vi.fn(),
+      confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrapPath }),
+      temporaryDirectory,
+      shellStateDirectory,
+      networkEgress: "none",
+      platform: "linux",
+    });
+
+    port.start({
+      shell: "/bin/bash",
+      cwd,
+      stateScope: "repo_test",
+      environment: {},
+      columns: 80,
+      rows: 24,
+    });
+
+    expect(spawn).toHaveBeenCalledWith(
+      bwrapPath,
+      expect.arrayContaining(["--", "/bin/bash", "-l"]),
+      expect.objectContaining({ cwd }),
+    );
+    expect(launchedCall(spawn)[1]).not.toContain("--new-session");
+    expect(launchedCall(spawn)[2].env.HOME).toBe(launchedStateDirectory(spawn));
+  });
 
   it("fails closed when Seatbelt confinement is unavailable", () => {
     expect(() =>

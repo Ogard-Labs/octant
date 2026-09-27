@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { XtermAdapterRuntime } from "./XtermTerminalAdapter";
+import { CodeClientFailure } from "@octant/client-runtime/code-client";
 import { CodeTerminalPane } from "./CodeTerminalPane";
 import { codeClient, ids, scope, terminalResult } from "./CodeDeliveryPane.test-fixtures";
 
@@ -362,6 +363,32 @@ describe("CodeTerminalPane", () => {
     await waitFor(() => expect(runtime.options).toBeDefined());
     runtime.options?.onData("input");
     expect(await screen.findByRole("alert")).toHaveTextContent(/terminal command failed/i);
+  });
+
+  it("names the transport failure and the lost keystroke when a terminal write is refused", async () => {
+    const client = codeClient({ evidence: "ready" });
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new CodeClientFailure({
+        category: "disconnected",
+        message: "Octant Code service is unavailable.",
+      }),
+    );
+    const runtime = xtermRuntime();
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    runtime.options?.onData("x");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Octant Code service is unavailable\..*Retype the last keystroke/s,
+    );
   });
 
   it("does not reload cumulative terminal replay from input command results", async () => {

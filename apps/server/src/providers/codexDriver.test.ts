@@ -1306,6 +1306,113 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("resume retries while another Codex process holds the thread writer and succeeds once it is released", async () => {
+    let attempts = 0;
+    const delays: number[] = [];
+    const f = fixture({
+      threadResume: async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32600,
+            remoteMessage: "thread t already has an active writer",
+          });
+        }
+        return {
+          thread: { id: "thread-released" },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: projectRoot,
+        };
+      },
+    });
+    const acquired = await acquireConnection(
+      makeCodexDriver(f.options({ sleep: async (milliseconds) => void delays.push(milliseconds) })),
+    );
+
+    const resumed = await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-released" },
+        executionPolicy: "plan",
+      }),
+    );
+
+    expect(resumed.resumeCursor).toEqual({ driverKind: "codex", value: "thread-released" });
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([400, 400]);
+    await acquired.close();
+  });
+
+  it("resume reports another Codex process using the thread when the writer conflict persists", async () => {
+    const delays: number[] = [];
+    const f = fixture({
+      threadResume: async () => {
+        throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+          remoteCode: -32600,
+          remoteMessage: "thread t already has an active writer",
+        });
+      },
+    });
+    const registry = new ProviderRuntimeRegistry();
+    const acquired = await acquireConnection(
+      makeCodexDriver(
+        f.options({
+          runtimeRegistry: registry,
+          sleep: async (milliseconds) => void delays.push(milliseconds),
+        }),
+      ),
+    );
+
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-persistently-locked" },
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+
+    expect(String(exit)).toContain("unavailable");
+    expect(String(exit)).toContain("Another Codex process is still using this thread");
+    expect(String(exit)).not.toContain("no longer available");
+    expect(f.calls.filter(({ method }) => method === "thread/resume")).toHaveLength(5);
+    expect(delays).toEqual([400, 400, 400, 400]);
+    expect(f.listenerCount()).toBe(0);
+    expect(registry.activeSessionCount(instanceId)).toBe(0);
+    await acquired.close();
+  });
+
+  it("resume keeps reporting a missing thread for other Codex errors", async () => {
+    const f = fixture({
+      threadResume: async () => {
+        throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+          remoteCode: -32600,
+          remoteMessage: "no rollout found",
+        });
+      },
+    });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-missing" },
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+
+    expect(String(exit)).toContain("stale-resume");
+    expect(String(exit)).toContain("Codex thread is no longer available for resume.");
+    expect(String(exit)).not.toContain("no rollout found");
+    expect(f.calls.filter(({ method }) => method === "thread/resume")).toHaveLength(1);
+    await acquired.close();
+  });
+
   it("removes the shared listener when thread/resume fails or returns a mismatched root", async () => {
     for (const value of ["missing", "wrong-root"] as const) {
       const f = fixture();

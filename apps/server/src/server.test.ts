@@ -1595,6 +1595,12 @@ describe("startOctantServer", () => {
       /submodule/i,
     );
     await expect(observing({ status: "failed" })).rejects.toThrow(/could not be inspected/i);
+    await expect(
+      observing({
+        status: "failed",
+        git: { command: "worktree list --porcelain -z", stderr: "error: unknown switch `z'" },
+      }),
+    ).rejects.toThrow(/Git 2\.36 or newer/);
 
     // Only the genuinely repository-less folder is told to run git init.
     for (const observed of [
