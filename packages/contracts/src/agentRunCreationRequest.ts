@@ -73,17 +73,6 @@ export const AgentRunWorkspaceHandle = Schema.Union(
 );
 export type AgentRunWorkspaceHandle = typeof AgentRunWorkspaceHandle.Type;
 
-export const AgentRunWorkspacePreparationRequest = Schema.Struct({
-  parentThreadId: AgentRunParentThreadId,
-}).annotations(strict);
-export type AgentRunWorkspacePreparationRequest = typeof AgentRunWorkspacePreparationRequest.Type;
-
-export const AgentRunWorkspaceConfirmationRequest = Schema.Struct({
-  parentThreadId: AgentRunParentThreadId,
-  worktreeReceiptId: WorktreeReceiptId,
-}).annotations(strict);
-export type AgentRunWorkspaceConfirmationRequest = typeof AgentRunWorkspaceConfirmationRequest.Type;
-
 export const AgentRunWorkspaceRefused = Schema.Struct({
   status: Schema.Literal("refused"),
   reason: AgentRunWorkspaceRefusalReason,
@@ -185,12 +174,6 @@ export const AgentRunControlRequest = Schema.Struct({
 }).annotations(strict);
 export type AgentRunControlRequest = typeof AgentRunControlRequest.Type;
 
-export const AgentRunControlPreviewRequest = Schema.Struct({
-  parentThreadId: AgentRunParentThreadId,
-  role: Schema.optional(AgentRunRole),
-}).annotations(strict);
-export type AgentRunControlPreviewRequest = typeof AgentRunControlPreviewRequest.Type;
-
 export const AgentRunControlResolvedFacts = Schema.Struct({
   mode: OctantMode,
   projectId: Schema.optional(ProjectId),
@@ -207,15 +190,6 @@ export const AgentRunControlResolvedFacts = Schema.Struct({
   creationPosture: AgentRunCreationPosture,
 }).annotations(strict);
 export type AgentRunControlResolvedFacts = typeof AgentRunControlResolvedFacts.Type;
-
-export const AgentRunControlPreviewResult = Schema.Union(
-  Schema.Struct({
-    status: Schema.Literal("ready"),
-    facts: AgentRunControlResolvedFacts,
-  }).annotations(strict),
-  AgentRunWorkspaceRefused,
-);
-export type AgentRunControlPreviewResult = typeof AgentRunControlPreviewResult.Type;
 
 export const AgentRunSteerRequest = Schema.Struct({
   runId: AgentRunId,
@@ -238,25 +212,7 @@ export type AgentRunResumeRequest = typeof AgentRunResumeRequest.Type;
 
 export const decodeAgentRunCreationRequest = Schema.decodeUnknownSync(AgentRunCreationRequest);
 export const decodeAgentRunControlRequest = Schema.decodeUnknownSync(AgentRunControlRequest);
-export const decodeAgentRunControlPreviewRequest = Schema.decodeUnknownSync(
-  AgentRunControlPreviewRequest,
-);
-export const decodeAgentRunControlPreviewResult = Schema.decodeUnknownSync(
-  AgentRunControlPreviewResult,
-);
 export const decodeAgentRunSteerRequest = Schema.decodeUnknownSync(AgentRunSteerRequest);
 export const decodeAgentRunRetryRequest = Schema.decodeUnknownSync(AgentRunRetryRequest);
 export const decodeAgentRunResumeRequest = Schema.decodeUnknownSync(AgentRunResumeRequest);
 export const decodeAgentRunWorkspaceHandle = Schema.decodeUnknownSync(AgentRunWorkspaceHandle);
-export const decodeAgentRunWorkspacePreparationRequest = Schema.decodeUnknownSync(
-  AgentRunWorkspacePreparationRequest,
-);
-export const decodeAgentRunWorkspaceConfirmationRequest = Schema.decodeUnknownSync(
-  AgentRunWorkspaceConfirmationRequest,
-);
-export const decodeAgentRunWorkspacePreparationResult = Schema.decodeUnknownSync(
-  AgentRunWorkspacePreparationResult,
-);
-export const decodeAgentRunWorkspaceConfirmationResult = Schema.decodeUnknownSync(
-  AgentRunWorkspaceConfirmationResult,
-);

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -8,32 +8,6 @@ import { AgentRunHierarchy } from "./AgentRunHierarchy";
 
 const parentThreadId = decodeAgentRunParentThreadId("11111111-1111-4111-8111-111111111111");
 const runId = decodeAgentRunId("22222222-2222-4222-8222-222222222222");
-
-const chatFacts = {
-  status: "ready" as const,
-  facts: {
-    mode: "chat" as const,
-    allowedRoles: ["research" as const],
-    providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" as never,
-    modelId: "gpt-4o" as never,
-    workspaceKind: "chat-virtual" as const,
-    authority: {
-      filesystem: false,
-      shell: false,
-      git: false,
-      network: false,
-      tools: true,
-      subagents: true,
-      executionPolicy: "plan" as const,
-      permissionPersistence: "current-session" as const,
-    },
-    executionKind: "octant-managed" as const,
-    attemptedExecutionKind: "provider-native" as const,
-    nativeFallbackReason: "nativeChildAgents-claimed-unsupported",
-    capabilityDegradations: ["native-child-agents-unavailable"],
-    creationPosture: "automatic" as const,
-  },
-};
 
 function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
@@ -50,25 +24,6 @@ function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
     })),
     parentSummary: vi.fn(async () => ({ parentThreadId, entries: [] })),
     acknowledge: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
-    preview: vi.fn(async () => chatFacts),
-    prepareWorkspace: vi.fn(async () => ({
-      status: "prepared" as const,
-      workspace: {
-        kind: "chat-virtual" as const,
-        mode: "chat" as const,
-        receiptId: "66666666-6666-4666-8666-666666666666" as never,
-      },
-    })),
-    confirmWorkspace: vi.fn(async () => ({
-      status: "confirmed" as const,
-      workspace: {
-        kind: "code-worktree" as const,
-        mode: "code" as const,
-        worktreeReceiptId: "66666666-6666-4666-8666-666666666666" as never,
-        confirmation: "confirmed" as const,
-      },
-    })),
-    requestRun: vi.fn(async () => ({ kind: "run-accepted" as const })),
     cancel: vi.fn(async () => ({ results: [] })),
     steer: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
     retry: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
@@ -103,20 +58,13 @@ function summaryEntry(overrides: {
 
 describe("AgentRunHierarchy", () => {
   it("offers no way to start a subagent by hand; only the thread's agent starts one", async () => {
-    const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
-    render(
-      <AgentRunHierarchy
-        client={emptyClient({ requestRun: requestRun as never })}
-        parentThreadId={parentThreadId}
-      />,
-    );
+    render(<AgentRunHierarchy client={emptyClient()} parentThreadId={parentThreadId} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /New/ })).not.toBeInTheDocument();
     expect(
       screen.getByText(/They appear here when the agent hands off part of its work/),
     ).toBeVisible();
-    expect(requestRun).not.toHaveBeenCalled();
   });
 
   it("opens a finished subagent and marks it reviewed at the version the host reported", async () => {
@@ -152,7 +100,11 @@ describe("AgentRunHierarchy", () => {
     });
 
     render(
-      <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="ask" />,
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
     await user.click(screen.getByRole("button", { name: /Verify the packaged child/ }));
@@ -190,7 +142,7 @@ describe("AgentRunHierarchy", () => {
         <AgentRunHierarchy
           client={emptyClient({ parentSummary: parentSummary as never })}
           parentThreadId={parentThreadId}
-          creationPosture="ask"
+          creationPosture="automatic"
         />,
       );
       await waitFor(() =>
@@ -207,6 +159,60 @@ describe("AgentRunHierarchy", () => {
       const calls = parentSummary.mock.calls.length;
       await vi.advanceTimersByTimeAsync(6_000);
       expect(parentSummary).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a newly started child when an older, slower read answers last", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const secondRunId = decodeAgentRunId("33333333-3333-4333-8333-333333333333");
+      const child = (id: typeof runId, lifecycleStatus: "starting" | "completed") => ({
+        runId: id,
+        requestId: `request-${String(id)}`,
+        parentThreadId,
+        role: "review",
+        task: `Task ${String(id)}`,
+        lifecycleStatus,
+        executionKind: "octant-managed",
+        usageQuality: "provider-reported",
+        resultAcknowledgement: { required: false, acknowledged: false },
+        version: 2,
+        updatedAt: "2026-08-01T15:01:00.000Z",
+      });
+      const reads: Array<(value: unknown) => void> = [];
+      const parentSummary = vi
+        .fn()
+        .mockResolvedValueOnce({ parentThreadId, entries: [child(runId, "starting")] })
+        .mockImplementation(() => new Promise((resolve) => reads.push(resolve)));
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ parentSummary: parentSummary as never })}
+          parentThreadId={parentThreadId}
+          creationPosture="automatic"
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible(),
+      );
+
+      // Two beats go out before either answers.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(reads).toHaveLength(2);
+      // The newer read sees a second child; the older one answers after it.
+      reads[1]?.({
+        parentThreadId,
+        entries: [child(runId, "starting"), child(secondRunId, "starting")],
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Working · 2" })).toBeVisible(),
+      );
+      reads[0]?.({ parentThreadId, entries: [child(runId, "completed")] });
+      await act(() => vi.advanceTimersByTimeAsync(50));
+
+      expect(screen.getByRole("heading", { name: "Working · 2" })).toBeVisible();
     } finally {
       vi.useRealTimers();
     }

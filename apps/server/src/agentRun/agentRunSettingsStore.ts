@@ -4,9 +4,10 @@ import {
   CorrelationId,
   EventActor,
   EventId,
+  DEFAULT_AGENT_RUN_CREATION_POSTURE,
   decodeAgentRunPolicySettings,
-  type AgentRunCreationPosture,
   type AgentRunPolicySettings,
+  type AgentRunSelectableCreationPosture,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -46,17 +47,17 @@ export interface AgentRunSettingsStoreOptions {
 }
 
 export interface UpdateAgentRunSettingsInput {
-  readonly creationPosture: AgentRunCreationPosture;
+  readonly creationPosture: AgentRunSelectableCreationPosture;
   readonly expectedVersion: number;
 }
 
 /**
  * Server-authoritative Agents settings: a dedicated single-aggregate event
- * stream for the global creation posture (Off / Ask / Automatic within
- * policy). Mirrors `ThemeService`'s append-then-cache pattern so the
- * effective posture is durable, replay-rebuildable after restart, and never
- * trusted from a raw client value — every AgentRun creation route reads
- * `current()` itself rather than accepting a posture in the request body.
+ * stream for the global creation posture (Off / Automatic within policy).
+ * Mirrors `ThemeService`'s append-then-cache pattern so the effective posture
+ * is durable, replay-rebuildable after restart, and never trusted from a raw
+ * client value — delegation admission reads `current()` itself rather than
+ * accepting a posture from the caller.
  */
 export class AgentRunSettingsStore {
   readonly #journal: JournalPort;
@@ -75,7 +76,7 @@ export class AgentRunSettingsStore {
       throw new AgentRunSettingsStoreError("invalid", "AgentRun settings actor is invalid.");
     }
     this.#current = decodeAgentRunPolicySettings({
-      creationPosture: "ask",
+      creationPosture: DEFAULT_AGENT_RUN_CREATION_POSTURE,
       version: 0,
       updatedAt: this.#clock(),
     });
@@ -157,6 +158,12 @@ export class AgentRunSettingsStore {
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
-    if (latest !== undefined) this.#current = latest;
+    if (latest === undefined) return;
+    // A stored Ask meant "only when I start them". Nobody starts a subagent
+    // by hand any more, so under Ask the agent was refused every delegation
+    // and nothing else could start one: the effective choice was Off. Reading
+    // it as Automatic would widen what a person explicitly held back.
+    this.#current =
+      latest.creationPosture === "ask" ? { ...latest, creationPosture: "off" } : latest;
   }
 }

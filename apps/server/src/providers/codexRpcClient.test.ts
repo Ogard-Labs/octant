@@ -302,6 +302,27 @@ describe("CodexRpcClient", () => {
     await client.close();
   });
 
+  it("a remote JSON-RPC error keeps its code and message on the failure while the user-facing message stays generic", async () => {
+    const { client, stdout } = transport();
+    const pending = client.request("thread/resume", {}, (value) => value);
+    stdout.write(
+      `${JSON.stringify({
+        id: 1,
+        error: { code: -32600, message: "thread x already has an active writer" },
+      })}\n`,
+    );
+
+    const failure = await failureOf(pending);
+    expect(failure).toMatchObject({
+      kind: "remote",
+      message: "Codex request failed.",
+      remoteCode: -32600,
+      remoteMessage: "thread x already has an active writer",
+    });
+    expect(failure.message).toBe("Codex request failed.");
+    await client.close();
+  });
+
   it("fully cleans up pending work, listeners, and stderr diagnostics when stdout ends", async () => {
     const onStderr = vi.fn();
     const { client, stdin, stdout, stderr } = transport({ onStderr });

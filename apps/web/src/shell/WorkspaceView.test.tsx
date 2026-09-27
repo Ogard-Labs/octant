@@ -992,7 +992,6 @@ describe("WorkspaceView subagent tray", () => {
       })),
       acknowledge: vi.fn(),
       cancel: vi.fn(async () => ({ results: [] })),
-      requestRun: vi.fn(),
     } as never;
   }
 

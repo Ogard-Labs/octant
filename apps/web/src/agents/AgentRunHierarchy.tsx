@@ -62,11 +62,32 @@ export function AgentRunHierarchy(props: {
     selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
   );
 
+  // Reads overlap: the beat below does not wait for the one before it, and a
+  // refresh can land mid-beat. An older answer arriving last replaced a newer
+  // list, hid a child accepted since, and could stop the beat. Only a read
+  // issued after the one on screen may replace it.
+  const issuedRead = useRef(0);
+  const shownRead = useRef(0);
+  const readSummary = useCallback(async () => {
+    const read = ++issuedRead.current;
+    const summary = await props.client.parentSummary(props.parentThreadId);
+    if (read < shownRead.current) return;
+    shownRead.current = read;
+    setEntries(summary.entries);
+  }, [props.client, props.parentThreadId]);
+  // A read still out when the panel closes or moves to another thread answers
+  // for a list no longer shown.
+  useEffect(
+    () => () => {
+      shownRead.current = ++issuedRead.current;
+    },
+    [props.client, props.parentThreadId],
+  );
+
   const refresh = useCallback(async () => {
     setStatus((current) => (current === "ready" ? "refreshing" : "loading"));
     try {
-      const summary = await props.client.parentSummary(props.parentThreadId);
-      setEntries(summary.entries);
+      await readSummary();
       setErrorMessage(undefined);
       setStatus("ready");
     } catch (error) {
@@ -77,7 +98,7 @@ export function AgentRunHierarchy(props: {
       );
       setStatus("error");
     }
-  }, [props.client, props.parentThreadId]);
+  }, [readSummary]);
 
   useEffect(() => {
     void refresh();
@@ -90,22 +111,13 @@ export function AgentRunHierarchy(props: {
   const anyActive = entries.some((entry) => isActiveAgentHierarchyStatus(entry.lifecycleStatus));
   useEffect(() => {
     if (!anyActive) return;
-    let cancelled = false;
     const timer = window.setInterval(() => {
-      void props.client.parentSummary(props.parentThreadId).then(
-        (summary) => {
-          if (!cancelled) setEntries(summary.entries);
-        },
-        // A missed beat is retried by the next one; the explicit refresh
-        // path owns the visible error.
-        () => undefined,
-      );
+      // A missed beat is retried by the next one; the explicit refresh path
+      // owns the visible error.
+      void readSummary().catch(() => undefined);
     }, ACTIVE_CHILD_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [anyActive, props.client, props.parentThreadId]);
+    return () => window.clearInterval(timer);
+  }, [anyActive, readSummary]);
 
   useEffect(() => {
     const settingsClient = props.settingsClient;

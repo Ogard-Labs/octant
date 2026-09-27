@@ -153,7 +153,7 @@ workspace pointing at another Project's root.
 | ------------------ | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------ |
 | Authority clamp    | Requested authority is intersected with parent, Project, and global ceilings; any widening rejects fail-closed | `packages/domain/src/agentRunPolicy.ts` (`clampAgentRunAuthority`, `authority-widening`) | Exists today |
 | Mode ceiling       | Mode-derived maximum authority (Chat plan-only, Work no shell, Code approval-gated) caps every child           | `packages/domain/src/agentRunAuthorityCeiling.ts`                                        | Exists today |
-| Depth and capacity | Depth ≤ 2, ≤ 4 active global, ≤ 3 active per parent; creation posture Off/Ask/Always enforced server-side      | `agentRunPolicy.ts`, `apps/server/src/agentRun/agentRunSettingsStore.ts`                 | Exists today |
+| Depth and capacity | Depth ≤ 2, ≤ 4 active global, ≤ 3 active per parent; creation posture Off/Automatic enforced server-side       | `agentRunPolicy.ts`, `apps/server/src/agentRun/agentRunSettingsStore.ts`                 | Exists today |
 | Workspace receipt  | A Code child requires a verified isolated worktree receipt; Chat children get virtual scratch only             | `agentRunWorkspacePolicy.ts` (`admitAgentRunWorkspace`), `agentRunWorkspaceService.ts`   | Exists today |
 | Live parent grant  | Clamping against the parent thread's _live_ effective grant, not only the mode ceiling                         | `agentRunLiveGrant.ts` / `clampAgentRunAuthorityAgainstLiveGrant` feeding admission      | Exists today |
 

@@ -11,12 +11,18 @@ export type ProjectCliCommand =
       readonly name?: string;
     }
   | { readonly action: "remove"; readonly name: string }
-  | { readonly action: "rename"; readonly name: string; readonly newName: string };
+  | { readonly action: "rename"; readonly name: string; readonly newName: string }
+  | {
+      readonly action: "access";
+      readonly name: string;
+      readonly access: "full-access" | "approval-gated";
+    };
 
 const ALLOWED_FLAGS: Readonly<Record<ProjectCliCommand["action"], readonly string[]>> = {
   add: ["name", "type"],
   remove: [],
   rename: [],
+  access: [],
 };
 
 export function resolveProjectCliCommand(
@@ -24,7 +30,8 @@ export function resolveProjectCliCommand(
   flags: Readonly<Record<string, string | boolean>>,
 ): ProjectCliCommand | undefined {
   const [action, ...rest] = positional;
-  if (action !== "add" && action !== "remove" && action !== "rename") return undefined;
+  if (action !== "add" && action !== "remove" && action !== "rename" && action !== "access")
+    return undefined;
   const allowed = ALLOWED_FLAGS[action];
   if (Object.keys(flags).some((flag) => !allowed.includes(flag))) return undefined;
   if (action === "add") {
@@ -45,6 +52,13 @@ export function resolveProjectCliCommand(
     const [name] = rest;
     if (name === undefined || rest.length !== 1 || name.trim() === "") return undefined;
     return { action: "remove", name: name.trim() };
+  }
+  if (action === "access") {
+    const [name, access] = rest;
+    if (name === undefined || access === undefined || rest.length !== 2) return undefined;
+    if (name.trim() === "") return undefined;
+    if (access !== "full-access" && access !== "approval-gated") return undefined;
+    return { action: "access", name: name.trim(), access };
   }
   const [name, newName] = rest;
   if (name === undefined || newName === undefined || rest.length !== 2) return undefined;
@@ -117,6 +131,45 @@ export async function runProjectCliCommand(input: RunProjectCliCommandInput): Pr
     );
     return 1;
   }
+  if (command.action === "access") {
+    if (project.type !== "code") {
+      input.stderr.write(
+        `Project ${project.name} is a ${project.type} Project. Only Code Projects can remember Full access.\n`,
+      );
+      return 1;
+    }
+    const remembered = project.codeAccessPersistence === "project-default";
+    if (remembered === (command.access === "full-access")) {
+      input.stdout.write(
+        remembered
+          ? `Project ${project.name} already remembers Full access.\n`
+          : `Project ${project.name} already starts Code threads approval-gated.\n`,
+      );
+      return 0;
+    }
+    const executed = await session.send({
+      path: "/api/projects/commands",
+      method: "POST",
+      body: {
+        kind: "change-code-project-access",
+        projectId: project.id,
+        expectedVersion: project.version,
+        codeAccessPersistence:
+          command.access === "full-access" ? "project-default" : "current-session",
+      },
+    });
+    if (executed.status !== 200) {
+      input.stderr.write(`${failureMessage(executed, "Octant refused this Project change.")}\n`);
+      return 1;
+    }
+    input.stdout.write(
+      command.access === "full-access"
+        ? `Project ${project.name} remembers Full access. New Code threads that ask for it start without a per-thread confirmation.\n`
+        : `Project ${project.name} starts Code threads approval-gated. Full access needs a per-thread confirmation again.\n`,
+    );
+    return 0;
+  }
+
   const executed = await session.send({
     path: "/api/projects/commands",
     method: "POST",

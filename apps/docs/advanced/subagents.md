@@ -4,32 +4,36 @@ description: Child agent runs, their hierarchy, isolation, recovery, and how res
 
 # Subagents
 
-Subagents are child agent runs that a thread can start to delegate research,
-implementation, or review. They are one durable **AgentRun** each and inherit
-the parent thread's provider, model, and authority ceiling.
+Subagents are child agent runs that a thread's agent starts to delegate
+research, implementation, or review. They are one durable **AgentRun** each and
+inherit the parent thread's provider, model, and authority ceiling.
+
+Only the thread's agent starts a subagent: the Octant Harness hands it a
+bounded task with its `delegate` tool, and the subagent's result returns to that
+agent through `collect`. You watch and control subagents from the composer and
+the **Agents** dock tool, but you do not start them there; a subagent a person
+started by hand would have no agent to hand its result back to.
 
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the
 orchestration service, process supervision, and packaged child smoke — is on
-`main`. **Settings → Octant Harness → Helper agents** holds the
-server-authoritative child-creation posture: **Off**, **Only when I start
-them** (Ask), or **Automatically**. Role cards and mixed-vendor routing per
-role remain planned.
+`main`. **Settings → Octant Harness → Helper agents** holds one
+server-authoritative switch, **Let the agent start subagents**: on (the
+default) or off. Role cards and mixed-vendor routing per role remain planned.
 
-A thread's subagents that are working, or finished and not yet reviewed, show
-in its composer in Chat, Work, and Code: one row each with its task and its
-state in words, such as "Working · 12s" or "Done — review". Hover or focus a
-row to **Stop** a working subagent or **Mark reviewed** a finished one;
-**Stop all** asks first and cancels only that thread's subagents. Choosing a
-row opens the **Agents** dock tool on that subagent. Once a subagent is
-reviewed it leaves the composer and stays in Agents.
+A thread's working subagents show in a small card behind its composer in
+Chat, Work, and Code: one row each with its task and "Working · 12s". Click the
+card's head to fold it to a tab; Octant remembers that. Hover or focus a row to
+**Stop** it; **Stop all** asks first and cancels only that thread's subagents.
+Choosing a row opens the **Agents** dock tool on that subagent. Finished
+subagents leave the card: **Environment → Subagents** lists every one, working
+and finished, and marks results you have not reviewed **To review**.
 
 The **Agents** dock tool lists the thread's subagents under **Working** and
-**Finished**, marks results you have not reviewed with **Needs review**, and
-offers **New** to start one; on a thread with none, the New subagent form is
-already open. Off posture still opens Agents and shows a visible refusal
-instead of a create form. Choosing a row opens its page: the task as the brief,
+**Finished** and marks results you have not reviewed with **Needs review**. On
+a thread with none it says they appear when the agent hands off part of its
+work, or that subagents are turned off in Settings. Choosing a row opens its page: the task as the brief,
 then its replies, live while it runs, or its retained final reply once the live
 conversation is gone. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
 **Cancel** sit under the conversation when they apply. A subagent that runs
@@ -67,11 +71,12 @@ that run only; your `CODEX_HOME` and `config.toml` are left as they are.
 
 ## Posture and clamps
 
-Creation postures are **Off**, **Only when I start them** (Ask, the default),
-and **Automatically** within policy. Off also refuses **New** in the
-Agents dock. Under Ask, starting a helper from the dock is the confirmation;
-there is no separate prompt, and only the Octant Harness model's `delegate` tool
-is refused. Provider-native subagents are not governed by this posture: Octant
+**Let the agent start subagents** is on by default: the agent's `delegate`
+calls start subagents within the thread's access and the clamps below. Turned
+off, every `delegate` call is refused and the agent does its work itself;
+subagents it already started stay readable and controllable. A host that had
+chosen the retired **Only when I start them** reads as off, because nothing else
+could start a subagent under it. Provider-native subagents are not governed by this posture: Octant
 keeps them off where the provider allows it. The server enforces hard clamps:
 
 - At most **4 concurrently running children** globally.

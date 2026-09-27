@@ -357,14 +357,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Octant Harness",
       scope: "app",
       keywords:
-        "octant harness native agent loop model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips endpoint openai-compatible anthropic-compatible ollama azure agents subagents helper child creation posture off ask automatic bounded hierarchy",
+        "octant harness native agent loop model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips endpoint openai-compatible anthropic-compatible ollama azure agents subagents helper child creation posture off on automatic bounded hierarchy",
       settings: [
         {
           id: settingId("subagent-creation-posture"),
           label: "Helper agents",
           scope: "app",
-          keywords:
-            "helper agents subagents child runs creation posture off ask automatic delegate add agent dock",
+          keywords: "helper agents subagents child runs creation posture off on automatic delegate",
         },
       ],
     },

@@ -457,6 +457,8 @@ function controller(
 ) {
   return {
     client,
+    accessNotice: undefined,
+    setAccessNotice: vi.fn(),
     ...(editorDrafts === undefined ? {} : { editorDrafts }),
     activeView: {
       checkout: {

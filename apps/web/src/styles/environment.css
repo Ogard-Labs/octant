@@ -378,6 +378,7 @@
 /* An open row's content starts under its name, not under its glyph. */
 .environment-group__body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: var(--oct-space-2);
   padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-3) 32px;
@@ -399,11 +400,81 @@
 }
 
 /* An empty open row still states what is true, in the summaries' register. */
-.thread-environment-dock .environment-subagents__empty {
+.environment-subagents__empty {
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-body);
+}
+
+/* Subagents: every one the agent delegated, working first, then finished
+   newest first. A thread that delegates a lot scrolls inside the row rather
+   than pushing the rest of Environment out of reach. */
+.environment-subagents__section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 2px;
+}
+
+.environment-subagents__label {
+  margin: 0;
+  padding-top: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+}
+
+.environment-subagents__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-height: 224px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.environment-subagent {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  text-align: left;
+  text-decoration: none;
+}
+
+.environment-subagent:hover {
+  text-decoration: none;
+}
+
+.environment-subagents__task {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-subagents__state {
+  flex: none;
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-subagent:hover .environment-subagents__task,
+.environment-subagent:focus-visible .environment-subagents__task {
+  color: var(--oct-fg);
 }
 
 @media (prefers-reduced-motion: reduce) {

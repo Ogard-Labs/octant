@@ -33,7 +33,6 @@ function stubClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
       entries: [summaryEntry("a", "running"), summaryEntry("b", "waiting")],
     }),
     acknowledge: vi.fn().mockResolvedValue({ kind: "run-updated" }),
-    requestRun: vi.fn(),
     cancel: vi.fn().mockResolvedValue({ results: [] }),
     ...overrides,
   } as unknown as AgentRunClient;

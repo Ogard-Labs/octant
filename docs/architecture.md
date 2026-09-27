@@ -389,13 +389,18 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
-A child AgentRun receives a server-prepared workspace: Chat a research-only
-virtual workspace, Work the current confined Project root and binding revision,
-and Code an isolated managed worktree that is confirmed before admission.
-Renderers supply only receipt ids — never absolute paths or a claimed
-`verified` flag. Admission, restart, and replay refuse stale, expired,
-foreign-thread, foreign-Project, parent-checkout, unavailable, or
-wider-than-parent grants.
+A child AgentRun starts only when the thread's agent delegates to it through the
+Octant Harness `delegate` tool, and its result returns to that agent through
+`collect`; the host's AgentRun routes read and control existing runs but start
+none. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
+on the server: Chat a research-only virtual workspace, Work the current
+confined Project root and binding revision, and Code an isolated managed
+worktree that is confirmed before admission. No client supplies a path, a
+receipt, or a claimed `verified` flag. Admission, restart, and replay refuse
+stale, expired, foreign-thread, foreign-Project, parent-checkout, unavailable,
+or wider-than-parent grants. Whether the agent may delegate is one host
+setting, on by default; a stored Ask from the retired "only when I start them"
+choice reads as off.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
@@ -782,7 +787,8 @@ native harness in `apps/server/src/harness`:
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
   and a per-slot circuit breaker. Child runs take their model from the role's
-  slot through the shared `admitAgentRunControlRequest` path.
+  slot through `admitAgentRunControlRequest`, the one path that starts a
+  subagent.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
   the questions a lead asked with how each was
@@ -980,14 +986,26 @@ mechanisms are:
   ceiling allows auto-accept-edits too. Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept
   path keep asking;
-  Full access is a remembered, per-Project decision. A composer turn may
+  Full access is a remembered, per-Project decision. The host records that
+  decision with `octant project access <name> full-access` (journaled
+  `project.code-access-changed@1`); a thread that asks for Full access for
+  the Project's default then starts without a per-thread native
+  confirmation, and an existing thread can be raised to it the same way,
+  while session-only Full access still needs one. A composer
+  turn may
   request a narrower posture; the server clamps it to the thread's grant
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  The access picker also offers "Lower thread" to durably return a thread to
+  approval-gated and revoke a session-only Full-access grant for that window
+  without confirmation.
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
   (`docs/decisions/0110`); that planned path does not yet run.
+  Three provider tool requests denied in one Code turn end it as
+  interrupted, with the reason journaled, so a provider cannot loop a
+  person's refusals.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
@@ -1196,7 +1214,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap`, an unlocked
+  `octant web --dev` for Vite). Linux requires `bubblewrap`, Git 2.36 or
+  newer, an unlocked
   freedesktop Secret Service session, and the `secret-tool` client. Without
   those, the host fails closed. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session

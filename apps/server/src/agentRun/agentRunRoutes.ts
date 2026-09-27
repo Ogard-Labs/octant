@@ -1,6 +1,4 @@
 import {
-  decodeAgentRunControlPreviewRequest,
-  decodeAgentRunControlRequest,
   decodeAgentRunCenterQuery,
   decodeAgentRunId,
   decodeAgentRunCanvasSnapshotRequest,
@@ -9,8 +7,6 @@ import {
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
   decodeAgentRunSteerRequest,
-  decodeAgentRunWorkspaceConfirmationRequest,
-  decodeAgentRunWorkspacePreparationRequest,
   decodeAgentRunConversationStreamFrame,
   MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES,
   MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
@@ -18,15 +14,10 @@ import {
   type AgentRunConversationStreamFrame,
   type AgentRun,
   type AgentRunCanvasSnapshotResult,
-  type AgentRunAuthority,
   type CanvasBlock,
   type AgentRunCenterSummary,
-  type AgentRunControlRequest,
-  type AgentRunCreationRequest,
   type AgentRunId,
   type AgentRunParentThreadId,
-  type AgentRunPolicySettings,
-  type AgentRunWorkspaceRefusalReason,
   type AggregateVersion,
   type CodeThreadId,
   type OctantMode,
@@ -40,7 +31,6 @@ import {
   assertAgentRunRetryAllowed,
   assertAgentRunSteerAllowed,
   AgentRunPolicyRejected,
-  type AgentRunNativeCapabilityEvidence,
 } from "@octant/domain/agent-run-control-policy";
 import { resolveAgentRunConversationDisclosure } from "@octant/domain/agent-run-conversation-policy";
 import {
@@ -52,18 +42,7 @@ import {
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import {
-  previewAgentRunControl,
-  type AgentRunControlParentFacts,
-  type AgentRunControlWorkspacePort,
-  type AgentRunParentRouteFacts,
-} from "./agentRunControlService";
-import { admitAgentRunControlRequest } from "./agentRunControlAdmission";
-import type {
-  AgentRunParentContextPort,
-  AgentRunPoolRoutingContext,
-  ProviderReadinessPort,
-} from "./agentRunCreationService";
+import type { AgentRunControlParentFacts } from "./agentRunControlService";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import type { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
@@ -83,9 +62,10 @@ export interface AgentRunRouteDependencies {
   readonly persistence: AgentRunPersistenceService;
   readonly liveConversations: AgentRunLiveConversationStore;
   readonly orchestration: AgentRunOrchestrationService;
-  readonly settings: { readonly current: () => AgentRunPolicySettings };
-  readonly providerReadiness: ProviderReadinessPort;
-  /** Resolves the actual parent thread/window authority; client body fields are never authority. */
+  /**
+   * Resolves the actual parent thread/window authority a retried or resumed
+   * child runs under; client body fields are never authority.
+   */
   readonly authorizeCreation: (input: {
     readonly parentThreadId: AgentRunParentThreadId;
     readonly windowId: string;
@@ -110,44 +90,6 @@ export interface AgentRunRouteDependencies {
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
   /**
-   * Server-side gathering of pool routing facts for a child creation request
-   * Absent or returning undefined means this host cannot resolve pool
-   * routing, so any pool-selecting request fails closed.
-   */
-  readonly poolRouting?: (input: {
-    readonly request: AgentRunCreationRequest;
-  }) => AgentRunPoolRoutingContext | undefined | Promise<AgentRunPoolRoutingContext | undefined>;
-  /**
-   * Server-observed native-child capability evidence. Absent means native
-   * execution is ineligible and the child is Octant-managed with a reason.
-   */
-  readonly nativeEvidence?: (input: {
-    readonly parent: AgentRunControlParentFacts;
-  }) => AgentRunNativeCapabilityEvidence;
-  /**
-   * Slot routing for a child's role: the model the role's slot names, in
-   * place of the parent's, when the request carries no one-off pool. Absent
-   * means children inherit the parent's route.
-   */
-  readonly routeOverride?: (input: {
-    readonly parent: AgentRunControlParentFacts;
-    readonly role: AgentRunControlRequest["role"];
-  }) => AgentRunParentRouteFacts | undefined;
-  /**
-   * Server-owned child workspace prepare/confirm/admit. Absent means this
-   * host cannot issue mode-correct workspace grants, so Work/Code children
-   * and explicit Chat receipts fail closed.
-   */
-  readonly workspace?: AgentRunControlWorkspacePort;
-  /**
-   * Reads the parent thread's own conversation for a child that asked to be
-   * admitted with it. Consulted only after `authorizeCreation` proved this
-   * window may create children from that parent thread, so a child can never
-   * be admitted with context its parent could not read. Absent means this host
-   * admits no parent context, and such a request fails closed.
-   */
-  readonly parentContext?: AgentRunParentContextPort;
-  /**
    * Resolves display facts for one center row after authorization. Parent
    * titles come from this host's thread stores; child thread ids are derived
    * for Code children without inventing filesystem paths.
@@ -169,7 +111,6 @@ export interface AgentRunRouteDependencies {
     readonly title: string;
     readonly blocks: ReadonlyArray<CanvasBlock>;
   }) => AgentRunCanvasSnapshotResult | Promise<AgentRunCanvasSnapshotResult>;
-  readonly uuid: () => string;
   readonly now?: () => number;
 }
 
@@ -192,18 +133,13 @@ function failure(message: string, status: number, origin: string | null): Respon
   return json({ error: message }, status, origin);
 }
 
-function refused(
-  reason: AgentRunWorkspaceRefusalReason,
-  origin: string | null,
-  status = 400,
-): Response {
-  return json({ status: "refused", reason }, status, origin);
-}
-
 /**
  * Authenticated AgentRun query/command routes for the shared renderer.
- * Authority and lifecycle remain server-owned; the client only reads summaries
- * and issues acknowledge commands with expected versions.
+ * Authority and lifecycle remain server-owned; the client reads summaries and
+ * controls runs that already exist (acknowledge, cancel, steer, retry, resume)
+ * with expected versions. Nothing here starts a subagent: only the thread's
+ * own agent does, through the Octant Harness delegate tool, so the child's
+ * result returns to the agent that asked for it.
  */
 export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -312,164 +248,6 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         expectedVersion: expectedVersion as never,
       });
       return json(result, result.kind === "run-updated" ? 200 : 409, origin);
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/agent-runs/workspaces/prepare") {
-      let body: unknown;
-      try {
-        body = await request.json();
-      } catch {
-        return failure("AgentRun workspace prepare body is invalid.", 400, origin);
-      }
-      let prepareRequest: ReturnType<typeof decodeAgentRunWorkspacePreparationRequest>;
-      try {
-        prepareRequest = decodeAgentRunWorkspacePreparationRequest(body);
-      } catch {
-        return failure("AgentRun workspace prepare request is invalid.", 400, origin);
-      }
-      const creationAuthority = dependencies.authorizeCreation({
-        parentThreadId: prepareRequest.parentThreadId,
-        windowId: authenticatedWindowId,
-      });
-      if (creationAuthority === undefined) {
-        return refused("unauthorized", origin, 403);
-      }
-      if (dependencies.workspace === undefined) {
-        return refused("unavailable", origin);
-      }
-      const prepared = await dependencies.workspace.prepare({
-        windowId: authenticatedWindowId,
-        parent: creationAuthority.workspaceParent,
-        ...(creationAuthority.codeWorkspace === undefined
-          ? {}
-          : { code: creationAuthority.codeWorkspace }),
-      });
-      return json(prepared, prepared.status === "refused" ? 400 : 200, origin);
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/agent-runs/workspaces/confirm") {
-      let body: unknown;
-      try {
-        body = await request.json();
-      } catch {
-        return failure("AgentRun workspace confirm body is invalid.", 400, origin);
-      }
-      let confirmRequest: ReturnType<typeof decodeAgentRunWorkspaceConfirmationRequest>;
-      try {
-        confirmRequest = decodeAgentRunWorkspaceConfirmationRequest(body);
-      } catch {
-        return failure("AgentRun workspace confirm request is invalid.", 400, origin);
-      }
-      const creationAuthority = dependencies.authorizeCreation({
-        parentThreadId: confirmRequest.parentThreadId,
-        windowId: authenticatedWindowId,
-      });
-      if (creationAuthority === undefined) {
-        return refused("unauthorized", origin, 403);
-      }
-      if (dependencies.workspace === undefined) {
-        return refused("unavailable", origin);
-      }
-      const confirmed = await dependencies.workspace.confirm({
-        windowId: authenticatedWindowId,
-        parent: creationAuthority.workspaceParent,
-        worktreeReceiptId: String(confirmRequest.worktreeReceiptId),
-      });
-      return json(confirmed, confirmed.status === "refused" ? 400 : 200, origin);
-    }
-
-    if (
-      (request.method === "GET" && url.pathname === "/api/agent-runs/control-preview") ||
-      (request.method === "POST" && url.pathname === "/api/agent-runs/control-preview")
-    ) {
-      let previewBody: unknown = {
-        parentThreadId: url.searchParams.get("parentThreadId") ?? "",
-        ...(url.searchParams.get("role") === null ? {} : { role: url.searchParams.get("role") }),
-      };
-      if (request.method === "POST") {
-        try {
-          previewBody = await request.json();
-        } catch {
-          return failure("AgentRun control preview body is invalid.", 400, origin);
-        }
-      }
-      let previewRequest: ReturnType<typeof decodeAgentRunControlPreviewRequest>;
-      try {
-        previewRequest = decodeAgentRunControlPreviewRequest(previewBody);
-      } catch {
-        return failure("AgentRun control preview request is invalid.", 400, origin);
-      }
-      const creationAuthority = dependencies.authorizeCreation({
-        parentThreadId: previewRequest.parentThreadId,
-        windowId: authenticatedWindowId,
-      });
-      if (creationAuthority === undefined) {
-        return refused("unauthorized", origin, 403);
-      }
-      const preview = previewAgentRunControl({
-        parent: creationAuthority,
-        ...(previewRequest.role === undefined ? {} : { role: previewRequest.role }),
-        creationPosture: dependencies.settings.current().creationPosture,
-        nativeEvidence: nativeEvidenceFor(dependencies, creationAuthority),
-      });
-      return json(preview, preview.status === "refused" ? 400 : 200, origin);
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/agent-runs/request") {
-      let body: unknown;
-      try {
-        body = await request.json();
-      } catch {
-        return failure("AgentRun request body is invalid.", 400, origin);
-      }
-      let controlRequest: AgentRunControlRequest;
-      try {
-        controlRequest = decodeAgentRunControlRequest(body);
-      } catch {
-        return failure("AgentRun creation request is invalid.", 400, origin);
-      }
-      const posture = dependencies.settings.current().creationPosture;
-      const admission = await admitAgentRunControlRequest(
-        {
-          persistence: dependencies.persistence,
-          orchestration: dependencies.orchestration,
-          settings: dependencies.settings,
-          providerReadiness: dependencies.providerReadiness,
-          uuid: dependencies.uuid,
-          authorizeCreation: dependencies.authorizeCreation,
-          nativeEvidence: ({ parent }) => nativeEvidenceFor(dependencies, parent),
-          ...(dependencies.workspace === undefined ? {} : { workspace: dependencies.workspace }),
-          ...(dependencies.poolRouting === undefined
-            ? {}
-            : { poolRouting: dependencies.poolRouting }),
-          ...(dependencies.parentContext === undefined
-            ? {}
-            : { parentContext: dependencies.parentContext }),
-        },
-        {
-          controlRequest,
-          windowId: authenticatedWindowId,
-          // Posture Off is still rejected by domain policy; Ask and Automatic
-          // are both reached only through this explicit, human-initiated
-          // creation route, so the act of calling it is the approval Ask
-          // requires.
-          confirmed: posture !== "off",
-          ...(dependencies.routeOverride === undefined
-            ? {}
-            : {
-                routeOverride: (parent) =>
-                  dependencies.routeOverride!({ parent, role: controlRequest.role }),
-              }),
-        },
-      );
-      if (admission.kind === "refused") return refused(admission.reason, origin, admission.status);
-      if (admission.kind === "invalid") return failure(admission.message, admission.status, origin);
-      return respondAfterAdmission(
-        admission.result,
-        dependencies.orchestration,
-        admission.liveAuthority,
-        origin,
-      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/agent-runs/cancel") {
@@ -992,43 +770,6 @@ function serializeCenterSummary(
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
   };
-}
-
-function respondAfterAdmission(
-  result: ReturnType<AgentRunOrchestrationService["admit"]> | AgentRun,
-  orchestration: AgentRunOrchestrationService,
-  liveAuthority: AgentRunAuthority,
-  origin: string | null,
-): Response {
-  const accepted = "kind" in result ? result : { kind: "run-accepted" as const, run: result };
-  if (
-    accepted.kind === "run-accepted" &&
-    accepted.run.lifecycleStatus === "queued" &&
-    accepted.run.recoveryReason === undefined
-  ) {
-    const started = orchestration.start(accepted.run.id, accepted.run.version, liveAuthority);
-    return json(started, started.kind === "run-command-failed" ? 409 : 200, origin);
-  }
-  // A `run-updated` admission (e.g. a pool child durably Waiting on its
-  // immutable route decision) is a success, not a conflict.
-  return json(accepted, accepted.kind === "run-command-failed" ? 409 : 200, origin);
-}
-
-function nativeEvidenceFor(
-  dependencies: AgentRunRouteDependencies,
-  parent: AgentRunControlParentFacts,
-): AgentRunNativeCapabilityEvidence {
-  return (
-    dependencies.nativeEvidence?.({ parent }) ?? {
-      claimedNativeSupport: "unsupported",
-      workspace: false,
-      authority: false,
-      observability: false,
-      cancellation: false,
-      steering: false,
-      recovery: false,
-    }
-  );
 }
 
 async function mutateLiveRun(

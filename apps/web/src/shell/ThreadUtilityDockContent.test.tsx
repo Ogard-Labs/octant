@@ -55,39 +55,11 @@ describe("thread utility dock content", () => {
               parentThreadId: threadId,
               entries: [],
             })),
-            preview: vi.fn(async () => ({
-              status: "ready",
-              facts: {
-                mode: "code",
-                allowedRoles: ["implementation", "review"],
-                providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-                modelId: "gpt-4o",
-                workspaceKind: "code-worktree",
-                authority: {
-                  filesystem: true,
-                  shell: true,
-                  git: true,
-                  network: true,
-                  tools: true,
-                  subagents: true,
-                  executionPolicy: "approval-gated",
-                  permissionPersistence: "current-session",
-                },
-                executionKind: "octant-managed",
-                attemptedExecutionKind: "provider-native",
-                nativeFallbackReason: "nativeChildAgents-claimed-unsupported",
-                capabilityDegradations: ["native-child-agents-unavailable"],
-                creationPosture: "ask",
-              },
-            })),
             acknowledge: vi.fn(),
-            requestRun: vi.fn(),
             cancel: vi.fn(),
             steer: vi.fn(),
             retry: vi.fn(),
             resume: vi.fn(),
-            prepareWorkspace: vi.fn(),
-            confirmWorkspace: vi.fn(),
           } as never
         }
         surface="agents"
@@ -138,7 +110,6 @@ describe("thread utility dock content", () => {
             conversation: vi.fn(async () => {
               throw new Error("no live transcript in this fixture");
             }),
-            preview: vi.fn(async () => ({ status: "refused", reason: "unavailable" })),
           } as never
         }
         onAgentRunRequestHandled={vi.fn()}
@@ -162,39 +133,11 @@ describe("thread utility dock content", () => {
               parentThreadId: threadId,
               entries: [],
             })),
-            preview: vi.fn(async () => ({
-              status: "ready",
-              facts: {
-                mode: "code",
-                allowedRoles: ["implementation"],
-                providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-                modelId: "gpt-4o",
-                workspaceKind: "code-worktree",
-                authority: {
-                  filesystem: true,
-                  shell: true,
-                  git: true,
-                  network: true,
-                  tools: true,
-                  subagents: true,
-                  executionPolicy: "approval-gated",
-                  permissionPersistence: "current-session",
-                },
-                executionKind: "octant-managed",
-                attemptedExecutionKind: "provider-native",
-                nativeFallbackReason: "nativeChildAgents-claimed-unsupported",
-                capabilityDegradations: ["native-child-agents-unavailable"],
-                creationPosture: "off",
-              },
-            })),
             acknowledge: vi.fn(),
-            requestRun: vi.fn(),
             cancel: vi.fn(),
             steer: vi.fn(),
             retry: vi.fn(),
             resume: vi.fn(),
-            prepareWorkspace: vi.fn(),
-            confirmWorkspace: vi.fn(),
           } as never
         }
         agentRunSettingsClient={

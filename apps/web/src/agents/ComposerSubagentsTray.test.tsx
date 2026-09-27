@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentsTray, ThreadSubagentsTray } from "./ComposerSubagentsTray";
@@ -35,10 +35,21 @@ function renderTray(
     onOpenSubagent: vi.fn(),
     onStop: vi.fn(),
     onStopAll: vi.fn(),
-    onMarkReviewed: vi.fn(),
   };
-  render(<SubagentsTray entries={entries} {...handlers} {...overrides} />);
+  render(
+    <SubagentsTray entries={entries} storage={memoryStorage()} {...handlers} {...overrides} />,
+  );
   return handlers;
+}
+
+function memoryStorage(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+  };
 }
 
 afterEach(() => {
@@ -46,60 +57,66 @@ afterEach(() => {
 });
 
 describe("SubagentsTray", () => {
-  it("shows working subagents and unreviewed results, in words, and leaves reviewed ones to Agents", () => {
+  it("shows only working subagents, in words, and leaves finished ones to Environment and Agents", () => {
     vi.useFakeTimers({ now: Date.parse("2026-09-26T10:00:12.000Z"), shouldAdvanceTime: true });
     renderTray([
       entry("a", "running"),
-      entry("b", "completed", { required: true }),
-      entry("c", "failed", { required: true }),
-      entry("d", "completed", { required: true, acknowledged: true }),
+      entry("b", "waiting"),
+      entry("c", "completed", { required: true }),
+      entry("d", "failed", { required: true }),
+      entry("e", "completed", { required: true, acknowledged: true }),
     ]);
 
     const tray = screen.getByRole("group", { name: "Subagents" });
     const rows = within(tray).getAllByRole("button", { name: /Opens it in Agents/ });
     expect(rows.map((row) => row.textContent)).toEqual([
       "Task aWorking · 12s",
-      "Task bDone — review",
-      "Task cFailed",
+      "Task bWaiting · 12s",
     ]);
-    expect(within(tray).queryByText("Task d")).not.toBeInTheDocument();
+    expect(tray).toHaveTextContent("2 working");
+    expect(within(tray).queryByText("Task c")).not.toBeInTheDocument();
   });
 
-  it("renders nothing once every subagent has settled and been reviewed", () => {
-    renderTray([entry("a", "completed", { required: true, acknowledged: true })]);
+  it("renders nothing when no subagent is working", () => {
+    renderTray([
+      entry("a", "completed", { required: true }),
+      entry("b", "completed", { required: true, acknowledged: true }),
+    ]);
 
     expect(screen.queryByRole("group", { name: "Subagents" })).not.toBeInTheDocument();
   });
 
-  it("asks to open the chosen subagent, and the Agents list for the rows past three", async () => {
+  it("asks to open the chosen subagent", async () => {
     const user = userEvent.setup();
-    const { onOpenSubagent } = renderTray([
-      entry("a", "running"),
-      entry("b", "running"),
-      entry("c", "waiting"),
-      entry("d", "queued"),
-      entry("e", "completed", { required: true }),
-    ]);
+    const { onOpenSubagent } = renderTray([entry("a", "running"), entry("b", "running")]);
 
     await user.click(screen.getByRole("button", { name: /^Task b\. Working/ }));
     expect(onOpenSubagent).toHaveBeenLastCalledWith("b");
-
-    await user.click(screen.getByRole("button", { name: "Show 2 more subagents in Agents" }));
-    expect(onOpenSubagent).toHaveBeenLastCalledWith();
   });
 
-  it("stops one named subagent at once and marks a finished one reviewed at its version", async () => {
+  it("folds to its head and stays folded for this viewer", async () => {
     const user = userEvent.setup();
-    const { onStop, onMarkReviewed } = renderTray([
-      entry("a", "running"),
-      entry("b", "completed", { required: true }),
-    ]);
+    const storage = memoryStorage();
+    renderTray([entry("a", "running")], { storage });
+
+    await user.click(screen.getByRole("button", { name: "Subagents, 1 working. Hide them" }));
+    expect(screen.queryByRole("button", { name: /Opens it in Agents/ })).not.toBeInTheDocument();
+    expect(storage.setItem).toHaveBeenCalledWith("octant.composer-subagents.open", "false");
+
+    cleanup();
+    renderTray([entry("a", "running")], { storage });
+    const toggle = screen.getByRole("button", { name: "Subagents, 1 working. Show them" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(screen.getByRole("button", { name: /^Task a\. Working/ })).toBeVisible();
+  });
+
+  it("stops one named subagent at once", async () => {
+    const user = userEvent.setup();
+    const { onStop } = renderTray([entry("a", "running")]);
 
     await user.click(screen.getByRole("button", { name: "Stop subagent: Task a" }));
     expect(onStop).toHaveBeenCalledWith("a");
-
-    await user.click(screen.getByRole("button", { name: "Mark reviewed: Task b" }));
-    expect(onMarkReviewed).toHaveBeenCalledWith({ runId: "b", version: 7 });
   });
 
   it("asks before stopping every working subagent, and stops nothing when declined", async () => {
@@ -132,44 +149,33 @@ describe("SubagentsTray", () => {
 });
 
 describe("ThreadSubagentsTray", () => {
-  it("drops a finished subagent from the tray once it is marked reviewed", async () => {
-    const user = userEvent.setup();
-    let acknowledged = false;
-    const acknowledge = vi.fn(async () => {
-      acknowledged = true;
-      return { kind: "run-updated" as const, run: {} as never };
-    });
+  it("shows the host's working subagents and none of its finished ones", async () => {
     const client = {
       parentSummary: vi.fn(async () => ({
         parentThreadId: threadId,
         entries: [
           {
-            ...entry("90000000-0000-4000-8000-000000000001", "completed", {
-              required: true,
-              acknowledged,
-            }),
-            requestId: "request-1",
+            ...entry("90000000-0000-4000-8000-000000000001", "running"),
+            requestId: "r1",
+            parentThreadId: threadId,
+          },
+          {
+            ...entry("90000000-0000-4000-8000-000000000002", "completed", { required: true }),
+            requestId: "r2",
             parentThreadId: threadId,
           },
         ],
       })),
-      acknowledge,
+      acknowledge: vi.fn(),
       cancel: vi.fn(async () => ({ results: [] })),
     } as never;
     render(<ThreadSubagentsTray client={client} threadId={threadId} />);
 
-    await user.click(
+    expect(
       await screen.findByRole("button", {
-        name: "Mark reviewed: Task 90000000-0000-4000-8000-000000000001",
+        name: /^Task 90000000-0000-4000-8000-000000000001\. Working/,
       }),
-    );
-
-    expect(acknowledge).toHaveBeenCalledWith({
-      runId: "90000000-0000-4000-8000-000000000001",
-      expectedVersion: 7,
-    });
-    await waitFor(() =>
-      expect(screen.queryByRole("group", { name: "Subagents" })).not.toBeInTheDocument(),
-    );
+    ).toBeVisible();
+    expect(screen.queryByText("Task 90000000-0000-4000-8000-000000000002")).not.toBeInTheDocument();
   });
 });

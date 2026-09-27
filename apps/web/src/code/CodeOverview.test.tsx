@@ -521,6 +521,8 @@ function controller(): CodeController {
   } as const;
   return {
     activeView: { checkout, lastSequence: 1, thread } as never,
+    accessNotice: undefined,
+    setAccessNotice: vi.fn(),
     announceFirstPrompt: vi.fn(),
     answerProviderRequest: vi.fn(async () => true),
     cancelTurn: vi.fn(async () => true),

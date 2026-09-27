@@ -135,6 +135,7 @@ function makeDependencies(options: {
   readonly realpathFailure?: string;
   readonly notRepository?: boolean;
   readonly failCommand?: string;
+  readonly failStderr?: string;
 }) {
   const canonicalRoot = options.canonicalRoot ?? options.root;
   const commonDirectory = options.commonDirectory ?? "/identity/common";
@@ -158,7 +159,9 @@ function makeDependencies(options: {
     },
     runGit: async (args: readonly string[]) => {
       const command = args.slice(2).join(" ");
-      if (command === options.failCommand) throw new Error("operational fixture failure");
+      if (command === options.failCommand) {
+        return { exitCode: 1, stdout: "", stderr: options.failStderr ?? "" };
+      }
       if (command === "rev-parse --is-bare-repository") {
         return options.notRepository
           ? { exitCode: 128, stdout: "" }
@@ -195,6 +198,7 @@ const missingSelectedDependencies = makeDependencies({
 const failedGitDependencies = makeDependencies({
   root: "/repo",
   failCommand: "worktree list --porcelain -z",
+  failStderr: "error: unknown switch `z'",
 });
 const missingNonPrunableDependencies = makeDependencies({
   root: "/repo",
@@ -257,15 +261,21 @@ describe("observeRepositoryIdentity", () => {
       status: "unavailable",
       reason: "not-repository",
     });
-    for (const dependencies of [
-      failedGitDependencies,
-      missingNonPrunableDependencies,
-      prunableOperationalDependencies,
-    ]) {
+    for (const dependencies of [missingNonPrunableDependencies, prunableOperationalDependencies]) {
       expect(await observeRepositoryIdentity("/repo", dependencies, signal)).toEqual({
         status: "failed",
       });
     }
+  });
+
+  it("names the Git command that failed so an old Git can be told apart from a lost folder", async () => {
+    expect(await observeRepositoryIdentity("/repo", failedGitDependencies, signal)).toEqual({
+      status: "failed",
+      git: {
+        command: "worktree list --porcelain -z",
+        stderr: "error: unknown switch `z'",
+      },
+    });
   });
 
   it("keeps repository identity stable across an ordinary same-volume move", async () => {

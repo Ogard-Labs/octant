@@ -25,11 +25,19 @@ export type CodexRpcClientFailureKind =
 
 export class CodexRpcClientFailure extends Error {
   readonly kind: CodexRpcClientFailureKind;
+  readonly remoteCode?: number;
+  readonly remoteMessage?: string;
 
-  constructor(kind: CodexRpcClientFailureKind, message: string) {
+  constructor(
+    kind: CodexRpcClientFailureKind,
+    message: string,
+    details?: { readonly remoteCode?: number; readonly remoteMessage?: string },
+  ) {
     super(message);
     this.name = "CodexRpcClientFailure";
     this.kind = kind;
+    if (details?.remoteCode !== undefined) this.remoteCode = details.remoteCode;
+    if (details?.remoteMessage !== undefined) this.remoteMessage = details.remoteMessage;
   }
 }
 
@@ -259,7 +267,10 @@ export function makeCodexRpcClient(options: CodexRpcClientOptions): CodexRpcClie
 
   const settleResponse = (
     id: CodexRpcId,
-    response: { readonly result?: unknown; readonly error?: { readonly code: number } },
+    response: {
+      readonly result?: unknown;
+      readonly error?: { readonly code: number; readonly message?: unknown };
+    },
   ) => {
     const request = pending.get(id);
     if (request === undefined) {
@@ -273,7 +284,12 @@ export function makeCodexRpcClient(options: CodexRpcClientOptions): CodexRpcClie
       request.reject(
         response.error.code === -32001
           ? new CodexRpcClientFailure("saturated", "Codex request was saturated.")
-          : new CodexRpcClientFailure("remote", "Codex request failed."),
+          : new CodexRpcClientFailure("remote", "Codex request failed.", {
+              remoteCode: response.error.code,
+              ...(typeof response.error.message === "string"
+                ? { remoteMessage: response.error.message }
+                : {}),
+            }),
       );
       return;
     }

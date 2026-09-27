@@ -318,6 +318,7 @@ function printUsage(): void {
       "  octant project add <path> [--type work|code] [--name <name>]",
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",
+      "  octant project access <name> full-access|approval-gated",
       "  octant pair [--source loopback|lan-private|tailscale]",
       "  octant auth list",
       "  octant auth revoke <device-id> | --all",
