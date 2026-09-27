@@ -52,7 +52,11 @@ describe("octantSettingsRegistry", () => {
     expect(host?.keywords).toMatch(/diagnostics/);
     expect(data?.label).toBe("Data & privacy");
     expect(data?.scope).toBe("host");
-    expect(data?.settings.map((setting) => setting.id)).toEqual(["data-map", "thread-retention"]);
+    expect(data?.settings.map((setting) => setting.id)).toEqual([
+      "data-map",
+      "thread-retention",
+      "browser-site-approvals",
+    ]);
     expect(data?.keywords).toMatch(/backup/);
     expect(data?.keywords).toMatch(/retention/);
   });

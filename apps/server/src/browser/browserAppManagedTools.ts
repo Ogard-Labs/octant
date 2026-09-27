@@ -58,7 +58,8 @@ export interface BrowserAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
   };
-  readonly approvals?: Pick<BrowserToolApprovalService, "request">;
+  readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
+    Partial<Pick<BrowserToolApprovalService, "isRemembered">>;
   readonly uuid: () => string;
 }
 
@@ -171,7 +172,13 @@ export function createBrowserAppManagedTools(
         existingBinding !== undefined &&
         String(existingBinding.modelId) === String(options.modelId) &&
         sameToolActionAuthority(existingBinding.authority, authority);
-      if (existing === undefined || !contextApproved) {
+      // A remembered origin grant stands in for the prompt when the context
+      // itself is new: "always allow" answered an open for this origin before.
+      // An existing context still asks when its binding no longer matches —
+      // the remembered grant covers the page, not a new model driving it.
+      const remembered =
+        existing === undefined && options.approvals?.isRemembered?.(origin) === true;
+      if ((existing === undefined || !contextApproved) && !remembered) {
         if (options.approvals === undefined) return failure("browser-approval-required");
         const outcome = await options.approvals.request({
           windowId: options.windowId,

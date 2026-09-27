@@ -289,6 +289,9 @@ export interface CodeAppManagedToolsOptions {
       origin: string,
       signal?: AbortSignal,
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    /** A grant the person remembered with "always allow"; a new context for
+     * that origin opens without asking. */
+    readonly isOriginRemembered?: (origin: string) => boolean;
     readonly remember: (contextId: string) => void;
     readonly forget: (contextId: string) => void;
   };
@@ -720,10 +723,15 @@ async function browserTool(
         : "browser-navigation-required",
     );
   const requiresApproval = currentAuthorityFailure(options) !== undefined;
+  const remembered =
+    existing === undefined &&
+    options.browserApproval?.isOriginRemembered !== undefined &&
+    options.browserApproval.isOriginRemembered(origin);
   if (
     requiresApproval &&
     (existing === undefined ||
-      options.browserApproval?.isApproved(String(existing.contextId)) !== true)
+      options.browserApproval?.isApproved(String(existing.contextId)) !== true) &&
+    !remembered
   ) {
     if (options.browserApproval === undefined) return failure("browser-approval-required");
     const outcome = await options.browserApproval.request(origin, signal);

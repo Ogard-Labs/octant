@@ -81,7 +81,9 @@ import {
   SettingGroup,
   SettingRow,
   SettingsPageScope,
+  SettingsPanel,
   SettingsSection,
+  SettingsState,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
 import { WorkSettingsView } from "../work/WorkSettingsView";
@@ -830,15 +832,32 @@ function ActiveSectionContent({
       );
     }
     case "data":
-      return props.hostControlClient !== undefined ? (
-        <HostDataSettingsSection
-          client={props.hostControlClient}
-          {...(focusedSetting === undefined ? {} : { focusedSetting })}
-        />
-      ) : (
-        <section aria-label="Data & privacy" id="settings-data">
-          <p>Backup, recovery, and retention controls are available on the host machine only.</p>
-        </section>
+      return (
+        <div className="settings-section-stack" id="settings-data">
+          <RememberedBrowserOriginsPanel
+            origins={props.settings.rememberedBrowserOrigins}
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            onForget={(origin) =>
+              props.onSettingsChange({
+                rememberedBrowserOrigins: props.settings.rememberedBrowserOrigins.filter(
+                  (entry) => entry !== origin,
+                ),
+              })
+            }
+          />
+          {props.hostControlClient !== undefined ? (
+            <HostDataSettingsSection
+              client={props.hostControlClient}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          ) : (
+            <section aria-label="Data & privacy">
+              <p>
+                Backup, recovery, and retention controls are available on the host machine only.
+              </p>
+            </section>
+          )}
+        </div>
       );
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable
@@ -861,6 +880,60 @@ function ActiveSectionContent({
     default:
       return null;
   }
+}
+
+/**
+ * Sites a thread's Browser may open without asking, granted with "Always
+ * allow" on its approval prompt. Forgetting an origin makes the next open ask
+ * again; browsing contexts already open keep their grant.
+ */
+function RememberedBrowserOriginsPanel(props: {
+  readonly origins: ReadonlyArray<string>;
+  readonly onForget: (origin: string) => Promise<boolean> | boolean | void;
+  readonly focusedSetting?: string | undefined;
+}) {
+  const [forgetting, setForgetting] = useState<string>();
+  const forget = async (origin: string) => {
+    setForgetting(origin);
+    try {
+      await props.onForget(origin);
+    } finally {
+      setForgetting(undefined);
+    }
+  };
+  return (
+    <SettingsPanel
+      description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
+      title="Remembered websites"
+    >
+      <div className="settings-panel__stack">
+        {props.origins.length === 0 ? (
+          <SettingsState kind="empty">No remembered websites.</SettingsState>
+        ) : (
+          props.origins.map((origin, index) => (
+            <SettingRow
+              description="Browser opens this site without asking."
+              focused={props.focusedSetting === "browser-site-approvals" && index === 0}
+              key={origin}
+              label={origin}
+              scope="host"
+              settingId="browser-site-approvals"
+            >
+              <OctantButton
+                disabled={forgetting === origin}
+                onClick={() => void forget(origin)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Forget
+              </OctantButton>
+            </SettingRow>
+          ))
+        )}
+      </div>
+    </SettingsPanel>
+  );
 }
 
 function ProvidersSection(props: {

@@ -175,6 +175,7 @@ export function defaultShellSettings(): ShellSettings {
     imageGeneration: { customSources: [] },
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
     standaloneSkillActivations: {},
+    rememberedBrowserOrigins: [],
   };
 }
 
@@ -672,6 +673,10 @@ export function replaceShellSettings(
     ) as ShellSettings["contextSidebarWidth"],
     standaloneSkillActivations:
       replacement.standaloneSkillActivations ?? current.standaloneSkillActivations,
+    // Remembered browser grants are written by the approval decision path, not
+    // the settings form — a replacement that never carried them keeps them.
+    rememberedBrowserOrigins:
+      replacement.rememberedBrowserOrigins ?? current.rememberedBrowserOrigins,
   };
 }
 

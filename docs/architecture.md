@@ -229,7 +229,12 @@ and tool-answer contract. The adapter's in-process server exposes only the
 current app-authored catalogue; external provider tool-server configuration
 stays disabled. Code browser sessions can request an inline approval without
 raising thread access. The grant is bound to the exact browser context and
-owner, and browser-service policy is checked again before effects. See
+owner, and browser-service policy is checked again before effects. Answering
+the prompt with "always allow" journals the origin into shell settings, so a
+new browsing context for that origin opens without asking — in Code, in Work,
+and for later sessions — until the person forgets it under Settings; rebinding
+an existing context to a different model or authority still asks, because the
+remembered grant covers the page, not who drives it. See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
 Tool definitions carry the agent's usage guidance alongside their argument

@@ -258,6 +258,11 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
+  /**
+   * Whether an origin already holds a remembered "always allow" grant. Read
+   * live so a grant forgotten in Settings stops satisfying it at once.
+   */
+  readonly isBrowserOriginRemembered?: (origin: string) => boolean;
   /** The app-managed Apple capability, when this host has an Apple toolchain. */
   readonly appleToolchain?: CodeAppManagedToolsOptions["apple"];
   /** The app-managed Android emulator capability. */
@@ -1837,6 +1842,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               return approved;
             },
             request: (origin, signal) => this.#askBrowserApproval(active, origin, signal),
+            ...(this.#options.isBrowserOriginRemembered === undefined
+              ? {}
+              : { isOriginRemembered: this.#options.isBrowserOriginRemembered }),
             remember: (contextId) => {
               if (this.#approvedBrowserContexts.size >= 256) {
                 const oldest = this.#approvedBrowserContexts.values().next().value;

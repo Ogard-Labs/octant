@@ -573,10 +573,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             contentsView(owned),
             owned.policy.credentialFieldProtection,
           );
-          const screenshotDataUrl =
-            request.kind === "screenshot" && !sensitiveDocument
-              ? await captureScreenshot(contentsView(owned))
-              : undefined;
+          // Every action's observation carries the page picture, not only an
+          // explicit screenshot request: the activity preview and remote
+          // clients render whatever the agent last saw, which is otherwise
+          // nothing after a navigate or click.
+          const screenshotDataUrl = sensitiveDocument
+            ? undefined
+            : await captureScreenshot(contentsView(owned));
           return {
             ...(contents.getURL() === ""
               ? {}
@@ -1146,8 +1149,30 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   const image = await view.webContents.capturePage();
   // A detached surface paints nothing, and Chromium reports that as an empty
   // image rather than an error; an empty JPEG is not a page snapshot.
-  if (image.isEmpty()) return undefined;
-  const bytes = image.toJPEG(70);
-  const dataUrl = `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`;
-  return dataUrl.length <= 54 * 1_024 ? dataUrl : undefined;
+  if (!image.isEmpty()) {
+    const bytes = image.toJPEG(70);
+    const dataUrl = `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`;
+    if (dataUrl.length <= 54 * 1_024) return dataUrl;
+    return undefined;
+  }
+  // A surface that is not in a window still has a live renderer: the debugger
+  // captures its view directly instead of a compositor surface it does not
+  // have.
+  const client = view.webContents.debugger;
+  if (client.isAttached()) return undefined;
+  try {
+    client.attach("1.3");
+    const result = (await client.sendCommand("Page.captureScreenshot", {
+      format: "jpeg",
+      quality: 70,
+      fromSurface: false,
+    })) as { readonly data?: string };
+    const data = typeof result.data === "string" ? result.data : "";
+    const dataUrl = `data:image/jpeg;base64,${data}`;
+    return data !== "" && dataUrl.length <= 54 * 1_024 ? dataUrl : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (client.isAttached()) client.detach();
+  }
 }

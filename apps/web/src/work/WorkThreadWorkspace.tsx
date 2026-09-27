@@ -809,7 +809,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }, [props.browserAutomationClient, props.threadId, turnRunning]);
 
   const pendingBrowserApproval = browserApprovals[0];
-  const decideBrowserApproval = async (decision: "approved" | "denied") => {
+  const decideBrowserApproval = async (decision: "approved" | "denied", remember?: boolean) => {
     if (
       pendingBrowserApproval === undefined ||
       props.browserAutomationClient?.decideApproval === undefined ||
@@ -823,6 +823,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       await props.browserAutomationClient.decideApproval({
         approvalId: pendingBrowserApproval.approvalId,
         decision,
+        ...(remember === true ? { remember: true } : {}),
       });
       setBrowserApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
@@ -1459,6 +1460,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               type="button"
             >
               Approve once
+            </OctantButton>
+            <OctantButton
+              disabled={browserApprovalBusy}
+              onClick={() => void decideBrowserApproval("approved", true)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Always allow
             </OctantButton>
             <OctantButton
               disabled={browserApprovalBusy}

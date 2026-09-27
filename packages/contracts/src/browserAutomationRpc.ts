@@ -59,6 +59,12 @@ export type BrowserToolApprovalList = typeof BrowserToolApprovalList.Type;
 export const BrowserToolApprovalDecision = Schema.Struct({
   approvalId: ToolApprovalId,
   decision: Schema.Literal("approved", "denied"),
+  /**
+   * Set on an approval that should survive the prompt: the host remembers the
+   * origin in shell settings and later requests for it settle approved without
+   * asking again, until the person forgets it in Settings.
+   */
+  remember: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserToolApprovalDecision = typeof BrowserToolApprovalDecision.Type;
 

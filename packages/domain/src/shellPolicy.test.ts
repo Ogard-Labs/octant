@@ -210,6 +210,8 @@ describe("shell settings policy", () => {
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       standaloneSkillActivations: {},
+      // Nothing has been answered "always allow" yet.
+      rememberedBrowserOrigins: [],
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,
@@ -217,6 +219,7 @@ describe("shell settings policy", () => {
       contextSidebarWidth: 960,
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       standaloneSkillActivations: {},
+      rememberedBrowserOrigins: [],
     });
     expect(current.chatEnabled).toBe(true);
     expect(replaceShellSettings(current, { ...replacement, sidebarWidth: 1 }).sidebarWidth).toBe(

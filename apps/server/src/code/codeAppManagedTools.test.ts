@@ -616,6 +616,68 @@ describe("Code app-managed tools", () => {
     });
   });
 
+  it("opens a remembered browser origin in a new context without asking again", async () => {
+    const approve = vi.fn(async () => "approved" as const);
+    const remember = vi.fn();
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    const create = vi.fn(async () => active);
+    const act = vi.fn(async ({ request }) => ({
+      ...active,
+      observation: {
+        contextId: active.context!.contextId,
+        actionId: active.context!.actionId,
+        correlationId: active.context!.correlationId,
+        authority,
+        url: request.target,
+        title: "Example",
+        extractedText: "Readable page text",
+        contentHash: "a".repeat(64),
+        observedAt: "2026-08-06T08:00:00.000Z",
+        stale: false,
+      },
+    })) as never;
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({ executionPolicy: "approval-gated" }),
+      readThread: () => thread({ executionPolicy: "approval-gated" }),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browserApproval: {
+        isApproved: () => false,
+        isOriginRemembered: () => true,
+        request: approve,
+        remember,
+        forget: vi.fn(),
+      },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ({ status: "ready", threadId: threadId as never, evidence: [] }),
+        create,
+        act,
+        releaseThread: vi.fn(async () => ({
+          status: "ready" as const,
+          threadId: threadId as never,
+          evidence: [],
+        })),
+      },
+    });
+
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/docs" }),
+    });
+
+    expect(approve).not.toHaveBeenCalled();
+    expect(remember).toHaveBeenCalledWith(active.context?.contextId);
+    expect(create).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      isError: false,
+      result: { status: "running", page: { title: "Example", text: "Readable page text" } },
+    });
+  });
+
   it("passes a requested read selector to the browser without changing its authority", async () => {
     const current = thread();
     const act = vi.fn(async () => browserSnapshot(browserAuthority()));
