@@ -47,6 +47,23 @@ describe("EnvironmentSubagents", () => {
     expect(screen.getByText(/They appear when the agent hands off part of its work/)).toBeVisible();
   });
 
+  it("does not claim there are none before the first read has answered", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnvironmentSubagents
+        client={environmentClient({
+          conversation: unusedClientMethod,
+          parentSummary: () => new Promise(() => {}),
+        })}
+        threadId={String(parentThreadId)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^Subagents/ }));
+    expect(screen.queryByText(/They appear when the agent hands off part of its work/)).toBeNull();
+    expect(screen.getByText("Reading subagents…")).toBeVisible();
+  });
+
   it("lists every subagent, working and finished, and opens the chosen one in Agents", async () => {
     const user = userEvent.setup();
     const onOpenAgents = vi.fn();
