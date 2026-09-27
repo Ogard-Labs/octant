@@ -951,6 +951,9 @@ function renderCodeTab(
                 }),
             })}
         tab={tab}
+        {...(project?.type === "code" && project.codeAccessPersistence === "project-default"
+          ? { projectRemembersFullAccess: true }
+          : {})}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}

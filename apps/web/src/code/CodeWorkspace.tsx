@@ -123,6 +123,7 @@ export interface CodeWorkspaceProps {
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
+  readonly projectRemembersFullAccess?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
@@ -225,6 +226,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
+        {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}

@@ -1473,6 +1473,42 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("raises a thread to remembered Project Full access without a native confirmation", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        projectRemembersFullAccess
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
+    );
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+    });
+  });
+
+  it("keeps Full access behind the native confirmation when the Project does not remember it", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
+
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("keeps the access picker disabled while the native Full access confirmation is open", async () => {
     const user = userEvent.setup();
     const approval = deferred<CodeApprovalId | undefined>();
