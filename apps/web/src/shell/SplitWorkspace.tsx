@@ -33,6 +33,8 @@ import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
 import { PullRequestChip } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { EnvironmentMark, type EnvironmentMarkProps } from "./EnvironmentMark";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
@@ -69,15 +71,14 @@ export interface SplitWorkspaceProps {
     placement: "before" | "after",
   ) => void;
   readonly renderSurface: (surface: WorkspaceTab, paneId: PaneId) => React.ReactNode;
-  /** Provider identity for thread-owned surfaces, used by the compact pane tab. */
+  /** Provider identity for thread-owned surfaces, used by the pane's content tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The same preference controls provider marks in navigation and pane tabs. */
   readonly showProviderIcons?: boolean;
-  /**
-   * Project context for the pane drag handle's tooltip. The visible header
-   * stays focused on the thread title.
-   */
+  /** The Project a thread pane names in its context chip when it has no facts of its own. */
   readonly contextLabel?: string;
+  /** Host names by host id, so a thread on another host names where it runs. */
+  readonly environmentNames?: ReadonlyMap<string, string>;
   /**
    * What a thread's pane says about where its work is: the pull request it
    * carries and its Project/branch. Read the way a person names a change,
@@ -300,6 +301,43 @@ function clampSplitRatio(value: number): number {
   return Number(Math.min(0.8, Math.max(0.2, value)).toFixed(6));
 }
 
+/**
+ * The surface kinds that are themselves a thread's pane, as opposed to a
+ * utility opened alongside one. A Browser tab optionally carries a
+ * `threadId` naming the thread it was opened for (`packages/contracts/src/
+ * shell.ts`'s `BrowserWorkspaceTab`), so checking for that property alone
+ * would mark a Browser utility as if it were the thread pane itself.
+ */
+const THREAD_SURFACE_KINDS: ReadonlySet<WorkspaceTab["kind"]> = new Set([
+  "chat-thread",
+  "work-thread",
+  "code-overview",
+  "code-file",
+  "code-terminal",
+  "code-test",
+  "code-git",
+  "code-pr",
+  "code-local-review",
+  "apple-workbench",
+]);
+
+/**
+ * Where the pane's thread runs. Only a thread has an environment; a surface
+ * that is not one (Settings, a start screen, the board, or a thread utility
+ * such as Browser) claims none.
+ */
+function paneEnvironment(
+  surface: WorkspaceTab,
+  environmentNames: ReadonlyMap<string, string> | undefined,
+): EnvironmentMarkProps | undefined {
+  if (!THREAD_SURFACE_KINDS.has(surface.kind)) return undefined;
+  if (!("threadId" in surface) || surface.threadId === undefined) return undefined;
+  if (!("hostId" in surface) || surface.hostId === undefined) return { kind: "local" };
+  if (String(surface.hostId) === String(LOCAL_HOST_ID)) return { kind: "local" };
+  const label = environmentNames?.get(String(surface.hostId));
+  return label === undefined ? { kind: "remote" } : { kind: "remote", label };
+}
+
 function PaneProviderMark(props: { readonly provider: ThreadProviderIdentity | undefined }) {
   const provider = props.provider;
   return provider === undefined ? null : (
@@ -352,10 +390,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
   const [menuOpen, setMenuOpen] = useState(false);
-  const provider =
-    props.showProviderIcons === false || !("threadId" in surface)
-      ? undefined
-      : props.providerByThreadId?.get(String(surface.threadId));
+  const environment = paneEnvironment(surface, props.environmentNames);
   const facts =
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
   const pullRequest = facts?.pullRequest;
@@ -405,12 +440,16 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 }
                 onPointerMove={props.drag.onPointerMove}
                 onPointerUp={props.drag.onPointerUp}
-                title={
-                  path === undefined ? "Drag to move or split" : `${path} · Drag to move or split`
-                }
+                title="Drag to move or split"
               >
-                <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
-                <PaneProviderMark provider={showTabs ? undefined : provider} />
+                {environment !== undefined ? (
+                  <EnvironmentMark {...environment} />
+                ) : showTabs ? (
+                  // Tabs carry the titles, so a surface with no environment
+                  // would leave this handle empty and the pane with nothing
+                  // to drag it by.
+                  <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+                ) : null}
                 {pullRequest === undefined ? null : (
                   <PullRequestChip
                     className="workspace-pane__pull-request"
@@ -423,6 +462,14 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 )}
                 {showTabs ? null : <span className="workspace-pane__title">{title}</span>}
+                {path === undefined ? null : (
+                  // Tabs replace the redundant title text, but the Project
+                  // chip names the pane's execution context rather than the
+                  // active tab, so it stays even when content tabs are open.
+                  <span className="workspace-pane__context" title={path}>
+                    {path}
+                  </span>
+                )}
               </span>
               {showTabs ? (
                 <OctantTabs

@@ -183,8 +183,11 @@ draw the same hairline.
 Workspace content and dock tool tabs share a compact 26px recipe for height,
 spacing, selected fill and edge, and close controls. Close controls retain their
 width; inactive controls appear on hover or keyboard focus and stay visible on
-touch devices. Thread tabs retain provider marks when enabled. The drag handle
-stays quiet and separate, without a second provider pill or repeated project label.
+touch devices. Thread tabs retain provider marks when enabled. The pane's drag
+handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
+computer, cloud for another host), the thread title at the sm step in medium
+weight, and a pill chip naming the Project in meta ink — no provider mark. See
+[Workspace](docs/design/workspace.md).
 
 ### Welcome and composer
 
@@ -913,7 +916,7 @@ different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
 semantics. `OctantToggleGroup` owns the enclosed track used for mutually
 exclusive values. Each split pane keeps its close action on the trailing edge of its header;
 only a pane underneath the window controls reserves space for that cluster.
-The split-pane grip alone owns active-pane paint. Feature
+The split-pane drag handle alone owns active-pane paint. Feature
 styles may size or scroll these primitives but may not restore a local tab
 track, underline recipe, or persistent active border.
 
