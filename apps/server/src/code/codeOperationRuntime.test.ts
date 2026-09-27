@@ -1129,14 +1129,110 @@ describe("CodeOperationRuntime", () => {
 
     await vi.waitFor(async () => {
       const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
-      const terminal = frames.find(
+      const terminal = frames.filter(
         (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
       );
-      expect(terminal).toMatchObject({
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]).toMatchObject({
         event: {
           state: "interrupted",
           failure: {
-            category: "interrupted",
+            category: "failed",
+            message:
+              "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
+          },
+        },
+      });
+    });
+    fixture.close();
+  });
+
+  it("stops a provider turn whose browser tool requests were denied for the third time", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const ready = decodeBrowserAutomationSnapshot({
+      status: "ready",
+      threadId,
+      evidence: [],
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ready,
+        create: vi.fn(async () => ready),
+        act: vi.fn(async () => ready),
+        releaseThread: vi.fn(async () => ready),
+      },
+    });
+    const operation = operationId(140);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+
+    for (const index of [0, 1, 2]) {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: `browser-${index}`,
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
+        approval = frames
+          .map((frame) => frame.event)
+          .filter((event) => event.kind === "approval-requested")[index];
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected browser approval");
+      const answer = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(141 + index),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "denied",
+      });
+      if (index < 2) {
+        expect(answer).toMatchObject({ kind: "provider-turn-state", state: "running" });
+        expect(provider.interrupt).not.toHaveBeenCalled();
+      } else {
+        expect(answer).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      }
+    }
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
+      const terminal = frames.filter(
+        (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
+      );
+      expect(terminal).toHaveLength(1);
+      expect(terminal[0]).toMatchObject({
+        event: {
+          state: "interrupted",
+          failure: {
+            category: "failed",
             message:
               "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
           },

@@ -1379,8 +1379,10 @@ interface ActiveTurn {
   readonly harnessQuestions: Set<string>;
   connection?: ProviderConnection;
   cursor: number;
-  /** Provider tool requests the person denied; the third ends the turn. */
+  /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
   deniedApprovals: number;
+  /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
+  interruptMessage?: string;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   lastPersistedState?: CodeTurnOutcome;
   /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
@@ -1717,7 +1719,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       )
         return turnState("failed");
       browserApproval(input.decision === "approved" ? "approved" : "denied");
-      return turnState(active.state);
+      if (input.decision === "approved") return turnState(active.state);
+      return this.#countDeniedApproval(active);
     }
     if (
       active === undefined ||
@@ -1736,22 +1739,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     );
     if (input.decision === "approved") return turnState(active.state);
+    return this.#countDeniedApproval(active);
+  }
+
+  /**
+   * A provider that keeps asking after repeated refusals is looping on the
+   * person, so the third denial ends the turn the way a cancel does. The
+   * reason rides on `interruptMessage` so the runner's settlement — not this
+   * answer — writes the single terminal frame after the change list.
+   */
+  async #countDeniedApproval(active: ActiveTurn) {
     active.deniedApprovals += 1;
     if (active.deniedApprovals < 3 || (active.state !== "running" && active.state !== "waiting"))
       return turnState(active.state);
-    // A provider that keeps asking after repeated refusals is looping on the
-    // person; end the turn the way a cancel does rather than let it continue.
-    this.#persistOutcome(active, "interrupted", {
-      category: "interrupted",
-      message: "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
-    });
+    active.interruptMessage =
+      "Stopped after 3 denied tool requests in one turn. Send a new message to continue.";
+    active.state = "interrupted";
+    this.#revokeBrowserGrants(active);
+    this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
-    await Effect.runPromise(
-      active.connection
-        .interrupt(active.sessionId as never)
-        .pipe(Effect.catchAll(() => Effect.void)),
-    );
-    return turnState(active.state);
+    if (active.connection !== undefined) {
+      await Effect.runPromise(
+        active.connection
+          .interrupt(active.sessionId as never)
+          .pipe(Effect.catchAll(() => Effect.void)),
+      );
+    }
+    return turnState("interrupted");
   }
 
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
@@ -2047,17 +2061,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ).pipe(
               Effect.andThen(
                 Effect.sync(() => {
-                  // A typed failure's message is provider-authored text like any
-                  // event's, so it takes the same redaction before it is journaled.
+                  // A forced stop can carry its own reason over the runner's
+                  // generic cancellation copy; the text is still redacted
+                  // before it is journaled like any provider-authored event's.
+                  const reason =
+                    outcome === "interrupted" && active.interruptMessage !== undefined
+                      ? active.interruptMessage
+                      : failure?.message;
                   const message =
-                    failure === undefined
+                    reason === undefined
                       ? undefined
                       : boundProviderFailureMessage(
-                          sanitizeProviderText(
-                            failure.message,
-                            active.checkoutRoot,
-                            active.secrets,
-                          ),
+                          sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
                         );
                   this.#persistOutcome(
                     active,
@@ -2082,7 +2097,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             active,
             outcome,
             outcome === "interrupted"
-              ? { category: "failed", message: "Code turn was cancelled." }
+              ? {
+                  category: "failed",
+                  message: active.interruptMessage ?? "Code turn was cancelled.",
+                }
               : evidenceCapacityFailure(error),
           );
         } catch {
