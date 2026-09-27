@@ -1,8 +1,13 @@
 import type { ServiceLimitBucket } from "@octant/contracts/context";
-import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
+import type { CodeProviderLimit } from "@octant/contracts/code-operations";
+import {
+  providerLimitWindowLabel,
+  providerLimitWindowName,
+} from "../providers/providerLimitWindow";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { matchKeybinding } from "@octant/domain";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { ContextInspector } from "./ContextInspector";
@@ -21,9 +26,10 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import "./context.css";
 
-const METER_RADIUS = 7;
-const METER_SIZE = 18;
-const METER_CIRCUMFERENCE = 2 * Math.PI * METER_RADIUS;
+const RING_SIZE = 16;
+const RING_RADIUS = 7;
+/** The share at which the ring and a limit's bar take the warning ink. */
+const NEAR_LIMIT_PERCENT = 80;
 
 export function ComposerContextMeterShortcut() {
   const { requestOpen } = useComposerContextMeterScope();
@@ -75,7 +81,7 @@ export function ComposerContextMeter() {
     fallback === undefined || reported !== undefined ? undefined : bindingLimit(fallback);
   const percent =
     windowModel === undefined ? (reported?.percent ?? limit?.percent ?? 0) : windowModel.percent;
-  const usedArc = (Math.max(0, Math.min(100, percent)) / 100) * METER_CIRCUMFERENCE;
+  const usedPercent = Math.round(Math.max(0, Math.min(100, percent)) * 10) / 10;
   const limitAlert =
     snapshot?.serviceLimits.quota === "exhausted"
       ? "exhausted"
@@ -97,6 +103,7 @@ export function ComposerContextMeter() {
     ...(health === undefined ? {} : { healthLabel: `Next turn: ${contextHealthLabel(health)}` }),
   });
   const triggerLabel = label + limitAlertText;
+  const openUsage = scope.openUsage;
 
   // The panel shows one of three things, and a screen reader that is told the
   // dialog is named for a heading it does not contain has been told the wrong
@@ -114,6 +121,7 @@ export function ComposerContextMeter() {
     <div
       className="composer-context-meter"
       data-health={health}
+      {...(usedPercent >= NEAR_LIMIT_PERCENT ? { "data-fill": "high" } : {})}
       {...(limitAlert === undefined ? {} : { "data-limit-alert": limitAlert })}
     >
       <OctantPopover
@@ -123,44 +131,26 @@ export function ComposerContextMeter() {
         open={open}
         side="top"
         title={panelTitle}
-        trigger={
-          <svg
-            aria-hidden="true"
-            className="composer-context-meter__ring"
-            viewBox={`0 0 ${String(METER_SIZE)} ${String(METER_SIZE)}`}
-          >
-            <circle
-              className="composer-context-meter__track"
-              cx={METER_SIZE / 2}
-              cy={METER_SIZE / 2}
-              fill="none"
-              r={METER_RADIUS}
-            />
-            {usedArc > 0 ? (
-              <circle
-                className="composer-context-meter__used"
-                cx={METER_SIZE / 2}
-                cy={METER_SIZE / 2}
-                fill="none"
-                r={METER_RADIUS}
-                strokeDasharray={`${String(usedArc)} ${String(METER_CIRCUMFERENCE)}`}
-                transform={`rotate(-90 ${String(METER_SIZE / 2)} ${String(METER_SIZE / 2)})`}
-              />
-            ) : null}
-            {limitAlert === undefined ? null : (
-              <circle className="composer-context-meter__alert" cx="13.5" cy="4.5" r="3" />
-            )}
-          </svg>
-        }
+        trigger={<UsageRing alert={limitAlert !== undefined} usedPercent={usedPercent} />}
         triggerClassName="composer-context-meter__button"
         triggerLabel={triggerLabel}
         triggerVariant="ghost-icon"
       >
         {windowModel === undefined || snapshot === undefined ? (
           fallback === undefined ? (
-            <p>{emptyMessage(scope.status)}</p>
+            <p className="context-window-popover__source">{emptyMessage(scope.status)}</p>
           ) : (
-            <ContextUsageFallback fallback={fallback} />
+            <ContextUsageFallback
+              fallback={fallback}
+              {...(openUsage === undefined
+                ? {}
+                : {
+                    onOpenUsage: () => {
+                      setOpen(false);
+                      openUsage();
+                    },
+                  })}
+            />
           )
         ) : (
           <ContextUsagePopover
@@ -207,6 +197,47 @@ export function ComposerContextMeter() {
 }
 
 /**
+ * A gauge, not an activity mark: a full faint track with the used share drawn
+ * clockwise from twelve o'clock. The arc is measured on a path length of 100,
+ * so its dash is the used percentage itself. The earlier ring read as a
+ * spinner because its track was barely visible and the arc wore the secondary
+ * ink, so a short arc looked like something turning rather than filling.
+ */
+function UsageRing(props: { readonly alert: boolean; readonly usedPercent: number }) {
+  const centre = RING_SIZE / 2;
+  return (
+    <svg
+      aria-hidden="true"
+      className="composer-context-meter__ring"
+      viewBox={`0 0 ${String(RING_SIZE)} ${String(RING_SIZE)}`}
+    >
+      <circle
+        className="composer-context-meter__track"
+        cx={centre}
+        cy={centre}
+        fill="none"
+        r={RING_RADIUS}
+      />
+      {props.usedPercent > 0 ? (
+        <circle
+          className="composer-context-meter__used"
+          cx={centre}
+          cy={centre}
+          fill="none"
+          pathLength={100}
+          r={RING_RADIUS}
+          strokeDasharray={`${String(props.usedPercent)} 100`}
+          transform={`rotate(-90 ${String(centre)} ${String(centre)})`}
+        />
+      ) : null}
+      {props.alert ? (
+        <circle className="composer-context-meter__alert" cx="13" cy="3" r="2.5" />
+      ) : null}
+    </svg>
+  );
+}
+
+/**
  * The share of the model's window the provider itself reported with its last
  * turn. A runtime the host does not plan has no context plan to measure, so
  * the provider's own figure is the window the meter shows. When the usage
@@ -214,17 +245,62 @@ export function ComposerContextMeter() {
  * declared for the selected model stands in — the popover says whose number
  * it is.
  */
-function reportedWindow(
-  fallback: ComposerContextUsageFallback,
-): { readonly percent: number; readonly label: string; readonly declared: boolean } | undefined {
+function reportedWindow(fallback: ComposerContextUsageFallback):
+  | {
+      readonly percent: number;
+      readonly label: string;
+      readonly total: string;
+      readonly declared: boolean;
+      readonly usedTokens: number;
+      readonly windowTokens: number;
+    }
+  | undefined {
   const window = fallback.contextWindow ?? fallback.modelContextWindow;
   if (window === undefined || fallback.contextTokens === undefined) return undefined;
   const percent = Math.max(0, Math.min(100, (fallback.contextTokens / window) * 100));
+  const share = `(${String(Math.round(percent))}%)`;
   return {
     percent,
     declared: fallback.contextWindow === undefined,
-    label: `${compactTokens(fallback.contextTokens)} of ${compactTokens(window)} (${String(Math.round(percent))}%)`,
+    label: `${compactTokens(fallback.contextTokens)} of ${compactTokens(window)} ${share}`,
+    total: `${compactTokens(fallback.contextTokens)} / ${compactTokens(window)} ${share}`,
+    usedTokens: fallback.contextTokens,
+    windowTokens: window,
   };
+}
+
+/**
+ * What a provider that is not planned by the host actually reports about its
+ * window: one occupancy figure. The thread's input and output totals are sums
+ * over turns, not parts of that occupancy, so they are not segments of it —
+ * the breakdown is the reported use and the room left, and nothing more.
+ */
+function reportedSegments(
+  reported: NonNullable<ReturnType<typeof reportedWindow>>,
+): ReadonlyArray<ContextWindowSegment> {
+  const free = Math.max(0, reported.windowTokens - reported.usedTokens);
+  // Each share is rounded once, when it is shown. Rounding here as well made
+  // 85.5% and 14.5% read as 86% and 15%: a window a point over full.
+  const share = (tokens: number) =>
+    Math.max(0, Math.min(100, (tokens / reported.windowTokens) * 100));
+  return [
+    {
+      key: "used",
+      kind: "content",
+      label: "Used",
+      percent: share(reported.usedTokens),
+      tokens: reported.usedTokens,
+      tone: 1,
+    },
+    {
+      key: "free",
+      kind: "free",
+      label: "Free space",
+      percent: share(free),
+      tokens: free,
+      tone: 8,
+    },
+  ];
 }
 
 /**
@@ -270,93 +346,126 @@ function providerUsageLabel(fallback: ComposerContextUsageFallback): string {
   return `Provider reported ${compactTokens(fallback.inputTokens)} input and ${compactTokens(fallback.outputTokens)} output`;
 }
 
-function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFallback }) {
-  const reported = reportedWindow(props.fallback);
+function ContextUsageFallback(props: {
+  readonly fallback: ComposerContextUsageFallback;
+  readonly onOpenUsage?: () => void;
+}) {
+  const { fallback } = props;
+  const reported = reportedWindow(fallback);
+  const [expanded, setExpanded] = useState(false);
+  const breakdownId = useId();
+  const totals = <ThreadTotals fallback={fallback} />;
+
   return (
     <>
-      <header className="context-window-popover__header">
-        <span>{reported === undefined ? "Provider usage" : "Context window"}</span>
-        <strong>
-          {reported === undefined
-            ? props.fallback.inputTokens === undefined
-              ? "Not reported"
-              : `${formatTokens(props.fallback.inputTokens)} in`
-            : reported.label}
-        </strong>
-      </header>
       {reported === undefined ? (
-        <p className="context-window-popover__source">
-          {props.fallback.inputTokens === undefined || props.fallback.outputTokens === undefined
-            ? "No usage has been reported for this thread."
-            : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
-        </p>
+        <>
+          <UsageHeader
+            title="Provider usage"
+            total={
+              fallback.inputTokens === undefined
+                ? "Not reported"
+                : `${formatTokens(fallback.inputTokens)} in`
+            }
+          />
+          <p className="context-window-popover__source">
+            {fallback.inputTokens === undefined || fallback.outputTokens === undefined
+              ? "No usage has been reported for this thread."
+              : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
+          </p>
+          {totals}
+        </>
       ) : (
         <>
-          <div
-            aria-label="Context window used"
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={Math.round(reported.percent)}
-            className="context-window-popover__meter"
-            role="progressbar"
-          >
-            <span
-              style={
-                { "--context-window-meter-size": `${String(reported.percent)}%` } as CSSProperties
-              }
-            />
-          </div>
-          <p className="context-window-popover__source">
-            {reported.declared
-              ? "The provider did not name a window; this divides the last request's occupancy by the context limit declared for the selected model."
-              : "Reported by the provider with its last turn."}
-          </p>
+          <UsageHeader
+            breakdownId={breakdownId}
+            expanded={expanded}
+            onToggle={() => setExpanded((current) => !current)}
+            title="Context window"
+            total={reported.total}
+          />
+          <SegmentBar
+            label={`Context window used, ${reported.label}`}
+            percent={reported.percent}
+            segments={reportedSegments(reported)}
+          />
+          {/* A window the provider did not name is a caveat on the figure
+              itself, so it stays in view; the ordinary provenance line waits
+              in the breakdown with the rest of the detail. */}
+          {reported.declared ? (
+            <p className="context-window-popover__source">
+              The provider did not name a window; this divides the last request's occupancy by the
+              context limit declared for the selected model.
+            </p>
+          ) : null}
+          {expanded ? (
+            <div className="context-window-popover__details" id={breakdownId}>
+              <SegmentLegend segments={reportedSegments(reported)} />
+              {reported.declared ? null : (
+                <p className="context-window-popover__source">
+                  Reported by the provider with its last turn.
+                </p>
+              )}
+              {totals}
+            </div>
+          ) : null}
         </>
       )}
-      <dl className="context-window-popover__facts">
-        <Fact
-          label="Input"
-          value={
-            props.fallback.inputTokens === undefined
-              ? "Not reported"
-              : formatTokens(props.fallback.inputTokens)
-          }
-        />
-        <Fact
-          label="Output"
-          value={
-            props.fallback.outputTokens === undefined
-              ? "Not reported"
-              : formatTokens(props.fallback.outputTokens)
-          }
-        />
-        {props.fallback.costUsd === undefined ? null : (
-          <Fact
-            label="Cost"
-            value={new Intl.NumberFormat(undefined, {
-              style: "currency",
-              currency: "USD",
-              maximumFractionDigits: 4,
-            }).format(props.fallback.costUsd)}
-          />
-        )}
-      </dl>
-      <section aria-label="Provider account limits" className="context-window-popover__limits">
-        <div className="context-window-popover__limits-heading">
-          <h3>Provider account limits</h3>
-        </div>
-        {props.fallback.limits.length === 0 ? (
+      <LimitSection>
+        {fallback.limits.length === 0 ? (
           <p className="context-window-popover__limit-state">
             <span>Usage windows</span>
             <span>Not reported</span>
           </p>
         ) : (
-          props.fallback.limits.map((limit) => (
-            <ProviderLimitRow key={limit.window} limit={limit} />
+          fallback.limits.map((limit) => (
+            <WindowLimitRow
+              key={limit.window}
+              limit={limit}
+              showScope={distinctScopes(fallback.limits) > 1}
+            />
           ))
         )}
-      </section>
+      </LimitSection>
+      {props.onOpenUsage === undefined ? null : (
+        <FooterAction label="View usage" onClick={props.onOpenUsage} />
+      )}
     </>
+  );
+}
+
+/**
+ * The thread's own totals. They are sums over every turn the provider
+ * reported, which is why they sit apart from the window's occupancy rather
+ * than inside its breakdown.
+ */
+function ThreadTotals(props: { readonly fallback: ComposerContextUsageFallback }) {
+  const { fallback } = props;
+  return (
+    <dl aria-label="This thread" className="context-window-popover__facts">
+      <Fact
+        label="Input"
+        value={
+          fallback.inputTokens === undefined ? "Not reported" : formatTokens(fallback.inputTokens)
+        }
+      />
+      <Fact
+        label="Output"
+        value={
+          fallback.outputTokens === undefined ? "Not reported" : formatTokens(fallback.outputTokens)
+        }
+      />
+      {fallback.costUsd === undefined ? null : (
+        <Fact
+          label="Cost"
+          value={new Intl.NumberFormat(undefined, {
+            style: "currency",
+            currency: "USD",
+            maximumFractionDigits: 4,
+          }).format(fallback.costUsd)}
+        />
+      )}
+    </dl>
   );
 }
 
@@ -365,98 +474,144 @@ function ContextUsagePopover(props: {
   readonly snapshot: ContextInspectorSnapshot;
   readonly windowModel: ReturnType<typeof contextWindowModel>;
 }) {
-  const { windowModel } = props;
-  const limitRows = [
-    { label: "Requests", limit: props.snapshot.serviceLimits.requests },
-    { label: "Tokens", limit: props.snapshot.serviceLimits.tokens },
-    { label: "Concurrent turns", limit: props.snapshot.serviceLimits.concurrency },
+  const { windowModel, snapshot } = props;
+  const [expanded, setExpanded] = useState(false);
+  const breakdownId = useId();
+  const now = Date.now();
+  const buckets = [
+    { label: "Requests", limit: snapshot.serviceLimits.requests },
+    { label: "Tokens", limit: snapshot.serviceLimits.tokens },
+    { label: "Concurrent turns", limit: snapshot.serviceLimits.concurrency },
   ] as const;
+  const windows = snapshot.serviceLimits.rateLimitWindows ?? [];
+  const percentLabel = `(${String(Math.round(windowModel.percent))}%)`;
 
   return (
     <>
-      <header className="context-window-popover__header">
-        <span>Context window</span>
-        <strong>
-          {windowModel.usageLabel} ({String(Math.round(windowModel.percent))}%)
-        </strong>
-      </header>
-      <ContextMeter segments={windowModel.segments} totalTokens={windowModel.totalTokens} />
-      <p className="context-window-popover__source">
-        {windowModel.sourceLabel} · {props.snapshot.modelLimits.modelId} ·{" "}
-        {contextWindowUsedSourceLabel(windowModel.usedSource)}
-      </p>
-      <dl className="context-window-popover__breakdown">
-        {windowModel.segments.map((segment) => (
-          <div key={segment.key}>
-            <dt>
-              <span aria-hidden="true" data-tone={segment.tone} />
-              {segment.label}
-            </dt>
-            <dd>
-              {segment.tokens === undefined
-                ? "Unknown"
-                : segment.estimated === true
-                  ? `${compactTokens(segment.tokens)} · Estimated`
-                  : compactTokens(segment.tokens)}
-              {segment.tokens === undefined ? null : <span>{formatPercent(segment.percent)}</span>}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      <div className="context-window-popover__capabilities">
-        {windowModel.capabilities.map((capability) => (
-          <p key={capability.key}>
-            <span>{capability.label}</span>
-            <strong>{String(capability.loaded)} loaded</strong>
-            <span>· {String(capability.deferred)} deferred</span>
+      <UsageHeader
+        breakdownId={breakdownId}
+        expanded={expanded}
+        onToggle={() => setExpanded((current) => !current)}
+        title="Context window"
+        total={`${windowModel.usageLabel} ${percentLabel}`}
+      />
+      <SegmentBar
+        label={`Context window composition across ${compactTokens(windowModel.totalTokens)} tokens`}
+        percent={windowModel.percent}
+        segments={windowModel.segments}
+      />
+      {expanded ? (
+        <div className="context-window-popover__details" id={breakdownId}>
+          <SegmentLegend segments={windowModel.segments} />
+          <p className="context-window-popover__source">
+            {windowModel.sourceLabel} · {snapshot.modelLimits.modelId} ·{" "}
+            {contextWindowUsedSourceLabel(windowModel.usedSource)}
           </p>
-        ))}
-      </div>
-      <section aria-label="Provider account limits" className="context-window-popover__limits">
-        <div className="context-window-popover__limits-heading">
-          <h3>Provider account limits</h3>
-          <time dateTime={props.snapshot.serviceLimits.updatedAt}>
-            Updated {formatRelativeTime(props.snapshot.serviceLimits.updatedAt)}
-          </time>
+          <div className="context-window-popover__capabilities">
+            {windowModel.capabilities.map((capability) => (
+              <p key={capability.key}>
+                <span>{capability.label}</span>
+                <span>
+                  {String(capability.loaded)} loaded · {String(capability.deferred)} deferred
+                </span>
+              </p>
+            ))}
+          </div>
         </div>
-        {limitRows.map((row) => (
-          <CapacityRow key={row.label} label={row.label} limit={row.limit} />
+      ) : null}
+      <LimitSection updatedAt={snapshot.serviceLimits.updatedAt}>
+        {buckets.map((row) => (
+          <BucketLimitRow key={row.label} label={row.label} limit={row.limit} now={now} />
+        ))}
+        {windows.map((limit) => (
+          <WindowLimitRow
+            key={limit.window}
+            limit={limit}
+            showScope={distinctScopes(windows) > 1}
+          />
         ))}
         <p className="context-window-popover__limit-state">
           <span>Quota</span>
-          <span>{quotaLabel(props.snapshot.serviceLimits.quota)}</span>
+          <span>{quotaLabel(snapshot.serviceLimits.quota)}</span>
         </p>
-        {props.snapshot.serviceLimits.retry.status === "active" ? (
+        {snapshot.serviceLimits.retry.status === "active" ? (
           <p className="context-window-popover__limit-state" data-state="rate-limited">
             <span>Retry</span>
-            <span>Rate limited until {formatTime(props.snapshot.serviceLimits.retry.until)}</span>
+            <span>Rate limited until {formatTime(snapshot.serviceLimits.retry.until)}</span>
           </p>
         ) : null}
-      </section>
-      <OctantButton
-        className="context-window-popover__inspect"
-        onClick={props.onInspect}
-        type="button"
-        variant="ghost"
-      >
-        Inspect context
-      </OctantButton>
+      </LimitSection>
+      <FooterAction label="Inspect context" onClick={props.onInspect} />
     </>
   );
 }
 
-function ContextMeter(props: {
+/**
+ * The popover's first line: what is measured, the figure, and — when there is
+ * a breakdown to show — the control that shows it. The breakdown starts
+ * folded every time the popover opens; the bar already answers "how full",
+ * and the parts are a second question.
+ */
+function UsageHeader(props: {
+  readonly breakdownId?: string;
+  readonly expanded?: boolean;
+  readonly onToggle?: () => void;
+  readonly title: string;
+  readonly total: string;
+}) {
+  return (
+    <header className="context-window-popover__header">
+      <span className="context-window-popover__title">{props.title}</span>
+      <strong className="context-window-popover__total">{props.total}</strong>
+      {props.onToggle === undefined ? null : (
+        <OctantButton
+          aria-controls={props.breakdownId}
+          aria-expanded={props.expanded === true}
+          aria-label="Context breakdown"
+          className="context-window-popover__toggle"
+          onClick={props.onToggle}
+          size="icon-xs"
+          title="Context breakdown"
+          type="button"
+          variant="ghost"
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className="context-window-popover__chevron"
+            data-expanded={props.expanded === true}
+            size={12}
+          />
+        </OctantButton>
+      )}
+    </header>
+  );
+}
+
+/**
+ * One thin bar, one segment per reported part in the order the breakdown
+ * lists them. Free space is not painted: it is the track the parts have not
+ * reached, so the bar's empty length and the window's free room are the same
+ * thing to the eye.
+ */
+function SegmentBar(props: {
+  readonly label: string;
+  readonly percent: number;
   readonly segments: ReadonlyArray<ContextWindowSegment>;
-  readonly totalTokens: number;
 }) {
   return (
     <span
-      aria-label={`Context window composition across ${compactTokens(props.totalTokens)} tokens`}
+      aria-label={props.label}
+      aria-valuemax={100}
+      aria-valuemin={0}
+      aria-valuenow={Math.round(props.percent)}
       className="context-window-popover__meter"
-      role="img"
+      role="meter"
     >
       {props.segments
-        .filter((segment) => segment.tokens !== undefined && segment.percent > 0)
+        .filter(
+          (segment) =>
+            segment.kind !== "free" && segment.tokens !== undefined && segment.percent > 0,
+        )
         .map((segment) => (
           <span
             data-kind={segment.kind}
@@ -471,30 +626,191 @@ function ContextMeter(props: {
   );
 }
 
-function CapacityRow(props: { readonly label: string; readonly limit: ServiceLimitBucket }) {
-  if (props.limit.status === "unavailable") {
-    return (
-      <p data-state="unavailable">
-        <span>{props.label}</span>
-        <span>Unavailable</span>
-      </p>
-    );
-  }
-  const used = props.limit.limit - props.limit.remaining;
-  const percent = props.limit.limit === 0 ? 0 : Math.round((used / props.limit.limit) * 100);
+/**
+ * The bar's key. Each swatch carries its category's name beside it, so the
+ * neutral ramp only has to tell adjacent segments apart, never name them.
+ */
+function SegmentLegend(props: { readonly segments: ReadonlyArray<ContextWindowSegment> }) {
   return (
-    <p>
-      <span>{props.label}</span>
-      <span>
-        {compactTokens(props.limit.remaining)} of {compactTokens(props.limit.limit)} left ·{" "}
-        {String(percent)}% used
-      </span>
-      {props.limit.resetsAt === undefined ? null : (
-        <span className="context-window-popover__reset">
-          Resets {formatTime(props.limit.resetsAt)}
+    <table className="context-window-popover__legend">
+      <thead className="sr-only">
+        <tr>
+          <th scope="col">Category</th>
+          <th scope="col">Tokens</th>
+          <th scope="col">Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {props.segments.map((segment) => (
+          <tr data-kind={segment.kind} data-tone={segment.tone} key={segment.key}>
+            <th scope="row">
+              <span aria-hidden="true" className="context-window-popover__swatch" />
+              <span>{segment.label}</span>
+              {segment.estimated === true ? (
+                <span className="context-window-popover__qualifier">Estimated</span>
+              ) : null}
+            </th>
+            <td>{segment.tokens === undefined ? "Unknown" : compactTokens(segment.tokens)}</td>
+            <td>{segment.tokens === undefined ? "" : formatPercent(segment.percent)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function LimitSection(props: { readonly children: ReactNode; readonly updatedAt?: string }) {
+  return (
+    <section aria-label="Provider account limits" className="context-window-popover__limits">
+      <div className="context-window-popover__limits-heading">
+        <h3>Provider account limits</h3>
+        {props.updatedAt === undefined ? null : (
+          <time dateTime={props.updatedAt}>Updated {formatRelativeTime(props.updatedAt)}</time>
+        )}
+      </div>
+      {props.children}
+    </section>
+  );
+}
+
+type LimitLevel = "ok" | "near" | "spent";
+
+/**
+ * One limit as a line and a bar: its name, when it resets, and how much is
+ * used, over a bar that ranks it against the others at a glance. A limit near
+ * its cap is marked on the row itself (`data-level`) and in the bar's value
+ * text, so the warning ink is never the only sign.
+ */
+function LimitRow(props: {
+  readonly level: LimitLevel;
+  readonly name: string;
+  readonly percent?: number;
+  readonly qualifier?: string;
+  readonly reset?: string;
+  readonly value?: string;
+}) {
+  const levelText =
+    props.level === "spent" ? ", spent" : props.level === "near" ? ", running low" : "";
+  return (
+    <div
+      className="context-window-popover__limit"
+      data-level={props.level}
+      {...(props.percent === undefined ? { "data-share": "none" } : {})}
+    >
+      <p>
+        <span className="context-window-popover__limit-name">
+          {props.name}
+          {props.qualifier === undefined ? null : (
+            <span className="context-window-popover__qualifier">{props.qualifier}</span>
+          )}
+        </span>
+        {props.reset === undefined ? null : (
+          <span className="context-window-popover__reset">{props.reset}</span>
+        )}
+        <span className="context-window-popover__limit-value">{limitValueText(props)}</span>
+      </p>
+      {props.percent === undefined ? null : (
+        <span
+          aria-label={`${props.name} used`}
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={props.percent}
+          aria-valuetext={`${String(props.percent)}% used${levelText}`}
+          className="context-window-popover__limit-meter"
+          role="meter"
+        >
+          <span style={{ width: `${String(Math.max(0, Math.min(100, props.percent)))}%` }} />
         </span>
       )}
-    </p>
+    </div>
+  );
+}
+
+/**
+ * A measured share still names a `near`/`spent` provider status next to the
+ * percentage: a reader who only reads figures, not the row's warning ink,
+ * must see the same word a screen reader announces via `aria-valuetext`.
+ */
+function limitValueText(props: {
+  readonly level: LimitLevel;
+  readonly percent?: number;
+  readonly value?: string;
+}): string {
+  if (props.percent === undefined) return props.value ?? "";
+  const percentText = `${String(props.percent)}%`;
+  if (props.level === "ok" || props.value === undefined) return percentText;
+  return `${percentText} · ${props.value}`;
+}
+
+function WindowLimitRow(props: {
+  readonly limit: Pick<CodeProviderLimit, "window" | "status" | "utilization" | "resetsAt">;
+  readonly showScope: boolean;
+}) {
+  const { limit } = props;
+  const name = providerLimitWindowName(limit.window);
+  const percent = limit.utilization === undefined ? undefined : Math.round(limit.utilization * 100);
+  const level: LimitLevel =
+    limit.status === "exhausted"
+      ? "spent"
+      : limit.status === "warning" || (percent ?? 0) >= NEAR_LIMIT_PERCENT
+        ? "near"
+        : "ok";
+  return (
+    <LimitRow
+      level={level}
+      name={name.label}
+      {...(percent === undefined ? {} : { percent })}
+      {...(props.showScope && name.scope !== undefined ? { qualifier: name.scope } : {})}
+      {...(limit.resetsAt === undefined ? {} : { reset: resetLabel(limit.resetsAt, Date.now()) })}
+      value={
+        limit.status === "exhausted" ? "Spent" : limit.status === "warning" ? "Low" : "Available"
+      }
+    />
+  );
+}
+
+function BucketLimitRow(props: {
+  readonly label: string;
+  readonly limit: ServiceLimitBucket;
+  readonly now: number;
+}) {
+  if (props.limit.status === "unavailable") {
+    return <LimitRow level="ok" name={props.label} value="Unavailable" />;
+  }
+  const { limit, remaining, resetsAt } = props.limit;
+  const percent = limit === 0 ? 0 : Math.round(((limit - remaining) / limit) * 100);
+  const level: LimitLevel =
+    remaining === 0 ? "spent" : percent >= NEAR_LIMIT_PERCENT ? "near" : "ok";
+  return (
+    <LimitRow
+      level={level}
+      name={props.label}
+      percent={percent}
+      qualifier={`${compactTokens(remaining)} of ${compactTokens(limit)} left`}
+      {...(resetsAt === undefined ? {} : { reset: resetLabel(resetsAt, props.now) })}
+    />
+  );
+}
+
+/** Two windows of the same length on different scopes would read alike. */
+function distinctScopes(limits: ReadonlyArray<{ readonly window: string }>): number {
+  return new Set(limits.map((limit) => providerLimitWindowName(limit.window).scope ?? "")).size;
+}
+
+function FooterAction(props: { readonly label: string; readonly onClick: () => void }) {
+  return (
+    <div className="context-window-popover__footer">
+      <OctantButton
+        className="context-window-popover__footer-action"
+        onClick={props.onClick}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        <span>{props.label}</span>
+        <ChevronRight aria-hidden="true" size={14} />
+      </OctantButton>
+    </div>
   );
 }
 
@@ -539,53 +855,6 @@ function meterLabel(input: {
   const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;
   const scope = input.snapshotLabel === undefined ? "" : ` for ${input.snapshotLabel}`;
   return `${action} context usage${scope}. ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
-}
-
-/**
- * One provider window, as a share rather than a sentence.
- *
- * A row of prose asked the reader to compare percentages in their head; the bar
- * ranks the windows at a glance and the words stay for the ones that have no
- * measurable share.
- */
-function ProviderLimitRow(props: {
-  readonly limit: ComposerContextUsageFallback["limits"][number];
-}) {
-  const { limit } = props;
-  const share = limit.utilization === undefined ? undefined : Math.round(limit.utilization * 100);
-  const tone =
-    limit.status === "exhausted" ? "danger" : limit.status === "warning" ? "warn" : undefined;
-  return (
-    <>
-      <p className="context-window-popover__limit-state">
-        <span>{providerLimitWindowLabel(limit.window)}</span>
-        <span>{codeProviderLimitLabel(limit)}</span>
-      </p>
-      {share === undefined ? null : (
-        <span
-          className="context-window-popover__limit-meter"
-          {...(tone === undefined ? {} : { "data-tone": tone })}
-        >
-          <span style={{ width: `${String(Math.max(0, Math.min(100, share)))}%` }} />
-        </span>
-      )}
-    </>
-  );
-}
-
-function codeProviderLimitLabel(limit: ComposerContextUsageFallback["limits"][number]): string {
-  const share =
-    limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
-  const reset =
-    limit.resetsAt === undefined
-      ? undefined
-      : `resets ${new Date(limit.resetsAt).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`;
-  const state =
-    limit.status === "exhausted" ? "Spent" : limit.status === "warning" ? "Low" : "Available";
-  return [state, share, reset].filter((part): part is string => part !== undefined).join(" · ");
 }
 
 function liveLabel(input: {
@@ -660,8 +929,34 @@ const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
+const resetDayFormat = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
 function formatTime(timestamp: string): string {
   return dateTimeFormat.format(new Date(timestamp));
+}
+
+/**
+ * When a limit frees up, in the terms a person plans around: a countdown
+ * inside the day, a weekday and time beyond it. A bare clock time ("resets
+ * 20:59") left the reader to work out whether that was today or next week.
+ */
+function resetLabel(resetsAt: string, now: number): string {
+  const at = new Date(resetsAt).getTime();
+  const minutes = Math.ceil((at - now) / 60_000);
+  if (minutes <= 0) return "Resets now";
+  if (minutes < 60) return `Resets in ${String(minutes)} min`;
+  if (minutes < 24 * 60) {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest === 0
+      ? `Resets in ${String(hours)} hr`
+      : `Resets in ${String(hours)} hr ${String(rest)} min`;
+  }
+  return `Resets ${resetDayFormat.format(new Date(at))}`;
 }
 
 function formatRelativeTime(timestamp: string): string {

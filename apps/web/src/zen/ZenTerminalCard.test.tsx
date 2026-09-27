@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ZenTerminalCard } from "./ZenTerminalCard";
 
@@ -51,6 +51,36 @@ describe("ZenTerminalCard", () => {
     // Pinning is a second window onto a shell, never a way to open one.
     expect(bound.executeOperation).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal" }),
+    );
+  });
+
+  it("attaches once however often its window re-renders it", async () => {
+    const bound = client();
+    const card = () => (
+      <ZenTerminalCard
+        client={bound as never}
+        createOperationId={createOperationId}
+        executionPolicy="full-access"
+        live
+        // A fresh scope object every render, exactly as the window passes it.
+        scope={{ ...scope }}
+        terminalId={terminalId}
+      />
+    );
+    const { rerender } = render(card());
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Terminal pane" })).toBeInTheDocument();
+    });
+    for (let render = 0; render < 5; render++) {
+      await act(async () => rerender(card()));
+    }
+
+    // Each attach is a new operation in the thread's journal. Re-attaching on
+    // every render of the window journaled one every second or so for hours.
+    // The card sends nothing but its attach here, so one call is one attach.
+    expect(bound.executeOperation).toHaveBeenCalledTimes(1);
+    expect(bound.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "attach-terminal", terminalId, ...scope }),
     );
   });
 

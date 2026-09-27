@@ -5,7 +5,6 @@
     "apps/web/src/styles/octant.css": 5
   },
   "motion-literal": {
-    "apps/web/src/context/context.css": 2,
     "apps/web/src/styles.css": 1,
     "apps/web/src/styles/canvas.css": 2,
     "apps/web/src/styles/octant.css": 5,
@@ -27,7 +26,7 @@
     "apps/web/src/styles/surface.css": 1
   },
   "control-repaint": {
-    "apps/web/src/context/context.css": 6,
+    "apps/web/src/context/context.css": 5,
     "apps/web/src/onboarding/first-run.css": 3,
     "apps/web/src/profile/profile.css": 8,
     "apps/web/src/styles.css": 71,
@@ -51,9 +50,9 @@
   },
   "spacing-scale": {
     "apps/web/src/code/project-pull-request-review.css": 7,
-    "apps/web/src/context/context.css": 17,
+    "apps/web/src/context/context.css": 10,
     "apps/web/src/gitHistory/git-history.css": 4,
-    "apps/web/src/styles.css": 154,
+    "apps/web/src/styles.css": 152,
     "apps/web/src/styles/chat.css": 30,
     "apps/web/src/styles/code.css": 58,
     "apps/web/src/styles/components.css": 29,

@@ -727,6 +727,106 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("reads a conversation without decoding the terminal attaches that flood its thread", () => {
+    const fixture = openJournal();
+    let tick = 0;
+    const store = createStore(fixture.journal, () =>
+      new Date(Date.parse(now) + ++tick * 1_000).toISOString(),
+    );
+    const terminalId = "89000000-0000-4000-8000-000000000070";
+    const attached = (attachOperationId: typeof operationId) =>
+      decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "terminal-state",
+          operationId: attachOperationId,
+          terminalId,
+          state: "running",
+        },
+      });
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000036",
+      digest: "e".repeat(64),
+      byteLength: 5,
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    });
+    // A pinned terminal card re-attached on every render of its window, and
+    // each attach is its own one-event operation in the thread's stream: a
+    // real thread held 19,026 of them against a handful of turns.
+    for (let index = 0; index < 300; index++) {
+      const attachOperationId = decodeCodeOperationId(
+        `89000000-0000-4000-9000-${index.toString().padStart(12, "0")}`,
+      );
+      store.append({
+        threadId,
+        operationId: attachOperationId,
+        expectedCursor: 0,
+        event: attached(attachOperationId),
+      });
+    }
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: { kind: "provider-content", channel: "message", content: prompt },
+    });
+    store.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("completed") });
+    // An event the page does not fold still marks when its turn last moved.
+    const lastMoved = store.append({
+      threadId,
+      operationId,
+      expectedCursor: 3,
+      event: attached(operationId),
+    }).occurredAt;
+    const undo = { worktree: "a".repeat(40), index: "b".repeat(40) };
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "git-mutation-state",
+          operationId: otherOperationId,
+          gitOperationId: "89000000-0000-4000-8000-000000000060",
+          mutation: "restore-checkpoint",
+          state: "completed",
+          undo,
+        },
+      }),
+    });
+    const anchored = vi.spyOn(fixture.journal, "replayThreadAnchoredRows");
+    const wholeThread = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+
+    const page = store.conversation({ threadId, afterCursor: 0, limit: 10 });
+
+    expect(page.turns).toMatchObject([
+      { operationId, assistant: [prompt], status: "completed", updatedAt: lastMoved },
+    ]);
+    expect(page.hasMore).toBe(false);
+    expect(page.restoreUndo).toEqual(undo);
+    // Only the turn's own four events and the restore reach the decoder.
+    const decoded = anchored.mock.results.reduce(
+      (total, result) =>
+        total + (result.type === "return" ? (result.value as ReadonlyArray<unknown>).length : 0),
+      0,
+    );
+    expect(decoded).toBe(5);
+    expect(wholeThread).not.toHaveBeenCalled();
+    fixture.connection.close();
+  });
+
   it("requires a snapshot when operation cursors or aggregate versions contain a gap", () => {
     const fixture = openJournal();
     appendRaw(fixture.journal, operationId, 0, frame(2, threadId, operationId));
@@ -748,12 +848,12 @@ describe("CodeOperationEventStore", () => {
   });
 });
 
-function createStore(journal: Journal): CodeOperationEventStore {
+function createStore(journal: Journal, clock: () => string = () => now): CodeOperationEventStore {
   let uuidCounter = 100;
   return new CodeOperationEventStore({
     journal,
     actor,
-    clock: () => now,
+    clock,
     uuid: () => `89000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
   });
 }
