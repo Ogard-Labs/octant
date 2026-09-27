@@ -8,6 +8,8 @@ import {
   decodeWorkThreadId,
   decodeMentionableThreadId,
   decodeWindowId,
+  MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_CHARACTERS,
+  MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
   type ChatThreadId,
   type MentionableThreadId,
   type ThreadMentionTranscriptEntry,
@@ -343,6 +345,74 @@ describe("ThreadMentionService resolve", () => {
     if (result.kind !== "mentions-resolved") throw new Error("expected resolve result");
     expect(result.mentions[0]!.mode).toBe("work");
     expect(result.mentions[0]!.transcript.map((line) => line.text)).toEqual(["hello"]);
+  });
+});
+
+describe("ThreadMentionService Side Chat source", () => {
+  it("reads the source with the Side Chat window, newest first, and says older history was dropped", async () => {
+    const chat = directory(
+      "chat",
+      [thread(chatThreadId)],
+      new Map([[String(chatThreadId), Array.from({ length: 60 }, (_, i) => entry(`line ${i}`))]]),
+    );
+    const { service } = createService([chat]);
+
+    const resolved = await service.resolveSideChatSource(windowId, chatThreadId);
+
+    if (resolved.kind !== "resolved") throw new Error("expected a resolved source");
+    expect(resolved.source.transcript).toHaveLength(MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES);
+    expect(resolved.source.transcript.at(-1)?.text).toBe("line 59");
+    expect(resolved.source.truncated).toBe(true);
+    expect(chat.readTranscript).toHaveBeenCalledWith(windowId, chatThreadId, {
+      maxEntries: MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES,
+    });
+  });
+
+  it("keeps the source's newest messages within the Side Chat character budget", async () => {
+    const long = "x".repeat(3_900);
+    const chat = directory(
+      "chat",
+      [thread(chatThreadId)],
+      new Map([[String(chatThreadId), Array.from({ length: 12 }, () => entry(long))]]),
+    );
+    const { service } = createService([chat]);
+
+    const resolved = await service.resolveSideChatSource(windowId, chatThreadId);
+
+    if (resolved.kind !== "resolved") throw new Error("expected a resolved source");
+    const characters = resolved.source.transcript.reduce((sum, line) => sum + line.text.length, 0);
+    expect(characters).toBeLessThanOrEqual(MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_CHARACTERS);
+    expect(resolved.source.transcript).toHaveLength(8);
+    expect(resolved.source.truncated).toBe(true);
+  });
+
+  it("answers unreadable for a source this window cannot Open", async () => {
+    const chat = directory("chat", [thread(chatThreadId)]);
+    const { service } = createService([chat]);
+
+    expect(await service.resolveSideChatSource(windowId, secretThreadId)).toEqual({
+      kind: "unreadable",
+    });
+    expect(chat.readTranscript).not.toHaveBeenCalled();
+  });
+
+  it("never offers a Side Chat as a thread another Chat may message", async () => {
+    const sidecarThreadId = decodeChatThreadId("00000000-0000-4000-8000-000000000201");
+    const sidecarMentionable = decodeMentionableThreadId(String(sidecarThreadId));
+    await sidecars.record({
+      sourceThreadId: workThreadId,
+      sourceMode: "work",
+      sidecarThreadId,
+      title: "Side Chat about Plan",
+      createdAt: "2026-08-14T10:00:00.000Z" as UtcTimestamp,
+    });
+    const { service } = createService([
+      directory("chat", [thread(chatThreadId), thread(sidecarMentionable)]),
+    ]);
+
+    const targets = await service.chatDialogueTargets(windowId, [chatThreadId, sidecarMentionable]);
+
+    expect(targets.map((target) => String(target.threadId))).toEqual([String(chatThreadId)]);
   });
 });
 

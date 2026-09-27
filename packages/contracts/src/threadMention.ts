@@ -121,7 +121,10 @@ export type UnavailableThreadMention = typeof UnavailableThreadMention.Type;
  * thread. The sidecar is ordinary Chat: it never inherits the source thread's
  * Work or Code filesystem, shell, Git, or worktree authority, and it is
  * hidden from Chat Recents and Project nesting so it cannot become a
- * second orchestration surface.
+ * second orchestration surface. It may read the source thread's transcript,
+ * state, and files through host reads the principal is re-authorized for on
+ * every turn and every tool call; it can never message, steer, approve, or
+ * append to the source.
  */
 export const SideChatSidecar = Schema.Struct({
   sourceThreadId: MentionableThreadId,
@@ -131,6 +134,54 @@ export const SideChatSidecar = Schema.Struct({
   createdAt: UtcTimestamp,
 }).annotations(strict);
 export type SideChatSidecar = typeof SideChatSidecar.Type;
+
+/**
+ * Transcript entries a Side Chat turn carries from its source thread. Larger
+ * than a mention's window because the source is the whole reason the Side Chat
+ * exists: a question about "what did it decide earlier" cannot be answered from
+ * the last dozen lines. The newest entries are kept.
+ */
+export const MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_ENTRIES = 40;
+
+/** Total transcript characters a Side Chat turn carries from its source thread. */
+export const MAX_SIDE_CHAT_SOURCE_TRANSCRIPT_CHARACTERS = 32_000;
+
+/**
+ * Characters the source thread's current-state section may take: checkout,
+ * changed files, delivery target, and subagent results. Kept separate from
+ * the transcript bound so a long conversation cannot crowd the state out.
+ */
+export const MAX_SIDE_CHAT_SOURCE_STATE_CHARACTERS = 8_000;
+
+/** Changed paths the state section names before it says the list is truncated. */
+export const MAX_SIDE_CHAT_SOURCE_CHANGED_PATHS = 50;
+
+/** Subagent runs the state section describes, newest first. */
+export const MAX_SIDE_CHAT_SOURCE_SUBAGENT_RUNS = 5;
+
+/** Characters of one subagent's result the state section quotes. */
+export const MAX_SIDE_CHAT_SOURCE_SUBAGENT_RESULT_CHARACTERS = 1_200;
+
+/**
+ * Read-only tools a Side Chat about a Work or Code thread may call on its
+ * source's files. There is deliberately no write, shell, or Git tool here: the
+ * sidecar reads the source thread and never acts in it.
+ */
+export const SIDE_CHAT_LIST_FILES_TOOL_NAME = "octant_side_chat_list_files";
+export const SIDE_CHAT_SEARCH_FILES_TOOL_NAME = "octant_side_chat_search_files";
+export const SIDE_CHAT_READ_FILE_TOOL_NAME = "octant_side_chat_read_file";
+
+/** Listed entries one Side Chat listing call returns. */
+export const MAX_SIDE_CHAT_TOOL_LIST_ENTRIES = 300;
+
+/** Matches one Side Chat search call returns. */
+export const MAX_SIDE_CHAT_TOOL_SEARCH_MATCHES = 50;
+
+/** Characters of file text one Side Chat read call returns. */
+export const MAX_SIDE_CHAT_TOOL_READ_CHARACTERS = 20_000;
+
+/** Lines one Side Chat read call returns when the caller names no range. */
+export const MAX_SIDE_CHAT_TOOL_READ_LINES = 400;
 
 /**
  * Authoritative thread-mention command. `search-mentions` powers the `#`

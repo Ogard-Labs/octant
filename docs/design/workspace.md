@@ -99,7 +99,11 @@ The top-right control reveals the dock only when the active pane has a bound thr
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Document shows the
+Tests, iOS Simulator, and Android emulator, as mode and capability allow. Side
+Chat is a Chat conversation about the pane's thread: it reads that thread's
+conversation, current state, files, and subagent results, and changes none of
+them ([authority](../architecture.md#security-and-authority)). Its notice says
+what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
 Chat-authored Canvas) in the dock once per document, never after the person

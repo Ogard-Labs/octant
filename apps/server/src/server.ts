@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  type ChatThreadId,
   type DiscoveryCandidate,
   LOCAL_TOOL_HOST_ID,
   type AppleRpcEnvelope,
@@ -492,6 +493,15 @@ import {
   createChatSideChatThreadFactory,
 } from "./chat/threadMentionService";
 import { ThreadDialogueService } from "./chat/threadDialogueService";
+import {
+  createSideChatSourceStateReader,
+  resolveSideChatSourceContext,
+} from "./chat/sideChatSource";
+import {
+  createSideChatSourceTools,
+  createSideChatWorkFileReader,
+  type SideChatFileSource,
+} from "./chat/sideChatSourceTools";
 import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createFileMentionRouteHandler } from "./fileMentionRoutes";
@@ -804,6 +814,12 @@ export interface ServeOptions {
 
 export const MAX_REQUEST_BODY_SIZE = 1_048_576;
 export const MAX_JSON_REQUEST_BODY_SIZE = MAX_REQUEST_BODY_SIZE;
+/**
+ * Largest Work file a Side Chat will read. The tool returns at most a few
+ * hundred lines of it, so anything past this is refused as too large rather
+ * than loaded whole to show a sliver.
+ */
+const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 export { MAX_CHAT_ATTACHMENT_BYTES };
 export { MAX_CODE_FILE_BODY_SIZE };
 
@@ -1504,6 +1520,7 @@ function withCodeOperationRuntime(
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
+    ...(service.readFile === undefined ? {} : { readFile: service.readFile.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     readRepositoryTestStatus: (windowId, input) =>
       runtime.readRepositoryTestStatus(windowId, input.threadId, input.checkoutId),
@@ -1593,6 +1610,7 @@ function withCodeBoard(
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
+    ...(service.readFile === undefined ? {} : { readFile: service.readFile.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     ...(service.readRepositoryTestStatus === undefined
       ? {}
@@ -5169,6 +5187,140 @@ export function startOctantServer(
       journal: persistence.journal,
       uuid: randomUUID,
     });
+    // The Work folder a Side Chat's source thread reads from, re-derived on the
+    // caller's window each time: the thread must be among the window's Work
+    // threads, its Project active, and the thread on the Project's current
+    // binding, the same checks an `@file` mention makes before it reads.
+    const sideChatWorkFolder = async (windowId: WindowId, threadId: WorkThreadId) => {
+      const bootstrap = await workThreadService.bootstrap(windowId);
+      const thread = bootstrap.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return undefined;
+      const project = persistence.readProject(thread.projectId);
+      if (project === undefined || project.type !== "work" || project.lifecycle !== "active") {
+        return undefined;
+      }
+      const latest = project.bindingHistory.at(-1);
+      if (
+        thread.bindingRevisionId === undefined ||
+        latest === undefined ||
+        String(thread.bindingRevisionId) !== String(latest.revisionId)
+      ) {
+        return undefined;
+      }
+      return {
+        projectId: project.id,
+        projectName: project.name,
+        canonicalRoot: project.binding.canonicalRoot,
+        ...(thread.workingDirectory === undefined
+          ? {}
+          : { workingDirectory: String(thread.workingDirectory) }),
+      };
+    };
+    const sideChatSourceState = createSideChatSourceStateReader({
+      code: {
+        readThread: async (windowId, threadId) =>
+          (await routeCodeService.read(windowId, threadId)).thread,
+        observeCheckout: (windowId, projectId, threadId) =>
+          environmentService.observeThreadChanges(windowId, projectId, threadId),
+        conversation: async (windowId, threadId, afterCursor, limit) => {
+          const read = routeCodeService.conversation;
+          if (read === undefined) throw new Error("Code conversation is unavailable.");
+          return await read(windowId, threadId, afterCursor, limit);
+        },
+      },
+      work: { readFolder: sideChatWorkFolder },
+      subagents: (parentThreadId) =>
+        agentRunPersistence.parentSummary(decodeAgentRunParentThreadId(parentThreadId)),
+    });
+    /**
+     * The read-only file tools for a Side Chat turn, or `undefined` when the
+     * thread is not a sidecar or its source has no files (Chat). Which tools
+     * exist is fixed by the sidecar's recorded source mode; whether a call may
+     * run is decided again at the call.
+     */
+    const sideChatFileTools = (windowId: WindowId, threadId: ChatThreadId) => {
+      const sidecar = sideChatSidecars.findBySidecarThread(threadId);
+      if (sidecar === undefined || sidecar.sourceMode === "chat") return undefined;
+      const authorize = async () =>
+        sideChatSidecars.findBySidecarThread(threadId) !== undefined &&
+        (await threadMentionService.openableThread(windowId, sidecar.sourceThreadId)) !== undefined;
+      let source: SideChatFileSource;
+      if (sidecar.sourceMode === "code") {
+        source = {
+          mode: "code",
+          threadId: decodeCodeThreadId(String(sidecar.sourceThreadId)),
+          reads: {
+            checkoutOf: async (codeThreadId) => {
+              const view = await routeCodeService.read(windowId, codeThreadId);
+              return {
+                checkoutId: view.thread.checkoutId,
+                availability: view.checkout.availability,
+              };
+            },
+            listFiles: async (input) => {
+              const list = routeCodeService.listFiles;
+              if (list === undefined) {
+                return {
+                  status: "failed",
+                  failure: { category: "unavailable", message: "File listing is unavailable." },
+                };
+              }
+              return await list(windowId, input);
+            },
+            searchFiles: async (input) => {
+              const search = routeCodeService.searchFiles;
+              if (search === undefined) {
+                return {
+                  status: "failed",
+                  failure: { category: "unavailable", message: "File search is unavailable." },
+                };
+              }
+              return await search(windowId, input);
+            },
+            readFile: async (input) => {
+              const read = routeCodeService.readFile;
+              if (read === undefined) return { status: "unavailable" };
+              return await read(windowId, input);
+            },
+          },
+        };
+      } else {
+        const workThreadId = decodeWorkThreadId(String(sidecar.sourceThreadId));
+        source = {
+          mode: "work",
+          threadId: workThreadId,
+          reads: {
+            listFiles: async (input) => {
+              const folder = await sideChatWorkFolder(windowId, input.threadId);
+              if (folder === undefined) {
+                return {
+                  status: "failed",
+                  failure: {
+                    category: "unauthorized",
+                    message: "This Project's folder is not available.",
+                  },
+                };
+              }
+              return await workFileListingService.list({
+                threadId: input.threadId,
+                projectId: folder.projectId,
+                rootPath: folder.canonicalRoot,
+                ...(input.directory === undefined ? {} : { directory: input.directory }),
+                ...(input.signal === undefined ? {} : { signal: input.signal }),
+              });
+            },
+            readFile: createSideChatWorkFileReader({
+              filesystem: liveWorkFilesystem,
+              resolveRoot: async (id) => (await sideChatWorkFolder(windowId, id))?.canonicalRoot,
+              maximumBytes: SIDE_CHAT_WORK_READ_MAX_BYTES,
+            }),
+          },
+        };
+      }
+      return createSideChatSourceTools({ source, authorize });
+    };
     let imageJobService!: ImageJobService;
     const chatService = new ChatService({
       resolveComputerUseTools: ({ windowId, thread, selection }) =>
@@ -5196,35 +5348,25 @@ export function startOctantServer(
       // A Side Chat sidecar is a lane *about* one source thread, so that
       // thread rides every one of its turns without the user having to add a
       // `#thread` chip. The host resolves it: the link comes from the sidecar
-      // registry, and the transcript comes back through the same mention
-      // resolution an Open would take, re-derived on this send's own window.
-      // The renderer therefore cannot name a different source or widen what
-      // the sidecar reads. `threadMentionService` is declared below; this
-      // closure only runs at send time.
-      resolveSideChatSourceContext: async ({ sidecarThreadId, windowId }) => {
-        const sidecar = sideChatSidecars.findBySidecarThread(sidecarThreadId);
-        if (sidecar === undefined) return undefined;
-        // Without an authenticated window there is no principal to re-derive
-        // the source thread's Open authority from, so the sidecar refuses
-        // rather than answering about a thread nobody proved it may read.
-        if (windowId === undefined) return { kind: "unreadable" };
-        let resolved: ThreadMentionCommandResult;
-        try {
-          resolved = await threadMentionService.execute(
-            {
-              kind: "resolve-mentions",
-              requestId: randomUUID(),
-              threadIds: [sidecar.sourceThreadId],
-            },
-            { windowId },
-          );
-        } catch {
-          return { kind: "unreadable" };
-        }
-        const mention = resolved.kind === "mentions-resolved" ? resolved.mentions[0] : undefined;
-        if (mention === undefined) return { kind: "unreadable" };
-        return { kind: "resolved", text: formatThreadMentionContext([mention]) };
-      },
+      // registry, and the transcript and state come back through reads an
+      // Open would take, re-derived on this send's own window. The renderer
+      // therefore cannot name a different source or widen what the sidecar
+      // reads. `threadMentionService` is declared below; this closure only
+      // runs at send time.
+      resolveSideChatSourceContext: ({ sidecarThreadId, windowId, readToolNames }) =>
+        resolveSideChatSourceContext(
+          {
+            findSidecar: (id) => sideChatSidecars.findBySidecarThread(decodeChatThreadId(id)),
+            resolveSource: (sourceWindowId, sourceThreadId) =>
+              threadMentionService.resolveSideChatSource(sourceWindowId, sourceThreadId),
+            readState: sideChatSourceState,
+          },
+          {
+            sidecarThreadId: String(sidecarThreadId),
+            ...(windowId === undefined ? {} : { windowId }),
+            readToolNames: readToolNames ?? [],
+          },
+        ),
       resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
       dataDirectory: chatDataDirectory,
       uuid: randomUUID,
@@ -5273,6 +5415,7 @@ export function startOctantServer(
               uuid: randomUUID,
             }),
             zenAssistantTools?.forThread(windowId, thread),
+            sideChatFileTools(windowId, thread.id),
             threadDialogueService?.forThread({
               windowId,
               sourceThreadId: thread.id,
@@ -5392,6 +5535,9 @@ export function startOctantServer(
         threadMentionService.chatDialogueTargets(windowId, threadIds),
       readChatThread: (threadId) => chatService.read(threadId),
       executeChat: (command, context) => chatService.execute(command, context),
+      // Unfinished claims count as sidecars too: the thread they name is
+      // already a Side Chat, even before its selection is confirmed.
+      isSideChat: (threadId) => sideChatSidecars.hiddenThreadIds().has(threadId),
     });
     const threadMentionRoutes = createThreadMentionRouteHandler({
       service: threadMentionService,
@@ -6441,25 +6587,28 @@ export function startOctantServer(
       hostId: previewHostId,
       uuid: randomUUID,
     });
+    // Shared by the Files panel route and a Side Chat about a Work thread, so
+    // both list a Project folder with the same confinement and ordering.
+    const workFileListingService = new WorkFileListingService({
+      filesystem: liveWorkFilesystem,
+      previewRefs: workFilePreviewRefs,
+      // The same projection the mutation service writes to, so a file the
+      // panel calls Work's own is one this host recorded writing.
+      artifactsForProject: (projectId) =>
+        [...workArtifactProjection.snapshot().values()].filter(
+          (entry) => String(entry.projectId) === String(projectId),
+        ),
+      // A provider writes with its own tools and never calls the mutation
+      // service, so the artifact projection alone would show most of a
+      // Project's real output as files the folder merely happened to hold.
+      // The turns' own observations are the other half of that answer.
+      pathsWrittenByTurns: (projectId) =>
+        workTurnProjection
+          .listForProject(projectId)
+          .flatMap((turn) => turn.wroteFiles?.paths ?? []),
+    });
     const workFileListingRoutes = createWorkFileListingRouteHandler({
-      service: new WorkFileListingService({
-        filesystem: liveWorkFilesystem,
-        previewRefs: workFilePreviewRefs,
-        // The same projection the mutation service writes to, so a file the
-        // panel calls Work's own is one this host recorded writing.
-        artifactsForProject: (projectId) =>
-          [...workArtifactProjection.snapshot().values()].filter(
-            (entry) => String(entry.projectId) === String(projectId),
-          ),
-        // A provider writes with its own tools and never calls the mutation
-        // service, so the artifact projection alone would show most of a
-        // Project's real output as files the folder merely happened to hold.
-        // The turns' own observations are the other half of that answer.
-        pathsWrittenByTurns: (projectId) =>
-          workTurnProjection
-            .listForProject(projectId)
-            .flatMap((turn) => turn.wroteFiles?.paths ?? []),
-      }),
+      service: workFileListingService,
       persistence,
       projects: projectService,
       windowAuthorityStore,

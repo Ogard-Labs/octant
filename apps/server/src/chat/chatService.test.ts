@@ -59,7 +59,11 @@ import type {
 } from "@octant/contracts/multi-model-pool";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import { Effect, Queue, Stream } from "effect";
-import { activeChatTurns, defaultShellSettings } from "@octant/domain";
+import {
+  activeChatTurns,
+  defaultShellSettings,
+  SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT,
+} from "@octant/domain";
 import type { ProviderAcquireInput, ProviderDriver } from "@octant/provider-sdk/driver";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextHarnessService } from "../context/contextHarnessService";
@@ -1500,6 +1504,75 @@ describe("ChatService", () => {
     expect(
       (fakeDriver.sentTurns[0]?.context ?? []).map((block) => block.text).join("\n"),
     ).not.toContain("Referenced thread");
+  });
+
+  it("sends an unchanged Side Chat source once to a provider that keeps its own history", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
+    const { service, fakeDriver } = openFixture({
+      nativeConversation: true,
+      resolveSideChatSourceContext: async () => ({
+        kind: "resolved",
+        text: "Subject thread: Release notes\nuser: ship the notes",
+      }),
+    });
+    const sidecar = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Side Chat about Release notes",
+    });
+    if (sidecar.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    for (const prompt of ["What is it about?", "And who asked for it?"]) {
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: sidecar.thread.id,
+          expectedVersion: service.read(sidecar.thread.id).thread.version,
+          prompt,
+        },
+        { windowId },
+      );
+    }
+
+    const contextOf = (index: number) =>
+      (fakeDriver.sentTurns[index]?.context ?? []).map((block) => block.text).join("\n");
+    expect(contextOf(0)).toContain("ship the notes");
+    expect(contextOf(1)).not.toContain("ship the notes");
+    expect(contextOf(1)).toContain(SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT);
+  });
+
+  it("sends the Side Chat source in full every turn when the host owns the conversation", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
+    const { service, fakeDriver } = openFixture({
+      resolveSideChatSourceContext: async () => ({
+        kind: "resolved",
+        text: "Subject thread: Release notes\nuser: ship the notes",
+      }),
+    });
+    const sidecar = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Side Chat about Release notes",
+    });
+    if (sidecar.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    for (const prompt of ["What is it about?", "And who asked for it?"]) {
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: sidecar.thread.id,
+          expectedVersion: service.read(sidecar.thread.id).thread.version,
+          prompt,
+        },
+        { windowId },
+      );
+    }
+
+    // A host-owned conversation rebuilds context each turn, so the earlier
+    // snapshot is not in front of the model anymore and must be sent again.
+    expect(
+      (fakeDriver.sentTurns[1]?.context ?? []).map((block) => block.text).join("\n"),
+    ).toContain("ship the notes");
   });
 
   it("tells a caller the message is in before the provider starts the reply", async () => {

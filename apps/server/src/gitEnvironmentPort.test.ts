@@ -91,6 +91,61 @@ describe("GitEnvironmentPort", () => {
     });
   });
 
+  it("lists every uncommitted path, untracked files included, with its line counts", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "README.md"), "one\n");
+    git(repository, "add", "README.md");
+    git(repository, "commit", "-m", "initial");
+    writeFileSync(join(repository, "README.md"), "one\ntwo\n");
+    writeFileSync(join(repository, "NOTES.md"), "never added\n");
+    const port = new GitEnvironmentPort(undefined, confinedOptions());
+
+    const observed = await port.observe(realpathSync(repository));
+
+    expect(observed).toMatchObject({
+      status: "ready",
+      changedFiles: {
+        files: [
+          { path: "NOTES.md", change: "untracked" },
+          { path: "README.md", change: "modified", insertions: 1, deletions: 0 },
+        ],
+        total: 2,
+        truncated: false,
+      },
+    });
+  });
+
+  it("counts a renamed file's lines from both its old and new path", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "README.md"), "one\ntwo\nthree\n");
+    git(repository, "add", "README.md");
+    git(repository, "commit", "-m", "initial");
+    git(repository, "mv", "README.md", "GUIDE.md");
+    const port = new GitEnvironmentPort(undefined, confinedOptions());
+
+    const observed = await port.observe(realpathSync(repository));
+
+    // Numstat runs without rename detection, so it reports the new path as
+    // three lines added and the old path as three lines deleted.
+    expect(observed).toMatchObject({
+      status: "ready",
+      changedFiles: {
+        files: [{ path: "GUIDE.md", change: "renamed", insertions: 3, deletions: 3 }],
+        total: 1,
+      },
+    });
+  });
+
   it("counts what a tracked file changed against HEAD", async () => {
     const root = temporaryDirectory();
     const repository = join(root, "repository");

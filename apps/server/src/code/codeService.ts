@@ -153,6 +153,8 @@ import {
 import type { CodeFileService, CodeFileOpenResult, CodeFileSaveResult } from "./codeFileService";
 import type { CodeFileWatchService } from "./codeFileWatchService";
 import type { CodeSearchService } from "./codeSearchService";
+import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
+import { readConfinedCodeFile, type CodeConfinedFileRead } from "./codeConfinedFileRead";
 import type { FileIdentity } from "./fileOperationPort";
 import {
   approvalContextDigest,
@@ -521,6 +523,11 @@ export interface CodeServiceOptions {
    * than an empty result, which would read as "the repository has no match".
    */
   readonly searcher?: Pick<CodeSearchService, "search">;
+  /**
+   * Confined read-only file access for `readFile`, which needs no file helper.
+   * Absent uses the live filesystem port the search and test discovery use.
+   */
+  readonly fileSource?: CodeTestSourcePort;
   readonly content: CodeContentStore;
   readonly evidence?: {
     readonly put: (
@@ -665,6 +672,13 @@ export interface CodeListTestsInput {
   readonly checkoutId: CodeCheckoutId;
 }
 
+export interface CodeReadFileInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly relativePath: CodeRelativePath;
+  readonly maximumBytes: number;
+}
+
 export interface CodeOpenFileInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -705,6 +719,7 @@ export class CodeService {
    */
   readonly #openWatches = new Map<string, Set<AbortController>>();
   readonly #searcher: Pick<CodeSearchService, "search"> | undefined;
+  readonly #fileSource: CodeTestSourcePort;
   readonly #content: CodeContentStore;
   readonly #evidence: CodeServiceOptions["evidence"];
   readonly #attachments: CodeServiceOptions["attachments"];
@@ -749,6 +764,7 @@ export class CodeService {
     this.#tests = options.tests;
     this.#watcher = options.watcher;
     this.#searcher = options.searcher;
+    this.#fileSource = options.fileSource ?? liveCodeTestSourcePort;
     this.#content = options.content;
     this.#evidence = options.evidence;
     this.#attachments = options.attachments;
@@ -2347,6 +2363,41 @@ export class CodeService {
       scope: input.scope,
       query: input.query,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  /**
+   * Read one file of the checkout bound to a Code thread, without the file
+   * helper the editor's open needs.
+   *
+   * Same checkout authority as the listing, so every posture including Plan may
+   * read, and nothing is staged or journaled: the caller gets the bytes or the
+   * reason they were refused. It exists because `openFile` answers
+   * `helper-unavailable` on any host without the desktop file helper, which
+   * left a reader able to list a file it could never read.
+   */
+  async readFile(
+    authenticatedWindowId: WindowId,
+    input: CodeReadFileInput,
+  ): Promise<CodeConfinedFileRead | { readonly status: "unavailable" }> {
+    const authorized = await this.#authorizeCheckoutRead(
+      authenticatedWindowId,
+      input.threadId,
+      input.checkoutId,
+      "Code file read is unauthorized.",
+    );
+    const root = await this.#roots.resolve(
+      authenticatedWindowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      input.relativePath,
+    );
+    if (root === undefined) return { status: "unavailable" };
+    return await readConfinedCodeFile({
+      port: this.#fileSource,
+      canonicalRoot: root.rootPath,
+      relativePath: input.relativePath,
+      maximumBytes: input.maximumBytes,
     });
   }
 
