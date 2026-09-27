@@ -6,6 +6,11 @@ import type { ContextControllerStatus } from "./useContextController";
 
 export interface ComposerContextMeterScopeValue {
   readonly busy: boolean;
+  /**
+   * Opens the host's usage surface. Absent where none is reachable, and then
+   * the meter offers no way there rather than a control that does nothing.
+   */
+  readonly openUsage?: () => void;
   readonly openNonce: number;
   readonly rebuild: () => void;
   readonly requestOpen: () => void;
@@ -55,6 +60,7 @@ const ComposerContextMeterVisibleContext = createContext(false);
 export interface ComposerContextMeterProviderProps {
   readonly busy?: boolean;
   readonly children: ReactNode;
+  readonly onOpenUsage?: () => void;
   readonly onRebuild?: () => void;
   readonly onSetExcluded?: (entryId: ContextEntryId, excluded: boolean) => void;
   readonly onSetPinned?: (entryId: ContextEntryId, pinned: boolean) => void;
@@ -81,12 +87,14 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
       setExcluded,
       setPinned,
       status: props.status,
+      ...(props.onOpenUsage === undefined ? {} : { openUsage: props.onOpenUsage }),
       ...(props.snapshot === undefined ? {} : { snapshot: props.snapshot }),
       ...(props.fallback === undefined ? {} : { fallback: props.fallback }),
       ...(props.subjectKey === undefined ? {} : { subjectKey: props.subjectKey }),
     }),
     [
       props.busy,
+      props.onOpenUsage,
       openNonce,
       props.snapshot,
       props.fallback,

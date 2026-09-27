@@ -6070,6 +6070,7 @@ function LaunchedShell(
               <AgentProfileNamesProvider profiles={agentProfiles}>
                 <ComposerContextMeterProvider
                   busy={contextController.status === "updating"}
+                  onOpenUsage={() => void controller.openSettings({ section: "usage" })}
                   onRebuild={() => void contextController.rebuild()}
                   onSetExcluded={(entryId, excluded) =>
                     void contextController.setExcluded(entryId, excluded)

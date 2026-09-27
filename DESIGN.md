@@ -915,11 +915,22 @@ skill collection shells remain open. The command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
-The context meter is a circular composer control, not a dock tab. It opens an
-opaque popover with attributed context segments, used/maximum/free values,
-estimate/source labels, loaded/deferred capabilities, provider service limits,
-quota state, and retry timing. Unknown or stale data is labeled as such and
-never rendered as zero. Inspecting context opens the authoritative inspector.
+The context meter is a circular composer control, not a dock tab: a 16px
+gauge with a full faint track and a 2px round-capped arc filled clockwise from
+twelve o'clock by the used share, in the foreground ink (the theme's warning
+ink from 80%). It opens an opaque 320px popover: a header with the used and
+maximum figures and share, one 4px segmented bar whose empty track is the free
+space, a breakdown folded behind a chevron each time the popover opens, the
+provider's limits as a name, a reset countdown or weekday, a share, and a thin
+bar each, and a footer action to the fuller surface (the context inspector, or
+Usage for a provider the host does not plan). The breakdown lists only the
+parts the data attributes: planned threads show their manifest categories,
+overhead, reserve, and free space; a provider-reported window shows used and
+free, with the thread's input and output totals kept apart because they are
+sums over turns, not parts of the window. Categories are told apart by a
+graded neutral ramp mixed from the foreground and each swatch is named. A limit
+near its cap is marked on its row and in its bar's value text, never by ink
+alone. Unknown or stale data is labeled as such and never rendered as zero.
 
 The task visualizer is a compact composer-adjacent chip backed by the thread's
 journaled plan. It appears only when a real plan exists, shows proposed review
