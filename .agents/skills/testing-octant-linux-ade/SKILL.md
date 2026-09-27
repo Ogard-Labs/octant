@@ -33,9 +33,10 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 ## Terminal input-soak technique
 
 To catch dropped/reordered keystrokes, type a brisk battery (`echo HEAD HEAD HEAD`, `echo THE-QUICK-BROWN-FOX-0123456789`, `printf '%s\n' ABCDEFGHIJKLMNOPQRSTUVWXYZ`, `echo AABBCCDDEEFFGGHH`) into the terminal, then type the SAME battery into a control surface to isolate the layer:
+
 - Native terminal (install/run `konsole`) — isolates the synthetic-input harness.
 - A plain textarea in the same page (e.g., the thread's follow-up composer) — isolates Chrome/DOM input vs the xterm.js→PTY path.
-Inspect results with the `zoom` action on the terminal region; default-scale screenshots can misrender "HEAD" as "HED".
+  Inspect results with the `zoom` action on the terminal region; default-scale screenshots can misrender "HEAD" as "HED".
 
 **Do NOT trust `computer`-tool (`type` action) typing for character-level assertions.** It drives xdotool, which remaps spare keycodes to synthesize characters; Chrome sometimes resolves the keysym after xdotool restored the mapping, producing `keydown` events with `key="\u0000"`, `code="IntlRo"/"Lang5"/"F19"/""`. At brisk cadence ~15-20% of characters arrive as garbage — a bare `<textarea>` on `about:blank` drops them identically. xterm.js emits a `"\0"` data byte for those keys and Octant faithfully forwards it (readline discards NUL). For reliable terminal typing attach playwright-core over CDP at `http://localhost:29229` and use `page.keyboard.type()` / `page.keyboard.insertText()` — CDP injects characters directly, skipping the X11 keysym path, and produced zero drops in soak runs.
 
