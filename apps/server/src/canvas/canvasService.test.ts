@@ -18,7 +18,7 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
-import { ProjectionRegistry } from "../persistence/projection";
+import { catchUpProjection, ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
   CANVAS_ACTION_RECEIPT_RECORDED,
@@ -708,7 +708,7 @@ describe("CanvasService", () => {
     expect(resolved).toBe(false);
   });
 
-  it("reconstructs idempotency receipts from the journal after service restart", async () => {
+  it("reconstructs a Canvas and its idempotency receipts from the journal after a host restart", async () => {
     const source = {
       sourceId: ids.source,
       kind: "artifact" as const,
@@ -737,9 +737,18 @@ describe("CanvasService", () => {
       { mode: "chat", projectId: ids.project },
       { id: ids.project, type: "chat", lifecycle: "active" },
     );
+    // A new process: a fresh projection caught up from the stored checkpoint,
+    // as host startup does it.
+    const restartedProjection = new CanvasProjection();
+    catchUpProjection({
+      connection: first.connection,
+      journal: first.journal,
+      projection: restartedProjection,
+      clock: () => later,
+    });
     const restarted = new CanvasService(
       {
-        projection: first.projection,
+        projection: restartedProjection,
         eventStore: first.eventStore,
         uuid: () => "cccccccc-cccc-4ccc-8ccc-000000000001",
         clock: () => later as never,
@@ -752,6 +761,13 @@ describe("CanvasService", () => {
       { id: ids.project, type: "chat", lifecycle: "active" },
     );
     expect(replayed).toEqual(accepted);
+    // The receipt replays from the journal either way; the Canvas itself lives
+    // only in the projection.
+    const scope = { mode: "chat", projectId: ids.project } as const;
+    const project = { id: ids.project, type: "chat", lifecycle: "active" } as const;
+    expect(restarted.get(canvasId, scope, project)).toEqual(
+      first.service.get(canvasId, scope, project),
+    );
   });
 
   it("returns stale-version when distinct refreshes race the same Canvas head", async () => {

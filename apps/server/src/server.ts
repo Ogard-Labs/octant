@@ -5573,7 +5573,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
-    yield* Effect.promise(() => imageJobService.reconcileInterruptedRunningJobs());
+    yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },

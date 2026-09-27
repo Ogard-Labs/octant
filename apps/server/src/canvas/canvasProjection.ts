@@ -45,6 +45,9 @@ export interface CanvasProvenanceKey {
 export class CanvasProjection implements Projection {
   readonly name = "canvas";
   readonly dependencies: ReadonlyArray<string> = [];
+  // Canvases live only in these maps, so every host start must replay them
+  // all: resuming from the stored checkpoint left a restarted host with none.
+  readonly holdsStateInMemory = true as const;
   readonly #byId = new Map<CanvasId, CanvasProjectionEntry>();
   readonly #byProject = new Map<string, Set<CanvasId>>();
   readonly #byThread = new Map<string, Set<CanvasId>>();

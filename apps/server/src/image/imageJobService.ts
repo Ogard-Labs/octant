@@ -328,10 +328,15 @@ export class ImageJobService {
   /**
    * A job still `running` after journal catch-up never re-enters the adapter.
    * The in-flight provider call died with the process and is not idempotent.
+   * A job still `queued` cannot start either: its prompt was never journaled,
+   * so this process has nothing to run and it would stay queued forever.
    */
-  async reconcileInterruptedRunningJobs(): Promise<ReadonlyArray<ImageJob>> {
+  async reconcileInterruptedJobs(): Promise<ReadonlyArray<ImageJob>> {
     const interrupted: Array<ImageJob> = [];
-    for (const job of this.#projection.listRunning()) {
+    const unfinished = this.#projection
+      .list()
+      .filter((job) => job.status === "running" || job.status === "queued");
+    for (const job of unfinished) {
       const next = this.#transition(job, "failed", {
         recoveryReason: IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
         failure: {

@@ -25,6 +25,9 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 export class ImageJobProjection implements Projection {
   readonly name = "image-jobs";
   readonly dependencies: ReadonlyArray<string> = [];
+  // Jobs live only in this map, so every host start must replay them all:
+  // resuming from the stored checkpoint hid the running jobs a restart fails.
+  readonly holdsStateInMemory = true as const;
   readonly #byId = new Map<string, ImageJob>();
 
   reset(_connection: SqliteConnection): void {
