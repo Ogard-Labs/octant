@@ -5391,29 +5391,6 @@ export function startOctantServer(
         taintAppManagedToolResults({
           tools: combineAppManagedToolSets(
             nativeHarnessComposition?.forChat({ thread, windowId }),
-            createBrowserAppManagedTools({
-              windowId,
-              threadId: thread.id as never,
-              mode: "chat",
-              modelId: String(thread.modelId),
-              resolveModelId: (threadId) => {
-                const current = persistence.readChatThread(threadId as never);
-                return current === undefined ? undefined : String(current.modelId);
-              },
-              modelBindings: browserModelBindings,
-              executionPolicy: "approval-gated",
-              resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
-              browser: {
-                inspectThread: (ownerWindowId, threadId) =>
-                  requireBrowserAutomationService().inspectThread(ownerWindowId, threadId),
-                create: (input) => requireBrowserAutomationService().create(input),
-                act: (input) => requireBrowserAutomationService().act(input),
-                releaseThread: (ownerWindowId, threadId) =>
-                  requireBrowserAutomationService().releaseThread(ownerWindowId, threadId),
-              },
-              approvals: requireBrowserToolApprovalService(),
-              uuid: randomUUID,
-            }),
             zenAssistantTools?.forThread(windowId, thread),
             sideChatFileTools(windowId, thread.id),
             threadDialogueService?.forThread({

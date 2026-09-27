@@ -1,9 +1,5 @@
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
-import {
-  BROWSER_SELECTION_GUIDANCE,
-  isBrowserUseSelection,
-  validateBrowserUseSelection,
-} from "@octant/plugin-host/browser-use";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { createHash } from "node:crypto";
 import {
@@ -2938,23 +2934,6 @@ export class ChatService {
       resolvedExtensions.toolSet,
       MAX_PROVIDER_TOOLS - reservedResearchTools,
     );
-    // A Browser selection is only honored when the merged tool set actually
-    // carries it: the host resolver can offer octant_browser while the probed
-    // provider cannot accept tools at all, and accepting the turn would send
-    // guidance the model cannot act on.
-    if (
-      resolvedExtensions.selections.some(isBrowserUseSelection) &&
-      tools?.definitions.some((definition) => definition.name === "octant_browser") !== true
-    ) {
-      throw new ChatServiceError({
-        category:
-          this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) ===
-          "unsupported"
-            ? "unsupported"
-            : "unavailable",
-        message: "The selected Browser is unavailable for this provider or task.",
-      });
-    }
     this.#preflightChatTurn(probe, thread, attachments, researchRoute, tools);
     const providerFacts = await this.#resolveProviderContextFacts(
       driver,
@@ -3398,32 +3377,17 @@ export class ChatService {
     }
     const computer = selections.filter(isComputerUseSelection);
     const browser = selections.filter(isBrowserUseSelection);
-    if (
-      browser.length > 1 ||
-      browser.some((selection) => !validateBrowserUseSelection(selection))
-    ) {
+    // Browser use is a Work and Code capability; a Chat thread never carries
+    // it, so the selection is refused rather than silently dropped.
+    if (browser.length > 0) {
       throw new ChatServiceError({
-        category: "unavailable",
-        message: "Browser selection is invalid or stale.",
+        category: "unsupported",
+        message: "Browser use is not available in Chat.",
       });
     }
-    if (browser.length > 0) {
-      const browserTools =
-        windowId === undefined
-          ? undefined
-          : this.#resolveAppManagedTools?.({ windowId, thread })?.definitions.some(
-              (definition) => definition.name === "octant_browser",
-            ) === true;
-      if (!browserTools) {
-        throw new ChatServiceError({
-          category: "unavailable",
-          message: "The selected Browser is unavailable for this provider or task.",
-        });
-      }
-    }
-    // Browser is a host-owned app-managed tool, like Computer. Its structured
-    // selection is retained with the turn but does not enter the generic
-    // extension resolver (which only knows installed packages).
+    // Computer use is a host-owned app-managed tool. Its structured selection
+    // is retained with the turn but does not enter the generic extension
+    // resolver (which only knows installed packages).
     const other = selections.filter(
       (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
     );
@@ -3452,25 +3416,9 @@ export class ChatService {
             ...(windowId === undefined ? {} : { windowId }),
           });
     const externalTools = "toolSet" in resolved ? resolved.toolSet : undefined;
-    const browserEntries =
-      browser.length === 0
-        ? []
-        : [
-            {
-              contextEntry: this.#contextEntry(
-                thread,
-                "octant-tools",
-                BROWSER_SELECTION_GUIDANCE,
-                BROWSER_SELECTION_GUIDANCE.length,
-                "required",
-                { kind: "plugin", referenceId: "app:browser" },
-              ),
-              providerContext: { kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE },
-            },
-          ];
     return {
       selections,
-      entries: [...resolved.entries, ...browserEntries],
+      entries: resolved.entries,
       ...(externalTools === undefined && computerTools === undefined
         ? {}
         : { toolSet: combineAppManagedToolSets(externalTools, computerTools) }),

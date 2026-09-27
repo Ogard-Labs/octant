@@ -115,13 +115,20 @@ export function useExtensionDraftSelections(options: {
         return true;
       }
       if (reference.toLowerCase() === "@browser") {
+        // Browser is a Work/Code capability; Chat never offers it, so a typed
+        // reference is a blocked receipt rather than a selection.
         commit((current) =>
-          upsertReceipt(current, {
-            reference: "@Browser",
-            label: "Browser",
-            selection: browserUseSelection(crypto.randomUUID()),
-            status: { kind: "selected" },
-          }),
+          upsertReceipt(
+            current,
+            mode === "chat"
+              ? blockedReceipt("@Browser", "unavailable")
+              : {
+                  reference: "@Browser",
+                  label: "Browser",
+                  selection: browserUseSelection(crypto.randomUUID()),
+                  status: { kind: "selected" },
+                },
+          ),
         );
         return true;
       }

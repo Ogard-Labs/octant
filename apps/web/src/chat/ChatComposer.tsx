@@ -1,12 +1,5 @@
 import { useComposerTip } from "../composer/useComposerTip";
-import {
-  ApplicationMentionTypeahead,
-  BrowserUseMention,
-  ComputerUseMention,
-  useApplicationMentionTypeahead,
-  useBrowserUseMention,
-  useComputerUseMention,
-} from "../computerUse/ComputerUseMention";
+import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   useId,
@@ -188,7 +181,6 @@ export interface ChatComposerProps {
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
   readonly stopDisabledReason?: string;
-  readonly browserAvailable?: boolean;
 }
 
 /**
@@ -226,20 +218,7 @@ export function ChatComposer(props: ChatComposerProps) {
       void resolveExtensionReference("@computer");
     },
   });
-  const browser = useBrowserUseMention({
-    textarea: () => messageRef.current,
-    draft: props.draft,
-    onDraftChange: props.onDraftChange,
-    scopeKey: String(props.caretRestoreKey ?? "chat-draft"),
-    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
-    onChoose: () => {
-      void resolveExtensionReference("@browser");
-    },
-  });
-  const appMentions = useApplicationMentionTypeahead([
-    { controller: computer, kind: "computer" },
-    { controller: browser, kind: "browser" },
-  ]);
+
   const statusId = useId();
   const providerId = useId();
   const modelId = useId();
@@ -269,7 +248,6 @@ export function ChatComposer(props: ChatComposerProps) {
     scopeKey: String(props.caretRestoreKey ?? "chat"),
     threads: props.threadMentions !== undefined,
     commands: offeredCommands.map((command) => command.id),
-    browser: browser.available,
     computer: computer.available,
   });
   const [commandToken, setCommandToken] = useState<SlashCommandToken | undefined>(undefined);
@@ -397,7 +375,6 @@ export function ChatComposer(props: ChatComposerProps) {
 
   function syncTokens(draft: string, caretIndex: number | null) {
     computer.sync(draft, caretIndex);
-    browser.sync(draft, caretIndex);
     mention.sync(draft, caretIndex);
     syncCommandToken(draft, caretIndex);
   }
@@ -440,9 +417,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
-    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
-    if (browser.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -629,47 +604,33 @@ export function ChatComposer(props: ChatComposerProps) {
   const input = (
     <OctantTextarea
       aria-activedescendant={
-        appMentions.open.length > 1
-          ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-          : computer.open
-            ? `${computer.listId}-computer`
-            : browser.open
-              ? `${browser.listId}-browser`
-              : activeCommand !== undefined
-                ? `${commandListId}-${activeCommand.id}`
-                : activeMention === undefined
-                  ? undefined
-                  : `${mentionListId}-${String(activeMention.threadId)}`
+        computer.open
+          ? `${computer.listId}-computer`
+          : activeCommand !== undefined
+            ? `${commandListId}-${activeCommand.id}`
+            : activeMention === undefined
+              ? undefined
+              : `${mentionListId}-${String(activeMention.threadId)}`
       }
       aria-autocomplete={
-        !computer.available &&
-        !browser.available &&
-        props.threadMentions === undefined &&
-        offeredCommands.length === 0
+        !computer.available && props.threadMentions === undefined && offeredCommands.length === 0
           ? undefined
           : "list"
       }
       aria-controls={
-        appMentions.open.length > 1
-          ? appMentions.listId
-          : computer.open
-            ? computer.listId
-            : browser.open
-              ? browser.listId
-              : commandOpen
-                ? commandListId
-                : mentionOpen
-                  ? mentionListId
-                  : undefined
+        computer.open
+          ? computer.listId
+          : commandOpen
+            ? commandListId
+            : mentionOpen
+              ? mentionListId
+              : undefined
       }
       aria-describedby={statusId}
       aria-expanded={
-        !computer.available &&
-        !browser.available &&
-        props.threadMentions === undefined &&
-        offeredCommands.length === 0
+        !computer.available && props.threadMentions === undefined && offeredCommands.length === 0
           ? undefined
-          : computer.open || browser.open || commandOpen || mentionOpen
+          : computer.open || commandOpen || mentionOpen
       }
       className="composer-input window-no-drag"
       onChange={(event) => {
@@ -947,15 +908,7 @@ export function ChatComposer(props: ChatComposerProps) {
         },
       }}
       typeahead={
-        appMentions.open.length > 1 ? (
-          <ApplicationMentionTypeahead typeahead={appMentions} />
-        ) : computer.open ? (
-          <ComputerUseMention controller={computer} surface="typeahead" />
-        ) : browser.open ? (
-          <BrowserUseMention controller={browser} surface="typeahead" />
-        ) : (
-          typeahead
-        )
+        computer.open ? <ComputerUseMention controller={computer} surface="typeahead" /> : typeahead
       }
     />
   );

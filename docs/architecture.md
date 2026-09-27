@@ -832,7 +832,8 @@ the top of the composer of each local thread pane.
 
 Side tasks are the mid-turn counterpart (`apps/server/src/sideTasks`). On any
 provider that runs app-managed tools, every Chat, Work, and Code turn's tool
-set includes `octant_offer_side_task`, beside browser and computer use: the
+set includes `octant_offer_side_task`; Work and Code turns also carry browser
+and computer use. The
 model offers out-of-scope work it noticed (title, one-sentence reason,
 standalone prompt, and in a Code thread in a Project a worktree or the current
 checkout). The call only journals the offer (`thread-side-tasks`, at most five
