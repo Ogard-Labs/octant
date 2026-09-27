@@ -39,6 +39,7 @@ import {
   decodeChatTurn,
   type ChatAttachment,
   type ChatAttempt,
+  type ChatAttemptOutcome,
   type ChatBootstrap,
   type ChatNavigation,
   MAX_CHAT_NAVIGATION_THREADS,
@@ -2135,6 +2136,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2269,6 +2271,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2564,6 +2567,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -2636,7 +2640,12 @@ export class ChatService {
       // credentials, or provider side effects when a persisted extension
       // selection drifted.
       if (turn.extensionSelections !== undefined && turn.extensionSelections.length > 0) {
-        await this.#resolveExtensionContext(thread, turn.extensionSelections, "resume");
+        await this.#resolveExtensionContext(
+          thread,
+          turn.extensionSelections,
+          "resume",
+          executionContext?.windowId,
+        );
       }
       const timestamp = decodeTimestamp(this.#clock());
       const content = this.#persistence.readChatContent(String(turn.userMessageRef.contentId));
@@ -2703,6 +2712,7 @@ export class ChatService {
       prompt: accepted.prompt,
       prepared: accepted.prepared,
       mode: "resume",
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -2928,6 +2938,23 @@ export class ChatService {
       resolvedExtensions.toolSet,
       MAX_PROVIDER_TOOLS - reservedResearchTools,
     );
+    // A Browser selection is only honored when the merged tool set actually
+    // carries it: the host resolver can offer octant_browser while the probed
+    // provider cannot accept tools at all, and accepting the turn would send
+    // guidance the model cannot act on.
+    if (
+      resolvedExtensions.selections.some(isBrowserUseSelection) &&
+      tools?.definitions.some((definition) => definition.name === "octant_browser") !== true
+    ) {
+      throw new ChatServiceError({
+        category:
+          this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) ===
+          "unsupported"
+            ? "unsupported"
+            : "unavailable",
+        message: "The selected Browser is unavailable for this provider or task.",
+      });
+    }
     this.#preflightChatTurn(probe, thread, attachments, researchRoute, tools);
     const providerFacts = await this.#resolveProviderContextFacts(
       driver,
@@ -4337,12 +4364,16 @@ export class ChatService {
     readonly prompt: string;
     readonly prepared: PreparedChatTurn;
     readonly mode?: "send" | "resume";
+    readonly windowId?: WindowId;
   }): Promise<void> {
     const controller = new AbortController();
     this.#activeAttempts.set(String(input.attempt.id), controller);
     this.#activeThreadExecutions.add(String(input.thread.id));
     const pendingContent = new Map<string, PreparedChatContent>();
-    const persistAttempt = async (attempt: ChatAttempt, providerFailure?: ProviderFailure) => {
+    const persistAttempt = async (
+      attempt: ChatAttempt,
+      terminalFailure?: ProviderFailure | ChatFailure,
+    ) => {
       const version = readAggregateVersion(
         this.#persistence.connection,
         "chat-thread",
@@ -4359,18 +4390,18 @@ export class ChatService {
             this.#pending(
               "chat.attempt-updated@1",
               { kind: "attempt-updated", attempt },
-              providerFailure === undefined
+              terminalFailure === undefined
                 ? undefined
                 : { correlationId: decodeCorrelationId(attempt.id) },
             ),
-            ...(providerFailure === undefined
+            ...(terminalFailure === undefined
               ? []
               : [
                   createDiagnosticsFailureIncidentEvent(
                     {
                       correlationId: decodeCorrelationId(attempt.id),
                       domain: "provider",
-                      failureCode: decodeDiagnosticFailureCode(providerFailure.category),
+                      failureCode: decodeDiagnosticFailureCode(terminalFailure.category),
                       observedAt: this.#clock(),
                     },
                     { eventIdGenerator: this.#uuid },
@@ -4399,6 +4430,7 @@ export class ChatService {
           input.thread,
           input.prepared.extensionSelections,
           input.mode === "resume" ? "resume" : "provider-handoff",
+          input.windowId,
         );
       }
       const providerInstanceId = decodeProviderInstanceId(input.thread.providerInstanceId);
@@ -4542,7 +4574,11 @@ export class ChatService {
           }),
         ),
       );
-    } catch {
+    } catch (error) {
+      // A deliberate refusal throws a ChatServiceError with the category the
+      // transcript can state; only an unexpected defect collapses to the
+      // generic interrupted/incomplete outcome.
+      const refusal = error instanceof ChatServiceError ? error.failure : undefined;
       const currentView = this.#persistence.readChatThreadView(input.thread.id);
       const currentAttempt = currentView?.turns
         .flatMap((turn) => turn.attempts)
@@ -4555,12 +4591,27 @@ export class ChatService {
         currentAttempt.outcome !== "interrupted" &&
         currentAttempt.outcome !== "waiting"
       ) {
+        const outcome: ChatAttemptOutcome =
+          refusal === undefined
+            ? "interrupted"
+            : refusal.category === "waiting"
+              ? "waiting"
+              : refusal.category === "interrupted"
+                ? "interrupted"
+                : "failed";
         await persistAttempt(
           transitionChatAttempt(currentAttempt, {
-            outcome: "interrupted",
+            outcome,
             updatedAt: decodeTimestamp(this.#clock()),
-            failure: { code: decodeDiagnosticFailureCode("incomplete") },
+            ...(outcome === "waiting"
+              ? {}
+              : {
+                  failure: {
+                    code: decodeDiagnosticFailureCode(refusal?.category ?? "incomplete"),
+                  },
+                }),
           }),
+          refusal,
         );
       }
     } finally {

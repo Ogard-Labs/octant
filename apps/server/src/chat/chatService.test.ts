@@ -1177,6 +1177,73 @@ describe("ChatService", () => {
     expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
+  it("sends a Browser-selected turn's tools to a tool-capable provider", async () => {
+    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000013");
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Browser send",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Open the fixture",
+        extensionSelections: [browserUseSelection("chat-browser-send")],
+      },
+      { windowId: browserWindow },
+    );
+
+    expect(sent.kind).toBe("turn-created");
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("octant_browser");
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("completed");
+  });
+
+  it("refuses a Browser-selected turn when the probed provider cannot accept app-managed tools", async () => {
+    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000014");
+    const supported = probeFixture();
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        execute: async () => ({ result: {} }),
+      }),
+      probe: probeFixture({
+        capabilities: { ...supported.capabilities, appManagedTools: "unsupported" },
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unsupported provider Browser",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Open the fixture",
+          extensionSelections: [browserUseSelection("chat-browser-unsupported")],
+        },
+        { windowId: browserWindow },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
   it("honors a pre-admitted thread id for linked Chat creation", async () => {
     const { service } = openFixture();
     const threadId = "84000000-0000-4000-8000-000000000099" as ChatThreadId;
@@ -2785,7 +2852,9 @@ describe("ChatService", () => {
     ]);
     expect(fakeDriver.acquireInputs).toHaveLength(0);
     expect(fakeDriver.sentTurns).toHaveLength(0);
-    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.outcome).toBe("failed");
+    expect(attempt?.failure).toEqual({ code: "unavailable" });
   });
 
   it("reattaches an interrupted provider session via ProviderConnection.resume with the exact persisted resume cursor and becomes Waiting without sending", async () => {
