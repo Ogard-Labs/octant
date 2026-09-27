@@ -264,8 +264,11 @@ export const AppBackground = Schema.Union(
 );
 export type AppBackground = typeof AppBackground.Type;
 
+// The retired pattern kind still decodes so older rows load, but the default
+// is the plain page: defaulting to "theme" wrote the retired kind into every
+// new settings row even though it resolves to nothing.
 export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({
-  kind: "theme",
+  kind: "none",
 });
 
 export const ThemeSettings = Schema.Struct({
