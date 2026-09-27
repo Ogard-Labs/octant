@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   SeatbeltConfinementError,
@@ -942,6 +942,42 @@ describe("shared Seatbelt profile builder", () => {
 
     const execRules = launch.args[1]!.split("\n").filter((line) => line.includes("process-exec"));
     expect(execRules).toEqual([seatbeltExecRule("/usr/bin/true")]);
+  });
+
+  it("grants a terminal launch its pseudo-terminal and shell-state ancestor metadata on macOS", () => {
+    const root = temporaryRoot();
+    const boundRoot = join(root, "project");
+    const temporaryDirectory = join(root, "tmp");
+    const shellStateDirectory = join(root, "shell-state", "repo_test");
+    const sandboxPath = join(root, "sandbox-exec");
+    mkdirSync(boundRoot);
+    mkdirSync(temporaryDirectory);
+    mkdirSync(shellStateDirectory, { recursive: true });
+    writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+
+    const launch = makeSeatbeltConfinementLive({
+      platform: "darwin",
+      sandboxPath,
+      homeDirectory: root,
+      usersDirectory: root,
+    }).prepare({
+      executable: "/usr/bin/true",
+      args: [],
+      boundRoot,
+      temporaryDirectory,
+      networkEgress: "none",
+      terminal: { shellStateDirectory },
+    });
+
+    const profile = launch.args[1]!;
+    expect(profile).toContain("(allow pseudo-tty)");
+    expect(profile).toContain('(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))');
+    expect(profile).toContain(
+      `(allow file-read-metadata (literal "${dirname(realpathSync(shellStateDirectory))}"))`,
+    );
+    expect(profile.indexOf('(allow file-write-data (literal "/dev/null"))')).toBeLessThan(
+      profile.indexOf("(allow pseudo-tty)"),
+    );
   });
 });
 

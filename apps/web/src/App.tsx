@@ -5049,7 +5049,12 @@ function LaunchedShell(
       });
     } catch {
       // The reply was lost, not necessarily the start.
+      setThreadExportNotice("The Project terminal could not be started.");
       await stop();
+      return;
+    }
+    if (started.kind === "project-terminal-refused") {
+      setThreadExportNotice(started.message);
       return;
     }
     if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
