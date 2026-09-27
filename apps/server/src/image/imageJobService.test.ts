@@ -639,12 +639,73 @@ describe("image job service", () => {
       actor,
       createAdapter: () => ({ generate: secondGenerate }),
     });
-    const interrupted = await restarted.reconcileInterruptedRunningJobs();
+    const interrupted = await restarted.reconcileInterruptedJobs();
     expect(interrupted).toHaveLength(1);
     expect(interrupted[0]?.status).toBe("failed");
     expect(interrupted[0]?.failure?.message).toBe(IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE);
     expect(secondGenerate).not.toHaveBeenCalled();
     void hangingResolve;
+  });
+});
+
+describe("image jobs across a host restart", () => {
+  it("fails a job still queued at restart instead of leaving it queued forever", async () => {
+    const first = openHarness(
+      { generate: async () => new Promise<never>(() => {}) },
+      {
+        concurrency: 1,
+      },
+    );
+    const running = await first.service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "holds the only slot",
+    });
+    const queued = await first.service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "waits for the slot",
+    });
+    await vi.waitFor(() => {
+      expect(first.service.get(running.id)?.status).toBe("running");
+    });
+    expect(first.service.get(queued.id)?.status).toBe("queued");
+
+    const restartedRuntime = createPhase1RuntimeRegistries();
+    const restartedJournal = new Journal({
+      connection: first.connection,
+      registry: restartedRuntime.events,
+      projections: restartedRuntime.projections,
+      clock: () => now,
+    });
+    for (const projection of restartedRuntime.projections.all()) {
+      catchUpProjection({
+        connection: first.connection,
+        journal: restartedJournal,
+        projection,
+        clock: () => now,
+      });
+    }
+    const restarted = new ImageJobService({
+      journal: restartedJournal,
+      projection: restartedRuntime.imageJobProjection,
+      attachments: new GeneratedImageStore(first.directory),
+      readProviderInstance: () => imageProfile(),
+      readImageGenerationCustomSources: () => [],
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      uuid: () => crypto.randomUUID(),
+      clock: () => "2026-08-28T12:01:00.000Z",
+      actor,
+    });
+    await restarted.reconcileInterruptedJobs();
+
+    expect(restarted.get(queued.id)?.status).toBe("failed");
+    expect(restarted.get(queued.id)?.failure?.message).toBe(IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE);
+    expect(restarted.get(running.id)?.status).toBe("failed");
   });
 });
 
