@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -159,6 +159,60 @@ describe("AgentRunHierarchy", () => {
       const calls = parentSummary.mock.calls.length;
       await vi.advanceTimersByTimeAsync(6_000);
       expect(parentSummary).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a newly started child when an older, slower read answers last", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const secondRunId = decodeAgentRunId("33333333-3333-4333-8333-333333333333");
+      const child = (id: typeof runId, lifecycleStatus: "starting" | "completed") => ({
+        runId: id,
+        requestId: `request-${String(id)}`,
+        parentThreadId,
+        role: "review",
+        task: `Task ${String(id)}`,
+        lifecycleStatus,
+        executionKind: "octant-managed",
+        usageQuality: "provider-reported",
+        resultAcknowledgement: { required: false, acknowledged: false },
+        version: 2,
+        updatedAt: "2026-08-01T15:01:00.000Z",
+      });
+      const reads: Array<(value: unknown) => void> = [];
+      const parentSummary = vi
+        .fn()
+        .mockResolvedValueOnce({ parentThreadId, entries: [child(runId, "starting")] })
+        .mockImplementation(() => new Promise((resolve) => reads.push(resolve)));
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ parentSummary: parentSummary as never })}
+          parentThreadId={parentThreadId}
+          creationPosture="automatic"
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible(),
+      );
+
+      // Two beats go out before either answers.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(reads).toHaveLength(2);
+      // The newer read sees a second child; the older one answers after it.
+      reads[1]?.({
+        parentThreadId,
+        entries: [child(runId, "starting"), child(secondRunId, "starting")],
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Working · 2" })).toBeVisible(),
+      );
+      reads[0]?.({ parentThreadId, entries: [child(runId, "completed")] });
+      await act(() => vi.advanceTimersByTimeAsync(50));
+
+      expect(screen.getByRole("heading", { name: "Working · 2" })).toBeVisible();
     } finally {
       vi.useRealTimers();
     }
