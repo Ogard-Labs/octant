@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReplayCursor } from "@octant/contracts";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import { EventRegistry } from "./eventRegistry";
 import {
@@ -658,6 +658,77 @@ describe("Journal", () => {
     expect(journal.replayAggregateTypeForThread(cursor(1)).map((event) => event.eventId)).toEqual([
       ids.event3,
     ]);
+    connection.close();
+  });
+
+  it("finds a thread's rows through the thread index instead of reading every row of the type", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    // The statements the journal itself prepared, not a copy of their text: a
+    // copy would keep passing after the journal's own spelling drifted away
+    // from the index expression, which is how the thread replay lost it.
+    const threadReplays = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter(
+        (sql) => sql.includes("'$.threadId'") && sql.includes("ORDER BY global_sequence ASC"),
+      );
+    prepare.mockRestore();
+
+    expect(threadReplays).toHaveLength(2);
+    for (const sql of threadReplays) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      // Either thread index serves the (type, thread) prefix; which one the
+      // planner picks is its call.
+      expect(plan).toMatch(
+        /event_journal_thread_(?:result_)?kind_sequence \(aggregate_type=\? AND <expr>=\?/,
+      );
+      expect(plan).not.toMatch(/SCAN event_journal\b/);
+    }
+    connection.close();
+  });
+
+  it("reads a thread's turn operations and restore results without visiting its other rows", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const anchored = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes("'$.event.result.kind'") && sql.includes("UNION ALL"));
+    prepare.mockRestore();
+
+    expect(anchored).toHaveLength(1);
+    const [sql] = anchored;
+    const plan = JSON.stringify(
+      connection
+        .prepare(`EXPLAIN QUERY PLAN ${sql ?? ""}`)
+        .all(
+          "code-operation",
+          "code-operation",
+          "thread",
+          "conversation-turn-started",
+          0,
+          "code-operation",
+          "thread",
+          "git-mutation-state",
+          0,
+          "thread",
+          10,
+        ),
+    );
+    // A thread flooded with terminal attaches is almost all operation-result
+    // rows. Walking the thread slice and testing each payload's result kind
+    // examined every one of them; each half now reads only its own index.
+    expect(plan).toContain(
+      "sqlite_autoindex_event_journal_2 (aggregate_type=? AND aggregate_id=?)",
+    );
+    expect(plan).toContain(
+      "event_journal_thread_result_kind_sequence (aggregate_type=? AND <expr>=? AND <expr>=? AND global_sequence>?)",
+    );
+    expect(plan).not.toMatch(/SCAN event_journal\b/);
     connection.close();
   });
 

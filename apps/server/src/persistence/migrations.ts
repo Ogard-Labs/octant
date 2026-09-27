@@ -1855,6 +1855,17 @@ ALTER TABLE code_runtime_projection
     name: "create_project_terminal_projection",
     sql: PROJECT_TERMINAL_PROJECTION_SQL,
   },
+  {
+    // The Code conversation reads a thread's operation results of one kind.
+    // Without this, finding them meant parsing every result row of the thread,
+    // and a thread flooded with terminal attaches is almost all result rows.
+    version: 63,
+    name: "index_thread_event_result_kind",
+    sql: `CREATE INDEX event_journal_thread_result_kind_sequence ON event_journal (
+      aggregate_type, CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END,
+      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END, global_sequence DESC
+    );`,
+  },
 ];
 
 interface AppliedMigrationRow {
