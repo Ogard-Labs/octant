@@ -223,24 +223,38 @@ export class Journal {
     // ignores every other row, and a thread whose journal was flooded with
     // one-event terminal attaches had 19,026 of those: decoding each one in
     // JavaScript held the event loop for over a second per read.
+    //
+    // Each half is its own indexed lookup, so SQLite never visits the rows it
+    // leaves out. Spelled as one `OR` over the thread slice, the planner
+    // walked every row of the thread and parsed each payload to test the
+    // result kind — and the flood rows are themselves operation results — so
+    // one read could still examine an unbounded suffix. The turn half reads
+    // by operation id through the aggregate's unique index; the result half
+    // reads the result-kind index (migration 63).
     this.#replayThreadAnchoredRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
         event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
         actor_id, ${actorJsonSelect}, occurred_at, payload_json
       FROM event_journal
-      WHERE aggregate_type = ?
-        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
-        AND global_sequence > ?
-        AND (
-          aggregate_id IN (
+      WHERE global_sequence IN (
+        SELECT global_sequence FROM event_journal
+        WHERE aggregate_type = ?
+          AND aggregate_id IN (
             SELECT aggregate_id FROM event_journal
             WHERE aggregate_type = ?
               AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
               AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
           )
-          OR CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END = ?
-        )
+          AND global_sequence > ?
+        UNION ALL
+        SELECT global_sequence FROM event_journal
+        WHERE aggregate_type = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END = ?
+          AND global_sequence > ?
+      )
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
@@ -587,12 +601,15 @@ export class Journal {
     return (
       this.#replayThreadAnchoredRows.all(
         cursor.aggregateType,
-        cursor.threadId,
-        cursor.afterSequence,
         cursor.aggregateType,
         cursor.threadId,
         cursor.anchorKind,
+        cursor.afterSequence,
+        cursor.aggregateType,
+        cursor.threadId,
         cursor.resultKind,
+        cursor.afterSequence,
+        cursor.threadId,
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));

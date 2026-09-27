@@ -681,9 +681,54 @@ describe("Journal", () => {
       const plan = JSON.stringify(
         connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
       );
-      expect(plan).toContain("event_journal_thread_kind_sequence (aggregate_type=? AND <expr>=?");
+      // Either thread index serves the (type, thread) prefix; which one the
+      // planner picks is its call.
+      expect(plan).toMatch(
+        /event_journal_thread_(?:result_)?kind_sequence \(aggregate_type=\? AND <expr>=\?/,
+      );
       expect(plan).not.toMatch(/SCAN event_journal\b/);
     }
+    connection.close();
+  });
+
+  it("reads a thread's turn operations and restore results without visiting its other rows", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const anchored = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes("'$.event.result.kind'") && sql.includes("UNION ALL"));
+    prepare.mockRestore();
+
+    expect(anchored).toHaveLength(1);
+    const [sql] = anchored;
+    const plan = JSON.stringify(
+      connection
+        .prepare(`EXPLAIN QUERY PLAN ${sql ?? ""}`)
+        .all(
+          "code-operation",
+          "code-operation",
+          "thread",
+          "conversation-turn-started",
+          0,
+          "code-operation",
+          "thread",
+          "git-mutation-state",
+          0,
+          "thread",
+          10,
+        ),
+    );
+    // A thread flooded with terminal attaches is almost all operation-result
+    // rows. Walking the thread slice and testing each payload's result kind
+    // examined every one of them; each half now reads only its own index.
+    expect(plan).toContain(
+      "sqlite_autoindex_event_journal_2 (aggregate_type=? AND aggregate_id=?)",
+    );
+    expect(plan).toContain(
+      "event_journal_thread_result_kind_sequence (aggregate_type=? AND <expr>=? AND <expr>=? AND global_sequence>?)",
+    );
+    expect(plan).not.toMatch(/SCAN event_journal\b/);
     connection.close();
   });
 
