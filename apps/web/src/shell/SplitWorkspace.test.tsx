@@ -4,7 +4,7 @@ import {
   type WorkspaceLayoutNode,
 } from "@octant/contracts/shell";
 import { decodeThreadBoardPullRequestSummary } from "@octant/contracts";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { splitCallbacks, splitLayout } from "../App.test-fixtures";
@@ -126,7 +126,7 @@ describe("SplitWorkspace", () => {
   });
 
   it.each([false, true])(
-    "keeps the provider mark beside the thread title (multiple tabs: %s)",
+    "leads a thread pane with where it runs, keeping provider marks for its tabs (multiple tabs: %s)",
     (multiple) => {
       const handlers = splitCallbacks();
       const layout = decodeWorkspaceLayoutNode({
@@ -176,15 +176,102 @@ describe("SplitWorkspace", () => {
         />,
       );
 
-      expect(screen.queryByText("repro-work")).not.toBeInTheDocument();
-      expect(screen.getByTitle("Claude")).toBeVisible();
-      if (multiple)
+      const handle = screen.getByTitle("Drag to move or split");
+      expect(within(handle).getByRole("img", { name: "Runs on this computer" })).toBeVisible();
+      if (multiple) {
+        // The tabs carry the titles, but the Project chip names the pane's
+        // execution context rather than the active tab, so it still shows.
+        expect(within(handle).getByText("repro-work")).toBeVisible();
         expect(screen.getByRole("tab", { name: "A thread" })).toContainElement(
           screen.getByTitle("Claude"),
         );
+      } else {
+        // The composer names the model; the title row no longer repeats it.
+        expect(screen.queryByTitle("Claude")).not.toBeInTheDocument();
+        expect(within(handle).getByText("A thread")).toBeVisible();
+        expect(within(handle).getByText("repro-work")).toBeVisible();
+      }
       expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
     },
   );
+
+  it("names the remote host a thread runs on, and says so even when the host is unnamed", () => {
+    const threadId = "00000000-0000-4000-8000-000000000614";
+    const hostId = "22222222-3333-4444-8555-666666666666";
+    const surface = {
+      kind: "code-overview",
+      id: "00000000-0000-4000-8000-000000000613",
+      mode: "code",
+      threadId,
+      title: "Remote change",
+      hostId,
+    };
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface,
+    });
+    const { rerender } = render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        environmentNames={new Map([[hostId, "Studio devbox"]])}
+        layout={layout}
+        paneFactsByThreadId={new Map([[threadId, { path: "Octant/fix/remote" }]])}
+        renderSurface={(tab) => tab.title}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Runs on Studio devbox" })).toBeVisible();
+    expect(screen.queryByRole("img", { name: "Runs on this computer" })).not.toBeInTheDocument();
+    expect(screen.getByText("Octant/fix/remote")).toBeVisible();
+
+    rerender(
+      <SplitWorkspace {...splitCallbacks()} layout={layout} renderSurface={(tab) => tab.title} />,
+    );
+    expect(screen.getByRole("img", { name: "Runs on a remote host" })).toBeVisible();
+  });
+
+  it("claims no environment for a surface that is not a thread", () => {
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contextLabel="Octant"
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    expect(screen.queryByRole("img", { name: /^Runs on/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Octant")).not.toBeInTheDocument();
+  });
+
+  it("claims no environment for a Browser utility opened for a thread", () => {
+    // A Browser tab optionally carries the threadId it was opened for
+    // (BrowserWorkspaceTab), but the tab itself is a utility, not the
+    // thread's own pane, so it must not pick up the thread's mark.
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "browser",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        title: "Browser",
+        threadId: "00000000-0000-4000-8000-000000000614",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    expect(screen.queryByRole("img", { name: /^Runs on/ })).not.toBeInTheDocument();
+  });
 
   it("opens the pull request a pane tab names in the dock", async () => {
     const user = userEvent.setup();
@@ -606,6 +693,45 @@ describe("SplitWorkspace", () => {
     expect(source).toMatchObject({ paneId: firstPaneId, title: "First" });
     expect(destination).toEqual({ kind: "edge", targetPaneId: secondPaneId, edge: "left" });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("moves a thread pane when the drag starts on its environment mark", () => {
+    const onDrop = vi.fn();
+    const split = splitLayout();
+    if (split.kind !== "split" || split.first.kind !== "pane") throw new Error("Expected a split");
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "split",
+      nodeId: split.nodeId,
+      orientation: split.orientation,
+      ratio: split.ratio,
+      first: {
+        kind: "pane",
+        nodeId: split.first.nodeId,
+        paneId: split.first.paneId,
+        surface: {
+          kind: "work-thread",
+          id: "00000000-0000-4000-8000-000000000613",
+          mode: "work",
+          threadId: "00000000-0000-4000-8000-000000000614",
+          title: "Quarterly notes",
+        },
+      },
+      second: split.second,
+    });
+    const { container } = render(<DragWorkspace layout={layout} onDrop={onDrop} />);
+    prepareDragGeometry(container);
+    const mark = screen.getByRole("img", { name: "Runs on this computer" });
+
+    fireEvent.pointerDown(mark, { button: 0, clientX: 20, clientY: 16, pointerId: 9 });
+    fireEvent.pointerMove(mark, { clientX: 410, clientY: 300, pointerId: 9 });
+    expect(screen.getByRole("status")).toHaveTextContent(/Split left and open Quarterly notes/i);
+    fireEvent.pointerUp(mark, { clientX: 410, clientY: 300, pointerId: 9 });
+
+    expect(onDrop).toHaveBeenCalledOnce();
+    expect(onDrop.mock.calls[0]?.[0]).toMatchObject({
+      paneId: firstPaneId,
+      title: "Quarterly notes",
+    });
   });
 
   it("cancels an active grip drag on Escape without committing", () => {
