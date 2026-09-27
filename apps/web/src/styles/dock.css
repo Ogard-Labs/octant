@@ -393,22 +393,48 @@
 
 /* The side conversation's own thread menu joins the Side Chat rail at its
    trailing edge. Left in the embedded chat's header, it sat alone on a row of
-   its own between the notice and the conversation. */
+   its own between the notice and the conversation. Only the trigger moves:
+   the receipt a menu action leaves stays in the flow under the notice, where
+   a header lifted whole onto the rail spilled it over the conversation. */
 .right-utility-dock__tool .side-chat {
   position: relative;
 }
 
 .right-utility-dock__tool .side-chat .chat-workspace__header {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  right: var(--oct-space-2);
-  display: flex;
-  height: var(--oct-title-rail-h);
-  align-items: center;
+  position: static;
+  display: block;
+  min-height: 0;
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.right-utility-dock__tool .side-chat .chat-workspace__thread-actions > .shell-icon-button {
+  position: absolute;
+  z-index: 1;
+  top: calc((var(--oct-title-rail-h) - var(--oct-rail-button-h)) / 2);
+  right: var(--oct-space-2);
+}
+
+.right-utility-dock__tool .side-chat .chat-workspace__export-status {
+  padding: var(--oct-space-2) var(--oct-space-3) 0;
+  text-align: start;
+}
+
+/* A long thread title stops short of the trigger instead of running under it. */
+.right-utility-dock__tool .side-chat__header {
+  padding-inline-end: calc(var(--oct-rail-button-h) + var(--oct-space-2) * 2);
+}
+
+.right-utility-dock__tool .side-chat__title {
+  min-width: 0;
+}
+
+.right-utility-dock__tool .side-chat__title > span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bottom-utility-panel {
