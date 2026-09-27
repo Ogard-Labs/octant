@@ -195,6 +195,36 @@ describe("CodeThreadControllerSlots", () => {
     expect(announceFirstPrompt).not.toHaveBeenCalled();
   });
 
+  it("sets the notice immediately when the thread's controller is published", () => {
+    const registry = createCodeThreadControllers();
+    const setAccessNotice = vi.fn();
+    const notice = "Full access was not confirmed.";
+
+    registry.publish(threadA, { setAccessNotice } as never);
+    registry.holdAccessNotice(threadA, notice);
+
+    expect(setAccessNotice).toHaveBeenCalledExactlyOnceWith(notice);
+  });
+
+  it("delivers an access notice held for a released thread when that thread's controller publishes again", () => {
+    const registry = createCodeThreadControllers();
+    const firstSetAccessNotice = vi.fn();
+    const secondSetAccessNotice = vi.fn();
+    const notice = "Full access confirmation was cancelled when you left this thread.";
+
+    registry.publish(threadA, { setAccessNotice: firstSetAccessNotice } as never);
+    registry.release(threadA);
+    registry.holdAccessNotice(threadA, notice);
+
+    expect(firstSetAccessNotice).not.toHaveBeenCalled();
+
+    registry.publish(threadA, { setAccessNotice: secondSetAccessNotice } as never);
+    expect(secondSetAccessNotice).toHaveBeenCalledExactlyOnceWith(notice);
+
+    registry.publish(threadA, { setAccessNotice: vi.fn() } as never);
+    expect(secondSetAccessNotice).toHaveBeenCalledOnce();
+  });
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(

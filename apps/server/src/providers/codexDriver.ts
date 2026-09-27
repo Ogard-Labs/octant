@@ -249,6 +249,8 @@ function codexDynamicTools(
 
 const MAX_MODEL_PAGES = 10;
 const SATURATION_DELAYS_MS = [50, 100, 200] as const;
+const CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS = 5;
+const CODEX_RESUME_WRITER_CONFLICT_DELAY_MS = 400;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
@@ -274,6 +276,15 @@ function providerFailure(error: unknown): ProviderFailure {
     }
   }
   return failure("provider-failed", "Codex request failed.");
+}
+
+function isActiveWriterConflict(error: unknown): boolean {
+  return (
+    error instanceof CodexRpcClientFailure &&
+    error.kind === "remote" &&
+    error.remoteCode === -32600 &&
+    /active writer/i.test(error.remoteMessage ?? "")
+  );
 }
 
 function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> {
@@ -1150,23 +1161,47 @@ function makeConnection(
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
             ensureSubscribed();
-            const thread = yield* request(() =>
-              // `ThreadResumeParams` also declares `approvalPolicy` and
-              // `sandbox`, but codex-cli 0.154.0 accepts them here and keeps
-              // the settings the thread was created with: a thread resumed with
-              // `read-only` still wrote in-root without asking. The posture is
-              // re-asserted per turn instead, where it does take effect.
-              // `config` is different: measured against codex-cli 0.155.1, a
-              // Work thread started with its shell off had it back after a
-              // plain resume, and had it off again when the resume carried
-              // the same overrides, so they are stated on every resume.
-              client.threadResume({
-                threadId: input.resumeCursor.value,
-                ...(mode === "work" ? { config: CODEX_WORK_CONFIG } : {}),
-              }),
-            ).pipe(
-              Effect.mapError(() =>
-                failure("stale-resume", "Codex thread is no longer available for resume."),
+            const resumeRequest = () =>
+              Effect.tryPromise({
+                try: () =>
+                  // `ThreadResumeParams` also declares `approvalPolicy` and
+                  // `sandbox`, but codex-cli 0.154.0 accepts them here and keeps
+                  // the settings the thread was created with: a thread resumed with
+                  // `read-only` still wrote in-root without asking. The posture is
+                  // re-asserted per turn instead, where it does take effect.
+                  // `config` is different: measured against codex-cli 0.155.1, a
+                  // Work thread started with its shell off had it back after a
+                  // plain resume, and had it off again when the resume carried
+                  // the same overrides, so they are stated on every resume.
+                  client.threadResume({
+                    threadId: input.resumeCursor.value,
+                    ...(mode === "work" ? { config: CODEX_WORK_CONFIG } : {}),
+                  }),
+                catch: (error) =>
+                  error instanceof CodexRpcClientFailure ? error : providerFailure(error),
+              });
+            const resumeWithWriterRetry = (
+              attempt: number,
+            ): Effect.Effect<CodexThreadResult, CodexRpcClientFailure | ProviderFailure> =>
+              resumeRequest().pipe(
+                Effect.catchAll((error) =>
+                  isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
+                    ? Effect.tryPromise({
+                        try: () =>
+                          (options.sleep ?? defaultSleep)(CODEX_RESUME_WRITER_CONFLICT_DELAY_MS),
+                        catch: providerFailure,
+                      }).pipe(Effect.flatMap(() => resumeWithWriterRetry(attempt + 1)))
+                    : Effect.fail(error),
+                ),
+              );
+            const thread = yield* resumeWithWriterRetry(1).pipe(
+              Effect.mapError((error) =>
+                isActiveWriterConflict(error)
+                  ? failure(
+                      "unavailable",
+                      "Another Codex process is still using this thread. Wait a moment and try again.",
+                    )
+                  : failure("stale-resume", "Codex thread is no longer available for resume."),
               ),
             );
             if (!isAbsolute(thread.cwd) || resolve(thread.cwd) !== projectRoot) {

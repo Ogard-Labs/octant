@@ -43,13 +43,14 @@ async function run(
       shell: false,
       signal,
     });
-    return { exitCode: 0, stdout: result.stdout };
+    return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     if (signal.aborted) throw error;
     if (isExecFailure(error)) {
       return {
         exitCode: typeof error.code === "number" ? error.code : 1,
         stdout: error.stdout ?? "",
+        stderr: error.stderr ?? "",
       };
     }
     throw error;
@@ -292,9 +293,11 @@ function isMissingError(error: unknown): boolean {
   return isRecord(error) && error.code === "ENOENT";
 }
 
-function isExecFailure(
-  error: unknown,
-): error is { readonly code?: string | number; readonly stdout?: string } {
+function isExecFailure(error: unknown): error is {
+  readonly code?: string | number;
+  readonly stdout?: string;
+  readonly stderr?: string;
+} {
   return isRecord(error);
 }
 

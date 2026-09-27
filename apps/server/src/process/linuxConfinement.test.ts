@@ -409,6 +409,61 @@ describe("Linux Bubblewrap confinement", () => {
       expect(result.status).not.toBe(0);
     },
   );
+
+  it("starts an interactive shell on Linux without any Seatbelt rules", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const shellStateDirectory = join(root, "shell-state");
+    mkdirSync(shellStateDirectory);
+    const launch = buildLinuxConfinementLaunch(
+      {
+        executable: "/bin/bash",
+        args: ["-l"],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        terminal: { shellStateDirectory },
+      },
+      { bwrapPath },
+    );
+
+    expect(launch.command).toBe(bwrapPath);
+    // Measured on bwrap 0.6.1: `--new-session` setsid()s the shell off its
+    // pty, so job control dies ("no job control in this shell", `fg` refuses).
+    expect(launch.args).not.toContain("--new-session");
+    expect(launch.args).toContain("--dev");
+
+    const nonTerminal = buildLinuxConfinementLaunch(
+      {
+        executable: "/bin/bash",
+        args: ["-l"],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+      },
+      { bwrapPath },
+    );
+    expect(nonTerminal.args).toContain("--new-session");
+  });
+
+  it("still refuses raw Seatbelt rules on Linux even for a terminal", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const shellStateDirectory = join(root, "shell-state");
+    mkdirSync(shellStateDirectory);
+    expect(() =>
+      buildLinuxConfinementLaunch(
+        {
+          executable: "/bin/bash",
+          args: ["-l"],
+          boundRoot,
+          temporaryDirectory,
+          networkEgress: "none",
+          terminal: { shellStateDirectory },
+          extraRules: ["(allow pseudo-tty)"],
+        },
+        { bwrapPath },
+      ),
+    ).toThrow(SeatbeltConfinementError);
+  });
 });
 
 function hasFlagValue(args: ReadonlyArray<string>, flag: string, value: string): boolean {
