@@ -26,6 +26,32 @@ if [[ "${need_apt}" -eq 1 ]]; then
     zsh
 fi
 
+# `git worktree list --porcelain -z` needs Git 2.36; Ubuntu 22.04 ships 2.34,
+# so stock hosts must take git from the git-core PPA.
+git_version_ok() {
+  local version major minor
+  version=$(git --version 2>/dev/null) || return 1
+  version=${version#git version }
+  major=${version%%.*}
+  minor=${version#*.}
+  minor=${minor%%.*}
+  [[ "${major}" =~ ^[0-9]+$ && "${minor}" =~ ^[0-9]+$ ]] || return 1
+  (( major > 2 || (major == 2 && minor >= 36) ))
+}
+
+if ! git_version_ok && command -v apt-get >/dev/null 2>&1; then
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    software-properties-common
+  sudo add-apt-repository -y ppa:git-core/ppa
+  sudo DEBIAN_FRONTEND=noninteractive apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git
+fi
+
+if ! git_version_ok; then
+  echo "git >= 2.36 is required (found $(git --version 2>/dev/null || echo 'git not installed'))" >&2
+  exit 1
+fi
+
 # Shell hooks load the live session address written by the start script.
 # A snapshotted socket path is never trusted: bashrc clears it when the bus is dead.
 cat > "${HOME}/.config/octant-host/bashrc.sh" << 'EOF'

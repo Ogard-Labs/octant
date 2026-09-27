@@ -145,6 +145,12 @@ export interface SeatbeltConfinementPrepareInput {
   readonly additionalDenyWritePaths?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
+  /**
+   * Whether this launch is an interactive shell on a pseudo-terminal, and where
+   * its Octant-owned shell state lives. Each platform grants what its own
+   * shell needs; callers never pass Seatbelt text for it.
+   */
+  readonly terminal?: Readonly<{ shellStateDirectory: string }>;
 }
 
 export interface SeatbeltConfinementPort {
@@ -223,6 +229,37 @@ export function seatbeltDenyRule(operation: "file-read*" | "file-write*", path: 
 
 export function seatbeltExecRule(path: string): string {
   return `(allow process-exec (literal "${escapeSeatbeltPath(path)}"))`;
+}
+
+const TERMINAL_TTY_RULES: ReadonlyArray<string> = [
+  '(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
+  "(allow pseudo-tty)",
+];
+
+function shellStateAncestorMetadataRules(directory: string): ReadonlyArray<string> {
+  const rules: string[] = [];
+  // mkdir -p checks each ancestor even when it already exists. Denying the
+  // shared state's metadata made shell-framework cache setup try to create
+  // that parent and print "Operation not permitted". Literal metadata reads
+  // allow that walk without listing the base or reading sibling histories.
+  for (let ancestor = dirname(realpathSync(directory)); ancestor !== dirname(ancestor);) {
+    rules.push(`(allow file-read-metadata (literal "${escapeSeatbeltPath(ancestor)}"))`);
+    ancestor = dirname(ancestor);
+  }
+  return rules;
+}
+
+/**
+ * What an interactive shell launch needs on a pseudo-terminal: the shell
+ * claims its pseudo-terminal's foreground process group through a tty ioctl.
+ * With that denied, zsh printed "can't set tty pgrp: operation not
+ * permitted", ran without job control, and echoed every command line twice.
+ * Only the pty devices are opened up. The ancestor metadata rules let
+ * `mkdir -p` walks into the shell state succeed without listing its shared
+ * base or reading sibling histories.
+ */
+export function terminalSeatbeltRules(shellStateDirectory: string): ReadonlyArray<string> {
+  return [...TERMINAL_TTY_RULES, ...shellStateAncestorMetadataRules(shellStateDirectory)];
 }
 
 const SHEBANG_BYTES = 512;
@@ -739,7 +776,16 @@ function prepareDarwinSeatbelt(
       ? {}
       : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
     privateHomeAllowPaths,
-    ...(input.extraRules === undefined ? {} : { extraRules: input.extraRules }),
+    ...(input.extraRules === undefined && input.terminal === undefined
+      ? {}
+      : {
+          extraRules: [
+            ...(input.extraRules ?? []),
+            ...(input.terminal === undefined
+              ? []
+              : terminalSeatbeltRules(input.terminal.shellStateDirectory)),
+          ],
+        }),
     ...(options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory }),
     ...(options.usersDirectory === undefined ? {} : { usersDirectory: options.usersDirectory }),
   });
