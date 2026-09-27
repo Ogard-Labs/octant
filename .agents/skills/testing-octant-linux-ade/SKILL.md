@@ -9,7 +9,7 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 
 - Server: `bun run packages/cli/src/bin.ts server run` → http://127.0.0.1:13773 (`/health` returns ok; `/` returns 503 "web client not built" — expected; use the Vite renderer).
 - Renderer: `bun run packages/cli/src/bin.ts web --dev --no-open` → open `http://127.0.0.1:5173/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773%2F` in Chrome. No launch token needed — loopback POSTs `/api/shell/local-session` automatically.
-- Always `. ~/.config/octant-host/session.env` before CLI use; if stale run `bash scripts/ade/start-secret-service-session.sh`.
+- Always `. ~/.config/octant-host/session.env` before CLI use; if stale, run `bash scripts/ade/start-secret-service-session.sh` and then re-source `. ~/.config/octant-host/session.env` (the script runs as a subprocess — its exports do not reach the calling shell).
 - CLI: `bun run packages/cli/src/bin.ts <cmd>` from repo root.
 
 ## Devin Secrets Needed
@@ -18,7 +18,7 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 
 ## Setup recipe
 
-1. Scratch Code project: `git init /tmp/ade-demo && cd /tmp/ade-demo && git commit -qm init` (Code binding inspects git — an empty dir fails), then `bun run packages/cli/src/bin.ts project add /tmp/ade-demo --type code --name ade-demo`.
+1. Scratch Code project: `git init /tmp/ade-demo && git -C /tmp/ade-demo commit --allow-empty -qm init` (Code binding inspects git — an empty dir fails; `--allow-empty` is required since nothing is staged), then from the Octant repo root `bun run packages/cli/src/bin.ts project add /tmp/ade-demo --type code --name ade-demo`.
 2. `octant project access <name> full-access` sets `codeAccessPersistence: "project-default"` (the "Project remembers Full access" flag); `... approval-gated` resets to `current-session`.
 3. Codex CLI instance auto-registers on first app load via discovery (no manual scan needed if `codex` is on PATH and logged in).
 
