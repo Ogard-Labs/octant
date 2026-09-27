@@ -571,6 +571,7 @@ function UsageHeader(props: {
           className="context-window-popover__toggle"
           onClick={props.onToggle}
           size="icon-xs"
+          title="Context breakdown"
           type="button"
           variant="ghost"
         >
@@ -706,9 +707,7 @@ function LimitRow(props: {
         {props.reset === undefined ? null : (
           <span className="context-window-popover__reset">{props.reset}</span>
         )}
-        <span className="context-window-popover__limit-value">
-          {props.percent === undefined ? (props.value ?? "") : `${String(props.percent)}%`}
-        </span>
+        <span className="context-window-popover__limit-value">{limitValueText(props)}</span>
       </p>
       {props.percent === undefined ? null : (
         <span
@@ -725,6 +724,22 @@ function LimitRow(props: {
       )}
     </div>
   );
+}
+
+/**
+ * A measured share still names a `near`/`spent` provider status next to the
+ * percentage: a reader who only reads figures, not the row's warning ink,
+ * must see the same word a screen reader announces via `aria-valuetext`.
+ */
+function limitValueText(props: {
+  readonly level: LimitLevel;
+  readonly percent?: number;
+  readonly value?: string;
+}): string {
+  if (props.percent === undefined) return props.value ?? "";
+  const percentText = `${String(props.percent)}%`;
+  if (props.level === "ok" || props.value === undefined) return percentText;
+  return `${percentText} · ${props.value}`;
 }
 
 function WindowLimitRow(props: {

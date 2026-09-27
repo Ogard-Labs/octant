@@ -562,6 +562,9 @@ describe("ComposerContextMeter", () => {
     const popover = screen.getByRole("dialog", { name: "Context window" });
     const toggle = within(popover).getByRole("button", { name: "Context breakdown" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The chevron carries no visible label, so a pointer user needs the
+    // native tooltip the design system requires on every icon-only button.
+    expect(toggle).toHaveAttribute("title", "Context breakdown");
     expect(within(popover).queryByRole("table")).not.toBeInTheDocument();
 
     await user.click(toggle);
@@ -661,7 +664,9 @@ describe("ComposerContextMeter", () => {
       const popover = screen.getByRole("dialog", { name: "Provider usage" });
       // Two scopes are present, so each window keeps the provider's scope name.
       expect(popover).toHaveTextContent("5-hour limitplan-aResets in 2 hr 18 min40%");
-      expect(popover).toHaveTextContent("7-day limitplan-b100%");
+      // Spent is a status, not a figure, so a reader relying on the visible
+      // text alone (not the row's warning ink) still sees the provider's word.
+      expect(popover).toHaveTextContent("7-day limitplan-b100% · Spent");
       expect(popover).not.toHaveTextContent("primary");
       expect(screen.getByRole("meter", { name: "7-day limit used" })).toHaveAttribute(
         "aria-valuetext",
@@ -670,6 +675,28 @@ describe("ComposerContextMeter", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps a provider's running-low status visible next to its measured share", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          limits: [{ window: "five_hour", status: "warning", utilization: 0.91 }],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    const popover = screen.getByRole("dialog", { name: "Provider usage" });
+    // The provider reports both a percentage and a "running low" status; the
+    // percentage must not push the status word off the row.
+    expect(popover).toHaveTextContent("5-hour limit91% · Low");
   });
 
   it("opens the usage surface from a provider-reported panel and closes the panel", async () => {
