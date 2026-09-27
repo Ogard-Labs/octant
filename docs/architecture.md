@@ -970,6 +970,9 @@ mechanisms are:
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
   (`docs/decisions/0110`); that planned path does not yet run.
+  Three provider tool requests denied in one Code turn end it as
+  interrupted, with the reason journaled, so a provider cannot loop a
+  person's refusals.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
