@@ -65,8 +65,14 @@ References are cleared when the pane or its authority context changes; reload
 restores only the authoritative visible surface. Closing image creation stops
 observation, while only Cancel job cancels generation on the host. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
-Thread titles appear once in the title row. Project context remains in the drag
-handle tooltip and in the Work composer's attached project/folder strip. Tab
+Thread titles appear once in the title row. A thread pane's title row is its
+drag handle: an environment mark (a small neutral tile holding a laptop glyph
+when the thread runs on this computer, a cloud glyph and the host's name when
+it runs on another host), the title, and a quiet chip naming the Project, with
+the branch for Code. The chip truncates before the title does and is omitted
+without a Project. A surface that is not a thread shows no environment mark.
+The model stays in the composer, not the title row. The tile holds its glyph
+so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
 [Content tabs](../../DESIGN.md#content-tabs).
 

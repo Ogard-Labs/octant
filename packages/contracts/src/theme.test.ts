@@ -533,14 +533,14 @@ describe("application background contracts", () => {
     expect(() => decodeAppBackground({ kind: "theme", scope: "sidebar" })).toThrow();
   });
 
-  it("replays settings written before the application background existed as the theme pattern", () => {
+  it("replays settings written before the application background existed as the plain page", () => {
     expect(decodeThemeSettings(validSettings).appBackground).toEqual(DEFAULT_APP_BACKGROUND);
     const event = decodeThemeSettingsUpdated({
       settings: { ...validSettings, sidebarBackground: DEFAULT_THEME_SETTINGS.sidebarBackground },
       version: 3,
       updatedAt: "2026-09-06T10:00:00.000Z",
     });
-    expect(event.settings.appBackground).toEqual({ kind: "theme", ...tuning });
+    expect(event.settings.appBackground).toEqual({ kind: "none", ...tuning });
     const photo = decodeThemeSettings({
       ...validSettings,
       appBackground: { kind: "photo", backgroundId: "00000000-0000-4000-8000-000000000b01" },

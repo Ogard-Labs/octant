@@ -1421,9 +1421,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding-left: var(--oct-space-3);
 }
 
-/* The grip carries the pane's surface title and is its one drag handle, in
-   the same quiet meta ink the header rail has always used — pointing at it
-   takes fg ink over the soft fill, exactly the dock-tab precedent.
+/* The grip is the pane's one drag handle: the environment mark, the title,
+   and the Project chip, in the same quiet meta ink the header rail has always
+   used — pointing at it takes fg ink over the soft fill, exactly the dock-tab
+   precedent.
 
    It shrink-wraps its title rather than filling the row. Stretched, it read as
    a full-width tab and, being a no-drag region, left the window with no title
@@ -1431,12 +1432,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .workspace-pane__grip {
   display: inline-flex;
   flex: 0 1 auto;
-  max-width: min(52ch, 60%);
+  max-width: min(72ch, 60%);
   min-width: 0;
   min-height: 26px;
   align-items: center;
-  gap: 5px;
-  padding: 0 7px;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-1);
   overflow: hidden;
   color: var(--oct-meta);
   background: transparent;
@@ -1486,8 +1487,50 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex: 1 1 auto;
 }
 
+/* Where the thread runs: a quiet tile, never a hue. The 4px corner is the
+   mark allowance — the 10px control radius turns a 20px tile into a disc. */
+.environment-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--oct-muted);
+  background: var(--oct-fg-soft);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: 4px;
+}
+
 .workspace-pane__title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The Project (and branch) the thread works in. Capped at 45% of the handle
+   so it can never crowd out the title, and given a much higher flex-shrink
+   than the title (docs/design/workspace.md: "The chip truncates before the
+   title does") so it absorbs the pane narrowing first; the title only gives
+   up room once the chip has already shrunk to its own floor. No min-width
+   floor on the chip itself — that widened a short chip past its own name and
+   cut into a title that had room. */
+.workspace-pane__context {
+  flex: 0 20 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

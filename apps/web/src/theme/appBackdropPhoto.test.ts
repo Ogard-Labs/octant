@@ -144,7 +144,7 @@ describe("welcome photo backing store", () => {
 });
 
 describe("welcome photo sampling", () => {
-  it("pixelates only the pattern and a dithered photo, not a clean one", () => {
+  it("pixelates a printed picture, not a clean one", () => {
     const css = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "../styles/surface.css"),
       "utf8",
@@ -154,7 +154,6 @@ describe("welcome photo sampling", () => {
       body: (match[2] ?? "").replace(/\s+/g, " ").trim(),
     }));
     const pixelated = rules.filter((rule) => /image-rendering:\s*pixelated/.test(rule.body));
-    expect(pixelated.some((rule) => rule.selector.includes(".app-backdrop__pattern"))).toBe(true);
     expect(
       pixelated.some((rule) =>
         rule.selector.includes('.app-backdrop__photo[data-dithered="true"]'),

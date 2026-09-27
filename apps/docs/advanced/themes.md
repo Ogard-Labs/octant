@@ -103,19 +103,15 @@ overlay opacity to at least 80%.
 
 ### Background
 
-The app sits on a background of its own, set in three choices.
+The app can sit on a picture of its own. It is off until you pick one.
 
-**Background** is what sits behind Octant. **Dot pattern** (the default) is an
-ordered-dither field drawn from the theme's bounded pattern palette. Most themes
-use the accent alone; Pride uses a six-colour spectrum and Norway uses red,
-white, and blue. The resolved accent remains the first ink, so switching presets
-or overriding the accent recolours the leading ink at once. **Built-in picture**
+**Background** is the picture behind Octant. **Built-in picture**
 uses the same still or animated first-party image catalog as Zen; the current
 picture stands for the set until you choose **Change**. **Your photo** uses a
 picture of yours: upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels,
 or pick one already on this host, and **Photo strength** sets how strongly it
 shows. The sidebar and the background share one photo library, and a photo in
-use cannot be deleted. **None** keeps the plain page.
+use cannot be deleted. **None** (the default) keeps the plain page.
 
 **Effect** prints a picture: **Off** shows it as it is, **Pixelate** draws it in
 square pixels, and **Dither** does that with fewer colours, like a print.
@@ -123,18 +119,14 @@ square pixels, and **Dither** does that with fewer colours, like a print.
 animated built-in is printed from its still frame. A photo saved before this
 choice existed keeps its original two-pixel, four-colour dither.
 
-**Motion** is what moves: **Still** holds everything, **Pulse** lets the
-background slowly breathe a little brighter and back, and **Wave** rolls soft
-bands of dots across it, with **Wave speed**, **Dot strength**, and **Dot
-density**. The dot pattern keeps its dots whatever moves; over a picture they
-are the Wave.
-
 **Show behind** puts the background behind the start screens only, where it is
 masked away behind the composer and fades out below it, or behind every page,
-where the workspace stays transparent over it and transcript responses carry
-their own reading cards; **Cover the sidebar** extends it under the sidebar.
-Reduced motion holds everything still; Increased contrast turns the background
-off; a browser without WebGL2 shows a picture but no dots.
+inside the main card, where transcript responses carry their own reading
+cards. The sidebar and the gaps around the cards keep their own look. **Cover
+the sidebar** runs the picture under the whole window instead, frosted behind
+the sidebar and the gaps.
+Reduced motion shows an animated picture's still frame; Increased contrast
+turns the background off.
 
 ### Zen backgrounds
 
