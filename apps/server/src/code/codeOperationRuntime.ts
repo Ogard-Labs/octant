@@ -2252,8 +2252,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const alreadyJournaled =
       active.lastPersistedState === outcome && active.lastPersistedFailure === failure?.message;
     if (!alreadyJournaled) {
-      active.lastPersistedState = outcome;
-      active.lastPersistedFailure = failure?.message;
       const frame = this.#events.append({
         threadId: active.thread.id,
         operationId: active.operationId,
@@ -2265,6 +2263,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         },
       });
       active.cursor = frame.cursor;
+      active.lastPersistedState = outcome;
+      active.lastPersistedFailure = failure?.message;
     }
     this.#persistRuntimeWork(active, outcome);
   }
