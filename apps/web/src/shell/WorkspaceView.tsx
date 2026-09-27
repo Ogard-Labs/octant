@@ -942,6 +942,7 @@ function renderCodeTab(
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(browserAutomationClient === undefined ? {} : { browserAvailable: true })}
         controller={codeController}
+        holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenSurface === undefined
@@ -970,6 +971,9 @@ function renderCodeTab(
                 }),
             })}
         tab={tab}
+        {...(project?.type === "code" && project.codeAccessPersistence === "project-default"
+          ? { projectRemembersFullAccess: true }
+          : {})}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}

@@ -965,14 +965,26 @@ mechanisms are:
   ceiling allows auto-accept-edits too. Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept
   path keep asking;
-  Full access is a remembered, per-Project decision. A composer turn may
+  Full access is a remembered, per-Project decision. The host records that
+  decision with `octant project access <name> full-access` (journaled
+  `project.code-access-changed@1`); a thread that asks for Full access for
+  the Project's default then starts without a per-thread native
+  confirmation, and an existing thread can be raised to it the same way,
+  while session-only Full access still needs one. A composer
+  turn may
   request a narrower posture; the server clamps it to the thread's grant
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  The access picker also offers "Lower thread" to durably return a thread to
+  approval-gated and revoke a session-only Full-access grant for that window
+  without confirmation.
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
   (`docs/decisions/0110`); that planned path does not yet run.
+  Three provider tool requests denied in one Code turn end it as
+  interrupted, with the reason journaled, so a provider cannot loop a
+  person's refusals.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
@@ -1163,7 +1175,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap`, an unlocked
+  `octant web --dev` for Vite). Linux requires `bubblewrap`, Git 2.36 or
+  newer, an unlocked
   freedesktop Secret Service session, and the `secret-tool` client. Without
   those, the host fails closed. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session

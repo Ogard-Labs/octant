@@ -1178,7 +1178,12 @@ export class CodeService {
           checkoutHead,
         });
         const approvalValidated =
-          thread.executionPolicy !== "full-access"
+          thread.executionPolicy !== "full-access" ||
+          this.#projectRemembersFullAccess(
+            command.projectId,
+            managedAuthority.executionPolicy,
+            managedAuthority.permissionPersistence,
+          )
             ? true
             : this.#approvals !== undefined &&
               command.approvalId !== undefined &&
@@ -1333,8 +1338,13 @@ export class CodeService {
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.projectId);
-        } catch {
-          throw this.#failure("unavailable", "The bound Code repository is unavailable.");
+        } catch (error) {
+          throw this.#failure(
+            "unavailable",
+            error instanceof Error && error.message !== ""
+              ? error.message
+              : "The bound Code repository is unavailable.",
+          );
         }
         if (
           !repeatsJournaledCheckout(
@@ -1452,8 +1462,13 @@ export class CodeService {
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.thread.projectId);
-        } catch {
-          throw this.#failure("unavailable", "The bound Code repository is unavailable.");
+        } catch (error) {
+          throw this.#failure(
+            "unavailable",
+            error instanceof Error && error.message !== ""
+              ? error.message
+              : "The bound Code repository is unavailable.",
+          );
         }
         const checkout = this.#persistence.readCodeCheckout(command.thread.checkoutId);
         if (
@@ -1503,6 +1518,11 @@ export class CodeService {
         }
         if (
           thread.executionPolicy === "full-access" &&
+          !this.#projectRemembersFullAccess(
+            command.thread.projectId,
+            command.thread.executionPolicy,
+            command.thread.permissionPersistence,
+          ) &&
           checkout !== undefined &&
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
@@ -1664,6 +1684,11 @@ export class CodeService {
         command.executionPolicy === "full-access" &&
         (effectiveCurrent.executionPolicy !== "full-access" ||
           effectiveCurrent.permissionPersistence !== "project-default") &&
+        !this.#projectRemembersFullAccess(
+          current.projectId,
+          command.executionPolicy,
+          command.permissionPersistence,
+        ) &&
         (currentContextDigest === undefined ||
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
@@ -2017,7 +2042,7 @@ export class CodeService {
         if (event.aggregateVersion !== threadCursor + 1) {
           throw this.#failure("stale", "Code replay requires a snapshot.");
         }
-        const frame = this.#publicFrame(threadId, event);
+        const frame = this.#publicFrame(authenticatedWindowId, threadId, event);
         if (frame !== undefined) {
           threadCursor = event.aggregateVersion;
           yield frame;
@@ -2769,22 +2794,35 @@ export class CodeService {
     });
   }
 
-  #publicFrame(threadId: CodeThreadId, event: EventEnvelope): CodeEventFrame | undefined {
+  #publicFrame(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    event: EventEnvelope,
+  ): CodeEventFrame | undefined {
     if (event.aggregateType !== "code-thread" || String(event.aggregateId) !== String(threadId)) {
       return undefined;
     }
+    // Session grants live outside the journal; frames must match reads.
     if (event.eventName === "code.thread-created@1") {
+      const created = decodeCodeThreadCreated(event.payload);
       return decodeCodeEventFrame({
         threadId,
         sequence: event.aggregateVersion,
-        event: decodeCodeThreadCreated(event.payload),
+        event: {
+          ...created,
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, created.thread),
+        },
       });
     }
     if (event.eventName === "code.thread-updated@1") {
+      const updated = decodeCodeThreadUpdated(event.payload);
       return decodeCodeEventFrame({
         threadId,
         sequence: event.aggregateVersion,
-        event: decodeCodeThreadUpdated(event.payload),
+        event: {
+          ...updated,
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, updated.thread),
+        },
       });
     }
     return undefined;
@@ -2881,6 +2919,25 @@ export class CodeService {
     // The check is here to stop a profile reaching past the request, not to
     // refuse one for agreeing with it.
     return highestPolicy(standing, requestedExecutionPolicy);
+  }
+
+  /**
+   * Whether a Full-access request was already confirmed by the person on the
+   * host. A remembered per-Project grant is the decision they already made
+   * with `octant project access <name> full-access`; a per-thread native
+   * prompt would re-ask it, and off-desktop hosts have no prompt to ask.
+   * Session-only Full access still needs a per-thread receipt.
+   */
+  #projectRemembersFullAccess(
+    projectId: ProjectId,
+    executionPolicy: ProviderExecutionPolicy,
+    permissionPersistence: PermissionPersistence,
+  ): boolean {
+    if (executionPolicy !== "full-access" || permissionPersistence !== "project-default") {
+      return false;
+    }
+    const project = this.#persistence.readProject?.(projectId);
+    return project?.type === "code" && project.codeAccessPersistence === "project-default";
   }
 
   /**

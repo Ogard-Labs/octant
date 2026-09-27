@@ -40,6 +40,7 @@ function sameCodeProviderRequestsByThreadId(
  */
 export interface CodeThreadControllers {
   readonly get: (threadId: CodeThreadId) => CodeController | undefined;
+  readonly holdAccessNotice: (threadId: CodeThreadId, text: string) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
@@ -65,6 +66,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const byThread = new Map<string, CodeController>();
   const refreshWhenPublished = new Set<string>();
   const firstPromptWhenPublished = new Map<string, string>();
+  const accessNoticeWhenPublished = new Map<string, string>();
   const draftWhenPublished = new Map<
     string,
     { readonly prompt: string; readonly refusal: string | undefined }
@@ -95,6 +97,15 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       }
     },
     get: (threadId) => byThread.get(String(threadId)),
+    holdAccessNotice: (threadId, text) => {
+      const key = String(threadId);
+      const controller = byThread.get(key);
+      if (controller !== undefined) {
+        controller.setAccessNotice(text);
+        return;
+      }
+      accessNoticeWhenPublished.set(key, text);
+    },
     publish: (threadId, controller) => {
       const key = String(threadId);
       if (byThread.get(key) !== controller) {
@@ -111,6 +122,11 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
         draftWhenPublished.delete(key);
         controller.setPendingDraft(draft.prompt);
         if (draft.refusal !== undefined) controller.showTurnRefusal(draft.refusal);
+      }
+      const accessNotice = accessNoticeWhenPublished.get(key);
+      if (accessNotice !== undefined) {
+        accessNoticeWhenPublished.delete(key);
+        controller.setAccessNotice(accessNotice);
       }
       if (!refreshWhenPublished.delete(key)) return;
       controller.refreshConversation();
@@ -129,6 +145,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       refreshWhenPublished.delete(key);
       firstPromptWhenPublished.delete(key);
       draftWhenPublished.delete(key);
+      // The origin tab is released on switch; keep its notice for when it returns.
       if (!byThread.delete(key)) return;
       announce();
     },

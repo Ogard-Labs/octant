@@ -1154,6 +1154,10 @@ function unavailableCheckoutMessage(
   observation: Exclude<RepositoryIdentityObservation, { status: "available" }>,
 ): string {
   if (observation.status === "failed") {
+    if (observation.git !== undefined) {
+      const detail = observation.git.stderr === "" ? "" : ` (${observation.git.stderr})`;
+      return `Git could not inspect the bound Code folder: \`git ${observation.git.command}\` failed${detail}. Octant needs Git 2.36 or newer on the host.`;
+    }
     return "The bound Code folder could not be inspected. Check that Octant still has access to it.";
   }
   if (observation.status === "unavailable") {
