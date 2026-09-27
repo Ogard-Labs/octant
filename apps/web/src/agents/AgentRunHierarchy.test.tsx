@@ -223,8 +223,8 @@ describe("AgentRunHierarchy", () => {
     render(
       <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="off" />,
     );
-    await waitFor(() => expect(screen.getByRole("heading")).toBeVisible());
-    expect(screen.getAllByText(/turned off in Settings/i).length).toBeGreaterThan(0);
+    // The loading state has a heading too, so wait for the words themselves.
+    expect(await screen.findAllByText(/turned off in Settings/i)).not.toHaveLength(0);
   });
 
   it("cancels a working subagent from its page", async () => {
