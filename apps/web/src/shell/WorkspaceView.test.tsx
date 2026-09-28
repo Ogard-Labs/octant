@@ -261,8 +261,46 @@ describe("WorkspaceView Code tab registration", () => {
         evidence: [],
       })),
     } as never;
+    // The offer is gated on the bound provider's probe: a thread with a
+    // settled provider only sees @Browser when that provider reports the
+    // tool surface supported.
+    const boundController = {
+      ...(base.codeController as object),
+      activeView: {
+        ...(base.codeController.activeView as object),
+        thread: {
+          ...(base.codeController.activeView?.thread as object),
+          providerInstanceId: "50000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
+        },
+      },
+    } as never;
+    const codeControllers = createCodeThreadControllers();
+    codeControllers.publish(codeIds.thread as never, boundController);
+    const codeProviderGroups = [
+      {
+        driverLabel: "OpenCode",
+        endpointHost: "local",
+        executionHost: "local",
+        instance: {
+          id: "50000000-0000-4000-8000-000000000001",
+          displayName: "Local OpenCode",
+        },
+        readiness: "ready",
+        appManagedTools: "supported",
+        sections: [{ label: "Models", models: [{ model: { id: "model-a" } }] }],
+      },
+    ] as never;
 
-    render(<WorkspaceView {...base} browserAutomationClient={browserAutomationClient} />);
+    render(
+      <WorkspaceView
+        {...base}
+        browserAutomationClient={browserAutomationClient}
+        codeControllers={codeControllers}
+        codeProviderGroups={codeProviderGroups}
+        providerController={{ observedByInstance: new Map() } as never}
+      />,
+    );
 
     const composer = await screen.findByLabelText("Follow-up message");
     await user.type(composer, "@");

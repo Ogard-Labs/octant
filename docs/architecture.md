@@ -706,7 +706,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   rest of the system sees only normalized runtime events.
 - **Honest capability.** Each driver reports, per mode and per model, whether
   app-managed tools, images, resume, approvals, and subagents are supported.
-  The server disables what is unsupported instead of emulating it. Bounded
+  The server disables what is unsupported instead of emulating it, and a
+  composer reads the same probe before offering an app-managed tool — an
+  incapable provider never shows the offer it would refuse on send. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
   `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
   selected for the host platform fails closed as incompatible.

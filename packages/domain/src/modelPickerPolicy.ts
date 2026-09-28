@@ -3,6 +3,7 @@ import type { ProviderDriverKind } from "@octant/contracts/providers";
 import type { HiddenProviderModelRef, ProviderInstance } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { ProviderModel } from "@octant/contracts/providers";
+import type { ProviderCapabilitySupport } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import type { ProviderReadiness } from "@octant/contracts/providers";
 import {
@@ -210,6 +211,18 @@ export interface PickerGroup {
   readonly endpointHost: string | undefined;
   readonly executionHost: string;
   readonly sections: ReadonlyArray<PickerSection>;
+  /**
+   * Whether the provider can carry Octant-managed tools at all. Absent when
+   * the instance was never probed; a surface that offers an app-managed tool
+   * (like @Browser) reads this so the offer never precedes a refusal.
+   */
+  readonly appManagedTools?: ProviderCapabilitySupport;
+  /**
+   * Models individually verified for Octant-managed tools on a provider that
+   * leaves the flag unset per deployment (Foundry). Same rule the server
+   * applies when a turn ships tools.
+   */
+  readonly verifiedToolModelIds?: ReadonlyArray<ProviderModelId>;
   readonly unavailableCurrent?: PickerModel;
   /**
    * A model hidden in Settings but still bound to an existing draft/thread.
@@ -375,6 +388,10 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       endpointHost: endpointHostOf(instance),
       executionHost: input.hostId ?? localExecutionHost,
       sections,
+      appManagedTools: observed.capabilities.appManagedTools,
+      ...(observed.verifiedToolModelIds === undefined
+        ? {}
+        : { verifiedToolModelIds: observed.verifiedToolModelIds }),
       ...(unavailableCurrent === undefined ? {} : { unavailableCurrent }),
       ...(hiddenCurrent === undefined ? {} : { hiddenCurrent }),
     });
@@ -524,6 +541,10 @@ function maybeAppendUnavailableCurrent(
     endpointHost: endpointHostOf(instance),
     executionHost: input.hostId ?? localExecutionHost,
     sections: [],
+    ...(observed === undefined ? {} : { appManagedTools: observed.capabilities.appManagedTools }),
+    ...(observed?.verifiedToolModelIds === undefined
+      ? {}
+      : { verifiedToolModelIds: observed.verifiedToolModelIds }),
     unavailableCurrent: unavailableCurrentModel(
       input.currentSelection.modelId,
       observed,
@@ -531,6 +552,31 @@ function maybeAppendUnavailableCurrent(
       observed?.verifiedToolModelIds ?? [],
     ),
   });
+}
+
+/**
+ * Can the selected provider and model carry an Octant-managed tool surface
+ * such as the Browser? Mirroring the server's send-time check —
+ * provider-level `supported`, or a per-model verification for providers that
+ * gate tools per deployment — keeps a composer from offering what the turn
+ * would only refuse. An unresolved selection stays permissive: the offer
+ * would otherwise vanish while a draft's default provider is still settling.
+ * A settled selection whose provider is absent — unprobed, disabled, or
+ * unready — is refused instead: the host will not carry its tool.
+ */
+export function pickerGroupCarriesAppManagedTools(
+  groups: ReadonlyArray<PickerGroup>,
+  selection: ModelPickerSelection | undefined,
+): boolean {
+  if (selection === undefined) return true;
+  const group = groups.find(
+    (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
+  );
+  if (group === undefined) return false;
+  return (
+    group.appManagedTools === "supported" ||
+    (group.verifiedToolModelIds?.some((id) => String(id) === String(selection.modelId)) ?? false)
+  );
 }
 
 export function filterModelPickerGroups(

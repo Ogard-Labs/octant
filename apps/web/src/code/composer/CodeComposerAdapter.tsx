@@ -32,6 +32,7 @@ import type {
 } from "@octant/contracts/providers";
 import {
   draftThreadModePresentation,
+  pickerGroupCarriesAppManagedTools,
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
@@ -243,7 +244,17 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
-    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
+    available:
+      props.browserAvailable === true &&
+      pickerGroupCarriesAppManagedTools(
+        props.providerGroups,
+        props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+          ? undefined
+          : {
+              providerInstanceId: props.selectedProviderInstanceId,
+              modelId: props.selectedModelId,
+            },
+      ),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({

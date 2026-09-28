@@ -1209,6 +1209,32 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
+  it("does not offer @Browser in a thread whose provider cannot carry the tool", async () => {
+    const user = userEvent.setup();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const incapable = { ...providerGroup(), appManagedTools: "unsupported" } as never;
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        browserAvailable
+        providerGroups={[incapable]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    // The bound provider is read once the thread has loaded; typing sooner
+    // would race the bootstrap and offer the tool permissively.
+    await screen.findByLabelText("Bound provider and model");
+    await user.type(screen.getByLabelText("Work prompt"), "@b");
+    expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
+  });
+
   it("does not duplicate a turn that settles before the start response arrives", async () => {
     const user = userEvent.setup();
     const settledTurn = workTurn({
