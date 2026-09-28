@@ -4,6 +4,7 @@ import {
   decodeImageGenerationProfilesResponse,
   decodeImageJob,
   decodeProviderInstanceId,
+  IMAGE_LIBRARY_SCOPE_ID,
   type ImageJob,
   type ProviderInstance,
 } from "@octant/contracts";
@@ -134,6 +135,16 @@ describe("image routes", () => {
     const response = await handler(
       request(`/api/image/jobs?threadKind=chat-thread&scopeId=${scopeId}`),
     );
+    const body = decodeImageGenerationJobsResponse(await response!.json());
+    expect(body.jobs[0]?.id).toBe(jobId);
+  });
+
+  it("lists jobs for the host-wide image library surface", async () => {
+    const { handler } = setup();
+    const response = await handler(
+      request(`/api/image/jobs?threadKind=image-library&scopeId=${IMAGE_LIBRARY_SCOPE_ID}`),
+    );
+    expect(response?.status).toBe(200);
     const body = decodeImageGenerationJobsResponse(await response!.json());
     expect(body.jobs[0]?.id).toBe(jobId);
   });
