@@ -437,10 +437,11 @@ describe("AppleToolchainService lifecycle", () => {
     ]);
   });
 
-  it("confines only the test launch to the measured grant set it asks for", async () => {
-    // `xcodebuild test` needs a closed set of host grants and a build launch
-    // needs none of them; widening them to every Apple command would hand the
-    // shared launches capabilities they never use.
+  it("confines only the test session launch to the measured grant set it asks for", async () => {
+    // The test action splits into build-for-testing, which needs no grants,
+    // and test-without-building, which carries the closed set the session
+    // measured. Widening either way would hand an unmeasured launch
+    // capabilities it never asked for.
     const execute = discoveryExecutor();
     execute.mockImplementation(
       async (input: {
@@ -477,7 +478,7 @@ describe("AppleToolchainService lifecycle", () => {
           input.argv.join(" ").startsWith("xcodebuild ") &&
           input.argv.join(" ").split(" ").at(-1) === verb,
       )?.[0];
-    const testLaunch = launchFor("test");
+    const testLaunch = launchFor("test-without-building");
     expect(testLaunch?.literalReadPaths).toEqual([
       expect.stringContaining("Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist"),
     ]);
@@ -487,7 +488,7 @@ describe("AppleToolchainService lifecycle", () => {
       "/private/var/tmp",
     ]);
     expect(testLaunch?.regexReadWritePaths).toEqual([
-      expect.stringContaining("com\\.apple\\.launchd"),
+      "^/private/var/tmp/com\\.apple\\.launchd\\.[^/]+(/.*)?$",
     ]);
     expect(testLaunch?.machLookupNames).toEqual([
       "com.apple.PowerManagement.control",
@@ -498,14 +499,15 @@ describe("AppleToolchainService lifecycle", () => {
     expect(testLaunch?.allowPseudoTty).toBe(true);
     expect(testLaunch?.allowJobCreation).toBe(true);
     expect(testLaunch?.allowSignal).toBe(true);
-    const buildLaunch = launchFor("build");
-    expect(buildLaunch?.literalReadPaths).toBeUndefined();
-    expect(buildLaunch?.literalMetadataPaths).toBeUndefined();
-    expect(buildLaunch?.regexReadWritePaths).toBeUndefined();
-    expect(buildLaunch?.machLookupNames).toBeUndefined();
-    expect(buildLaunch?.allowPseudoTty).toBeUndefined();
-    expect(buildLaunch?.allowJobCreation).toBeUndefined();
-    expect(buildLaunch?.allowSignal).toBeUndefined();
+    for (const ungranted of [launchFor("build-for-testing"), launchFor("build")]) {
+      expect(ungranted?.literalReadPaths).toBeUndefined();
+      expect(ungranted?.literalMetadataPaths).toBeUndefined();
+      expect(ungranted?.regexReadWritePaths).toBeUndefined();
+      expect(ungranted?.machLookupNames).toBeUndefined();
+      expect(ungranted?.allowPseudoTty).toBeUndefined();
+      expect(ungranted?.allowJobCreation).toBeUndefined();
+      expect(ungranted?.allowSignal).toBeUndefined();
+    }
   });
 
   it("maps cancellation, timeout, process death, and cleanup uncertainty distinctly", async () => {

@@ -906,18 +906,42 @@ export class AppleToolchainService {
             signal,
           );
         }
-        terminal =
-          readiness !== undefined && !succeeded(readiness)
-            ? readiness
-            : await this.#command(
-                xcodebuildCommand(request, projectPath, context.artifactRoot, resultBundle),
+        if (request.kind === "test") {
+          // `xcodebuild test` builds and tests in one launch, which would run
+          // the project's Run Script phases under the test session's widened
+          // profile. Splitting the phases confines the granted launch to the
+          // session that measured the need; the build phase needs none of it,
+          // exactly like the `build` action that already runs ungranted.
+          const sharedArguments = xcodebuildArguments(request, projectPath, context.artifactRoot);
+          const buildPhase = await this.#command(
+            [...sharedArguments, "build-for-testing"],
+            context,
+            request.timeoutMs,
+            signal,
+          );
+          terminal = succeeded(buildPhase)
+            ? await this.#command(
+                [...sharedArguments, "-resultBundlePath", resultBundle, "test-without-building"],
                 context,
                 request.timeoutMs,
                 signal,
-                ...(request.kind === "test" ? [appleToolchainTestGrants(homedir())] : []),
-              );
-        if (request.kind === "test") {
+                appleToolchainTestGrants(homedir()),
+              )
+            : buildPhase;
           artifacts = [{ kind: "xcresult", reference: `apple-xcresult-${request.actionId}` }];
+        } else {
+          terminal =
+            readiness !== undefined && !succeeded(readiness)
+              ? readiness
+              : await this.#command(
+                  [
+                    ...xcodebuildArguments(request, projectPath, context.artifactRoot),
+                    request.kind === "clean" ? "clean" : "build",
+                  ],
+                  context,
+                  request.timeoutMs,
+                  signal,
+                );
         }
         if (request.kind === "run" && succeeded(terminal)) {
           const settings = await this.#command(
@@ -1459,13 +1483,12 @@ function boundedStrings(value: unknown, maximum: number): ReadonlyArray<string> 
     : [];
 }
 
-function xcodebuildCommand(
+function xcodebuildArguments(
   request: AppleBuildRequest,
   projectPath: string,
   artifactRoot: string,
-  resultBundle: string,
 ): ReadonlyArray<string> {
-  const argv = [
+  return [
     "xcodebuild",
     projectSelector(request.projectPath),
     projectPath,
@@ -1477,9 +1500,6 @@ function xcodebuildCommand(
     ...destinationArguments(request),
     "CODE_SIGNING_ALLOWED=NO",
   ];
-  if (request.kind === "test") argv.push("-resultBundlePath", resultBundle, "test");
-  else argv.push(request.kind === "clean" ? "clean" : "build");
-  return argv;
 }
 
 function xcodebuildSettingsCommand(

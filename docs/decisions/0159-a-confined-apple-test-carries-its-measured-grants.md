@@ -46,9 +46,13 @@ measured directly.
 
 ## Decision
 
-`xcodebuild test` launches remain confined. The test action, and only the
-test action, carries a closed set of per-launch grants attached through
-`extraRules` — never added to the shared profile default:
+`xcodebuild test` launches remain confined, and the action splits into two
+launches so the grant reaches only the phase that needs it:
+`build-for-testing` runs under the ordinary profile — proven sufficient by
+the `build` action, and it keeps the project's Run Script phases away from
+the widened reach — while `test-without-building` carries a closed set of
+per-launch grants attached through `extraRules`, never added to the shared
+profile default:
 
 - literal `file-read*` on the SDK-to-simulator index plist (0133 class)
 - literal `file-read-metadata` on `/private`, `/private/var`, and
@@ -66,8 +70,8 @@ test action, carries a closed set of per-launch grants attached through
   spawned processes that are neither self nor children of the launch
 
 Each allowance is granted at the weakest measured spelling that unblocks
-the run and is recorded here. Build, run, discovery, and every other Apple
-launch carry none of them.
+the run and is recorded here. Build-for-testing, build, run, discovery, and
+every other Apple launch carry none of them.
 
 ## Consequences
 
