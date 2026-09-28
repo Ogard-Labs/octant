@@ -542,9 +542,7 @@ describe("a turn without a Computer selection", () => {
     const f = fixture();
     try {
       expect(
-        f.service.unattachedToolSet(
-          decodeComputerUseOwner({ ...owner, executionPolicy: "plan" }),
-        ),
+        f.service.unattachedToolSet(decodeComputerUseOwner({ ...owner, executionPolicy: "plan" })),
       ).toBeUndefined();
     } finally {
       await f.service.close();
