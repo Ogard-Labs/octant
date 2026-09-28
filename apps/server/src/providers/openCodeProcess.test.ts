@@ -692,6 +692,9 @@ describe("OpenCodeProcessPort", () => {
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
+          // Seatbelt spellings only exist for Darwin; off it the launch's
+          // loopback rides network egress and carries no extra rules.
+          platform: "darwin",
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
         }).start({
@@ -767,6 +770,7 @@ describe("OpenCodeProcessPort", () => {
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
+          platform: "darwin",
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
           inheritedEnvironment: { ...process.env, HOME: home },

@@ -691,6 +691,9 @@ describe("GitMutationPort", () => {
           return fake.confinement.prepare(input);
         },
       },
+      // The assertions below read Seatbelt spellings; on other backends the
+      // same metadata arrives as binds and `extraRules` is never written.
+      platform: "darwin",
       temporaryDirectory: fake.temporaryDirectory,
       gitExecutable: "/usr/bin/git",
     });
