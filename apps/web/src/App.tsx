@@ -4735,7 +4735,10 @@ function LaunchedShell(
             ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
-            setDraftError("The selected Chat provider and model could not be applied.");
+            setDraftError(
+              chatController.lastExecuteError.current ??
+                "The selected Chat provider and model could not be applied.",
+            );
             return;
           }
           thread = changed.thread;
@@ -4762,7 +4765,10 @@ function LaunchedShell(
           throw outcome.error;
         }
         if (outcome.sent === undefined) {
-          setDraftError("The first message could not be sent. Retry from the open thread.");
+          setDraftError(
+            chatController.lastExecuteError.current ??
+              "The first message could not be sent. Retry from the open thread.",
+          );
         }
       } else if (mode === "code") {
         const destinationHostId = refuseUnlessCreatableDestination({

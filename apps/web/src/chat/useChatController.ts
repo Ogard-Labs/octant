@@ -962,6 +962,9 @@ export function useChatController(options: ChatControllerOptions) {
     snoozeThread,
     wakeThread,
     errorMessage,
+    // Failures on a thread that is not open never reach errorMessage; a
+    // caller acting on a thread it just created reads the reason here.
+    lastExecuteError,
     discard,
     execute,
     markThreadRead,
