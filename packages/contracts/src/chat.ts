@@ -13,6 +13,7 @@ import {
   ProviderProcessDiagnostic,
   ProviderResumeCursor,
   ProviderSessionId,
+  ProviderUsageLimit,
 } from "./providers";
 import { DiagnosticFailureCode } from "./diagnostics";
 import { PreviewContextSelection } from "./previews";
@@ -273,6 +274,13 @@ export const ChatAttempt = Schema.Struct({
    * state why. Absent on a completed, cancelled, or still-running attempt.
    */
   failure: Schema.optional(ChatAttemptFailure),
+  /**
+   * The provider's own usage-limit signal when it stopped this attempt's
+   * turn. Carried on the attempt — not only the failure — because a limited
+   * turn parks as `waiting` without recording a failure, and the surface
+   * still owes the person the provider's reason and reset time.
+   */
+  usageLimit: Schema.optional(ProviderUsageLimit),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })

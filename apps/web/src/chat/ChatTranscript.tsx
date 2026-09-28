@@ -9,6 +9,7 @@ import type {
   ChatTurnRouteDecision,
   ChatAttemptId,
 } from "@octant/contracts/chat";
+import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import type { PickerGroup } from "@octant/domain";
@@ -29,6 +30,7 @@ import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
@@ -144,6 +146,16 @@ const attemptFailureSentences: Record<string, string> = {
   unavailable: "The provider is unavailable.",
   "unknown-spend": "The spend ceiling could not account for this turn's cost.",
   unsupported: "The provider does not support this turn.",
+};
+
+/**
+ * The run-state word an attempt stopped on a usage limit wears instead of
+ * "Waiting" — parked is its outcome, limited is its reason.
+ */
+const usageLimitLabels: Record<ProviderUsageLimit["kind"], string> = {
+  temporary: "Rate limited",
+  exhausted: "Usage exhausted",
+  billing: "Billing problem",
 };
 
 function attemptFailureSentence(attempt: ChatAttempt): string {
@@ -578,7 +590,13 @@ const AttemptBlock = memo(function AttemptBlock(props: {
     responseContents.length === 0 || responseContents.some((content) => content === undefined)
       ? undefined
       : responseContents.map((content) => content!.body).join("");
-  const canRetry = props.attempt.outcome === "failed" || props.attempt.outcome === "interrupted";
+  const usageLimit = props.attempt.usageLimit;
+  // A limited attempt parks as waiting with the provider's fact beside it;
+  // retry is the manual recovery path the notice offers.
+  const canRetry =
+    props.attempt.outcome === "failed" ||
+    props.attempt.outcome === "interrupted" ||
+    (props.attempt.outcome === "waiting" && usageLimit !== undefined);
   // A completed attempt may run again: the person is asking for a different
   // answer to the same prompt. The server decides whether the turn may.
   const canRegenerate = props.attempt.outcome === "completed" && props.onRetryAttempt !== undefined;
@@ -594,7 +612,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
       )}
       <article
-        aria-label={`Assistant response · ${attemptLabels[props.attempt.outcome]}`}
+        aria-label={`Assistant response · ${usageLimit === undefined ? attemptLabels[props.attempt.outcome] : usageLimitLabels[usageLimit.kind]}`}
         className="turn-agent"
       >
         <TurnHeader
@@ -606,6 +624,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           {...(props.attempt.pendingQuestion === undefined
             ? {}
             : { label: "Waiting for your answer" })}
+          {...(usageLimit === undefined ? {} : { label: usageLimitLabels[usageLimit.kind] })}
           {...(props.providerGroups === undefined
             ? {}
             : { provider: providerModelLabel(props.providerGroups, props.attempt) })}
@@ -645,7 +664,18 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             responseBody={responseBody}
           />
         )}
-        <AttemptFailureNotice attempt={props.attempt} />
+        {usageLimit === undefined ? (
+          <AttemptFailureNotice attempt={props.attempt} />
+        ) : (
+          <UsageLimitNotice
+            limit={usageLimit}
+            provider={
+              props.providerGroups === undefined
+                ? "The provider"
+                : providerModelLabel(props.providerGroups, props.attempt)
+            }
+          />
+        )}
         {props.attempt.outcome === "failed" || props.attempt.failure !== undefined ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
@@ -687,7 +717,11 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             type="button"
             variant="secondary"
           >
-            Retry {attemptLabels[props.attempt.outcome].toLowerCase()} response
+            Retry{" "}
+            {usageLimit === undefined
+              ? attemptLabels[props.attempt.outcome].toLowerCase()
+              : "limited"}{" "}
+            response
           </OctantButton>
         ) : null}
       </article>

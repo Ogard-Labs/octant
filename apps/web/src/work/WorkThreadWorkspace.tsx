@@ -96,6 +96,7 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import {
   TurnHeader,
   TurnTime,
@@ -170,24 +171,51 @@ const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
 
 /**
  * The turn header: it opens the turn's first reply, or stands alone when the
- * turn ended without one.
+ * turn ended without one. A turn the provider stopped on its own usage-limit
+ * signal also speaks in the notice beside it — the header's reason line is
+ * the failure's words; the notice is the provider-reported fact about why.
  */
 function WorkTurnHeader(props: {
   readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
+  /** Puts the stopped turn's prompt back in the composer to send again. */
+  readonly onRestorePrompt?: (prompt: string) => void;
 }) {
   const outcome = turnHeaderOutcome(props.turn);
+  const usageLimit = props.turn.failure?.usageLimit;
   const workedFor = turnWorkedFor(outcome, props.turn.acceptedAt, props.turn.updatedAt);
   return (
-    <TurnHeader
-      at={props.turn.updatedAt}
-      copyValue={props.copyValue}
-      outcome={outcome}
-      provider={providerModelLabel(props.providerGroups, props.turn.authority)}
-      {...(workedFor === undefined ? {} : { workedFor })}
-      {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
-    />
+    <>
+      <TurnHeader
+        at={props.turn.updatedAt}
+        copyValue={props.copyValue}
+        outcome={outcome}
+        provider={providerModelLabel(props.providerGroups, props.turn.authority)}
+        {...(workedFor === undefined ? {} : { workedFor })}
+        {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
+      />
+      {usageLimit === undefined ? null : (
+        <UsageLimitNotice
+          limit={usageLimit}
+          provider={providerModelLabel(props.providerGroups, props.turn.authority)}
+          {...(props.onRestorePrompt === undefined
+            ? {}
+            : {
+                action: (
+                  <OctantButton
+                    onClick={() => props.onRestorePrompt?.(props.turn.prompt)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Edit and resend
+                  </OctantButton>
+                ),
+              })}
+        />
+      )}
+    </>
   );
 }
 
@@ -1293,6 +1321,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 {row.head === undefined ? null : (
                   <WorkTurnHeader
                     copyValue={row.entry.text}
+                    onRestorePrompt={composerDraft.setDraft}
                     providerGroups={props.providerGroups ?? []}
                     turn={row.head}
                   />
@@ -1306,7 +1335,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           if (row.kind === "head") {
             return (
               <div className="turn-agent">
-                <WorkTurnHeader providerGroups={props.providerGroups ?? []} turn={row.turn} />
+                <WorkTurnHeader
+                  onRestorePrompt={composerDraft.setDraft}
+                  providerGroups={props.providerGroups ?? []}
+                  turn={row.turn}
+                />
               </div>
             );
           }

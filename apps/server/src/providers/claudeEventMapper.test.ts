@@ -1073,6 +1073,120 @@ describe("mapClaudeMessage", () => {
     expect(ctx.terminal).toBe(true);
   });
 
+  it("carries the rejected window's reset time on the limited failure", () => {
+    const ctx = context();
+    const results = mapped(ctx, {
+      kind: "rate-limit",
+      sessionId: claudeSessionId,
+      status: "rejected",
+      resetsAt: Date.parse(occurredAt) + 120_000,
+      rateLimitType: "five_hour",
+      utilization: 1,
+    });
+
+    expect(results).toMatchObject([
+      { kind: "event", event: { kind: "rate-limit-window" } },
+      {
+        kind: "event",
+        event: {
+          kind: "failed",
+          failure: {
+            category: "rate-limited",
+            usageLimit: {
+              kind: "temporary",
+              resetsAt: new Date(Date.parse(occurredAt) + 120_000).toISOString(),
+            },
+          },
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    {
+      name: "billing error",
+      error: "billing_error",
+      failure: {
+        category: "provider-failed",
+        usageLimit: { kind: "billing" },
+      },
+    },
+    {
+      name: "rate limit error",
+      error: "rate_limit",
+      failure: {
+        category: "rate-limited",
+        usageLimit: { kind: "temporary" },
+      },
+    },
+    {
+      name: "overloaded error",
+      error: "overloaded",
+      failure: {
+        category: "rate-limited",
+        usageLimit: { kind: "temporary" },
+      },
+    },
+  ])("classifies the assistant's own error signal: $name", ({ error, failure }) => {
+    const results = mapped(context(), {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-limited",
+      content: [],
+      usage,
+      error,
+    });
+
+    expect(results).toMatchObject([
+      { kind: "event", event: { kind: "usage" } },
+      { kind: "event", event: { kind: "failed", failure } },
+    ]);
+  });
+
+  it("keeps an unlisted assistant error an honest provider failure", () => {
+    const results = mapped(context(), {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-unknown",
+      content: [],
+      usage,
+      error: "image_error",
+    });
+
+    expect(results).toMatchObject([
+      { kind: "event", event: { kind: "usage" } },
+      { kind: "event", event: { kind: "failed", failure: { category: "provider-failed" } } },
+    ]);
+    expect(results[1]).not.toHaveProperty("event.failure.usageLimit");
+  });
+
+  it.each([
+    { name: "exhausted allowance", terminalReason: "blocking_limit", kind: "exhausted" },
+    { name: "rapid refill breaker", terminalReason: "rapid_refill_breaker", kind: "temporary" },
+  ])("classifies the result's declared limit reason: $name", ({ terminalReason, kind }) => {
+    const results = mapped(context(), {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "error" as const,
+      subtype: "error_during_execution",
+      stopReason: null,
+      terminalReason,
+      usage,
+      permissionDenials: [],
+    });
+
+    expect(results).toMatchObject([
+      { kind: "event", event: { kind: "usage" } },
+      {
+        kind: "event",
+        event: {
+          kind: "failed",
+          failure: { category: "rate-limited", usageLimit: { kind } },
+        },
+      },
+    ]);
+  });
+
   it("reports a usage window that is filling up without failing the turn", () => {
     const ctx = context();
     const resetsAt = Date.parse(occurredAt) + 3_600_000;

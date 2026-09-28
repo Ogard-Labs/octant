@@ -548,6 +548,33 @@ describe("chat turn and attempt policy", () => {
     expect(cancelled.pendingQuestion).toBeUndefined();
   });
 
+  it("carries a usage-limit fact onto the parked attempt and drops it when the turn resumes", () => {
+    const limited = transitionChatAttempt(makeAttempt("streaming"), {
+      outcome: "waiting",
+      updatedAt: later,
+      usageLimit: { kind: "exhausted" },
+    });
+    expect(limited.usageLimit).toEqual({ kind: "exhausted" });
+
+    const resumed = transitionChatAttempt(limited, { outcome: "streaming", updatedAt: later });
+    expect(resumed.usageLimit).toBeUndefined();
+  });
+
+  it("lets a later failure supersede a parked limit fact", () => {
+    const limited = transitionChatAttempt(makeAttempt("streaming"), {
+      outcome: "waiting",
+      updatedAt: later,
+      usageLimit: { kind: "temporary", resetsAt: "2026-07-15T12:00:00.000Z" as UtcTimestamp },
+    });
+    const failed = transitionChatAttempt(limited, {
+      outcome: "failed",
+      updatedAt: later,
+      failure: { code: "protocol" as never },
+    });
+    expect(failed.usageLimit).toBeUndefined();
+    expect(failed.failure).toEqual({ code: "protocol" });
+  });
+
   it("carries a typed failure onto terminal attempts and refuses one on live outcomes", () => {
     const failed = transitionChatAttempt(makeAttempt("streaming"), {
       outcome: "failed",

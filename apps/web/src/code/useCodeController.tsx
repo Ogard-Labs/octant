@@ -34,6 +34,7 @@ import {
   type CodeAttachmentReference,
   type MentionableThreadId,
   type ProviderExecutionPolicy,
+  type ProviderUsageLimit,
   ThreadBoardPullRequestSummaries,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -289,6 +290,10 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const [turnStatus, setTurnStatus] = useState<CodeTurnStatus>("idle");
   const [turnError, setTurnErrorMessage] = useState<string>();
+  // The provider's own usage-limit signal for the turn `turnError` speaks
+  // about. Kept separate so arbitrary failure text can never grow a
+  // countdown; only a contract fact the host journaled can.
+  const [turnUsageLimit, setTurnUsageLimit] = useState<ProviderUsageLimit>();
   /**
    * Whether the current failure already reads in the transcript. A turn the
    * host projected as failed carries its reason in its own assistant row; a
@@ -798,6 +803,9 @@ export function useCodeController(options: CodeControllerOptions) {
         cursor = page.nextCursor;
       }
       const latestTurn = turns.at(-1);
+      // The journal is the only authority a reopen can trust for a limit: a
+      // completed later turn carries none, so this also clears a stale one.
+      setTurnUsageLimit(latestTurn?.failure?.usageLimit);
       const incomplete = latestTurn?.status === "incomplete";
       const waiting = latestTurn?.status === "waiting";
       if (latestTurn !== undefined && (incomplete || waiting)) {
@@ -996,21 +1004,25 @@ export function useCodeController(options: CodeControllerOptions) {
 
                   let terminalState: "completed" | "waiting" | "interrupted" | "failed" | undefined;
                   let terminalMessage: string | undefined;
+                  let terminalUsageLimit: ProviderUsageLimit | undefined;
                   if (event.kind === "operation-state" && event.state !== "running") {
                     terminalState = event.state;
                     terminalMessage = event.failure?.message;
+                    terminalUsageLimit = event.failure?.usageLimit;
                   } else if (
                     event.kind === "operation-result" &&
                     event.result.kind === "provider-turn-state" &&
                     event.result.state !== "running"
                   ) {
                     terminalState = event.result.state;
+                    terminalUsageLimit = event.result.failure?.usageLimit;
                   } else if (
                     event.kind === "operation-result" &&
                     event.result.kind === "operation-failed"
                   ) {
                     terminalState = "failed";
                     terminalMessage = event.result.failure.message;
+                    terminalUsageLimit = event.result.failure.usageLimit;
                   }
 
                   operationCursor = Number(frame.cursor);
@@ -1035,6 +1047,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     // not wait on a read the user has no stake in.
                     void recordSeenActivity(threadId);
                     if (!isActive(request, threadGeneration, mounted)) return;
+                    setTurnUsageLimit(terminalUsageLimit);
                     if (terminalState === "completed") {
                       if (hydrated?.incomplete !== true) {
                         setTurnStatus("idle");
@@ -1314,6 +1327,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ? undefined
         : firstTurnFailures.current.get(String(options.activeThreadId));
     setTurnError(firstTurnFailure?.message);
+    // Activation rehydrates the journal's own fact; nothing carried over from
+    // the thread being left is allowed to speak for this one.
+    setTurnUsageLimit(undefined);
     if (firstTurnFailure !== undefined) {
       setPendingDraft(firstTurnFailure.prompt);
       firstTurnFailures.current.delete(String(options.activeThreadId));
@@ -1577,6 +1593,7 @@ export function useCodeController(options: CodeControllerOptions) {
       lastStartRefusal.current = undefined;
       clearFailure();
       setTurnError(undefined);
+      setTurnUsageLimit(undefined);
       setTurnStatus("sending");
       const failFirstTurn = (message: string) => {
         firstTurnFailures.current.set(String(input.threadId), { prompt, message });
@@ -1597,6 +1614,9 @@ export function useCodeController(options: CodeControllerOptions) {
         const { operationId, started } = await beginProviderTurn({ ...input, prompt });
         if (started.kind === "operation-failed") {
           failFirstTurn(started.failure.message);
+          if (started.failure.usageLimit !== undefined) {
+            setTurnUsageLimit(started.failure.usageLimit);
+          }
           return false;
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
@@ -1930,6 +1950,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
       clearFailure();
       setTurnError(undefined);
+      setTurnUsageLimit(undefined);
       setTurnStatus("sending");
       const sendingThreadId = String(view.thread.id);
       const draftRevisionAtDispatch = composerDraftRef.current.revisionFor(sendingThreadId);
@@ -1984,6 +2005,7 @@ export function useCodeController(options: CodeControllerOptions) {
         if (started.kind === "operation-failed") {
           setTurnStatus("failed");
           setTurnError(started.failure.message);
+          setTurnUsageLimit(started.failure.usageLimit);
           restoreFailedPrompt();
           return false;
         }
@@ -1992,6 +2014,9 @@ export function useCodeController(options: CodeControllerOptions) {
           const refusal =
             started.kind === "provider-turn-state" ? started.failure?.message : undefined;
           setTurnError(refusal ?? "The provider turn could not be started.");
+          if (started.kind === "provider-turn-state") {
+            setTurnUsageLimit(started.failure?.usageLimit);
+          }
           restoreFailedPrompt();
           return false;
         }
@@ -2352,6 +2377,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnError,
     turnErrorInTranscript,
     turnStatus,
+    turnUsageLimit,
     updateSettings,
   };
 }

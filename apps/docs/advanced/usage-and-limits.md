@@ -103,6 +103,23 @@ Normally that is the last completed reading. On a view that has never produced
 a completed reading yet, the last unfinished reading is the fallback that is
 kept, and it is replaced when a scan finishes.
 
+## Turns stopped by a provider limit
+
+When a provider's own protocol signal stops a turn on a usage limit, the
+transcript shows a warning with what happened and — when the provider declared
+one — the reset time as a countdown. Three kinds are distinguished: a temporary
+rate limit, an exhausted allowance, and a billing or credit problem.
+
+Only the provider's declared signal counts: account telemetry alone never turns
+an ordinary failure into a limit stop, so a provider with no such signal keeps
+its ordinary error. When no reset time is reported the notice says so rather
+than estimating, and a billing stop shows no countdown — an account in arrears
+does not free up on a clock.
+
+The notice belongs to the stopped turn alone. Retrying the turn, a successful
+recovery, or a different failure clears it. Recovery is always your explicit
+retry — Octant never resumes a limited turn on its own.
+
 ## Related
 
 - [Context budgets](/advanced/context-budgets)

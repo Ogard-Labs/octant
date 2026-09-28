@@ -578,6 +578,95 @@ describe("ChatTranscript", () => {
     expect(screen.queryByRole("button", { name: /Retry cancelled/i })).not.toBeInTheDocument();
   });
 
+  it("names the limit and counts down to a provider-declared reset on a parked attempt", () => {
+    const parked = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        onRetryAttempt={vi.fn()}
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                {
+                  ...parked,
+                  outcome: "waiting",
+                  usageLimit: {
+                    kind: "temporary",
+                    resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+                  },
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Rate limited")).toBeVisible();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("The provider reached a temporary rate limit.");
+    expect(alert).toHaveTextContent("Resets in 10 min");
+    expect(screen.getByRole("button", { name: "Retry limited response" })).toBeVisible();
+  });
+
+  it("says plainly when the provider gave no reset time", () => {
+    const parked = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                {
+                  ...parked,
+                  outcome: "waiting",
+                  usageLimit: { kind: "exhausted" },
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Usage exhausted")).toBeVisible();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("usage allowance on this account is exhausted");
+    expect(alert).toHaveTextContent("The provider did not say when this clears.");
+    expect(alert).not.toHaveTextContent("Resets");
+  });
+
+  it("explains a billing stop without inventing a countdown", () => {
+    const failed = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                {
+                  ...failed,
+                  outcome: "failed",
+                  failure: { code: "provider-failed" },
+                  usageLimit: { kind: "billing" },
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Billing problem")).toBeVisible();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("billing or credit problem");
+    expect(alert).not.toHaveTextContent("Resets");
+    expect(alert).not.toHaveTextContent("did not say when");
+  });
+
   it("offers regenerate on a completed attempt and routes it through the server", async () => {
     const onRetryAttempt = vi.fn();
     const user = userEvent.setup();

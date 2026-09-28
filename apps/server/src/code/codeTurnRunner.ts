@@ -7,6 +7,7 @@ import {
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
+  type ProviderUsageLimit,
 } from "@octant/contracts";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
@@ -35,6 +36,9 @@ export type CodeTurnOutcome = "completed" | "waiting" | "interrupted" | "failed"
 export interface CodeTurnFailure {
   readonly category: Exclude<CodeTurnOutcome, "completed">;
   readonly message: string;
+  readonly retryAfterMs?: number;
+  /** The provider's usage-limit signal, when stopping this turn was one. */
+  readonly usageLimit?: ProviderUsageLimit;
 }
 
 export interface CodeProviderAcquireInput extends ProviderAcquireInput {
@@ -204,9 +208,13 @@ export class CodeTurnRunner {
           }),
         );
 
-      const fail = (next: Exclude<CodeTurnOutcome, "completed">, message: string) =>
+      const fail = (
+        next: Exclude<CodeTurnOutcome, "completed">,
+        message: string,
+        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
+      ) =>
         Effect.gen(function* () {
-          const failure = codeTurnFailure(next, message);
+          const failure = codeTurnFailure(next, message, limit);
           yield* persistOutcome(next, failure);
           return yield* Effect.fail(failure);
         });
@@ -743,13 +751,18 @@ function failForProvider(
   fail: (
     outcome: Exclude<CodeTurnOutcome, "completed">,
     message: string,
+    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
   ) => Effect.Effect<never, CodeTurnFailure>,
 ): Effect.Effect<never, CodeTurnFailure> {
   if (!isProviderFailure(failure)) return fail("failed", "Provider execution failed.");
-  if (failure.category === "rate-limited") return fail("waiting", failure.message);
+  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs"> = {
+    ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
+    ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+  };
+  if (failure.category === "rate-limited") return fail("waiting", failure.message, limit);
   if (failure.category === "stale-resume") return fail("waiting", failure.message);
   if (failure.category === "interrupted") return fail("interrupted", failure.message);
-  return fail("failed", failure.message);
+  return fail("failed", failure.message, limit);
 }
 
 function isProviderFailure(value: unknown): value is ProviderFailure {
@@ -778,8 +791,14 @@ function isCodeTurnFailure(value: unknown): value is CodeTurnFailure {
 function codeTurnFailure(
   category: Exclude<CodeTurnOutcome, "completed">,
   message: string,
+  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs">,
 ): CodeTurnFailure {
-  return { category, message };
+  return {
+    category,
+    message,
+    ...(limit?.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
+    ...(limit?.retryAfterMs === undefined ? {} : { retryAfterMs: limit.retryAfterMs }),
+  };
 }
 
 function waitForSignal(signal: AbortSignal): Effect.Effect<void> {

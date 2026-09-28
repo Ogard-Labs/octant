@@ -462,6 +462,26 @@ stays off the attempt. App-managed tool and research calls use the turn's own
 deadline; a call that never returns ends the attempt instead of leaving it
 running, and a cancellation is not recorded as that call having failed.
 
+A turn stopped by the provider's own usage-limit signal additionally carries a
+provider-neutral `usageLimit` fact in every mode: `temporary` (a live rate
+window or overload), `exhausted` (the provider says the allowance is spent), or
+`billing` (the provider reports an account/credit problem), plus the
+provider-declared `resetsAt` instant when one exists. Only an explicit protocol
+signal — Codex's `turn.error.codexErrorInfo`, Claude's assistant `error` and
+result `terminalReason`, a rejected rate-limit message — produces the fact;
+message-text matching never does, and account usage telemetry alone does not
+prove this turn stopped. Providers without such a signal keep their ordinary
+honest failure. An unknown reset stays unknown: the notice states the provider
+did not say when the limit clears rather than fabricating a countdown, and a
+billing stop gets no reset line at all. The fact is bound to the single
+affected turn: each later attempt transition, successful recovery, provider or
+account switch, and replacement error clears it. In Chat the fact rides the
+parked `waiting` attempt (which records no failure); in Work it rides the
+turn's `rate-limited` failure category; in Code it rides the journaled turn
+failure and parks the turn as `waiting` so the existing manual retry path —
+never an automatic resume — remains the recovery. Drafts, queued input, and
+completed tool results are untouched.
+
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)

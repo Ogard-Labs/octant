@@ -22,6 +22,7 @@ import {
   MAX_CODE_TURN_EVENT_BYTES,
   type CodeProviderPort,
   type CodeTurnEvent,
+  type CodeTurnFailure,
   type CodeTurnOutcome,
   type CodeTurnRunnerInput,
 } from "./codeTurnRunner";
@@ -990,6 +991,51 @@ describe("CodeTurnRunner", () => {
 
     expect(exit._tag).toBe("Failure");
     expect(outcomes).toEqual([["failed", "Claude runtime binary was not found on this Mac."]]);
+  });
+
+  it("parks a provider-declared usage limit as waiting with the limit fact intact", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "failed",
+            failure: {
+              category: "rate-limited",
+              message: "The provider's usage allowance is exhausted.",
+              retryAfterMs: 300_000,
+              usageLimit: { kind: "exhausted", resetsAt: "2026-08-11T17:00:00.000Z" },
+            },
+          }),
+        ]),
+      ),
+    });
+    const outcomes: Array<readonly [CodeTurnOutcome, CodeTurnFailure | undefined]> = [];
+
+    await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistOutcome: (next, failure) =>
+              Effect.sync(() => {
+                outcomes.push([next, failure]);
+              }),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual([
+      [
+        "waiting",
+        {
+          category: "waiting",
+          message: "The provider's usage allowance is exhausted.",
+          retryAfterMs: 300_000,
+          usageLimit: { kind: "exhausted", resetsAt: "2026-08-11T17:00:00.000Z" },
+        },
+      ],
+    ]);
   });
 
   it("treats the timeout as provider inactivity, not total turn duration", async () => {

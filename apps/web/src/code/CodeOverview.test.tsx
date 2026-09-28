@@ -579,6 +579,7 @@ function controller(): CodeController {
     status: "ready",
     turnError: undefined,
     turnStatus: "idle",
+    turnUsageLimit: undefined,
     updateSettings: vi.fn(),
   };
 }

@@ -8,6 +8,7 @@ import {
   ProviderModelId,
   ProviderSessionId,
   ProviderResumeCursor,
+  ProviderUsageLimit,
 } from "./providers";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -125,8 +126,15 @@ export const WorkTurnFailure = Schema.Struct({
     "interrupted",
     "failed",
     "stale",
+    "rate-limited",
   ),
   message: boundedNonEmptyText(MAX_WORK_TURN_FAILURE_BYTES),
+  /**
+   * The provider's own usage-limit signal, when stopping this turn was one.
+   * Kept beside the message so a "temporary/exhausted/billing" truth survives
+   * the category's coarse vocabulary.
+   */
+  usageLimit: Schema.optional(ProviderUsageLimit),
 }).annotations(strict);
 export type WorkTurnFailure = typeof WorkTurnFailure.Type;
 

@@ -13,6 +13,7 @@ import {
   type CodexRpcId,
   type CodexServerMessage,
   type CodexServerRequest,
+  type CodexTurnReference,
   type RateLimitSnapshot,
   type UnmodeledThreadItem,
 } from "./codexProtocol";
@@ -38,6 +39,12 @@ export interface CodexEventContext {
     readonly previous: CodexUsage;
     readonly turn: CodexUsage;
   };
+  /**
+   * Reset instant of the most recently reported exhausted account window in
+   * this turn. Telemetry alone never classifies a stop — it only supplies the
+   * `resetsAt` timing for a usage-limit failure the turn itself reports.
+   */
+  exhaustedWindowReset?: UtcTimestamp;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -572,38 +579,75 @@ function dynamicTool(
   ];
 }
 
+/**
+ * The classified `codexErrorInfo` values that name a usage-limit stop. A stop
+ * whose signal is absent or unrecognized keeps the honest generic failure.
+ */
+function usageLimitFailure(
+  context: CodexEventContext,
+  codexErrorInfo: string,
+  message: string,
+): ProviderFailure {
+  const limitBase =
+    context.exhaustedWindowReset === undefined ? {} : { resetsAt: context.exhaustedWindowReset };
+  switch (codexErrorInfo) {
+    case "usageLimitExceeded":
+      return {
+        category: "rate-limited",
+        message,
+        usageLimit: { kind: "exhausted", ...limitBase },
+      };
+    case "rateLimitExceeded":
+    case "serverOverloaded":
+      return {
+        category: "rate-limited",
+        message,
+        usageLimit: { kind: "temporary", ...limitBase },
+      };
+    default:
+      return { category: "provider-failed", message };
+  }
+}
+
 function mapTerminal(
   context: CodexEventContext,
-  status: "completed" | "interrupted" | "failed" | "inProgress",
+  turn: CodexTurnReference,
 ): ReadonlyArray<CodexMappedMessage> {
   if (context.terminal) {
     return protocolFailure("Provider emitted more than one terminal event.");
   }
-  if (status === "inProgress") {
+  if (turn.status === "inProgress") {
     return protocolFailure("Provider returned a non-terminal turn completion status.");
   }
   const activeTools = [...context.toolStates.values()].filter(
     ({ lifecycle }) => lifecycle === "active",
   );
-  if (status === "completed" && activeTools.length > 0) {
+  if (turn.status === "completed" && activeTools.length > 0) {
     return protocolFailure("Provider completed the turn while tool items were still active.");
   }
   context.terminal = true;
   activeTools.forEach((tool) => {
     tool.lifecycle = "terminal";
   });
-  if (status === "interrupted") {
+  if (turn.status === "interrupted") {
     return [
       event(context, { kind: "interrupted", message: "Provider execution was interrupted." }),
     ];
   }
-  if (status === "failed") {
-    return [
-      event(context, {
-        kind: "failed",
-        failure: { category: "provider-failed", message: "Provider execution failed." },
-      }),
-    ];
+  if (turn.status === "failed") {
+    const message =
+      turn.error !== undefined && turn.error.message.trim() !== ""
+        ? turn.error.message
+        : "Provider execution failed.";
+    const codexErrorInfo =
+      typeof turn.error?.codexErrorInfo === "string" ? turn.error.codexErrorInfo : undefined;
+    const failure =
+      codexErrorInfo === undefined
+        ? { category: "provider-failed" as const, message }
+        : codexErrorInfo === "unauthorized"
+          ? { category: "unauthenticated" as const, message }
+          : usageLimitFailure(context, codexErrorInfo, message);
+    return [event(context, { kind: "failed", failure })];
   }
   return [
     event(context, {
@@ -629,7 +673,7 @@ function mapNotification(
       if (!matchesCorrelation(context, message.params.threadId, message.params.turn.id)) {
         return correlationFailure();
       }
-      return mapTerminal(context, message.params.turn.status);
+      return mapTerminal(context, message.params.turn);
     case "item/started":
     case "item/completed":
       return mapLifecycle(context, message);
@@ -757,6 +801,9 @@ function rateLimitWindowEvents(
     const utilization = window.usedPercent / 100;
     if (window.usedPercent < 0 || window.usedPercent > 100) continue;
     const resetsAt = resetTimestamp(window.resetsAt ?? undefined);
+    if (utilization >= 1 && resetsAt !== undefined) {
+      context.exhaustedWindowReset = resetsAt;
+    }
     results.push(
       event(context, {
         kind: "rate-limit-window",
