@@ -413,7 +413,13 @@ export function retryChatTurn(
   if (attempt.turnId !== input.turnId || attempt.id !== input.attemptId) {
     reject("retry-not-allowed", "Attempt identity does not match retry input");
   }
-  if (!retryEligibleOutcomes.includes(attempt.outcome)) {
+  // A provider-reported limit parks the attempt as waiting with the retry the
+  // notice offers as its only recovery — a fresh attempt on a new session.
+  // Other waiting causes (a live provider question) remain resumable only.
+  const retryEligible =
+    retryEligibleOutcomes.includes(attempt.outcome) ||
+    (attempt.outcome === "waiting" && attempt.usageLimit !== undefined);
+  if (!retryEligible) {
     reject("retry-not-allowed", `Cannot retry an attempt that is ${attempt.outcome}`);
   }
 

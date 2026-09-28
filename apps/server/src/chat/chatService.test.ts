@@ -211,7 +211,7 @@ function openFixture(options?: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId?: WindowId;
   }) => Promise<ReadonlyArray<import("./chatService").ChatThreadMentionContext>>;
-  readonly turnOutcome?: "completed" | "waiting" | "interrupted";
+  readonly turnOutcome?: "completed" | "waiting" | "interrupted" | "limited";
   readonly providerNativeExecute?: (
     input: import("./research/researchRouter").ResearchExecuteInput,
   ) => Promise<import("./research/researchRouter").ProviderNativeResearchResultSet>;
@@ -493,6 +493,13 @@ function openFixture(options?: {
         if (outcome === "waiting") {
           yield* Queue.offer(queue, { kind: "waiting", sessionId: input.sessionId } as never);
           return;
+        }
+        if (outcome === "limited") {
+          return yield* Effect.fail({
+            category: "rate-limited",
+            message: "The provider's usage window is spent.",
+            usageLimit: { kind: "exhausted" },
+          } as never);
         }
         if (outcome === "interrupted") {
           yield* Queue.offer(queue, {
@@ -4156,6 +4163,52 @@ describe("ChatService", () => {
     expect(fakeDriver.resumeInputs).toHaveLength(1);
     expect(fakeDriver.sentTurns[1]?.sessionId).toBe(attempt.providerSessionId);
     expect(service.read(created.thread.id).turns[0]?.attempts[0]).toEqual(attempt);
+  });
+
+  it("retries an attempt parked on a provider-reported usage limit", async () => {
+    const { service, fakeDriver } = openFixture({ turnOutcome: "limited" });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    expect(attempt.usageLimit).toEqual({ kind: "exhausted" });
+
+    const retried = await service.execute({
+      kind: "retry-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    expect(retried).toMatchObject({ kind: "attempt-updated" });
+    await until(
+      () =>
+        service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting" &&
+        service.read(created.thread.id).turns[0]?.attempts.length === 2,
+      { timeoutMs: 10_000 },
+    );
+    const after = service.read(created.thread.id).turns[0];
+    expect(after?.attempts[1]?.id).not.toBe(attempt.id);
+    expect(after?.attempts[1]?.providerSessionId).not.toBe(attempt.providerSessionId);
+    expect(fakeDriver.sentTurns).toHaveLength(2);
   });
 
   it("refuses to retry an older turn in a provider-owned conversation", async () => {

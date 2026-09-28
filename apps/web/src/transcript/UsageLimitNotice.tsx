@@ -1,5 +1,5 @@
 import { CircleAlert } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimit } from "@octant/contracts";
 import { resetCountdownLabel } from "../lib/relativeTime";
 
@@ -41,7 +41,18 @@ export function UsageLimitNotice(props: {
   /** The existing manual retry affordance for the mode; no auto-retry. */
   readonly action?: ReactNode;
 }) {
-  const reset = usageLimitResetLine(props.limit, Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  // A named reset time becomes a countdown that must keep moving while the
+  // notice sits parked; without one the line is static and the tick never
+  // needs to run.
+  const countdown =
+    props.limit.kind !== "billing" && props.limit.resetsAt !== undefined ? true : false;
+  useEffect(() => {
+    if (!countdown) return;
+    const tick = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(tick);
+  }, [countdown]);
+  const reset = usageLimitResetLine(props.limit, now);
   return (
     <div className="callout callout-warn" role="alert">
       <CircleAlert aria-hidden="true" size={16} />

@@ -91,6 +91,7 @@ function makeAttempt(
   options: {
     readonly resumeCursor?: ChatAttempt["resumeCursor"];
     readonly pendingQuestion?: ChatAttempt["pendingQuestion"];
+    readonly usageLimit?: ChatAttempt["usageLimit"];
   } = {},
 ): ChatAttempt {
   return decodeChatAttempt({
@@ -106,6 +107,7 @@ function makeAttempt(
     citationIds: [],
     ...(options.resumeCursor === undefined ? {} : { resumeCursor: options.resumeCursor }),
     ...(options.pendingQuestion === undefined ? {} : { pendingQuestion: options.pendingQuestion }),
+    ...(options.usageLimit === undefined ? {} : { usageLimit: options.usageLimit }),
     createdAt: now,
     updatedAt: now,
   });
@@ -402,6 +404,26 @@ describe("chat turn and attempt policy", () => {
       expect(retried.citationIds).toEqual([]);
       expect(retried.usage).toBeUndefined();
     }
+  });
+
+  it("allows retry for a waiting attempt parked on a provider-reported limit", () => {
+    const thread = makeThread();
+    const retryInput = {
+      turnId: ids.turn,
+      attemptId: ids.attempt,
+      newAttemptId: ids.newAttempt,
+      newProviderSessionId: ids.newSession,
+      newContextManifestId: ids.newContext,
+      expectedVersion: 1 as AggregateVersion,
+      createdAt: now,
+    };
+
+    const parked = makeAttempt("waiting", { usageLimit: { kind: "exhausted" } });
+    const retried = retryChatTurn(thread, parked, retryInput);
+    expect(retried.outcome).toBe("queued");
+    expect(retried.id).toBe(ids.newAttempt);
+    expect(retried.providerSessionId).toBe(ids.newSession);
+    expect(retried.usageLimit).toBeUndefined();
   });
 
   it("keeps the newest completed attempt as the answer a turn carries onward", () => {
