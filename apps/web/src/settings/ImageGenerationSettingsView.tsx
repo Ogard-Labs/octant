@@ -183,59 +183,68 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
       isImageProfileDriverKind(instance.driverKind) || instance.driverKind === "openai-compatible",
   );
   return (
-    <ProviderSettingsList
-      busy={controller.busy}
-      createForm={<ImageProviderCreateForm controller={controller} />}
-      credentialManagementAvailable={controller.credentialManagementAvailable}
-      defaults={controller.defaults}
-      discoverySnapshot={undefined}
-      heading="Image providers"
-      instances={imageInstances}
-      note="Connect, configure, and choose models for dedicated image APIs or custom endpoints."
-      observedByInstance={controller.observedByInstance}
-      onAgentEligibleModelsChange={controller.updateAgentEligibleModels}
-      onBeginProviderAuthentication={controller.beginProviderAuthentication}
-      onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
-      onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
-      onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
-      onChangeBinary={controller.changeBinary}
-      onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
-      onChangeClineConfiguration={controller.changeClineConfiguration}
-      onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
-      onChangeDevinConfiguration={controller.changeDevinConfiguration}
-      onChangeGeminiConfiguration={controller.changeGeminiConfiguration}
-      onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
-      onChangeGlmConfiguration={controller.changeGlmConfiguration}
-      onChangeGooseConfiguration={controller.changeGooseConfiguration}
-      onChangeGrokConfiguration={controller.changeGrokConfiguration}
-      onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
-      onChangeKiloConfiguration={controller.changeKiloConfiguration}
-      onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
-      onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
-      onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
-      onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
-      onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
-      onChangePiConfiguration={controller.changePiConfiguration}
-      onChangeQwenConfiguration={controller.changeQwenConfiguration}
-      onChangeFxConfiguration={controller.changeFxConfiguration}
-      onClearProviderCredential={controller.clearProviderCredential}
-      onCompleteProviderAuthentication={controller.completeProviderAuthentication}
-      onHiddenModelsChange={controller.updateHiddenModels}
-      onProbe={controller.probe}
-      onProviderCredentialStatus={controller.providerCredentialStatus}
-      onProviderOrderChange={controller.updateProviderOrder}
-      onRemove={controller.remove}
-      onRename={controller.rename}
-      onSetEnabled={controller.setEnabled}
-      onDataTagsChange={controller.setDataTags}
-      onModelDataTagsChange={controller.setModelDataTags}
-      onVerifyFoundryTools={controller.verifyFoundryTools}
-      presentationObservedByInstance={controller.presentationObservedByInstance}
-      probingIds={controller.probingIds}
-      showAgentEligibleModels={false}
-      showReorder={false}
-      status={controller.status}
-    />
+    <div className="provider-settings">
+      <div aria-live="polite" className="provider-settings__message-slot">
+        {controller.message === undefined ? null : (
+          <p className="provider-settings__alert" role="alert">
+            {controller.message}
+          </p>
+        )}
+      </div>
+      <ProviderSettingsList
+        busy={controller.busy}
+        createForm={<ImageProviderCreateForm controller={controller} />}
+        credentialManagementAvailable={controller.credentialManagementAvailable}
+        defaults={controller.defaults}
+        discoverySnapshot={undefined}
+        heading="Image providers"
+        instances={imageInstances}
+        note="Connect, configure, and choose models for dedicated image APIs or custom endpoints."
+        observedByInstance={controller.observedByInstance}
+        onAgentEligibleModelsChange={controller.updateAgentEligibleModels}
+        onBeginProviderAuthentication={controller.beginProviderAuthentication}
+        onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
+        onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
+        onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
+        onChangeBinary={controller.changeBinary}
+        onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
+        onChangeClineConfiguration={controller.changeClineConfiguration}
+        onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
+        onChangeDevinConfiguration={controller.changeDevinConfiguration}
+        onChangeGeminiConfiguration={controller.changeGeminiConfiguration}
+        onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
+        onChangeGlmConfiguration={controller.changeGlmConfiguration}
+        onChangeGooseConfiguration={controller.changeGooseConfiguration}
+        onChangeGrokConfiguration={controller.changeGrokConfiguration}
+        onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
+        onChangeKiloConfiguration={controller.changeKiloConfiguration}
+        onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
+        onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
+        onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
+        onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
+        onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
+        onChangePiConfiguration={controller.changePiConfiguration}
+        onChangeQwenConfiguration={controller.changeQwenConfiguration}
+        onChangeFxConfiguration={controller.changeFxConfiguration}
+        onClearProviderCredential={controller.clearProviderCredential}
+        onCompleteProviderAuthentication={controller.completeProviderAuthentication}
+        onHiddenModelsChange={controller.updateHiddenModels}
+        onProbe={controller.probe}
+        onProviderCredentialStatus={controller.providerCredentialStatus}
+        onProviderOrderChange={controller.updateProviderOrder}
+        onRemove={controller.remove}
+        onRename={controller.rename}
+        onSetEnabled={controller.setEnabled}
+        onDataTagsChange={controller.setDataTags}
+        onModelDataTagsChange={controller.setModelDataTags}
+        onVerifyFoundryTools={controller.verifyFoundryTools}
+        presentationObservedByInstance={controller.presentationObservedByInstance}
+        probingIds={controller.probingIds}
+        showAgentEligibleModels={false}
+        showReorder={false}
+        status={controller.status}
+      />
+    </div>
   );
 }
 
