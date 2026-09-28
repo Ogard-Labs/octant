@@ -1497,6 +1497,23 @@ describe("Kimi Code provider-owned profile", () => {
       expect(launch.args[1]).not.toContain(`(allow file-write* (subpath "${root}"))`);
       expect(launch.args[1]).not.toContain("(allow process-fork)");
     }
+
+    // Work keeps the bound root writable — approval-gated fs/* writes go
+    // through the client — but its declared shell is "denied", and an
+    // in-process provider shell emits no permission request to refuse.
+    const work = await Effect.runPromise(
+      prepared.prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root,
+        managedHome: join(root, "managed-work-approval-gated"),
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: {},
+      }),
+    );
+    expect(work.args[1]).not.toContain("(allow process-fork)");
+    expect(work.args[1]).not.toContain("(allow process-exec)");
   });
 
   it("allows the owned ACP tool bridge port and provider endpoints on a Work turn", async () => {

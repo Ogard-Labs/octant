@@ -637,8 +637,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [piHome],
               allowFileReadStar: true,
-              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
-              allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              // Work declares shell "denied"; an in-process provider shell
+              // emits no permission request, so the jail itself must refuse
+              // to spawn it.
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode !== "code"),
+              allowProcessFork: !(input.executionPolicy === "plan" || input.mode !== "code"),
               ...(input.environment?.PATH === undefined
                 ? {}
                 : { interpreterSearchPath: input.environment.PATH }),

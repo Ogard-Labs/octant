@@ -492,8 +492,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               temporaryDirectory,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
-              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
-              allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              // Work declares shell "denied": ACP terminal/* refusals only
+              // cover providers that route shell through the protocol, so an
+              // in-process shell would otherwise still exec inside the jail.
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode !== "code"),
+              allowProcessFork: !(input.executionPolicy === "plan" || input.mode !== "code"),
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: denyPaths,
               additionalDenyWritePaths: denyPaths,

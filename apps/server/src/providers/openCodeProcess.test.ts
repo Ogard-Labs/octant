@@ -710,6 +710,10 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(rules.some((rule) => rule.includes("network-inbound"))).toBe(true);
     expect(rules).toContain('(allow network-outbound (remote ip "localhost:41234"))');
+    // Work declares shell "denied": the provider process itself must not be
+    // able to exec, or an in-process shell would bypass the refused tools.
+    expect(captured?.allowProcessExec).toBe(false);
+    expect(captured?.allowProcessFork).toBe(false);
   });
 
   // OpenCode 2 resolves each bundled coding tool's home directory while it

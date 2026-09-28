@@ -480,6 +480,28 @@ describe("Pi process boundary", () => {
     expect(chatLaunch.args[1]).not.toContain("(allow process-fork)");
     expect(chatLaunch.args[1]).not.toContain("(allow process-exec)");
     expect(chatLaunch.args[1]).not.toContain(`(allow file-write* (subpath "${chat.root}"))`);
+
+    const work = fixture();
+    const workLaunch = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "darwin",
+        sandboxPath: work.sandbox,
+        temporaryDirectory: work.base,
+      }).prepare({
+        binaryPath: work.binary,
+        root: work.root,
+        piHome: work.home,
+        sessionDirectory: join(work.home, "sessions"),
+        sessionId: "work-1",
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, work.home),
+      }),
+    );
+    // Work declares shell "denied", but a provider's in-process shell emits
+    // no protocol request to refuse — only the jail's exec deny holds it.
+    expect(workLaunch.args[1]).not.toContain("(allow process-fork)");
+    expect(workLaunch.args[1]).not.toContain("(allow process-exec)");
   });
 
   it("fails closed for non-macOS bounded modes and pre-existing provider-owned targets", async () => {
