@@ -25,6 +25,7 @@ import {
   ACCESS_POSTURE_RANK,
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
+  pickerGroupCarriesAppManagedTools,
   type PickerGroup,
 } from "@octant/domain";
 import { CircleAlert, CirclePause, X } from "lucide-react";
@@ -300,7 +301,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next);
     },
     scopeKey: String(props.threadId),
-    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
+    available:
+      props.browserAvailable === true &&
+      pickerGroupCarriesAppManagedTools(
+        props.providerGroups ?? [],
+        view === undefined
+          ? undefined
+          : {
+              providerInstanceId: view.thread.providerInstanceId,
+              modelId: view.thread.modelId,
+            },
+      ),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;

@@ -17,6 +17,7 @@ import {
   modelBadges,
   modelCatalog,
   pickerCatalogs,
+  pickerGroupCarriesAppManagedTools,
   type ModelPickerInput,
 } from "./modelPickerPolicy";
 import { isDraftSelectionSelectable, resolveDraftProviderSelection } from "./modelPickerPolicy";
@@ -691,6 +692,95 @@ describe("model picker policy", () => {
         input({ instances: [ready, unauth], observedByInstance }),
       );
       expect(groups.map((g) => g.instance.displayName)).toEqual(["Ready"]);
+    });
+  });
+
+  describe("pickerGroupCarriesAppManagedTools", () => {
+    it("stays permissive while a draft has no settled provider", () => {
+      expect(pickerGroupCarriesAppManagedTools([], undefined)).toBe(true);
+      expect(
+        pickerGroupCarriesAppManagedTools([], {
+          providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
+          modelId: decodeProviderModelId("m"),
+        }),
+      ).toBe(true);
+    });
+
+    it("reads the probe's tool support so an incapable provider is never offered a tool", () => {
+      const capable = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000101",
+        displayName: "Capable",
+      });
+      const incapable = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000102",
+        displayName: "Incapable",
+      });
+      const observedByInstance = new Map([
+        [capable.id, observed(capable.id, [model({ id: "m", displayName: "M" })])],
+        [
+          incapable.id,
+          observed(incapable.id, [model({ id: "m", displayName: "M" })], {
+            capabilities: {
+              ...observed(incapable.id, []).capabilities,
+              appManagedTools: "unsupported",
+            },
+          }),
+        ],
+      ]);
+      const groups = buildModelPickerGroups(
+        input({ instances: [capable, incapable], observedByInstance }),
+      );
+      expect(groups.find((g) => g.instance.id === incapable.id)?.appManagedTools).toBe(
+        "unsupported",
+      );
+      expect(
+        pickerGroupCarriesAppManagedTools(groups, {
+          providerInstanceId: incapable.id,
+          modelId: decodeProviderModelId("m"),
+        }),
+      ).toBe(false);
+      expect(
+        pickerGroupCarriesAppManagedTools(groups, {
+          providerInstanceId: capable.id,
+          modelId: decodeProviderModelId("m"),
+        }),
+      ).toBe(true);
+    });
+
+    it("lets a per-model verification carry the tool when the provider reports none", () => {
+      const foundry = foundryInstance("00000000-0000-4000-8000-000000000103", "Foundry");
+      const observedByInstance = new Map([
+        [
+          foundry.id,
+          observed(
+            foundry.id,
+            [
+              model({ id: "deployment-a", displayName: "A" }),
+              model({ id: "deployment-b", displayName: "B" }),
+            ],
+            {
+              capabilities: {
+                ...observed(foundry.id, []).capabilities,
+                appManagedTools: "unsupported",
+              },
+              verifiedToolModelIds: [decodeProviderModelId("deployment-a")],
+            },
+          ),
+        ],
+      ]);
+      const groups = buildModelPickerGroups(input({ instances: [foundry], observedByInstance }));
+      expect(
+        pickerGroupCarriesAppManagedTools(groups, {
+          providerInstanceId: foundry.id,
+          modelId: decodeProviderModelId("deployment-a"),
+        }),
+      ).toBe(true);
+      expect(
+        pickerGroupCarriesAppManagedTools(groups, {
+          providerInstanceId: foundry.id,
+          modelId: decodeProviderModelId("deployment-b"),
+        }),
+      ).toBe(false);
     });
   });
 

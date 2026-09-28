@@ -26,7 +26,7 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
-import type { PickerGroup } from "@octant/domain";
+import { pickerGroupCarriesAppManagedTools, type PickerGroup } from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -376,7 +376,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     scopeKey: String(props.threadId),
-    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
+    available:
+      props.browserAvailable === true &&
+      pickerGroupCarriesAppManagedTools(
+        props.providerGroups ?? [],
+        thread === undefined
+          ? undefined
+          : { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
+      ),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
