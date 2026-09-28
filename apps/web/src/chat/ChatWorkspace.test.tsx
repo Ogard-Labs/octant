@@ -544,39 +544,36 @@ describe("ChatWorkspace", () => {
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
 
-  it("offers @Browser only when the open thread's provider can carry the tool", async () => {
+  it("does not offer @Browser in the composer even when the thread's provider can carry the tool", async () => {
     const user = userEvent.setup();
-    const group = (appManagedTools: "supported" | "unsupported") =>
-      ({
-        driverLabel: "OpenCode",
-        endpointHost: "local",
-        executionHost: "local",
-        instance: { id: providerId, displayName: "Local OpenCode" },
-        readiness: "ready",
-        appManagedTools,
-        sections: [{ label: "Models", models: [{ model: { id: "model-a", displayName: "M" } }] }],
-      }) as never;
     const browserAutomationClient = { listApprovals: vi.fn(async () => []) };
-    function Harness({ appManagedTools }: { appManagedTools: "supported" | "unsupported" }) {
+    function Harness() {
       const [draft, setDraft] = useState("");
       return (
         <ChatWorkspace
           browserAutomationClient={browserAutomationClient as never}
           controller={controllerFixture({ pendingDraft: draft, setPendingDraft: setDraft })}
-          providerGroups={[group(appManagedTools)]}
+          providerGroups={[
+            {
+              driverLabel: "OpenCode",
+              endpointHost: "local",
+              executionHost: "local",
+              instance: { id: providerId, displayName: "Local OpenCode" },
+              readiness: "ready",
+              appManagedTools: "supported",
+              sections: [
+                { label: "Models", models: [{ model: { id: "model-a", displayName: "M" } }] },
+              ],
+            } as never,
+          ]}
           providerSnapshot={providerSnapshot()}
         />
       );
     }
-    const rendered = render(<Harness appManagedTools="unsupported" />);
+    render(<Harness />);
 
     await user.type(screen.getByLabelText("Message"), "@b");
     expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
-
-    rendered.unmount();
-    render(<Harness appManagedTools="supported" />);
-    await user.type(screen.getByLabelText("Message"), "@b");
-    expect(await screen.findByRole("option", { name: /Browser/ })).toBeInTheDocument();
   });
 
   it("sends a message written while a turn is running once that turn completes", async () => {
