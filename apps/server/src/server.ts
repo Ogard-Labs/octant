@@ -349,6 +349,7 @@ import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoute
 import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunControlAdmission";
+import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
 import {
   createAgentRunChildWorktreePort,
   deriveAgentRunChildWorktreeThreadId,
@@ -732,7 +733,7 @@ import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
 import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
-import { combineAppManagedToolSets } from "./providers/appManagedToolSet";
+import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
 import {
   isPrivateListenerFailureCode,
@@ -2133,6 +2134,47 @@ export function startOctantServer(
       },
       uuid: randomUUID,
     };
+    // Every turn's `octant_agents` tool set binds to the calling thread: the
+    // delegation and the cancellation authority it petitions are the same ones
+    // the Agents dock uses, so a tool call and a click are the same request.
+    const agentsManagedToolsFor = (input: {
+      readonly windowId: string;
+      readonly parentThreadId: string;
+      readonly mode: OctantMode;
+    }): AppManagedToolSet =>
+      createAgentsManagedTools({
+        admission: agentRunAdmission,
+        orchestration: agentRunOrchestration,
+        persistence: agentRunPersistence,
+        mode: input.mode,
+        windowId: input.windowId,
+        parentThreadId: input.parentThreadId,
+        listTargets: () =>
+          persistence.readProviderInstances().flatMap((instance) => {
+            if (!instance.enabled) return [];
+            const observed = providerRuntimeRegistry.observedState(instance.id);
+            if (observed?.readiness !== "ready") return [];
+            return [
+              {
+                providerInstanceId: String(instance.id),
+                displayName: instance.displayName,
+                driverKind: String(instance.driverKind),
+                modelIds: observed.models.map((model) => String(model.id)),
+              },
+            ];
+          }),
+        isTainted: () =>
+          readThreadExternalContentTaint(persistence.connection, input.parentThreadId)
+            .externalContentIngested,
+        authorizeCancel: (run) =>
+          authorizeAgentRunCancellation({
+            persistence,
+            workThreadProjection,
+            run,
+            windowId: input.windowId,
+          }),
+        uuid: randomUUID,
+      });
     const agentRunRouteDependencies: AgentRunRouteDependencies = {
       windowAuthorityStore,
       persistence: agentRunPersistence,
@@ -4076,6 +4118,12 @@ export function startOctantServer(
             return undefined;
           }
         },
+        agents: (input) =>
+          agentsManagedToolsFor({
+            windowId: String(input.windowId),
+            parentThreadId: String(input.thread.id),
+            mode: "code",
+          }),
         nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
@@ -5505,6 +5553,11 @@ export function startOctantServer(
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             }),
+            agentsManagedToolsFor({
+              windowId,
+              parentThreadId: String(thread.id),
+              mode: "chat",
+            }),
           ),
           threadId: thread.id,
           recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
@@ -5904,6 +5957,13 @@ export function startOctantServer(
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        const agentsTools = !browserSupported
+          ? undefined
+          : agentsManagedToolsFor({
+              windowId: input.windowId,
+              parentThreadId: String(input.thread.id),
+              mode: "work",
+            });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -5922,10 +5982,11 @@ export function startOctantServer(
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
+          agentsTools === undefined &&
           computer === undefined
         )
           return undefined;
-        return combineAppManagedToolSets(native, browser, computer, sideTaskTools);
+        return combineAppManagedToolSets(native, browser, computer, sideTaskTools, agentsTools);
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),

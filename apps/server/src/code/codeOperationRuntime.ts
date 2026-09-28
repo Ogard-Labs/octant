@@ -298,6 +298,14 @@ export interface CodeOperationRuntimeOptions {
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
   /**
+   * The agent-run tool set for this thread: the model petitions the server's
+   * own run admission for a child run, scoped to this thread as the parent.
+   */
+  readonly agents?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
+  /**
    * The native harness tool set for a direct-endpoint provider: reads, edits,
    * the sandboxed shell, and the harness's own reads, each authorized at the
    * server choke point. Absent for providers that bring their own tools.
@@ -1914,6 +1922,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
         this.#options.agentMessages?.({ thread: active.thread }),
         this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.checkoutRoot,
