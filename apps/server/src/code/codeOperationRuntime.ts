@@ -1507,9 +1507,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart(
         "This task's provider session belongs to a different provider, model, or checkout. Restore that selection or start a new task.",
       );
+    // A recorded session without a resume cursor wedges the thread rather than
+    // silently discarding the conversation the provider still holds. A prior
+    // turn that never reached its session (a send refused before acquisition,
+    // or one cut off before `provider-session-ready`) left nothing to discard,
+    // so the follow-up falls through to a fresh start.
     if (
       priorTurn &&
-      (previous?.kind !== "provider-session-ready" || previous.resumeCursor === undefined)
+      previous?.kind === "provider-session-ready" &&
+      previous.resumeCursor === undefined
     ) {
       return failStart(
         "This task has no resumable provider session. Start a new task; Octant will not silently discard its conversation.",
