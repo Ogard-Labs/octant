@@ -1325,6 +1325,26 @@ describe("mapCodexMessage", () => {
     expect(ctx.terminal).toBe(true);
   });
 
+  it("maps a failed turn whose reason the app-server reported as null", () => {
+    const ctx = context();
+    const result = map(
+      ctx,
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "failed", error: null },
+      }),
+    );
+    expect(result).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "failed",
+          failure: { category: "provider-failed", message: "Provider execution failed." },
+        },
+      },
+    ]);
+  });
+
   it("keeps accepted partial output followed by failure terminal as failed", () => {
     const ctx = context();
     const partial = map(

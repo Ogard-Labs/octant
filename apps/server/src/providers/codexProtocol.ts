@@ -96,7 +96,9 @@ const TurnError = Schema.Struct({
 const TurnReference = Schema.Struct({
   id: Schema.String,
   status: TurnStatus,
-  error: Schema.optional(TurnError),
+  // The app-server reports `error: null` on every healthy turn, not a
+  // missing field.
+  error: Schema.optional(Schema.NullOr(TurnError)),
 });
 export type CodexTurnReference = typeof TurnReference.Type;
 

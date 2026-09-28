@@ -547,6 +547,28 @@ describe("Codex stable 0.144.4 protocol", () => {
     },
   );
 
+  it("accepts the null error the app-server reports on every turn", () => {
+    expect(decodeTurnStartResult({ turn: { ...turn, error: null } })).toEqual({
+      turn: { id: "turn-1", status: "inProgress", error: null },
+    });
+    expect(
+      decodeCodexServerMessage({
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed", error: null },
+        },
+      }),
+    ).toEqual({
+      kind: "notification",
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+  });
+
   it("decodes only the three stable approval requests", () => {
     const requests = [
       {

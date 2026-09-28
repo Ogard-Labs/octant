@@ -635,12 +635,13 @@ function mapTerminal(
     ];
   }
   if (turn.status === "failed") {
+    const turnError = turn.error ?? undefined;
     const message =
-      turn.error !== undefined && turn.error.message.trim() !== ""
-        ? turn.error.message
+      turnError !== undefined && turnError.message.trim() !== ""
+        ? turnError.message
         : "Provider execution failed.";
     const codexErrorInfo =
-      typeof turn.error?.codexErrorInfo === "string" ? turn.error.codexErrorInfo : undefined;
+      typeof turnError?.codexErrorInfo === "string" ? turnError.codexErrorInfo : undefined;
     const failure =
       codexErrorInfo === undefined
         ? { category: "provider-failed" as const, message }
