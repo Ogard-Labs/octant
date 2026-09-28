@@ -4321,6 +4321,7 @@ export class ChatService {
     const persistAttempt = async (
       attempt: ChatAttempt,
       terminalFailure?: ProviderFailure | ChatFailure,
+      providerOriginated = false,
     ) => {
       const version = readAggregateVersion(
         this.#persistence.connection,
@@ -4342,7 +4343,11 @@ export class ChatService {
                 ? undefined
                 : { correlationId: decodeCorrelationId(attempt.id) },
             ),
-            ...(terminalFailure === undefined
+            // Only failures the provider itself reported earn a provider-domain
+            // incident: a refusal thrown before acquisition is a host capability
+            // rejection, and attributing it to the provider corrupts support
+            // exports.
+            ...(terminalFailure === undefined || !providerOriginated
               ? []
               : [
                   createDiagnosticsFailureIncidentEvent(
@@ -4449,7 +4454,7 @@ export class ChatService {
               }),
             persistProviderFailure: (attempt, failure) =>
               Effect.tryPromise({
-                try: () => persistAttempt(attempt, failure),
+                try: () => persistAttempt(attempt, failure, true),
                 catch: () =>
                   decodeChatFailure({
                     category: "unavailable",
@@ -4539,25 +4544,24 @@ export class ChatService {
         currentAttempt.outcome !== "interrupted" &&
         currentAttempt.outcome !== "waiting"
       ) {
+        // A thrown refusal leaves no pending question to wait on. Persisting
+        // `waiting` here would park an attempt that cannot resume (it has no
+        // session cursor) and cannot retry (the command rejects waiting
+        // attempts), so the attempt settles as interrupted and keeps the
+        // refusal category as its failure code.
         const outcome: ChatAttemptOutcome =
-          refusal === undefined
+          refusal === undefined ||
+          refusal.category === "waiting" ||
+          refusal.category === "interrupted"
             ? "interrupted"
-            : refusal.category === "waiting"
-              ? "waiting"
-              : refusal.category === "interrupted"
-                ? "interrupted"
-                : "failed";
+            : "failed";
         await persistAttempt(
           transitionChatAttempt(currentAttempt, {
             outcome,
             updatedAt: decodeTimestamp(this.#clock()),
-            ...(outcome === "waiting"
-              ? {}
-              : {
-                  failure: {
-                    code: decodeDiagnosticFailureCode(refusal?.category ?? "incomplete"),
-                  },
-                }),
+            failure: {
+              code: decodeDiagnosticFailureCode(refusal?.category ?? "incomplete"),
+            },
           }),
           refusal,
         );

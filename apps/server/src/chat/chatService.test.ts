@@ -2754,7 +2754,7 @@ describe("ChatService", () => {
       }
       return { selections: input.selections, entries: [] };
     });
-    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const { service, fakeDriver, persistence } = openFixture({ resolveExtensionSelectionContext });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -2780,6 +2780,57 @@ describe("ChatService", () => {
     const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
     expect(attempt?.outcome).toBe("failed");
     expect(attempt?.failure).toEqual({ code: "unavailable" });
+    // A refusal thrown before provider acquisition is a host rejection, not a
+    // provider incident: support exports must not attribute it to the provider.
+    expect(
+      readDiagnosticsFailureIncident(
+        persistence.connection,
+        service.read(created.thread.id).turns[0]!.attempts[0]!.id,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("settles a thrown waiting refusal as interrupted so the attempt can be retried", async () => {
+    const extensionSelection = {
+      kind: "plugin" as const,
+      extensionId: "30000000-0000-4000-8000-000000000002" as never,
+      packageId: "31000000-0000-4000-8000-000000000002" as never,
+      componentId: "instructions" as never,
+      packageVersion: "1.2.3" as never,
+      packageDigest: `sha256:${"b".repeat(64)}` as never,
+      catalogEpoch: `sha256:${"d".repeat(64)}` as never,
+      origin: { kind: "draft" as const, reference: "draft-handoff" },
+    };
+    const resolveExtensionSelectionContext = vi.fn(async (input) => {
+      if (input.phase === "provider-handoff") {
+        throw new ChatServiceError({
+          category: "waiting",
+          message: "Selected extension is still preparing.",
+        });
+      }
+      return { selections: input.selections, entries: [] };
+    });
+    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Waiting handoff refusal",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Wait for the extension",
+      extensionSelections: [extensionSelection],
+    });
+
+    expect(sent.kind).toBe("turn-created");
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.outcome).toBe("interrupted");
+    expect(attempt?.failure).toEqual({ code: "waiting" });
   });
 
   it("reattaches an interrupted provider session via ProviderConnection.resume with the exact persisted resume cursor and becomes Waiting without sending", async () => {
