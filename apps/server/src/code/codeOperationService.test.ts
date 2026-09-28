@@ -2312,6 +2312,121 @@ describe("CodeOperationService terminal readers", () => {
     expect(outputCursorsFor(events, String(abandoned[3]))).toEqual([1]);
   });
 
+  it("reports a shell that was never started as unavailable rather than journaling a failure", async () => {
+    const { events, service } = readerFixture();
+    const result = await service.execute(ids.window, {
+      kind: "attach-terminal",
+      operationId: ids.operation,
+      ...scope,
+    });
+    // First open probes with an attach before starting; the answer is a state
+    // the surface can act on, not an operation-failed row on the journal.
+    expect(result).toMatchObject({ kind: "terminal-state", state: "unavailable" });
+    expect(events.append).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      operationId: ids.operation,
+      expectedCursor: 0,
+      event: { kind: "operation-result", result },
+    });
+  });
+
+  it("waits for a starting shell to finish launching before attaching to it", async () => {
+    const { service, terminals } = readerFixture();
+    let release!: () => void;
+    terminals.launch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              terminalId: ids.terminal,
+              status: "running" as const,
+              canRerun: false,
+              transcript: {
+                chunks: ["boot"],
+                byteLength: 4,
+                truncated: false,
+                characters: 4,
+              },
+            });
+        }),
+    );
+    const start = service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    await vi.waitFor(() => expect(terminals.launch).toHaveBeenCalledOnce());
+    const attach = service.execute(ids.window, {
+      kind: "attach-terminal",
+      operationId: second,
+      ...scope,
+    });
+    release();
+    await expect(start).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
+    await expect(attach).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(terminals.attach).toHaveBeenCalledWith(ids.terminal);
+  });
+
+  it("refuses to start a shell whose identifier is already in use", async () => {
+    const { service, terminals } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    const again = await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: second,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    expect(again).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    expect(terminals.launch).toHaveBeenCalledOnce();
+  });
+
+  it("restarts a shell whose settled identifier still lingers in the owner record", async () => {
+    const { service, terminals } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    // The process is already gone but the owner record has not caught up —
+    // its exit emission is delayed, or no observer ever armed to deliver it.
+    terminals.attach.mockReturnValue({
+      terminalId: ids.terminal,
+      status: "exited",
+      canRerun: true,
+      exitCode: 0,
+      transcript: { chunks: ["boot"], byteLength: 4, truncated: false, characters: 4 },
+    } as never);
+
+    const restarted = await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: second,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    expect(restarted).toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(terminals.launch).toHaveBeenCalledTimes(2);
+  });
+
   it("stops a terminal nothing can be journaled to any more", async () => {
     const { emit, events, service, terminals } = readerFixture();
     await service.execute(ids.window, {

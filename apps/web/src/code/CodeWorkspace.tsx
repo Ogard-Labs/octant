@@ -1122,7 +1122,11 @@ function TerminalWorkspaceSurface(
           ...props.scope,
         });
         if (!active) return;
-        if (result.kind === "terminal-state") {
+        if (result.kind === "terminal-state" && result.state === "unavailable") {
+          // The attach was a probe: the shell was never started, which is a
+          // state the host reports, not a failure it journals.
+          absent = true;
+        } else if (result.kind === "terminal-state") {
           setTerminal(result);
           setFailure(undefined);
           setStarting(false);
@@ -1145,7 +1149,7 @@ function TerminalWorkspaceSurface(
           setFailure(result.failure.message);
           return;
         }
-        absent = result.kind === "operation-failed";
+        if (!absent) absent = result.kind === "operation-failed";
       } catch (error) {
         if (active && terminalRecoveryFailureCategory(error) !== "unavailable") {
           setFailure(

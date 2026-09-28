@@ -74,7 +74,7 @@ export function ZenTerminalCard(props: ZenTerminalCardProps) {
           ...scope,
         });
         if (!active) return;
-        if (result.kind !== "terminal-state") {
+        if (result.kind !== "terminal-state" || result.state === "unavailable") {
           setFailure("This terminal is no longer running.");
           return;
         }
