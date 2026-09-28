@@ -227,6 +227,27 @@ export function seatbeltDenyRule(operation: "file-read*" | "file-write*", path: 
   return `(deny ${operation} (subpath "${escapeSeatbeltPath(path)}"))`;
 }
 
+/**
+ * One named Mach service, for a tool that must reach a daemon over XPC the
+ * deny-default profile hides. `xcodebuild test` holds a no-idle-sleep
+ * assertion through `com.apple.PowerManagement.control` for the whole run,
+ * and without the lookup the call aborts the action outright.
+ */
+export function seatbeltAllowMachLookupRule(name: string): string {
+  return `(allow mach-lookup (global-name "${escapeSeatbeltPath(name)}"))`;
+}
+
+/**
+ * Every file matching one POSIX regex, read and written, for host state whose
+ * name is minted per boot. `xcodebuild test` reaches the test runner over a
+ * unix socket the simulator's launchd session materialises under
+ * `/private/var/tmp/com.apple.launchd.<session>/`, a path no literal rule can
+ * name ahead of time. The caller supplies the full pattern verbatim.
+ */
+export function seatbeltAllowRegexReadWriteRule(pattern: string): string {
+  return `(allow file-read* file-write* (regex #"${pattern}"))`;
+}
+
 export function seatbeltExecRule(path: string): string {
   return `(allow process-exec (literal "${escapeSeatbeltPath(path)}"))`;
 }

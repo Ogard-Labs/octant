@@ -15,7 +15,10 @@ import {
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
+  seatbeltAllowLiteralMetadataRule,
   seatbeltAllowLiteralReadRule,
+  seatbeltAllowMachLookupRule,
+  seatbeltAllowRegexReadWriteRule,
   type SeatbeltConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
@@ -99,6 +102,58 @@ export interface RepositoryTestProcessInput {
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
+  /**
+   * Exact host paths this launch must read even though they sit beneath a
+   * denied ancestor, unioned with the port-wide set. A launch that needs a
+   * node names it here so a launch that does not never receives the grant
+   * (0133). macOS only.
+   */
+  readonly literalReadPaths?: ReadonlyArray<string>;
+  /**
+   * Exact host nodes this launch may stat even though they sit beneath a
+   * denied ancestor. Traversal into a re-allowed subpath asks the kernel for
+   * each ancestor's metadata first, and a launch that needs it names the
+   * nodes here rather than gaining read of their siblings. macOS only.
+   */
+  readonly literalMetadataPaths?: ReadonlyArray<string>;
+  /**
+   * POSIX regexes over resolved absolute paths this launch may read and
+   * write, for host state minted per boot whose name no literal can name
+   * ahead of time. `xcodebuild test` is the caller: the test runner's unix
+   * socket lands under `/private/var/tmp/com.apple.launchd.<session>/`.
+   * macOS only.
+   */
+  readonly regexReadWritePaths?: ReadonlyArray<string>;
+  /**
+   * Named Mach services this launch may look up. `xcodebuild test` is the
+   * caller: it keeps a no-idle-sleep assertion over XPC and aborts without
+   * the lookup. macOS only.
+   */
+  readonly machLookupNames?: ReadonlyArray<string>;
+  /**
+   * Whether this launch may allocate a pseudo-terminal. `xcodebuild test`
+   * runs the test bundle behind a PTY for output capture; denied, the run
+   * dies with "Pseudo Terminal Setup Error". Unlike a terminal launch,
+   * which inherits its slave descriptor, this process allocates the pair
+   * itself, so the grant covers the master node and the numbered slaves.
+   * macOS only.
+   */
+  readonly allowPseudoTty?: boolean;
+  /**
+   * Whether this launch may spawn processes into a new session job.
+   * `xcodebuild test` installs and launches the test runner as its own job;
+   * denied `job-creation`, the launch reports it could not launch the runner.
+   * macOS only.
+   */
+  readonly allowJobCreation?: boolean;
+  /**
+   * Whether this launch may signal processes outside its own group.
+   * `xcodebuild test` terminates a stale copy of the target app before
+   * installing and stops it again at teardown; denied `signal`, the old
+   * instance survives and the session hangs waiting on the runner. macOS
+   * only.
+   */
+  readonly allowSignal?: boolean;
 }
 
 export interface RepositoryTestArtifactReadInput {
@@ -189,6 +244,36 @@ export class RepositoryTestProcessPort {
         : await resolveTestExecutable(validated.executable);
       if (executable === undefined) return unavailable(false);
       const binaryDirectory = dirname(executable);
+      const launchReadRules =
+        this.#platform === "darwin"
+          ? [...this.#literalReadPaths, ...(input.literalReadPaths ?? [])].map(
+              seatbeltAllowLiteralReadRule,
+            )
+          : [];
+      if (this.#platform === "darwin") {
+        for (const path of input.literalMetadataPaths ?? []) {
+          launchReadRules.push(seatbeltAllowLiteralMetadataRule(path));
+        }
+        for (const pattern of input.regexReadWritePaths ?? []) {
+          launchReadRules.push(seatbeltAllowRegexReadWriteRule(pattern));
+        }
+        for (const name of input.machLookupNames ?? []) {
+          launchReadRules.push(seatbeltAllowMachLookupRule(name));
+        }
+        if (input.allowPseudoTty === true) {
+          launchReadRules.push(
+            "(allow pseudo-tty)",
+            '(allow file-write* file-ioctl (literal "/dev/ptmx"))',
+            '(allow file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
+          );
+        }
+        if (input.allowJobCreation === true) {
+          launchReadRules.push("(allow job-creation)");
+        }
+        if (input.allowSignal === true) {
+          launchReadRules.push("(allow signal)");
+        }
+      }
       launch = this.#confinement.prepare({
         executable,
         args: validated.args,
@@ -201,8 +286,8 @@ export class RepositoryTestProcessPort {
         ...(this.#additionalWritePaths.length === 0
           ? {}
           : { additionalWriteRoots: this.#additionalWritePaths }),
-        ...(this.#platform === "darwin" && this.#literalReadPaths.length > 0
-          ? { extraRules: this.#literalReadPaths.map(seatbeltAllowLiteralReadRule) }
+        ...(this.#platform === "darwin" && launchReadRules.length > 0
+          ? { extraRules: launchReadRules }
           : {}),
       });
     } catch (error) {
