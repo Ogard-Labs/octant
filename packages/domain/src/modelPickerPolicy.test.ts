@@ -696,14 +696,14 @@ describe("model picker policy", () => {
   });
 
   describe("pickerGroupCarriesAppManagedTools", () => {
-    it("stays permissive while a draft has no settled provider", () => {
+    it("stays permissive while a draft has no settled provider, but not once one is absent", () => {
       expect(pickerGroupCarriesAppManagedTools([], undefined)).toBe(true);
       expect(
         pickerGroupCarriesAppManagedTools([], {
           providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
           modelId: decodeProviderModelId("m"),
         }),
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it("reads the probe's tool support so an incapable provider is never offered a tool", () => {

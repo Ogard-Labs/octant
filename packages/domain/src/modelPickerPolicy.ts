@@ -561,6 +561,8 @@ function maybeAppendUnavailableCurrent(
  * gate tools per deployment — keeps a composer from offering what the turn
  * would only refuse. An unresolved selection stays permissive: the offer
  * would otherwise vanish while a draft's default provider is still settling.
+ * A settled selection whose provider is absent — unprobed, disabled, or
+ * unready — is refused instead: the host will not carry its tool.
  */
 export function pickerGroupCarriesAppManagedTools(
   groups: ReadonlyArray<PickerGroup>,
@@ -570,7 +572,7 @@ export function pickerGroupCarriesAppManagedTools(
   const group = groups.find(
     (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
   );
-  if (group === undefined) return true;
+  if (group === undefined) return false;
   return (
     group.appManagedTools === "supported" ||
     (group.verifiedToolModelIds?.some((id) => String(id) === String(selection.modelId)) ?? false)
