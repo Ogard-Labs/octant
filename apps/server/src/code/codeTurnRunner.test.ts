@@ -764,6 +764,7 @@ describe("CodeTurnRunner", () => {
         expect.objectContaining({
           category: "tool",
           status: "failed",
+          requestId: "escape-read",
           text: "App-managed action failed: path-outside-checkout.",
         }),
       );
@@ -771,6 +772,15 @@ describe("CodeTurnRunner", () => {
         expect.objectContaining({
           category: "tool",
           status: "failed",
+          requestId: "escape-write",
+          text: "App-managed action failed: path-outside-checkout.",
+        }),
+      );
+      expect(observed).toContainEqual(
+        expect.objectContaining({
+          category: "tool",
+          status: "failed",
+          requestId: "escape-terminal",
           text: "App-managed action failed: cwd-outside-checkout.",
         }),
       );
