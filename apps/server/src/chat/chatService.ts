@@ -1,9 +1,5 @@
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
-import {
-  BROWSER_SELECTION_GUIDANCE,
-  isBrowserUseSelection,
-  validateBrowserUseSelection,
-} from "@octant/plugin-host/browser-use";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { createHash } from "node:crypto";
 import {
@@ -39,6 +35,7 @@ import {
   decodeChatTurn,
   type ChatAttachment,
   type ChatAttempt,
+  type ChatAttemptOutcome,
   type ChatBootstrap,
   type ChatNavigation,
   MAX_CHAT_NAVIGATION_THREADS,
@@ -2135,6 +2132,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2269,6 +2267,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2564,6 +2563,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -2636,7 +2636,12 @@ export class ChatService {
       // credentials, or provider side effects when a persisted extension
       // selection drifted.
       if (turn.extensionSelections !== undefined && turn.extensionSelections.length > 0) {
-        await this.#resolveExtensionContext(thread, turn.extensionSelections, "resume");
+        await this.#resolveExtensionContext(
+          thread,
+          turn.extensionSelections,
+          "resume",
+          executionContext?.windowId,
+        );
       }
       const timestamp = decodeTimestamp(this.#clock());
       const content = this.#persistence.readChatContent(String(turn.userMessageRef.contentId));
@@ -2703,6 +2708,7 @@ export class ChatService {
       prompt: accepted.prompt,
       prepared: accepted.prepared,
       mode: "resume",
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -3371,32 +3377,17 @@ export class ChatService {
     }
     const computer = selections.filter(isComputerUseSelection);
     const browser = selections.filter(isBrowserUseSelection);
-    if (
-      browser.length > 1 ||
-      browser.some((selection) => !validateBrowserUseSelection(selection))
-    ) {
+    // Browser use is a Work and Code capability; a Chat thread never carries
+    // it, so the selection is refused rather than silently dropped.
+    if (browser.length > 0) {
       throw new ChatServiceError({
-        category: "unavailable",
-        message: "Browser selection is invalid or stale.",
+        category: "unsupported",
+        message: "Browser use is not available in Chat.",
       });
     }
-    if (browser.length > 0) {
-      const browserTools =
-        windowId === undefined
-          ? undefined
-          : this.#resolveAppManagedTools?.({ windowId, thread })?.definitions.some(
-              (definition) => definition.name === "octant_browser",
-            ) === true;
-      if (!browserTools) {
-        throw new ChatServiceError({
-          category: "unavailable",
-          message: "The selected Browser is unavailable for this provider or task.",
-        });
-      }
-    }
-    // Browser is a host-owned app-managed tool, like Computer. Its structured
-    // selection is retained with the turn but does not enter the generic
-    // extension resolver (which only knows installed packages).
+    // Computer use is a host-owned app-managed tool. Its structured selection
+    // is retained with the turn but does not enter the generic extension
+    // resolver (which only knows installed packages).
     const other = selections.filter(
       (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
     );
@@ -3425,25 +3416,9 @@ export class ChatService {
             ...(windowId === undefined ? {} : { windowId }),
           });
     const externalTools = "toolSet" in resolved ? resolved.toolSet : undefined;
-    const browserEntries =
-      browser.length === 0
-        ? []
-        : [
-            {
-              contextEntry: this.#contextEntry(
-                thread,
-                "octant-tools",
-                BROWSER_SELECTION_GUIDANCE,
-                BROWSER_SELECTION_GUIDANCE.length,
-                "required",
-                { kind: "plugin", referenceId: "app:browser" },
-              ),
-              providerContext: { kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE },
-            },
-          ];
     return {
       selections,
-      entries: [...resolved.entries, ...browserEntries],
+      entries: resolved.entries,
       ...(externalTools === undefined && computerTools === undefined
         ? {}
         : { toolSet: combineAppManagedToolSets(externalTools, computerTools) }),
@@ -4337,12 +4312,17 @@ export class ChatService {
     readonly prompt: string;
     readonly prepared: PreparedChatTurn;
     readonly mode?: "send" | "resume";
+    readonly windowId?: WindowId;
   }): Promise<void> {
     const controller = new AbortController();
     this.#activeAttempts.set(String(input.attempt.id), controller);
     this.#activeThreadExecutions.add(String(input.thread.id));
     const pendingContent = new Map<string, PreparedChatContent>();
-    const persistAttempt = async (attempt: ChatAttempt, providerFailure?: ProviderFailure) => {
+    const persistAttempt = async (
+      attempt: ChatAttempt,
+      terminalFailure?: ProviderFailure | ChatFailure,
+      providerOriginated = false,
+    ) => {
       const version = readAggregateVersion(
         this.#persistence.connection,
         "chat-thread",
@@ -4359,18 +4339,22 @@ export class ChatService {
             this.#pending(
               "chat.attempt-updated@1",
               { kind: "attempt-updated", attempt },
-              providerFailure === undefined
+              terminalFailure === undefined
                 ? undefined
                 : { correlationId: decodeCorrelationId(attempt.id) },
             ),
-            ...(providerFailure === undefined
+            // Only failures the provider itself reported earn a provider-domain
+            // incident: a refusal thrown before acquisition is a host capability
+            // rejection, and attributing it to the provider corrupts support
+            // exports.
+            ...(terminalFailure === undefined || !providerOriginated
               ? []
               : [
                   createDiagnosticsFailureIncidentEvent(
                     {
                       correlationId: decodeCorrelationId(attempt.id),
                       domain: "provider",
-                      failureCode: decodeDiagnosticFailureCode(providerFailure.category),
+                      failureCode: decodeDiagnosticFailureCode(terminalFailure.category),
                       observedAt: this.#clock(),
                     },
                     { eventIdGenerator: this.#uuid },
@@ -4399,6 +4383,7 @@ export class ChatService {
           input.thread,
           input.prepared.extensionSelections,
           input.mode === "resume" ? "resume" : "provider-handoff",
+          input.windowId,
         );
       }
       const providerInstanceId = decodeProviderInstanceId(input.thread.providerInstanceId);
@@ -4469,7 +4454,7 @@ export class ChatService {
               }),
             persistProviderFailure: (attempt, failure) =>
               Effect.tryPromise({
-                try: () => persistAttempt(attempt, failure),
+                try: () => persistAttempt(attempt, failure, true),
                 catch: () =>
                   decodeChatFailure({
                     category: "unavailable",
@@ -4542,7 +4527,11 @@ export class ChatService {
           }),
         ),
       );
-    } catch {
+    } catch (error) {
+      // A deliberate refusal throws a ChatServiceError with the category the
+      // transcript can state; only an unexpected defect collapses to the
+      // generic interrupted/incomplete outcome.
+      const refusal = error instanceof ChatServiceError ? error.failure : undefined;
       const currentView = this.#persistence.readChatThreadView(input.thread.id);
       const currentAttempt = currentView?.turns
         .flatMap((turn) => turn.attempts)
@@ -4555,12 +4544,26 @@ export class ChatService {
         currentAttempt.outcome !== "interrupted" &&
         currentAttempt.outcome !== "waiting"
       ) {
+        // A thrown refusal leaves no pending question to wait on. Persisting
+        // `waiting` here would park an attempt that cannot resume (it has no
+        // session cursor) and cannot retry (the command rejects waiting
+        // attempts), so the attempt settles as interrupted and keeps the
+        // refusal category as its failure code.
+        const outcome: ChatAttemptOutcome =
+          refusal === undefined ||
+          refusal.category === "waiting" ||
+          refusal.category === "interrupted"
+            ? "interrupted"
+            : "failed";
         await persistAttempt(
           transitionChatAttempt(currentAttempt, {
-            outcome: "interrupted",
+            outcome,
             updatedAt: decodeTimestamp(this.#clock()),
-            failure: { code: decodeDiagnosticFailureCode("incomplete") },
+            failure: {
+              code: decodeDiagnosticFailureCode(refusal?.category ?? "incomplete"),
+            },
           }),
+          refusal,
         );
       }
     } finally {

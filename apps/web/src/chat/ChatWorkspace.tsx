@@ -1421,7 +1421,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         pendingPreviewSelections={pendingPreviewSelections}
         pendingQuotes={pendingQuotes}
         pendingExtensionSelections={pendingExtensionSelections}
-        browserAvailable={props.browserAutomationClient !== undefined}
         {...(steered.pending === undefined
           ? {}
           : { sendDisabledReason: "A message is already waiting to run." })}

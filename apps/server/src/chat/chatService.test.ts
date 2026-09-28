@@ -1055,42 +1055,34 @@ function genericChatStream(text: string): Response {
 }
 
 describe("ChatService", () => {
-  it("forwards fixed Browser guidance when the selected provider exposes Browser", async () => {
+  it("refuses a Browser selection in Chat even when the host could expose a Browser tool", async () => {
     const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000010");
-    const { service, contextHarness } = openFixture({
+    const { service, fakeDriver } = openFixture({
       resolveAppManagedTools: () => ({
         definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
         execute: async () => ({ result: {} }),
       }),
     });
-    const planTurn = vi.spyOn(contextHarness, "planTurn");
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
-      title: "Browser guidance",
+      title: "Browser in Chat",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    const sent = await service.execute(
-      {
-        kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: created.thread.version,
-        prompt: "Open the docs",
-        extensionSelections: [browserUseSelection("chat-browser-guidance")],
-      },
-      { windowId: browserWindow },
-    );
-    expect(sent).toMatchObject({ kind: "turn-created" });
-    const browserEntries = planTurn.mock.calls
-      .at(-1)?.[0]
-      .entries.filter((entry) => String(entry.source.referenceId).includes("app:browser"));
-    expect(browserEntries).toHaveLength(1);
-    expect(browserEntries?.[0]?.posture).toBe("required");
-    expect(
-      (planTurn.mock.calls.at(-1)?.[0].entries ?? []).some((entry) =>
-        String(entry.label).includes("user selected Octant's built-in Browser"),
+    await expect(
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Open the docs",
+          extensionSelections: [browserUseSelection("chat-browser-guidance")],
+        },
+        { windowId: browserWindow },
       ),
-    ).toBe(true);
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
   it("refuses an invalid Browser receipt before provider acquisition", async () => {
@@ -1124,7 +1116,7 @@ describe("ChatService", () => {
         },
         { windowId: browserWindow },
       ),
-    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
     expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
@@ -1148,7 +1140,7 @@ describe("ChatService", () => {
         },
         { windowId: browserWindow },
       ),
-    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
     expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
@@ -1173,7 +1165,7 @@ describe("ChatService", () => {
         prompt: "Continue this",
         extensionSelections: [browserUseSelection("chat-browser-without-window")],
       }),
-    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
     expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
@@ -2762,7 +2754,7 @@ describe("ChatService", () => {
       }
       return { selections: input.selections, entries: [] };
     });
-    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const { service, fakeDriver, persistence } = openFixture({ resolveExtensionSelectionContext });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -2785,7 +2777,60 @@ describe("ChatService", () => {
     ]);
     expect(fakeDriver.acquireInputs).toHaveLength(0);
     expect(fakeDriver.sentTurns).toHaveLength(0);
-    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.outcome).toBe("failed");
+    expect(attempt?.failure).toEqual({ code: "unavailable" });
+    // A refusal thrown before provider acquisition is a host rejection, not a
+    // provider incident: support exports must not attribute it to the provider.
+    expect(
+      readDiagnosticsFailureIncident(
+        persistence.connection,
+        service.read(created.thread.id).turns[0]!.attempts[0]!.id,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("settles a thrown waiting refusal as interrupted so the attempt can be retried", async () => {
+    const extensionSelection = {
+      kind: "plugin" as const,
+      extensionId: "30000000-0000-4000-8000-000000000002" as never,
+      packageId: "31000000-0000-4000-8000-000000000002" as never,
+      componentId: "instructions" as never,
+      packageVersion: "1.2.3" as never,
+      packageDigest: `sha256:${"b".repeat(64)}` as never,
+      catalogEpoch: `sha256:${"d".repeat(64)}` as never,
+      origin: { kind: "draft" as const, reference: "draft-handoff" },
+    };
+    const resolveExtensionSelectionContext = vi.fn(async (input) => {
+      if (input.phase === "provider-handoff") {
+        throw new ChatServiceError({
+          category: "waiting",
+          message: "Selected extension is still preparing.",
+        });
+      }
+      return { selections: input.selections, entries: [] };
+    });
+    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Waiting handoff refusal",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Wait for the extension",
+      extensionSelections: [extensionSelection],
+    });
+
+    expect(sent.kind).toBe("turn-created");
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.outcome).toBe("interrupted");
+    expect(attempt?.failure).toEqual({ code: "waiting" });
   });
 
   it("reattaches an interrupted provider session via ProviderConnection.resume with the exact persisted resume cursor and becomes Waiting without sending", async () => {

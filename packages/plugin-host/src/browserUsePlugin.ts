@@ -19,7 +19,7 @@ export const BROWSER_USE_PLUGIN = decodeExtensionPackageManifest({
   license: { kind: "spdx", identifier: "MIT" },
   compatibility: {
     platforms: ["macos", "linux", "windows"],
-    modes: ["chat", "work", "code"],
+    modes: ["work", "code"],
     providerFamilies: [],
   },
   declaredCapabilities: ["browser"],
