@@ -9,8 +9,13 @@ import {
   type ProviderFailure,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Deferred, Effect, Fiber, Queue, Stream } from "effect";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
+import type { WindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeTurnRunner,
@@ -20,6 +25,8 @@ import {
   type CodeTurnOutcome,
   type CodeTurnRunnerInput,
 } from "./codeTurnRunner";
+import { liveCodeTestSourcePort } from "./codeDirectoryPort";
+import { createCodeAcpClientTools } from "./codeAcpClientTools";
 
 const now = "2026-07-21T00:00:00.000Z";
 const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000000000001");
@@ -666,6 +673,112 @@ describe("CodeTurnRunner", () => {
         text: "App-managed action failed: cwd-outside-checkout.",
       }),
     );
+  });
+
+  it("refuses and journals an ACP fs or terminal request whose path escapes the Code checkout", async () => {
+    const checkoutRoot = await mkdtemp(join(tmpdir(), "octant-acp-port-"));
+    const outsideFile = join(tmpdir(), `octant-acp-outside-${crypto.randomUUID()}.txt`);
+    try {
+      // Confinement is never reached: every request here must be refused before
+      // it could spawn, so a throwing prepare would fail the test loudly.
+      const appManagedTools = createCodeAcpClientTools({
+        windowId: "10000000-0000-4000-8000-000000000001" as WindowId,
+        thread: thread(),
+        readExecutionPolicy: () => "full-access",
+        checkoutRoot,
+        uuid: (() => {
+          let next = 0;
+          return () => `port-${(next += 1)}`;
+        })(),
+        pathPort: liveCodeTestSourcePort,
+        terminalConfinement: {
+          environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
+          prepare: () => {
+            throw new Error("confinement reached before the checkout refusal");
+          },
+        },
+        wait: () => Promise.resolve(),
+      });
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.fromIterable([
+            event({
+              kind: "tool-request",
+              requestId: "escape-read",
+              toolName: "octant_acp_fs_read_text_file",
+              inputJson: JSON.stringify({ path: "/etc/hosts" }),
+            }),
+            event({
+              kind: "tool-request",
+              requestId: "escape-write",
+              toolName: "octant_acp_fs_write_text_file",
+              inputJson: JSON.stringify({ path: outsideFile, content: "x" }),
+            }),
+            event({
+              kind: "tool-request",
+              requestId: "escape-terminal",
+              toolName: "octant_acp_terminal_create",
+              inputJson: JSON.stringify({ command: "echo hi", cwd: "/" }),
+            }),
+            event({ kind: "completed" }),
+          ]),
+        ),
+      });
+      const observed: CodeTurnEvent[] = [];
+
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              checkoutRoot,
+              provider: { acquire: () => Effect.succeed(connection) },
+              appManagedTools,
+              persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            }),
+          ),
+        ),
+      );
+
+      expect(connection.answerTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "escape-read",
+          resultJson: JSON.stringify({ error: "path-outside-checkout" }),
+          isError: true,
+        }),
+      );
+      expect(connection.answerTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "escape-write",
+          resultJson: JSON.stringify({ error: "path-outside-checkout" }),
+          isError: true,
+        }),
+      );
+      expect(connection.answerTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "escape-terminal",
+          resultJson: JSON.stringify({ error: "cwd-outside-checkout" }),
+          isError: true,
+        }),
+      );
+      expect(observed).toContainEqual(
+        expect.objectContaining({
+          category: "tool",
+          status: "failed",
+          text: "App-managed action failed: path-outside-checkout.",
+        }),
+      );
+      expect(observed).toContainEqual(
+        expect.objectContaining({
+          category: "tool",
+          status: "failed",
+          text: "App-managed action failed: cwd-outside-checkout.",
+        }),
+      );
+      expect(existsSync(outsideFile)).toBe(false);
+    } finally {
+      await rm(checkoutRoot, { recursive: true, force: true });
+      await rm(outsideFile, { force: true });
+    }
   });
 
   it("normalizes interactive and progress events under the immutable thread authority", async () => {
