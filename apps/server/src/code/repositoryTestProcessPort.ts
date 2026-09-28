@@ -201,9 +201,9 @@ export class RepositoryTestProcessPort {
         ...(this.#additionalWritePaths.length === 0
           ? {}
           : { additionalWriteRoots: this.#additionalWritePaths }),
-        ...(this.#literalReadPaths.length === 0
-          ? {}
-          : { extraRules: this.#literalReadPaths.map(seatbeltAllowLiteralReadRule) }),
+        ...(this.#platform === "darwin" && this.#literalReadPaths.length > 0
+          ? { extraRules: this.#literalReadPaths.map(seatbeltAllowLiteralReadRule) }
+          : {}),
       });
     } catch (error) {
       if (error instanceof SeatbeltConfinementError) return unavailable(false);

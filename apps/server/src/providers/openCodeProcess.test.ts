@@ -692,6 +692,9 @@ describe("OpenCodeProcessPort", () => {
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
+          // Seatbelt spellings only exist for Darwin; off it the launch's
+          // loopback rides network egress and carries no extra rules.
+          platform: "darwin",
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
         }).start({
@@ -714,6 +717,38 @@ describe("OpenCodeProcessPort", () => {
     // able to exec, or an in-process shell would bypass the refused tools.
     expect(captured?.allowProcessExec).toBe(false);
     expect(captured?.allowProcessFork).toBe(false);
+  });
+
+  // Bubblewrap refuses any rule it cannot express: per-port loopback has no
+  // spelling there — loopback rides the launch's network egress choice — and
+  // the tool-home discovery reads are already covered by file-read-star.
+  it("sends no Seatbelt rules to a Linux confinement", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const captured: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured.push(input);
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "linux",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "work",
+          executionPolicy: "approval-gated",
+          loopbackPorts: [41_234],
+        }),
+      ),
+    );
+    expect(captured.length).toBeGreaterThan(0);
+    for (const input of captured) expect(input.extraRules).toBeUndefined();
   });
 
   // OpenCode 2 resolves each bundled coding tool's home directory while it
@@ -739,6 +774,7 @@ describe("OpenCodeProcessPort", () => {
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
+          platform: "darwin",
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
           inheritedEnvironment: { ...process.env, HOME: home },

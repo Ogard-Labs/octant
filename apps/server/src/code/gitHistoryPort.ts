@@ -229,10 +229,12 @@ export class GitHistoryPort {
     const metadata = await gitHistoryMetadata(root);
     if (metadata === undefined) return { ok: false, text: "" };
     const binaryDirectory = dirname(this.#sandbox.gitExecutable);
-    const extraRules = [
-      ...gitShimExtraRules(this.#sandbox.platform),
-      ...gitLinkedWorktreeMetadataRules(root),
-    ];
+    // Seatbelt spellings exist only for Darwin: the same out-of-root metadata
+    // is already in `metadata`, which every backend binds through readRoots.
+    const extraRules =
+      this.#sandbox.platform === "darwin"
+        ? [...gitShimExtraRules(this.#sandbox.platform), ...gitLinkedWorktreeMetadataRules(root)]
+        : [];
     const launch = this.#sandbox.confinement.prepare({
       executable: this.#sandbox.gitExecutable,
       args: ["-C", root, "-c", "core.quotePath=false", ...args],
