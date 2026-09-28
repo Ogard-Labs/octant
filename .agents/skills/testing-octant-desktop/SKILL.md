@@ -12,7 +12,9 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 - User data lands in `~/Library/Application Support/Octant/`:
   - `octant.sqlite3` — event journal + projections (authoritative state)
   - `providers/runtime-receipts/receipt-*.json` — tracked provider child processes
-  - `~/Library/Logs/Octant/service.log` — server lifecycle log (only `server.ready` lines; errors are NOT logged here)
+  - `~/Library/Logs/Octant/service.log` — server lifecycle log (`server.ready` plus error-level
+    `server.failure` entries from packaged-launch and migration failures; request-level failures
+    like HTTP 4xx/5xx are NOT logged here)
 - Electron DevTools works in the packaged app: Cmd+Opt+I opens Elements/Console/Network — the only way to see renderer-side errors (e.g. `POST /api/chat/commands` status codes).
 
 ## Providers
@@ -131,8 +133,9 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   `ImageGenerationSettingsView` does not render `controller.message` — a cleared field = the failure
   signature, not a success.
 - Probe without UI: `POST /api/providers/commands` with header `x-octant-window-capability` (extract from
-  the renderer process args: `ps eww | grep octant-project-capability`) — CLI creates return
-  `{"kind":"provider-created"}`, image ones 503.
+  the renderer process args: `ps axww -o command= | grep octant-project-capability`; argv only — `ps eww`
+  misses the headless renderer and dumps every process's environment, provider secrets included) — CLI
+  creates return `{"kind":"provider-created"}`, image ones 503.
 - In-process repro: real `Journal` + `createPhase1RuntimeRegistries` + `migrateStoreWithBackup` on a
   scratch `OCTANT_DATA_DIR`, then `journal.append` the `provider.instance-created@1` event — surfaces the
   true `CHECK constraint failed` error that the HTTP layer masks. Enumerating `projections.all()` and
@@ -149,8 +152,9 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   unauthorized/not-connected state (empty `hosts:` map).
 - "Set up GitHub" runs a real GitHub device flow: shows a one-time code to enter at
   github.com/login/device — completing it needs a github.com browser session (user side).
-- There is NO token-paste field by design; provisioning via `security add-generic-password -s gh:github.com
--a <login> -w <token>` + `~/.config/gh/hosts.yml` works for gh but not past the `scopes` decode.
+- There is NO token-paste field by design; provisioning via `printf '%s' "$GH_TOKEN" | gh auth login
+--hostname github.com --with-token` (stdin, never argv or shell history) works for gh but not past the
+`scopes` decode.
 
 ## Hidden/unreachable features
 
