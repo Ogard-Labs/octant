@@ -66,7 +66,9 @@ export function OpenAiImageFields(props: {
               : `Model allowlist for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.modelAllowlist.join(", ")}
+          defaultValue={
+            configuration?.modelAllowlist.join(", ") ?? OPENAI_IMAGE_MODEL_PRESETS.join(", ")
+          }
           name="modelAllowlist"
           placeholder={OPENAI_IMAGE_MODEL_PRESETS.join(", ")}
           required
@@ -81,7 +83,7 @@ export function OpenAiImageFields(props: {
               : `Default model for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.defaultModel}
+          defaultValue={configuration?.defaultModel ?? OPENAI_IMAGE_MODEL_PRESETS[0]}
           name="defaultModel"
           placeholder="gpt-image-2"
           required
@@ -176,7 +178,9 @@ export function GeminiImageFields(props: {
               : `Model allowlist for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.modelAllowlist.join(", ")}
+          defaultValue={
+            configuration?.modelAllowlist.join(", ") ?? GEMINI_IMAGE_MODEL_PRESETS.join(", ")
+          }
           name="modelAllowlist"
           placeholder={GEMINI_IMAGE_MODEL_PRESETS.join(", ")}
           required
@@ -191,7 +195,7 @@ export function GeminiImageFields(props: {
               : `Default model for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.defaultModel}
+          defaultValue={configuration?.defaultModel ?? GEMINI_IMAGE_MODEL_PRESETS[0]}
           name="defaultModel"
           placeholder="gemini-3.1-flash-image"
           required
@@ -295,7 +299,9 @@ export function BflImageFields(props: {
               : `Model allowlist for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.modelAllowlist.join(", ")}
+          defaultValue={
+            configuration?.modelAllowlist.join(", ") ?? BFL_IMAGE_MODEL_PRESETS.join(", ")
+          }
           name="modelAllowlist"
           placeholder={BFL_IMAGE_MODEL_PRESETS.join(", ")}
           required
@@ -310,7 +316,7 @@ export function BflImageFields(props: {
               : `Default model for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.defaultModel}
+          defaultValue={configuration?.defaultModel ?? BFL_IMAGE_MODEL_PRESETS[0]}
           name="defaultModel"
           placeholder="flux-pro-1.1"
           required
@@ -371,7 +377,9 @@ export function IdeogramImageFields(props: {
               : `Model allowlist for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.modelAllowlist.join(", ")}
+          defaultValue={
+            configuration?.modelAllowlist.join(", ") ?? IDEOGRAM_IMAGE_MODEL_PRESETS.join(", ")
+          }
           name="modelAllowlist"
           placeholder={IDEOGRAM_IMAGE_MODEL_PRESETS.join(", ")}
           required
@@ -386,7 +394,7 @@ export function IdeogramImageFields(props: {
               : `Default model for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.defaultModel}
+          defaultValue={configuration?.defaultModel ?? IDEOGRAM_IMAGE_MODEL_PRESETS[0]}
           name="defaultModel"
           placeholder="ideogram-v3"
           required

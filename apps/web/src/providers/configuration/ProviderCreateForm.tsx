@@ -198,6 +198,7 @@ export function ProviderCreateForm(
             onSubmit={(event) => {
               event.preventDefault();
               const form = event.currentTarget;
+              if (!form.reportValidity()) return;
               const data = new FormData(form);
               setCreating(true);
               let operation: Promise<boolean>;
