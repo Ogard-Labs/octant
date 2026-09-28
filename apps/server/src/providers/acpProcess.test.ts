@@ -611,6 +611,32 @@ describe("ACP child-server profiles", () => {
     }
   });
 
+  it("keeps fork for the nested server in Work while exec stays denied", async () => {
+    const target = fixture(opencode);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: opencode,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    // The stdio child server re-execs the provider's own binary, which the
+    // exec literals already permit; Work's shell denial still holds for every
+    // other exec target.
+    expect(launch.args[1]).toContain("(allow process-fork)");
+    expect(launch.args[1]).not.toContain("(allow process-exec)\n");
+    expect(launch.args[1]).toContain(`(allow process-exec (literal "${target.binaryPath}"))`);
+  });
+
   it("reads the existing user configuration without granting it write access", async () => {
     const target = fixture(opencode);
     const launch = await Effect.runPromise(
