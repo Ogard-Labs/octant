@@ -540,7 +540,11 @@ flowchart LR
   crash-safe
   append, explicit terminal reasons for turns, tools, terminals, and subagents,
   preservation of partial provider output, and recovery of outstanding
-  approvals and user-input requests after restart. Multi-host Settings uses the
+  approvals after restart. A parked provider question is the exception: the
+  session that would consume the answer died with the process, so an answer
+  submitted after restart settles the attempt interrupted — naming the outcome
+  and leaving the turn retryable — instead of holding an undeliverable card
+  forever. Multi-host Settings uses the
   same rule per registered host: reconnect renews from that host's device key;
   only a revoked, expired, lost, or host-changed credential forces a new pair.
   Revoke-self drops that host's sessions and streams before the client clears
