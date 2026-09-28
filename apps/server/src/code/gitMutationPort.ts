@@ -491,7 +491,7 @@ export class GitMutationPort {
       }
       return { status: "captured", snapshot, anchorId };
     } finally {
-      await this.#discardScratchIndex(input.checkoutRoot, scratch, signal, input.executionPolicy);
+      await this.#discardScratchIndex(input.checkoutRoot, scratch, input.executionPolicy);
     }
   }
 
@@ -636,7 +636,7 @@ export class GitMutationPort {
       );
       return worktree.exitCode === 0 ? { status: "applied" } : failedMutation(worktree.stderr);
     } finally {
-      await this.#discardScratchIndex(input.checkoutRoot, scratch, signal, input.executionPolicy);
+      await this.#discardScratchIndex(input.checkoutRoot, scratch, input.executionPolicy);
     }
   }
 
@@ -761,11 +761,13 @@ export class GitMutationPort {
   async #discardScratchIndex(
     checkoutRoot: string,
     scratch: string,
-    signal: AbortSignal | undefined,
     executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<void> {
     try {
-      await this.#runFileTool(checkoutRoot, "rm", ["-f", scratch], signal, executionPolicy);
+      // Cleanup runs in a finally after the turn's outcome is settled, so it
+      // outlives the caller's signal: a canceled turn still removes the scratch
+      // index it copied, under this launch's own timeout.
+      await this.#runFileTool(checkoutRoot, "rm", ["-f", scratch], undefined, executionPolicy);
     } catch {
       // A leftover scratch index is inert: every use overwrites it first.
     }
