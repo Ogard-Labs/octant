@@ -294,6 +294,10 @@ export function useCodeController(options: CodeControllerOptions) {
   // about. Kept separate so arbitrary failure text can never grow a
   // countdown; only a contract fact the host journaled can.
   const [turnUsageLimit, setTurnUsageLimit] = useState<ProviderUsageLimit>();
+  // The conversation-tail provider turn's operationId, kept beside
+  // `turnUsageLimit`: a resume opt-in names exactly this operation.
+  const [latestProviderTurnOperationId, setLatestProviderTurnOperationId] =
+    useState<CodeOperationId>();
   /**
    * Whether the current failure already reads in the transcript. A turn the
    * host projected as failed carries its reason in its own assistant row; a
@@ -806,6 +810,7 @@ export function useCodeController(options: CodeControllerOptions) {
       // The journal is the only authority a reopen can trust for a limit: a
       // completed later turn carries none, so this also clears a stale one.
       setTurnUsageLimit(latestTurn?.failure?.usageLimit);
+      setLatestProviderTurnOperationId(latestTurn?.operationId);
       const incomplete = latestTurn?.status === "incomplete";
       const waiting = latestTurn?.status === "waiting";
       if (latestTurn !== undefined && (incomplete || waiting)) {
@@ -2378,6 +2383,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnErrorInTranscript,
     turnStatus,
     turnUsageLimit,
+    latestProviderTurnOperationId,
     updateSettings,
   };
 }

@@ -65,6 +65,8 @@ import {
   type CodeThreadActivity,
   type CodeThreadId,
   type CodeThreadView,
+  type CodeOperationEventFrame,
+  decodeCodeOperationEventFrame,
   type Project,
   type EventEnvelope,
   type PermissionPersistence,
@@ -77,6 +79,9 @@ import {
   type ThreadWorkingDirectory,
   type GithubIssueContextRequest,
   type LinearIssueContextRequest,
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  type UsageResumeRecord,
 } from "@octant/contracts";
 import type {
   AgentProfile,
@@ -343,6 +348,15 @@ function profileContextSnapshot(profiled: ProfiledThreadAuthority): {
   if (profiled.profileContext === undefined) return {};
   return { profileContext: profiled.profileContext };
 }
+
+/**
+ * The recorded shape of a provider turn's last state, as journaled on its
+ * operation aggregate — the tail frame a schedule opt-in is validated against.
+ */
+type CodeProviderTurnRecordedState = Extract<
+  Extract<CodeOperationEventFrame["event"], { kind: "operation-result" }>["result"],
+  { kind: "provider-turn-state" }
+>;
 
 export interface CodePersistencePort {
   readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate">;
@@ -1590,6 +1604,76 @@ export class CodeService {
         current,
       );
       const updatedAt = decodeTimestamp(this.#clock());
+      if (command.kind === "schedule-code-usage-resume") {
+        if (current.lifecycle !== "active") {
+          throw this.#failure("invalid", "Only an active Code thread can resume at reset.");
+        }
+        const providerTurn = this.#persistence
+          .readCodeRuntimeWorks(current.id)
+          .filter(({ work }) => work.kind === "provider-turn")
+          .at(-1);
+        if (
+          providerTurn === undefined ||
+          String(providerTurn.work.id) !== String(command.operationId)
+        ) {
+          throw this.#failure(
+            "invalid",
+            "Only the thread's latest stopped provider turn can resume at reset.",
+          );
+        }
+        const stopped = this.#latestProviderTurnState(command.operationId);
+        if (
+          stopped === undefined ||
+          stopped.state !== "waiting" ||
+          stopped.failure?.usageLimit === undefined
+        ) {
+          throw this.#failure("invalid", "The provider turn is not waiting on a usage limit.");
+        }
+        if (stopped.failure.usageLimit.resetsAt === undefined) {
+          throw this.#failure("invalid", "The provider did not disclose when the limit resets.");
+        }
+        if (stopped.evidence === undefined) {
+          throw this.#failure("invalid", "The turn preserved no provider resume state.");
+        }
+        const record: UsageResumeRecord = {
+          threadId: String(current.id),
+          turnId: String(command.operationId),
+          providerInstanceId: current.providerInstanceId,
+          usageLimit: stopped.failure.usageLimit,
+          resetsAt: stopped.failure.usageLimit.resetsAt,
+          scheduledAt: updatedAt,
+        };
+        const next = decodeCodeThread({
+          ...current,
+          usageResume: { record, status: "scheduled" },
+          version: command.expectedVersion + 2,
+          updatedAt,
+        });
+        this.#appendBoth("code-thread", current.id, command.expectedVersion, [
+          [USAGE_RESUME_SCHEDULED, { resume: record }],
+          ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+        ]);
+        return { kind: "thread-updated", thread: next };
+      }
+      if (command.kind === "cancel-code-usage-resume") {
+        const scheduled = current.usageResume;
+        if (scheduled === undefined || scheduled.status !== "scheduled") {
+          throw this.#failure("invalid", "The thread has no scheduled resume to cancel.");
+        }
+        // The cancel event already deleted the resume row; the emitted thread
+        // must not keep reporting the opt-in it just withdrew.
+        const { usageResume: _withdrawn, ...withdrawnThread } = current;
+        const next = decodeCodeThread({
+          ...withdrawnThread,
+          version: command.expectedVersion + 2,
+          updatedAt,
+        });
+        this.#appendBoth("code-thread", current.id, command.expectedVersion, [
+          [USAGE_RESUME_CANCELLED, { resume: scheduled.record }],
+          ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+        ]);
+        return { kind: "thread-updated", thread: next };
+      }
       if (command.kind === "rebind-code-thread-checkout") {
         // Recovery from a superseded checkout. The thread's id was derived from
         // the binding revision it was created against, so once the Project is
@@ -2843,6 +2927,58 @@ export class CodeService {
         },
       ],
     });
+  }
+
+  /**
+   * A schedule or cancel is two facts about the same aggregate head: the
+   * resume record itself and the thread row surfaces refresh through. They
+   * land in one append so a replay can never see one without the other.
+   */
+  #appendBoth(
+    aggregateType: string,
+    aggregateId: string,
+    expectedVersion: number,
+    events: ReadonlyArray<readonly [string, unknown]>,
+    actorKind: "local-user" | "system" = "local-user",
+  ): void {
+    this.#persistence.journal.append({
+      aggregate: { aggregateType, aggregateId },
+      expectedVersion,
+      events: events.map(([eventName, payload]) => ({
+        eventId: decodeEventId(this.#uuid()),
+        eventName,
+        eventVersion: 1,
+        correlationId: decodeCorrelationId(this.#uuid()),
+        actor: { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+        occurredAt: decodeTimestamp(this.#clock()),
+        payload,
+      })),
+    });
+  }
+
+  /**
+   * The latest provider-turn result the operation aggregate recorded — the
+   * authoritative copy of the stop the schedule opt-in binds to.
+   */
+  #latestProviderTurnState(operationId: string): CodeProviderTurnRecordedState | undefined {
+    const frames = this.#persistence.journal.replayAggregate({
+      aggregateType: "code-operation",
+      aggregateId: operationId,
+      afterVersion: 0,
+      limit: 1_000,
+    });
+    let latest: CodeProviderTurnRecordedState | undefined;
+    for (const committed of frames) {
+      if (committed.eventName !== "code.operation-event-recorded@1") continue;
+      const frame = decodeCodeOperationEventFrame(committed.payload);
+      if (
+        frame.event.kind === "operation-result" &&
+        frame.event.result.kind === "provider-turn-state"
+      ) {
+        latest = frame.event.result;
+      }
+    }
+    return latest;
   }
 
   #publicFrame(

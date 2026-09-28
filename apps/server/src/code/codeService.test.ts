@@ -10,6 +10,7 @@ import {
   decodeCodeFileReference,
   decodeCodeRepositoryId,
   decodeCodeRuntimeWork,
+  decodeUsageResumeRecord,
   decodeCodeThread,
   decodeCodeThreadId,
   decodeCodeWorktreeSourcePreview,
@@ -4362,3 +4363,142 @@ function reasoningProbe() {
     ),
   });
 }
+
+describe("scheduling a Code thread's usage-limit resume", () => {
+  const operationId = testUuid(3100);
+  const resetsAt = "2026-07-19T13:00:00.000Z";
+
+  const waitingProviderWork = () => [
+    {
+      work: decodeCodeRuntimeWork({
+        id: operationId,
+        threadId: ids.thread,
+        kind: "provider-turn",
+        state: "waiting",
+        updatedAt: now,
+      }),
+      firstSequence: 1,
+    },
+  ];
+
+  const waitingLimitEnvelope = (usageLimit: Record<string, unknown> = {}) => ({
+    ...eventEnvelope(1, "code.operation-event-recorded@1", {
+      threadId: ids.thread,
+      operationId,
+      cursor: 1,
+      occurredAt: now,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId,
+          state: "waiting",
+          evidence: {
+            contentId: testUuid(3101),
+            digest: "a".repeat(64),
+            byteLength: 12,
+          },
+          failure: {
+            category: "waiting",
+            message: "The provider's usage window is spent.",
+            usageLimit: { kind: "exhausted", resetsAt, ...usageLimit },
+          },
+        },
+      },
+    }),
+    aggregateType: "code-operation" as never,
+    aggregateId: operationId as never,
+  });
+
+  it("schedules a host-owned resume for a provider turn waiting on a usage limit", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope()],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "schedule-code-usage-resume",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      operationId,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        usageResume: {
+          status: "scheduled",
+          record: { turnId: operationId, resetsAt },
+        },
+      },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({ eventName: "usage-resume.scheduled@1" }),
+          expect.objectContaining({ eventName: "code.thread-updated@1" }),
+        ],
+      }),
+    );
+  });
+
+  it("withdraws the scheduled resume when the person cancels it", async () => {
+    const fixture = serviceFixture({
+      threads: [
+        thread({
+          usageResume: {
+            record: decodeUsageResumeRecord({
+              threadId: String(ids.thread),
+              turnId: operationId,
+              providerInstanceId: ids.provider,
+              usageLimit: { kind: "exhausted", resetsAt },
+              resetsAt,
+              scheduledAt: now,
+            }),
+            status: "scheduled",
+          },
+        }),
+      ],
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "cancel-code-usage-resume",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: { version: 3 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({ eventName: "usage-resume.cancelled@1" }),
+          expect.objectContaining({ eventName: "code.thread-updated@1" }),
+        ],
+      }),
+    );
+    const emitted = result as { thread: Record<string, unknown> };
+    expect("usageResume" in emitted.thread).toBe(false);
+  });
+
+  it("refuses to schedule a resume for a stopped turn that discloses no reset", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope({ resetsAt: undefined })],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "schedule-code-usage-resume",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        operationId,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});

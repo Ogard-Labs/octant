@@ -580,6 +580,7 @@ function controller(): CodeController {
     turnError: undefined,
     turnStatus: "idle",
     turnUsageLimit: undefined,
+    latestProviderTurnOperationId: undefined,
     updateSettings: vi.fn(),
   };
 }

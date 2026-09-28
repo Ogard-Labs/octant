@@ -570,6 +570,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const trimmed = draft.trim();
   const busy =
     props.controller.turnStatus === "sending" || props.controller.turnStatus === "running";
+  const providerTurnOperationId = props.controller.latestProviderTurnOperationId;
+  // The resume opt-in rides the ordinary serialized command path; the host
+  // re-checks the whole premise before it schedules, so a stale offer here is
+  // refused honestly rather than firing on an older turn.
+  const scheduleUsageResume =
+    providerTurnOperationId === undefined
+      ? undefined
+      : () =>
+          void props.controller.execute({
+            kind: "schedule-code-usage-resume",
+            threadId: thread.id,
+            expectedVersion: thread.version,
+            operationId: providerTurnOperationId,
+          });
+  const cancelUsageResume = () =>
+    void props.controller.execute({
+      kind: "cancel-code-usage-resume",
+      threadId: thread.id,
+      expectedVersion: thread.version,
+    });
   // A running turn never blocks the composer: the host admits one turn per
   // thread, so a message sent during one is held by the surface and sent the
   // moment that turn stops, without the user having to manage it.
@@ -1037,6 +1057,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <UsageLimitNotice
               limit={props.controller.turnUsageLimit}
               provider={providerModelLabel(providerGroups, thread)}
+              resumable={providerTurnOperationId !== undefined}
+              {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
+              {...(scheduleUsageResume === undefined
+                ? {}
+                : { onScheduleResume: scheduleUsageResume })}
+              onCancelResume={cancelUsageResume}
             />
           </div>
         )
@@ -1079,6 +1105,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           <UsageLimitNotice
             limit={props.controller.turnUsageLimit}
             provider={providerModelLabel(providerGroups, thread)}
+            resumable={providerTurnOperationId !== undefined}
+            {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
+            {...(scheduleUsageResume === undefined
+              ? {}
+              : { onScheduleResume: scheduleUsageResume })}
+            onCancelResume={cancelUsageResume}
           />
         </div>
       ) : null}

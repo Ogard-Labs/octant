@@ -60,6 +60,7 @@ import {
   type ProjectedCodeSettings,
 } from "./codePersistenceSchema";
 import type { SqliteConnection } from "./sqlitePort";
+import { readUsageResumeState } from "./usageResumeProjection";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateIdSchema);
 export const CODE_SETTINGS_AGGREGATE_ID = decodeAggregateId("00000000-0000-4000-8000-000000000020");
@@ -710,7 +711,7 @@ export function readCodeThread(
   const row = connection
     .prepare("SELECT * FROM code_thread_projection WHERE thread_id = ?")
     .get(threadId) as CodeThreadProjectionRow | undefined;
-  return row === undefined ? undefined : decodeThreadRow(row);
+  return row === undefined ? undefined : hydrateThreadUsageResume(connection, decodeThreadRow(row));
 }
 
 export function readCodeThreads(connection: SqliteConnection): ReadonlyArray<CodeThread> {
@@ -718,7 +719,7 @@ export function readCodeThreads(connection: SqliteConnection): ReadonlyArray<Cod
     connection
       .prepare("SELECT * FROM code_thread_projection ORDER BY updated_at DESC, thread_id ASC")
       .all() as ReadonlyArray<CodeThreadProjectionRow>
-  ).map(decodeThreadRow);
+  ).map((row) => hydrateThreadUsageResume(connection, decodeThreadRow(row)));
 }
 
 /**
@@ -1063,6 +1064,17 @@ export function reconcileCodeRestart(input: {
       ],
     });
   }
+}
+
+/**
+ * The journaled thread copy can embed a resume state that later events moved
+ * past; the usage-resume projection is the authoritative read, so every read
+ * overrides the embedded copy with it (including clearing it).
+ */
+function hydrateThreadUsageResume(connection: SqliteConnection, thread: CodeThread): CodeThread {
+  const usageResume = readUsageResumeState(connection, "code-thread", String(thread.id));
+  const { usageResume: _embedded, ...rest } = thread;
+  return usageResume === undefined ? rest : { ...rest, usageResume };
 }
 
 function decodeThreadRow(row: CodeThreadProjectionRow): CodeThread {

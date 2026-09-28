@@ -1,8 +1,15 @@
 import {
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  USAGE_RESUME_SETTLED,
   WorkThreadCreated as WorkThreadCreatedSchema,
   WorkThreadUpdated as WorkThreadUpdatedSchema,
   WorkThreadCompletionConfirmed as WorkThreadCompletionConfirmedSchema,
+  decodeUsageResumeCancelled,
+  decodeUsageResumeScheduled,
+  decodeUsageResumeSettled,
   decodeWorkSettingsUpdated,
+  type UsageResumeThreadState,
   type WorkSettings,
   type WorkSettingsUpdated,
   type WorkThread,
@@ -54,12 +61,22 @@ export class WorkThreadProjection {
     });
   }
 
+  /**
+   * The thread's recovery state, keyed apart from the journaled thread copy:
+   * `usage-resume.*` events land on this aggregate without embedding into a
+   * `thread-updated` payload, so this map — not the stored thread — is the
+   * authoritative read. `read`/`list` merge it over any embedded copy.
+   */
+  readonly #usageResumeByThread = new Map<string, UsageResumeThreadState>();
+
   read(threadId: WorkThreadId): WorkThread | undefined {
-    return this.#threads.get(threadId);
+    const thread = this.#threads.get(threadId);
+    return thread === undefined ? undefined : this.#withUsageResume(thread);
   }
 
   forget(threadId: WorkThreadId): void {
     this.#threads.delete(threadId);
+    this.#usageResumeByThread.delete(String(threadId));
   }
 
   list(): ReadonlyArray<WorkThread> {
@@ -67,7 +84,35 @@ export class WorkThreadProjection {
       .filter((thread) => thread.lifecycle !== "deleted")
       .sort(
         (left, right) => right.updatedAt.localeCompare(left.updatedAt) || compareIds(left, right),
-      );
+      )
+      .map((thread) => this.#withUsageResume(thread));
+  }
+
+  #withUsageResume(thread: WorkThread): WorkThread {
+    const usageResume = this.#usageResumeByThread.get(String(thread.id));
+    const { usageResume: _embedded, ...rest } = thread;
+    return usageResume === undefined ? rest : { ...rest, usageResume };
+  }
+
+  applyUsageResume(event: { readonly eventName: string; readonly payload: unknown }): void {
+    if (event.eventName === USAGE_RESUME_SCHEDULED) {
+      const { resume } = decodeUsageResumeScheduled(event.payload);
+      this.#usageResumeByThread.set(resume.threadId, { record: resume, status: "scheduled" });
+      return;
+    }
+    if (event.eventName === USAGE_RESUME_CANCELLED) {
+      const { resume } = decodeUsageResumeCancelled(event.payload);
+      this.#usageResumeByThread.delete(resume.threadId);
+      return;
+    }
+    if (event.eventName === USAGE_RESUME_SETTLED) {
+      const settled = decodeUsageResumeSettled(event.payload);
+      this.#usageResumeByThread.set(settled.resume.threadId, {
+        record: settled.resume,
+        status: settled.outcome,
+        ...(settled.detail === undefined ? {} : { detail: settled.detail }),
+      });
+    }
   }
 
   /**
@@ -106,10 +151,29 @@ export function hydrateWorkThreadProjectionFromJournal(input: {
     apply: (envelope) => {
       if (
         (envelope.aggregateType !== undefined && envelope.aggregateType !== "work-thread") ||
-        envelope.eventVersion !== 1 ||
-        (envelope.eventName !== "work.thread-created@1" &&
-          envelope.eventName !== "work.thread-updated@1" &&
-          envelope.eventName !== "work.thread-completion-confirmed@1")
+        envelope.eventVersion !== 1
+      ) {
+        return;
+      }
+      if (
+        envelope.eventName === USAGE_RESUME_SCHEDULED ||
+        envelope.eventName === USAGE_RESUME_CANCELLED ||
+        envelope.eventName === USAGE_RESUME_SETTLED
+      ) {
+        try {
+          input.projection.applyUsageResume({
+            eventName: envelope.eventName,
+            payload: envelope.payload,
+          });
+        } catch {
+          // Ignore malformed historical records during best-effort hydration.
+        }
+        return;
+      }
+      if (
+        envelope.eventName !== "work.thread-created@1" &&
+        envelope.eventName !== "work.thread-updated@1" &&
+        envelope.eventName !== "work.thread-completion-confirmed@1"
       ) {
         return;
       }

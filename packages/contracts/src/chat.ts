@@ -15,6 +15,7 @@ import {
   ProviderSessionId,
   ProviderUsageLimit,
 } from "./providers";
+import { UsageResumeThreadState } from "./usageResume";
 import { DiagnosticFailureCode } from "./diagnostics";
 import { PreviewContextSelection } from "./previews";
 import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canvasContext";
@@ -368,6 +369,12 @@ export const ChatThread = Schema.Struct({
   multiModelPool: Schema.optional(MultiModelPool),
   /** Present only on threads created by branching another Chat thread. */
   branchedFrom: Schema.optional(ChatThreadBranchOrigin),
+  /**
+   * The thread's pending usage-resume opt-in, when a person asked the host to
+   * resume a usage-limited attempt at the provider's declared reset. Journaled
+   * on this thread's own stream; absent means no recovery is pending.
+   */
+  usageResume: Schema.optional(UsageResumeThreadState),
   /** Completed and snoozed rest, shared with Work and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -604,6 +611,27 @@ export const InterruptChatTurnCommand = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * Opts this thread into resuming one usage-limited attempt when the provider's
+ * declared reset arrives. The server reads the limit and reset from the
+ * journaled attempt rather than trusting the command, and journals the opt-in
+ * on the thread's stream so every client and the host scheduler see it.
+ */
+export const ScheduleChatUsageResumeCommand = Schema.Struct({
+  kind: Schema.Literal("schedule-chat-usage-resume"),
+  ...ChatThreadCommandFields,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+}).annotations(strict);
+
+/**
+ * Withdraws the thread's pending usage-resume opt-in before it fires.
+ */
+export const CancelChatUsageResumeCommand = Schema.Struct({
+  kind: Schema.Literal("cancel-chat-usage-resume"),
+  ...ChatThreadCommandFields,
+}).annotations(strict);
+
+/**
  * Answers a question a running attempt asked and is blocked on. The server
  * hands the answer to the live turn, which journals the answered question and
  * lets the provider continue; the attempt it returns reflects the moment the
@@ -746,6 +774,8 @@ export const ChatCommand = Schema.Union(
   RetryChatTurnCommand,
   ResumeChatTurnCommand,
   InterruptChatTurnCommand,
+  ScheduleChatUsageResumeCommand,
+  CancelChatUsageResumeCommand,
   AnswerChatTurnQuestionCommand,
   DeleteChatThreadCommand,
   UpdateChatSettingsCommand,

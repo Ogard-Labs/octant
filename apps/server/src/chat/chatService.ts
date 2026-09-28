@@ -73,6 +73,10 @@ import {
   type ProviderProbeResult,
   type MentionableThreadId,
   type ProviderServiceLimits,
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  type UsageResumeRecord,
+  type UsageResumeThreadState,
   type WindowId,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -182,6 +186,7 @@ import {
   purgeThreadContent,
   writeChatContent,
 } from "../persistence/chatProjection";
+import { readUsageResumeState } from "../persistence/usageResumeProjection";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { modelEvidenceFromObservedState } from "../providers/providerContextFacts";
 import type { ReviewedModelManifest } from "../providers/reviewedModelManifest";
@@ -1155,6 +1160,14 @@ export class ChatService {
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#answerTurnQuestion(command),
+          );
+        case "schedule-chat-usage-resume":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#scheduleUsageResume(command),
+          );
+        case "cancel-chat-usage-resume":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#cancelUsageResume(command),
           );
         case "delete-chat-thread":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -2599,6 +2612,129 @@ export class ChatService {
       ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
+  }
+
+  /**
+   * The durable opt-in: the recorded stop must still be the conversation's
+   * tail — a resume can only belong to the attempt the limit actually parked.
+   * The scheduled event and the thread update journal in one append so live
+   * subscribers refresh through the channel they already read.
+   */
+  async #scheduleUsageResume(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "schedule-chat-usage-resume" }>,
+  ): Promise<ChatCommandResult> {
+    const thread = this.#requireActiveThread(command.threadId);
+    this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+    const view = this.#requireThreadView(command.threadId);
+    const turn = view.turns.find((candidate) => String(candidate.id) === String(command.turnId));
+    const attempt = turn?.attempts.find(
+      (candidate) => String(candidate.id) === String(command.attemptId),
+    );
+    if (turn === undefined || attempt === undefined) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Chat attempt was not found.",
+      });
+    }
+    const latestTurn = view.turns.at(-1);
+    if (
+      latestTurn === undefined ||
+      String(latestTurn.id) !== String(turn.id) ||
+      String(latestTurn.attempts.at(-1)?.id) !== String(attempt.id)
+    ) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "Only the turn's latest stopped attempt can resume at reset.",
+        }),
+      );
+    }
+    if (attempt.outcome !== "waiting" || attempt.usageLimit === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The attempt is not waiting on a usage limit.",
+        }),
+      );
+    }
+    if (attempt.usageLimit.resetsAt === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The provider did not disclose when the limit resets.",
+        }),
+      );
+    }
+    if (attempt.resumeCursor === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The attempt preserved no provider resume state.",
+        }),
+      );
+    }
+    const record: UsageResumeRecord = {
+      threadId: String(thread.id),
+      turnId: String(turn.id),
+      attemptId: String(attempt.id),
+      providerInstanceId: thread.providerInstanceId,
+      usageLimit: attempt.usageLimit,
+      resetsAt: attempt.usageLimit.resetsAt,
+      scheduledAt: decodeTimestamp(this.#clock()),
+    };
+    const usageResume: UsageResumeThreadState = { record, status: "scheduled" };
+    const updatedThread = {
+      ...withoutThreadRest(thread),
+      usageResume,
+      version: (command.expectedVersion + 2) as AggregateVersion,
+      updatedAt: decodeTimestamp(this.#clock()),
+    };
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: command.expectedVersion,
+      events: [
+        this.#pending(USAGE_RESUME_SCHEDULED, { resume: record }),
+        this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
+      ],
+    });
+    return { kind: "thread-updated", thread: updatedThread };
+  }
+
+  async #cancelUsageResume(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "cancel-chat-usage-resume" }>,
+  ): Promise<ChatCommandResult> {
+    const thread = this.#requireActiveThread(command.threadId);
+    this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+    const scheduled = readUsageResumeState(
+      this.#persistence.connection,
+      "chat-thread",
+      String(thread.id),
+    );
+    if (scheduled === undefined || scheduled.status !== "scheduled") {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The thread has no scheduled resume to cancel.",
+        }),
+      );
+    }
+    // The cancel event already deleted the resume row; the emitted thread
+    // must not keep reporting the opt-in it just withdrew.
+    const { usageResume: _withdrawn, ...withdrawnThread } = withoutThreadRest(thread);
+    const updatedThread = {
+      ...withdrawnThread,
+      version: (command.expectedVersion + 2) as AggregateVersion,
+      updatedAt: decodeTimestamp(this.#clock()),
+    };
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: command.expectedVersion,
+      events: [
+        this.#pending(USAGE_RESUME_CANCELLED, { resume: scheduled.record }),
+        this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
+      ],
+    });
+    return { kind: "thread-updated", thread: updatedThread };
   }
 
   async #resumeTurn(

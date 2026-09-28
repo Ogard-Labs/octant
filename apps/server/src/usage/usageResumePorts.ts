@@ -1,0 +1,441 @@
+/**
+ * The mode adapters the usage-resume scheduler re-checks and dispatches
+ * through. Each port re-reads the authoritative projection at fire time —
+ * the opt-in is only as good as the stop it recorded, so a thread, turn,
+ * provider, or reset fact that moved invalidates the resume rather than
+ * resuming against stale evidence.
+ */
+import { Schema } from "effect";
+import {
+  decodeAggregateVersion,
+  decodeChatAttemptId,
+  decodeChatThread,
+  decodeChatThreadId,
+  decodeChatTurnId,
+  decodeCodeOperationEventFrame,
+  decodeCodeOperationId,
+  decodeCodeThread,
+  decodeCodeThreadId,
+  decodeProviderSessionId,
+  decodeWorkThread,
+  decodeWorkThreadId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
+  UtcTimestamp,
+  type ChatThread,
+  type ChatThreadView,
+  type CodeEvidenceBatchResponse,
+  type CodeEvidenceContentId,
+  type CodeEvidenceReference,
+  type CodeOperationCommand,
+  type CodeOperationEventFrame,
+  type CodeOperationResult,
+  type CodeThread,
+  type CodeThreadId,
+  type UsageResumeRecord,
+  type WindowId,
+  type WorkThread,
+  type WorkThreadId,
+  type WorkTurnLookupResult,
+  type WorkTurnState,
+} from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { Journal } from "../persistence/journal";
+import { readAggregateVersion } from "../persistence/chatProjection";
+import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
+import type { SqliteConnection } from "../persistence/sqlitePort";
+import type { UsageResumeModePort, UsageResumePorts } from "./usageResumeService";
+
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+/**
+ * What the ports need from the host. Every function is a narrow cut of the
+ * service the mode already exposes — a resume is a normal send, so it goes
+ * through the ordinary command path and inherits its authority checks.
+ */
+export interface UsageResumePortDependencies {
+  readonly connection: SqliteConnection;
+  readonly journal: Pick<Journal, "replayAggregate">;
+  readonly clock: () => Date;
+  readonly uuid: () => string;
+  /** Any registered local window; the turn path rechecks access itself. */
+  readonly windowId: () => WindowId | undefined;
+  readonly chat: {
+    readonly readThread: (threadId: ChatThread["id"]) => ChatThread | undefined;
+    readonly readThreadView: (threadId: ChatThread["id"]) => ChatThreadView | undefined;
+    readonly execute: (input: unknown) => Promise<unknown>;
+  };
+  readonly work: {
+    readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
+    readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
+    readonly startFirstTurn: (windowId: WindowId, input: unknown) => Promise<WorkTurnLookupResult>;
+  };
+  readonly code: {
+    readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
+    readonly readRuntimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
+    readonly readOperationContents?: (
+      windowId: WindowId,
+      input: {
+        readonly threadId: CodeThreadId;
+        readonly items: ReadonlyArray<{
+          readonly operationId: CodeOperationEventFrame["operationId"];
+          readonly contentId: CodeEvidenceContentId;
+        }>;
+      },
+    ) => Promise<CodeEvidenceBatchResponse> | CodeEvidenceBatchResponse;
+    readonly stageEvidence?: (
+      windowId: WindowId,
+      threadId: CodeThreadId,
+      text: string,
+    ) => Promise<CodeEvidenceReference> | CodeEvidenceReference;
+    readonly executeOperation?: (
+      windowId: WindowId,
+      command: CodeOperationCommand,
+    ) => Promise<CodeOperationResult> | CodeOperationResult;
+  };
+}
+
+const invalid = (detail: string) => ({ kind: "invalid" as const, detail });
+const refused = (detail: string) => ({ kind: "refused" as const, detail });
+const refusalDetail = (error: unknown): string =>
+  error instanceof Error ? error.message : "The continuation could not be admitted.";
+
+/**
+ * The opt-in must still be the thread's one scheduled resume — same recorded
+ * stop — or the settle it rides belongs to something else.
+ */
+const scheduledFor = (
+  state: { readonly record: UsageResumeRecord; readonly status: string } | undefined,
+  record: UsageResumeRecord,
+): boolean =>
+  state !== undefined &&
+  state.status === "scheduled" &&
+  String(state.record.turnId) === String(record.turnId) &&
+  String(state.record.attemptId) === String(record.attemptId) &&
+  String(state.record.providerInstanceId) === String(record.providerInstanceId) &&
+  state.record.resetsAt === record.resetsAt;
+
+function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
+  return {
+    inspect: async (record) => {
+      const threadId = decodeChatThreadId(record.threadId);
+      const thread = deps.chat.readThread(threadId);
+      if (thread === undefined || thread.lifecycle !== "active") {
+        return invalid("The Chat thread is no longer active.");
+      }
+      if (String(thread.providerInstanceId) !== String(record.providerInstanceId)) {
+        return invalid("The thread's provider changed.");
+      }
+      if (!scheduledFor(thread.usageResume, record)) {
+        return invalid("The scheduled resume is no longer current.");
+      }
+      const view = deps.chat.readThreadView(threadId);
+      const turn = view?.turns.at(-1);
+      const attempt = turn?.attempts.at(-1);
+      if (
+        turn === undefined ||
+        attempt === undefined ||
+        String(turn.id) !== record.turnId ||
+        String(attempt.id) !== String(record.attemptId)
+      ) {
+        return invalid("The recorded stop is no longer the conversation's tail.");
+      }
+      if (attempt.outcome !== "waiting" || attempt.usageLimit === undefined) {
+        return invalid("The attempt is no longer waiting on a usage limit.");
+      }
+      if (attempt.usageLimit.resetsAt !== record.resetsAt) {
+        return invalid("The provider moved the reset the opt-in was made against.");
+      }
+      if (attempt.resumeCursor === undefined) {
+        return invalid("The attempt no longer carries provider resume state.");
+      }
+      return { kind: "ready" };
+    },
+    dispatch: async (record) => {
+      const threadId = decodeChatThreadId(record.threadId);
+      const attemptId = record.attemptId;
+      if (attemptId === undefined) {
+        return refused("The recorded stop names no attempt.");
+      }
+      try {
+        await deps.chat.execute({
+          kind: "resume-chat-turn",
+          threadId,
+          expectedVersion: decodeAggregateVersion(
+            readAggregateVersion(deps.connection, "chat-thread", String(threadId)),
+          ),
+          turnId: decodeChatTurnId(record.turnId),
+          attemptId: decodeChatAttemptId(attemptId),
+        });
+        return { kind: "dispatched" };
+      } catch (error) {
+        return refused(refusalDetail(error));
+      }
+    },
+    settleUpdate: (record, outcome, detail, nextVersion) => {
+      const thread = deps.chat.readThread(decodeChatThreadId(record.threadId));
+      if (thread === undefined) return undefined;
+      return {
+        eventName: "chat.thread-updated@1",
+        payload: {
+          kind: "thread-updated",
+          thread: decodeChatThread({
+            ...thread,
+            usageResume: {
+              record,
+              status: outcome,
+              ...(detail === undefined ? {} : { detail }),
+            },
+            version: nextVersion,
+            updatedAt: decodeTimestamp(deps.clock().toISOString()),
+          }),
+        },
+      };
+    },
+  };
+}
+
+function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
+  const stoppedTurn = (record: UsageResumeRecord) =>
+    deps.work.listTurns(decodeWorkThreadId(record.threadId)).at(-1);
+  return {
+    inspect: async (record) => {
+      const threadId = decodeWorkThreadId(record.threadId);
+      const thread = deps.work.readThread(threadId);
+      if (thread === undefined || thread.lifecycle !== "active") {
+        return invalid("The Work thread is no longer active.");
+      }
+      if (String(thread.providerInstanceId) !== String(record.providerInstanceId)) {
+        return invalid("The thread's provider changed.");
+      }
+      if (thread.bindingRevisionId === undefined) {
+        return invalid("The thread has no bound project revision.");
+      }
+      if (!scheduledFor(thread.usageResume, record)) {
+        return invalid("The scheduled resume is no longer current.");
+      }
+      const turn = stoppedTurn(record);
+      if (turn === undefined || String(turn.turnId) !== record.turnId) {
+        return invalid("The recorded stop is no longer the thread's latest turn.");
+      }
+      if (turn.status !== "waiting" || turn.failure?.usageLimit === undefined) {
+        return invalid("The turn is no longer waiting on a usage limit.");
+      }
+      if (turn.failure.usageLimit.resetsAt !== record.resetsAt) {
+        return invalid("The provider moved the reset the opt-in was made against.");
+      }
+      if (turn.resumeCursor === undefined) {
+        return invalid("The turn no longer carries provider resume state.");
+      }
+      return { kind: "ready" };
+    },
+    dispatch: async (record) => {
+      const windowId = deps.windowId();
+      if (windowId === undefined) {
+        return refused("No local window is registered for this host.");
+      }
+      const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
+      const turn = stoppedTurn(record);
+      if (thread === undefined || turn === undefined || thread.bindingRevisionId === undefined) {
+        return refused("The thread's recorded stop is unavailable.");
+      }
+      try {
+        const result = await deps.work.startFirstTurn(windowId, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(deps.uuid()),
+          threadId: thread.id,
+          turnId: decodeWorkTurnId(deps.uuid()),
+          prompt: turn.prompt,
+          ...(turn.extensionSelections === undefined
+            ? {}
+            : { extensionSelections: turn.extensionSelections }),
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted"
+          ? { kind: "dispatched" }
+          : refused("message" in result ? result.message : "The continuation was not admitted.");
+      } catch (error) {
+        return refused(refusalDetail(error));
+      }
+    },
+    settleUpdate: (record, outcome, detail, nextVersion) => {
+      const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
+      if (thread === undefined) return undefined;
+      return {
+        eventName: "work.thread-updated@1",
+        payload: {
+          kind: "thread-updated",
+          thread: decodeWorkThread({
+            ...thread,
+            usageResume: {
+              record,
+              status: outcome,
+              ...(detail === undefined ? {} : { detail }),
+            },
+            version: nextVersion,
+            updatedAt: decodeTimestamp(deps.clock().toISOString()),
+          }),
+        },
+      };
+    },
+  };
+}
+
+/**
+ * The provider-turn tail a Code thread recorded on the operation aggregate —
+ * the journaled stop the opt-in binds to, re-read at fire time.
+ */
+const codeStoppedTurnState = (
+  deps: UsageResumePortDependencies,
+  operationId: string,
+):
+  | Extract<
+      Extract<CodeOperationEventFrame["event"], { kind: "operation-result" }>["result"],
+      { kind: "provider-turn-state" }
+    >
+  | undefined => {
+  let latest:
+    | Extract<
+        Extract<CodeOperationEventFrame["event"], { kind: "operation-result" }>["result"],
+        { kind: "provider-turn-state" }
+      >
+    | undefined;
+  for (const committed of deps.journal.replayAggregate({
+    aggregateType: "code-operation",
+    aggregateId: operationId,
+    afterVersion: 0,
+    limit: 1_000,
+  })) {
+    if (committed.eventName !== "code.operation-event-recorded@1") continue;
+    const frame = decodeCodeOperationEventFrame(committed.payload);
+    if (
+      frame.event.kind === "operation-result" &&
+      frame.event.result.kind === "provider-turn-state"
+    ) {
+      latest = frame.event.result;
+    }
+  }
+  return latest;
+};
+
+function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
+  return {
+    inspect: async (record) => {
+      const threadId = decodeCodeThreadId(record.threadId);
+      const thread = deps.code.readThread(threadId);
+      if (thread === undefined || thread.lifecycle !== "active") {
+        return invalid("The Code thread is no longer active.");
+      }
+      if (String(thread.providerInstanceId) !== String(record.providerInstanceId)) {
+        return invalid("The thread's provider changed.");
+      }
+      if (!scheduledFor(thread.usageResume, record)) {
+        return invalid("The scheduled resume is no longer current.");
+      }
+      const latest = deps.code
+        .readRuntimeWorks(threadId)
+        .filter(({ work }) => work.kind === "provider-turn")
+        .at(-1);
+      if (latest === undefined || String(latest.work.id) !== record.turnId) {
+        return invalid("The recorded stop is no longer the thread's latest provider turn.");
+      }
+      const stopped = codeStoppedTurnState(deps, record.turnId);
+      if (
+        stopped === undefined ||
+        stopped.state !== "waiting" ||
+        stopped.failure?.usageLimit === undefined
+      ) {
+        return invalid("The provider turn is no longer waiting on a usage limit.");
+      }
+      if (stopped.failure.usageLimit.resetsAt !== record.resetsAt) {
+        return invalid("The provider moved the reset the opt-in was made against.");
+      }
+      if (stopped.evidence === undefined) {
+        return invalid("The turn preserved no provider prompt state.");
+      }
+      return { kind: "ready" };
+    },
+    dispatch: async (record) => {
+      const windowId = deps.windowId();
+      if (windowId === undefined) {
+        return refused("No local window is registered for this host.");
+      }
+      const threadId = decodeCodeThreadId(record.threadId);
+      const thread = deps.code.readThread(threadId);
+      const stopped = codeStoppedTurnState(deps, record.turnId);
+      const evidence = stopped?.evidence;
+      if (
+        thread === undefined ||
+        evidence === undefined ||
+        deps.code.readOperationContents === undefined ||
+        deps.code.stageEvidence === undefined ||
+        deps.code.executeOperation === undefined
+      ) {
+        return refused("The recorded stop's preserved prompt is unavailable.");
+      }
+      try {
+        const batch = await deps.code.readOperationContents(windowId, {
+          threadId,
+          items: [
+            { operationId: decodeCodeOperationId(record.turnId), contentId: evidence.contentId },
+          ],
+        });
+        const text = batch.items.at(0)?.text;
+        if (text === undefined || text.trim().length === 0) {
+          return refused("The recorded stop's preserved prompt is unavailable.");
+        }
+        const prompt = await deps.code.stageEvidence(windowId, threadId, text);
+        const result = await deps.code.executeOperation(windowId, {
+          kind: "start-provider-turn",
+          operationId: decodeCodeOperationId(deps.uuid()),
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          sessionId: decodeProviderSessionId(deps.uuid()),
+          prompt,
+        });
+        return result.kind === "provider-turn-state" &&
+          (result.state === "running" || result.state === "waiting" || result.state === "completed")
+          ? { kind: "dispatched" }
+          : refused(
+              result.kind === "provider-turn-state" && result.failure !== undefined
+                ? result.failure.message
+                : "The continuation was not admitted.",
+            );
+      } catch (error) {
+        return refused(refusalDetail(error));
+      }
+    },
+    settleUpdate: (record, outcome, detail, nextVersion) => {
+      const thread = deps.code.readThread(decodeCodeThreadId(record.threadId));
+      if (thread === undefined) return undefined;
+      return {
+        eventName: "code.thread-updated@1",
+        payload: {
+          kind: "thread-updated",
+          thread: decodeCodeThread({
+            ...thread,
+            usageResume: {
+              record,
+              status: outcome,
+              ...(detail === undefined ? {} : { detail }),
+            },
+            version: nextVersion,
+            updatedAt: decodeTimestamp(deps.clock().toISOString()),
+          }),
+        },
+      };
+    },
+  };
+}
+
+export function createUsageResumePorts(deps: UsageResumePortDependencies): UsageResumePorts {
+  return { chat: chatPort(deps), work: workPort(deps), code: codePort(deps) };
+}

@@ -55,6 +55,7 @@ import {
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeContextSubjectContent } from "./contextProjection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
+import { readUsageResumeState } from "./usageResumeProjection";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateIdSchema);
 const decodeThreadWorkItem = Schema.decodeUnknownSync(ThreadWorkItemSchema);
@@ -497,7 +498,7 @@ export function readChatThreads(connection: SqliteConnection): ReadonlyArray<Cha
     .all() as ReadonlyArray<{ readonly schema_version: number; readonly thread_json: string }>;
   return rows.map(({ schema_version, thread_json }) => {
     assertChatProjectionSchema(schema_version);
-    return decodeChatThread(JSON.parse(thread_json));
+    return hydrateThreadUsageResume(connection, decodeChatThread(JSON.parse(thread_json)));
   });
 }
 
@@ -1034,7 +1035,18 @@ function readRawThread(connection: SqliteConnection, threadId: string): ChatThre
     .get(threadId) as { readonly schema_version: number; readonly thread_json: string } | undefined;
   if (row === undefined) return undefined;
   assertChatProjectionSchema(row.schema_version);
-  return decodeChatThread(JSON.parse(row.thread_json));
+  return hydrateThreadUsageResume(connection, decodeChatThread(JSON.parse(row.thread_json)));
+}
+
+/**
+ * The journaled thread copy can embed a resume state that later events moved
+ * past; the usage-resume projection is the authoritative read, so every read
+ * overrides the embedded copy with it (including clearing it).
+ */
+function hydrateThreadUsageResume(connection: SqliteConnection, thread: ChatThread): ChatThread {
+  const usageResume = readUsageResumeState(connection, "chat-thread", String(thread.id));
+  const { usageResume: _embedded, ...rest } = thread;
+  return usageResume === undefined ? rest : { ...rest, usageResume };
 }
 
 function normalizeSearchText(value: string): string {

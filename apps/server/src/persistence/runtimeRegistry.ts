@@ -44,6 +44,12 @@ import {
   WorkResearchFrame,
   WorkRequestFrame,
   WorkflowFrame,
+  UsageResumeCancelled,
+  UsageResumeScheduled,
+  UsageResumeSettled,
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  USAGE_RESUME_SETTLED,
   EnvironmentPresentationReplaced,
   MemoryEntryCreated,
   MemoryEntryRetracted,
@@ -175,6 +181,7 @@ import {
 import { ProjectTerminalProjection } from "./projectTerminalProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
+import { UsageResumeProjection } from "./usageResumeProjection";
 import { ExternalContentTaintProjection } from "../context/externalContentTaintProjection";
 import {
   THREAD_CHECKPOINT_FORGOTTEN,
@@ -280,6 +287,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("context.plan-created@1", 1, ContextPlanCreated)
     .register("context.summary-created@1", 1, ContextSummaryCreated)
     .register("context.usage-reconciled@1", 1, ContextUsageReconciled)
+    .register(USAGE_RESUME_SCHEDULED, 1, UsageResumeScheduled)
+    .register(USAGE_RESUME_CANCELLED, 1, UsageResumeCancelled)
+    .register(USAGE_RESUME_SETTLED, 1, UsageResumeSettled)
     .register("context.capacity-reservation-updated@1", 1, ContextCapacityReservationUpdated)
     .register("chat.settings-updated@1", 1, ChatSettingsUpdated)
     .register("chat.thread-created@1", 1, ChatThreadCreated)
@@ -441,6 +451,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ProjectTerminalProjection())
       .register(new ThreadRetentionProjection())
       .register(new ExternalContentTaintProjection())
+      .register(new UsageResumeProjection())
       .register(new SpendCeilingProjection()),
   };
 }

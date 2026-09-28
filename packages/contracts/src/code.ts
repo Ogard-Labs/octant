@@ -15,6 +15,7 @@ import {
   ProviderUsageLimit,
   ThreadProviderHandoff,
 } from "./providers";
+import { UsageResumeThreadState } from "./usageResume";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -263,6 +264,12 @@ export const CodeThread = Schema.Struct({
    * thread started on its own.
    */
   forkedFrom: Schema.optional(CodeThreadForkOrigin),
+  /**
+   * The thread's pending usage-resume opt-in, when a person asked the host to
+   * resume a usage-limited provider turn at the declared reset. Journaled on
+   * this thread's own stream; absent means no recovery is pending.
+   */
+  usageResume: Schema.optional(UsageResumeThreadState),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
@@ -627,6 +634,27 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("confirm-code-delivery-outcome"),
     ...CodeThreadCommandFields,
     outcomeKind: CodeDeliveryOutcomeKind,
+  }).annotations(strict),
+  /**
+   * Opts this thread into resuming a usage-limited provider turn when the
+   * provider's declared reset arrives. The server reads the limit and reset
+   * from the journaled turn rather than trusting the command, and journals
+   * the opt-in on the thread's stream so every client and the host scheduler
+   * see it. The operation id is a plain UUID for the same import-boundary
+   * reason as `throughOperationId`: operations import threads, not the other
+   * way round.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("schedule-code-usage-resume"),
+    ...CodeThreadCommandFields,
+    operationId: Schema.UUID,
+  }).annotations(strict),
+  /**
+   * Withdraws the thread's pending usage-resume opt-in before it fires.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("cancel-code-usage-resume"),
+    ...CodeThreadCommandFields,
   }).annotations(strict),
 );
 export type CodeCommand = typeof CodeCommand.Type;
