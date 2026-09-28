@@ -761,9 +761,11 @@ function createRepository(root: string): string {
 
 /**
  * A checkout shaped like a linked worktree: its `.git` is a file naming a
- * gitdir inside another repository, with the `commondir` that repository
- * shares. Both sit outside the bound root, which is what makes the launch's
- * out-of-root metadata rules apply to it.
+ * gitdir inside another repository's "worktrees" directory, and the gitdir
+ * carries Git's reciprocal record — a "gitdir" file pointing back at the
+ * marker and a "commondir" naming the shared repository metadata. Both sit
+ * outside the bound root, which is what makes the launch's out-of-root
+ * metadata rules apply to it.
  */
 function linkedWorktreeCheckout(): string {
   const root = temporaryDirectory();
@@ -772,6 +774,7 @@ function linkedWorktreeCheckout(): string {
   mkdirSync(checkout);
   mkdirSync(gitdir, { recursive: true });
   writeFileSync(join(checkout, ".git"), `gitdir: ${gitdir}\n`);
+  writeFileSync(join(gitdir, "gitdir"), `${join(checkout, ".git")}\n`);
   writeFileSync(join(gitdir, "commondir"), `${join(root, "main.git")}\n`);
   return checkout;
 }
