@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  gitLinkedWorktreeMetadataPaths,
   gitLinkedWorktreeMetadataRules,
   gitShimExtraRules,
   MACOS_GIT_SHIM_READ_PATHS,
@@ -128,21 +129,22 @@ describe("git Seatbelt launch", () => {
       mkdirSync(worktree);
       mkdirSync(gitdir, { recursive: true });
       writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(gitdir, "gitdir"), `${join(worktree, ".git")}\n`);
       writeFileSync(join(gitdir, "commondir"), `${common}\n`);
       const rules = gitLinkedWorktreeMetadataRules(worktree);
-      expect(rules.some((rule) => rule.includes(gitdir))).toBe(true);
-      expect(rules.some((rule) => rule.includes(common))).toBe(true);
+      expect(rules.some((rule) => rule.includes(realpathSync(gitdir)))).toBe(true);
+      expect(rules.some((rule) => rule.includes(realpathSync(common)))).toBe(true);
       // Git canonicalises the out-of-root metadata by walking its
       // components, so every ancestor needs metadata of its own — and only
       // metadata: the worktree root's contents stay unreadable.
-      expect(rules).toContain(`(allow file-read-metadata (literal "${root}"))`);
+      expect(rules).toContain(`(allow file-read-metadata (literal "${realpathSync(root)}"))`);
       // These rules are appended last and Seatbelt resolves by last matching
       // rule, so a write allow here would override a read-only caller's own
       // write deny on the same path. Observing history must not come with
       // write authority over the parent repository's refs, objects and hooks.
       expect(rules.some((rule) => rule.includes("file-write"))).toBe(false);
       expect(gitLinkedWorktreeMetadataRules(worktree, { writable: true })).toContain(
-        `(allow file-write* (subpath "${common}"))`,
+        `(allow file-write* (subpath "${realpathSync(common)}"))`,
       );
 
       // The launch itself defaults to read-only. These rules are appended
@@ -164,7 +166,48 @@ describe("git Seatbelt launch", () => {
         networkEgress: "none",
       });
       expect((captured?.extraRules ?? []).some((rule) => rule.includes("file-write"))).toBe(false);
-      expect(rules).not.toContain(`(allow file-read* (subpath "${root}"))`);
+      expect(rules).not.toContain(`(allow file-read* (subpath "${realpathSync(root)}"))`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("grants nothing when a rewritten marker fails to prove the reciprocal worktree record", () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-git-forged-"));
+    try {
+      const worktree = join(root, "worktree");
+      const outside = join(root, "outside");
+      mkdirSync(worktree);
+      mkdirSync(outside);
+      // A marker can name any existing directory; none of these is the
+      // reciprocal record Git writes for a linked worktree, so confinement
+      // must never bind them.
+      const attempts = [
+        () => writeFileSync(join(worktree, ".git"), `gitdir: ${outside}\n`),
+        () => {
+          const gitdir = join(root, "main.git", "worktrees", "feature");
+          mkdirSync(gitdir, { recursive: true });
+          writeFileSync(join(gitdir, "commondir"), `${join(root, "main.git")}\n`);
+          writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+        },
+        () => {
+          const gitdir = join(root, "main.git", "worktrees", "feature");
+          writeFileSync(join(gitdir, "gitdir"), `${join(worktree, ".git")}\n`);
+          writeFileSync(join(gitdir, "commondir"), `${outside}\n`);
+          writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+        },
+      ];
+      for (const attempt of attempts) {
+        attempt();
+        expect(gitLinkedWorktreeMetadataPaths(worktree)).toEqual({
+          readPaths: [],
+          writePaths: [],
+        });
+        expect(gitLinkedWorktreeMetadataPaths(worktree, { writable: true })).toEqual({
+          readPaths: [],
+          writePaths: [],
+        });
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -179,6 +222,7 @@ describe("git Seatbelt launch", () => {
       mkdirSync(worktree);
       mkdirSync(gitdir, { recursive: true });
       writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(gitdir, "gitdir"), `${join(worktree, ".git")}\n`);
       writeFileSync(join(gitdir, "commondir"), `${common}\n`);
 
       for (const writable of [false, true]) {
@@ -202,13 +246,13 @@ describe("git Seatbelt launch", () => {
         // authority is carried as binds, which is also what lets a linked
         // worktree's history read run there at all.
         expect(captured?.extraRules).toBeUndefined();
-        expect(captured?.readRoots).toContain(gitdir);
-        expect(captured?.readRoots).toContain(common);
+        expect(captured?.readRoots).toContain(realpathSync(gitdir));
+        expect(captured?.readRoots).toContain(realpathSync(common));
         if (writable) {
-          expect(captured?.additionalWriteRoots).toContain(gitdir);
-          expect(captured?.additionalWriteRoots).toContain(common);
+          expect(captured?.additionalWriteRoots).toContain(realpathSync(gitdir));
+          expect(captured?.additionalWriteRoots).toContain(realpathSync(common));
         } else {
-          expect(captured?.additionalWriteRoots ?? []).not.toContain(gitdir);
+          expect(captured?.additionalWriteRoots ?? []).not.toContain(realpathSync(gitdir));
         }
       }
     } finally {
@@ -226,6 +270,7 @@ describe("git Seatbelt launch", () => {
       mkdirSync(gitdir, { recursive: true });
       mkdirSync(join(root, "tmp"));
       writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(gitdir, "gitdir"), `${join(worktree, ".git")}\n`);
       writeFileSync(join(gitdir, "commondir"), `${join(root, "main.git")}\n`);
       writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
       chmodSync(sandboxPath, 0o700);
@@ -250,8 +295,8 @@ describe("git Seatbelt launch", () => {
       });
 
       const profile = launch.args[1] ?? "";
-      expect(profile).toContain(`(allow file-read-metadata (literal "${root}"))`);
-      expect(profile).not.toContain(`(allow file-read* (subpath "${root}"))`);
+      expect(profile).toContain(`(allow file-read-metadata (literal "${realpathSync(root)}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${realpathSync(root)}"))`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

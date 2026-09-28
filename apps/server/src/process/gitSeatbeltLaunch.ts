@@ -1,6 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
@@ -131,32 +139,57 @@ export interface GitLinkedWorktreeMetadataPaths {
  * commondir as plain paths so each confinement backend can translate them:
  * Seatbelt writes them as rules, Bubblewrap binds them directly — its mounts
  * create the bind-target ancestors the Darwin profile has to spell out.
+ *
+ * The marker is a file anyone with write access to the checkout can rewrite,
+ * so only Git's reciprocal linked-worktree record earns an out-of-root grant:
+ * the pointer has to land inside a "worktrees" directory, that gitdir has to
+ * carry a "gitdir" file pointing back at this marker, and its "commondir" has
+ * to resolve to the main repository's .git. This is the same proof
+ * gitHistoryMetadata requires; without it a rewritten marker could name any
+ * existing directory and the confinement layer would expose it — writable for
+ * a mutation launch — outside the authorized checkout.
  */
 export function gitLinkedWorktreeMetadataPaths(
   checkoutRoot: string,
   options: GitLinkedWorktreeMetadataOptions = {},
 ): GitLinkedWorktreeMetadataPaths {
-  let gitdir: string | undefined;
   try {
-    const text = readFileSync(join(checkoutRoot, ".git"), "utf8");
-    const match = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+    const marker = join(checkoutRoot, ".git");
+    const stat = lstatSync(marker);
+    if (stat.isSymbolicLink() || !stat.isFile()) return { readPaths: [], writePaths: [] };
+    const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(marker, "utf8"));
     const raw = match?.[1];
     if (raw === undefined || raw === "") return { readPaths: [], writePaths: [] };
-    gitdir = isAbsolute(raw) ? raw : join(checkoutRoot, raw);
+    const gitdir = realpathSync(isAbsolute(raw) ? raw : resolve(checkoutRoot, raw));
+    if (basename(dirname(gitdir)) !== "worktrees") return { readPaths: [], writePaths: [] };
+    const backlink = realpathSync(resolve(gitdir, readGitPointerSync(join(gitdir, "gitdir"))));
+    if (backlink !== realpathSync(marker)) return { readPaths: [], writePaths: [] };
+    const commonDirectory = realpathSync(
+      resolve(gitdir, readGitPointerSync(join(gitdir, "commondir"))),
+    );
+    if (commonDirectory !== dirname(dirname(gitdir))) return { readPaths: [], writePaths: [] };
+    const roots = [gitdir, commonDirectory];
+    return {
+      readPaths: roots,
+      writePaths: options.writable === true ? roots : [],
+    };
   } catch {
     return { readPaths: [], writePaths: [] };
   }
-  const roots = [gitdir];
+}
+
+function readGitPointerSync(path: string): string {
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.size > 4096) throw new Error("Invalid Git metadata pointer");
+  const fd = openSync(path, "r");
   try {
-    const common = readFileSync(join(gitdir, "commondir"), "utf8").trim();
-    if (common !== "") roots.push(isAbsolute(common) ? common : join(gitdir, common));
-  } catch {
-    // Ordinary repositories have no commondir file.
+    const bytes = Buffer.alloc(4097);
+    const bytesRead = readSync(fd, bytes, 0, bytes.length, 0);
+    if (bytesRead > 4096) throw new Error("Oversized Git metadata pointer");
+    return bytes.subarray(0, bytesRead).toString("utf8").trimEnd();
+  } finally {
+    closeSync(fd);
   }
-  return {
-    readPaths: roots,
-    writePaths: options.writable === true ? roots : [],
-  };
 }
 
 /**
