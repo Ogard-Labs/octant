@@ -1213,6 +1213,14 @@ export class ProviderService implements ProviderServiceApi {
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
         }
+        if (isImageProfileDriverKind(instance.driverKind)) {
+          // Image profiles are generation endpoints with a stored credential,
+          // not runtimes to probe — the chat-model driver cannot be built for
+          // them and would only ever report "incompatible".
+          this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw this.#unsupported("Image profiles have no runtime to probe.");
+        }
         // Do NOT clear the runtime observed state for a valid enabled probe:
         // the web client already clears its local snapshot for the "checking"
         // UI state, and clearing the server runtime state would race with

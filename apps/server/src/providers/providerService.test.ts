@@ -683,6 +683,31 @@ describe("ProviderService", () => {
     expect(createFixture.append).not.toHaveBeenCalled();
   });
 
+  it("refuses to probe an image profile and records no observation", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        provider({
+          displayName: "GPT Image",
+          driverKind: "openai-image",
+          configuration: {
+            kind: "openai-image-http",
+            modelAllowlist: ["gpt-image-2"],
+            defaultModel: "gpt-image-2",
+          },
+        }),
+      ],
+    });
+    await expect(fixture.service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "unsupported" },
+    });
+    expect(fixture.probe).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
+
+    await expect(fixture.service.warmEnabledProviders()).resolves.toBeUndefined();
+    expect(fixture.probe).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
+  });
+
   it("still journals an image profile when vendor-driver plugins are not effective", async () => {
     const fixture = serviceFixture({
       isDriverPluginEffective: () => false,
