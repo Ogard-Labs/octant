@@ -81,10 +81,24 @@ export const decodeModelListResult = decode(ModelListResult);
 
 const ThreadReference = Schema.Struct({ id: Schema.String });
 const TurnStatus = Schema.Literal("completed", "interrupted", "failed", "inProgress");
+/**
+ * The reason the app-server reports on a failed turn. `codexErrorInfo` is the
+ * classified signal (`"usageLimitExceeded"`, `"rateLimitExceeded"`, ...);
+ * structured variants decode as records and only their string form classifies.
+ */
+const TurnError = Schema.Struct({
+  message: Schema.String,
+  codexErrorInfo: Schema.optional(
+    Schema.Union(Schema.String, Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  ),
+  additionalDetails: Schema.optional(NullableString),
+});
 const TurnReference = Schema.Struct({
   id: Schema.String,
   status: TurnStatus,
+  error: Schema.optional(TurnError),
 });
+export type CodexTurnReference = typeof TurnReference.Type;
 
 const ThreadResult = Schema.Struct({
   thread: ThreadReference,

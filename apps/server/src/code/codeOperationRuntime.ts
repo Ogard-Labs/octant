@@ -2112,7 +2112,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   this.#persistOutcome(
                     active,
                     outcome,
-                    message === undefined ? undefined : { category: "failed", message },
+                    message === undefined
+                      ? undefined
+                      : {
+                          category: "failed",
+                          message,
+                          ...(failure?.usageLimit === undefined
+                            ? {}
+                            : { usageLimit: failure.usageLimit }),
+                          ...(failure?.retryAfterMs === undefined
+                            ? {}
+                            : { retryAfterMs: failure.retryAfterMs }),
+                        },
                   );
                 }),
               ),

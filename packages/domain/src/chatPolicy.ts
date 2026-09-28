@@ -24,6 +24,7 @@ import type {
   ProviderModelOption,
   ProviderModelOptionValues,
   ProviderSessionId,
+  ProviderUsageLimit,
 } from "@octant/contracts/providers";
 
 export type ChatPolicyRejectionCode =
@@ -412,7 +413,13 @@ export function retryChatTurn(
   if (attempt.turnId !== input.turnId || attempt.id !== input.attemptId) {
     reject("retry-not-allowed", "Attempt identity does not match retry input");
   }
-  if (!retryEligibleOutcomes.includes(attempt.outcome)) {
+  // A provider-reported limit parks the attempt as waiting with the retry the
+  // notice offers as its only recovery — a fresh attempt on a new session.
+  // Other waiting causes (a live provider question) remain resumable only.
+  const retryEligible =
+    retryEligibleOutcomes.includes(attempt.outcome) ||
+    (attempt.outcome === "waiting" && attempt.usageLimit !== undefined);
+  if (!retryEligible) {
     reject("retry-not-allowed", `Cannot retry an attempt that is ${attempt.outcome}`);
   }
 
@@ -553,6 +560,12 @@ export interface TransitionChatAttemptInput {
    * where the runner stamps it.
    */
   readonly failure?: ChatAttemptFailure;
+  /**
+   * The provider's usage-limit signal for this stop. A transition means the
+   * previous stop is over — a resumed attempt, a replacement error, or a
+   * retried turn — so the fact is cleared unless the new state carries one.
+   */
+  readonly usageLimit?: ProviderUsageLimit;
 }
 const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
   "completed",
@@ -593,7 +606,7 @@ export function transitionChatAttempt(
       "A failure reason belongs on a failed or interrupted outcome, not " + input.outcome,
     );
   }
-  const { failure: previousFailure, ...attemptRest } = attempt;
+  const { failure: previousFailure, usageLimit: _previousLimit, ...attemptRest } = attempt;
   const failure =
     input.failure ?? (failureOutcomes.includes(input.outcome) ? previousFailure : undefined);
   // A question dies with the attempt that parked it: a terminal attempt can
@@ -606,6 +619,7 @@ export function transitionChatAttempt(
     outcome: input.outcome,
     updatedAt: input.updatedAt,
     ...(failure === undefined ? {} : { failure }),
+    ...(input.usageLimit === undefined ? {} : { usageLimit: input.usageLimit }),
   });
 }
 

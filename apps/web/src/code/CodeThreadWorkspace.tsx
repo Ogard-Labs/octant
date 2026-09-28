@@ -80,6 +80,7 @@ import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -1019,15 +1020,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       )}
 
       {props.controller.turnStatus === "waiting" ? (
-        <div className="code-thread-workspace__waiting thread-column" role="status">
-          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>
-            {props.controller.providerRequests.length === 0 &&
-            props.controller.turnError !== undefined
-              ? `Waiting · ${props.controller.turnError}`
-              : waitingTurnLabel(props.controller.providerRequests)}
-          </span>
-        </div>
+        props.controller.turnUsageLimit === undefined ? (
+          <div className="code-thread-workspace__waiting thread-column" role="status">
+            <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>
+              {props.controller.providerRequests.length === 0 &&
+              props.controller.turnError !== undefined
+                ? `Waiting · ${props.controller.turnError}`
+                : waitingTurnLabel(props.controller.providerRequests)}
+            </span>
+          </div>
+        ) : (
+          // A parked turn whose stop the provider's own signal called a usage
+          // limit says so — the generic waiting row has nothing honest to add.
+          <div className="thread-column">
+            <UsageLimitNotice
+              limit={props.controller.turnUsageLimit}
+              provider={providerModelLabel(providerGroups, thread)}
+            />
+          </div>
+        )
       ) : props.controller.turnError === undefined ||
         ((props.controller.turnStatus === "failed" ||
           props.controller.turnStatus === "interrupted") &&
@@ -1056,6 +1068,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ) : null}
         </div>
       )}
+
+      {/* The transcript row repeats the failure's own sentence; only this
+          notice carries what the provider reported about the limit itself —
+          its kind and any reset time. Waiting turns already show it in place
+          of the generic waiting row above. */}
+      {props.controller.turnStatus !== "waiting" &&
+      props.controller.turnUsageLimit !== undefined ? (
+        <div className="thread-column">
+          <UsageLimitNotice
+            limit={props.controller.turnUsageLimit}
+            provider={providerModelLabel(providerGroups, thread)}
+          />
+        </div>
+      ) : null}
 
       {thread.lifecycle === "waiting" || thread.lifecycle === "interrupted" ? (
         <div className="callout thread-column code-thread-workspace__callout" role="alert">

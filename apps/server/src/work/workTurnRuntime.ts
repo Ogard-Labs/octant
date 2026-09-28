@@ -426,11 +426,13 @@ function outcomeFromEvents(
     };
   }
   if (terminal?.kind === "failed") {
+    const usageLimit = terminal.failure.usageLimit;
     return {
       kind: "failed",
       failure: {
-        category: "failed",
+        category: terminal.failure.category === "rate-limited" ? "rate-limited" : "failed",
         message: truncateMessage(terminal.failure.message || "Provider turn failed."),
+        ...(usageLimit === undefined ? {} : { usageLimit }),
       },
     };
   }
@@ -452,12 +454,18 @@ function failureOutcome(error: unknown): WorkTurnRuntimeOutcome {
           ? "unauthorized"
           : error.category === "unsupported" || error.category === "incompatible"
             ? "unsupported"
-            : error.category === "provider-failed"
-              ? "failed"
-              : "unavailable";
+            : error.category === "rate-limited"
+              ? "rate-limited"
+              : error.category === "provider-failed"
+                ? "failed"
+                : "unavailable";
     return {
       kind: category === "interrupted" ? "waiting" : "failed",
-      failure: { category, message: truncateMessage(error.message) },
+      failure: {
+        category,
+        message: truncateMessage(error.message),
+        ...(error.usageLimit === undefined ? {} : { usageLimit: error.usageLimit }),
+      },
     };
   }
   return {

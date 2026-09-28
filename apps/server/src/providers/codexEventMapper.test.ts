@@ -1349,6 +1349,112 @@ describe("mapCodexMessage", () => {
     expect(failed).not.toMatchObject([{ kind: "event", event: { kind: "completed" } }]);
   });
 
+  it("classifies a provider-declared exhausted limit with the exhausted window's reset", () => {
+    const ctx = context();
+    map(
+      ctx,
+      notification("account/rateLimits/updated", {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1_784_000_000 },
+        },
+      }),
+    );
+
+    const failed = map(
+      ctx,
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: { message: "You've hit your usage limit.", codexErrorInfo: "usageLimitExceeded" },
+        },
+      }),
+    );
+
+    expect(failed).toEqual([
+      {
+        kind: "event",
+        event: expect.objectContaining({
+          kind: "failed",
+          failure: {
+            category: "rate-limited",
+            message: "You've hit your usage limit.",
+            usageLimit: { kind: "exhausted", resetsAt: "2026-07-14T03:33:20.000Z" },
+          },
+        }),
+      },
+    ]);
+  });
+
+  it("classifies a temporary provider rate limit without inventing a reset", () => {
+    const failed = map(
+      context(),
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: { message: "Rate limit reached.", codexErrorInfo: "rateLimitExceeded" },
+        },
+      }),
+    );
+
+    expect(failed).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "failed",
+          failure: { category: "rate-limited", usageLimit: { kind: "temporary" } },
+        },
+      },
+    ]);
+    expect(failed[0]).not.toHaveProperty("event.failure.usageLimit.resetsAt");
+  });
+
+  it("keeps an unrecognized stop signal an honest provider failure", () => {
+    const failed = map(
+      context(),
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: { message: "Internal error.", codexErrorInfo: "internalServerError" },
+        },
+      }),
+    );
+
+    expect(failed).toMatchObject([
+      { kind: "event", event: { kind: "failed", failure: { category: "provider-failed" } } },
+    ]);
+    expect(failed[0]).not.toHaveProperty("event.failure.usageLimit");
+  });
+
+  it("does not let account telemetry alone reclassify an ordinary failure", () => {
+    const ctx = context();
+    map(
+      ctx,
+      notification("account/rateLimits/updated", {
+        rateLimits: { primary: { usedPercent: 100, resetsAt: 1_784_000_000 } },
+      }),
+    );
+
+    const failed = map(
+      ctx,
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "failed", error: { message: "Turn crashed." } },
+      }),
+    );
+
+    expect(failed).toMatchObject([
+      { kind: "event", event: { kind: "failed", failure: { category: "provider-failed" } } },
+    ]);
+    expect(failed[0]).not.toHaveProperty("event.failure.usageLimit");
+  });
+
   it("fails closed on duplicate terminal without consuming another sequence", () => {
     const ctx = context();
     map(

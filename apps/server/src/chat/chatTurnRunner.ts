@@ -415,6 +415,10 @@ export class ChatTurnRunner {
             currentAttempt = transitionChatAttempt(currentAttempt, {
               outcome,
               updatedAt: updatedAt(),
+              // A limited turn parks as waiting and records no failure, so the
+              // provider's usage-limit signal rides beside the outcome instead
+              // of inside one; a stop that is not a limit clears the fact.
+              ...(error.usageLimit === undefined ? {} : { usageLimit: error.usageLimit }),
               // Waiting is resumable rather than failed, so the attempt only
               // records a cause once the outcome states one.
               ...(outcome === "waiting"

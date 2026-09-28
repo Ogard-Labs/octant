@@ -12,6 +12,7 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderUsageLimit,
   ThreadProviderHandoff,
 } from "./providers";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
@@ -645,6 +646,12 @@ export const CodeFailure = Schema.Struct({
   ),
   message: Schema.NonEmptyTrimmedString,
   retryAfterMs: Schema.optional(PositiveInt),
+  /**
+   * The provider's own usage-limit signal, when stopping this operation was
+   * one. Absolute `resetsAt` supersedes the bounded `retryAfterMs` for
+   * longer-lived limits the provider disclosed.
+   */
+  usageLimit: Schema.optional(ProviderUsageLimit),
 }).annotations(strict);
 export type CodeFailure = typeof CodeFailure.Type;
 

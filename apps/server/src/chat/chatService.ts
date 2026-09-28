@@ -2517,7 +2517,8 @@ export class ChatService {
       if (
         attempt.outcome !== "failed" &&
         attempt.outcome !== "interrupted" &&
-        attempt.outcome !== "completed"
+        attempt.outcome !== "completed" &&
+        !(attempt.outcome === "waiting" && attempt.usageLimit !== undefined)
       ) {
         throw new ChatServiceError(
           decodeChatFailure({

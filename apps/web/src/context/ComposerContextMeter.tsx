@@ -21,6 +21,7 @@ import {
   useComposerContextMeterScope,
   type ComposerContextUsageFallback,
 } from "./composerContextMeterScope";
+import { resetCountdownLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -761,7 +762,9 @@ function WindowLimitRow(props: {
       name={name.label}
       {...(percent === undefined ? {} : { percent })}
       {...(props.showScope && name.scope !== undefined ? { qualifier: name.scope } : {})}
-      {...(limit.resetsAt === undefined ? {} : { reset: resetLabel(limit.resetsAt, Date.now()) })}
+      {...(limit.resetsAt === undefined
+        ? {}
+        : { reset: resetCountdownLabel(limit.resetsAt, Date.now()) })}
       value={
         limit.status === "exhausted" ? "Spent" : limit.status === "warning" ? "Low" : "Available"
       }
@@ -787,7 +790,7 @@ function BucketLimitRow(props: {
       name={props.label}
       percent={percent}
       qualifier={`${compactTokens(remaining)} of ${compactTokens(limit)} left`}
-      {...(resetsAt === undefined ? {} : { reset: resetLabel(resetsAt, props.now) })}
+      {...(resetsAt === undefined ? {} : { reset: resetCountdownLabel(resetsAt, props.now) })}
     />
   );
 }
@@ -929,34 +932,8 @@ const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
-const resetDayFormat = new Intl.DateTimeFormat(undefined, {
-  weekday: "short",
-  hour: "numeric",
-  minute: "2-digit",
-});
-
 function formatTime(timestamp: string): string {
   return dateTimeFormat.format(new Date(timestamp));
-}
-
-/**
- * When a limit frees up, in the terms a person plans around: a countdown
- * inside the day, a weekday and time beyond it. A bare clock time ("resets
- * 20:59") left the reader to work out whether that was today or next week.
- */
-function resetLabel(resetsAt: string, now: number): string {
-  const at = new Date(resetsAt).getTime();
-  const minutes = Math.ceil((at - now) / 60_000);
-  if (minutes <= 0) return "Resets now";
-  if (minutes < 60) return `Resets in ${String(minutes)} min`;
-  if (minutes < 24 * 60) {
-    const hours = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    return rest === 0
-      ? `Resets in ${String(hours)} hr`
-      : `Resets in ${String(hours)} hr ${String(rest)} min`;
-  }
-  return `Resets ${resetDayFormat.format(new Date(at))}`;
 }
 
 function formatRelativeTime(timestamp: string): string {

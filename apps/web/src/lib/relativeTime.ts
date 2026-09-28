@@ -16,3 +16,29 @@ export const absoluteTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
 });
+
+const resetDayFormat = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/**
+ * When a limit frees up, in the terms a person plans around: a countdown
+ * inside the day, a weekday and time beyond it. A bare clock time ("resets
+ * 20:59") left the reader to work out whether that was today or next week.
+ */
+export function resetCountdownLabel(resetsAt: string, now: number): string {
+  const at = new Date(resetsAt).getTime();
+  const minutes = Math.ceil((at - now) / 60_000);
+  if (minutes <= 0) return "Resets now";
+  if (minutes < 60) return `Resets in ${String(minutes)} min`;
+  if (minutes < 24 * 60) {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest === 0
+      ? `Resets in ${String(hours)} hr`
+      : `Resets in ${String(hours)} hr ${String(rest)} min`;
+  }
+  return `Resets ${resetDayFormat.format(new Date(at))}`;
+}

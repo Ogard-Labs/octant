@@ -1678,6 +1678,20 @@ export const ProviderFailureCategory = Schema.Literal(
 );
 export type ProviderFailureCategory = typeof ProviderFailureCategory.Type;
 
+/**
+ * A provider's structured reason for stopping a turn on its usage limit.
+ * `temporary` is a rolling rate limit that lifts on its own; `exhausted` is an
+ * allowance that is spent until the provider refills it; `billing` means the
+ * account has a credit or plan problem no waiting resolves. `resetsAt` is the
+ * provider's own reset instant — absent when it discloses none, and never
+ * guessed from wall-clock heuristics.
+ */
+export const ProviderUsageLimit = Schema.Struct({
+  kind: Schema.Literal("temporary", "exhausted", "billing"),
+  resetsAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type ProviderUsageLimit = typeof ProviderUsageLimit.Type;
+
 export const ProviderFailure = Schema.Struct({
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
@@ -1686,6 +1700,11 @@ export const ProviderFailure = Schema.Struct({
   retryAfterMs: Schema.optional(
     Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(3_600_000)),
   ),
+  /**
+   * Present only when the provider's own protocol signal says this stop is a
+   * usage limit. Message-text matching never produces it.
+   */
+  usageLimit: Schema.optional(ProviderUsageLimit),
 }).annotations(strict);
 export type ProviderFailure = typeof ProviderFailure.Type;
 

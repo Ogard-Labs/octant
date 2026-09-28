@@ -432,23 +432,38 @@ function mapAssistant(
   results.push(usageEvent(context, message.usage));
   if (message.error !== undefined) {
     if (context.terminal) return [failure("Claude returned a duplicate terminal message.")];
-    const category: ProviderFailure["category"] =
-      message.error === "authentication_failed" || message.error === "oauth_org_not_allowed"
-        ? "unauthenticated"
-        : message.error === "rate_limit"
-          ? "rate-limited"
-          : "provider-failed";
-    const failureMessage =
-      category === "unauthenticated"
-        ? "Claude authentication is required."
-        : category === "rate-limited"
-          ? "Claude is temporarily rate limited."
-          : "Claude execution failed.";
-    results.push(
-      terminal(context, { kind: "failed", failure: { category, message: failureMessage } }),
-    );
+    const classified = assistantErrorFailure(message.error);
+    results.push(terminal(context, { kind: "failed", failure: classified }));
   }
   return withoutIgnored(results);
+}
+
+/**
+ * Claude's structured assistant-error codes are the only signal allowed to
+ * classify the stop: `rate_limit` and `overloaded` are temporary limits,
+ * `billing_error` is an account credit or plan problem no waiting resolves.
+ */
+function assistantErrorFailure(error: string): ProviderFailure {
+  switch (error) {
+    case "authentication_failed":
+    case "oauth_org_not_allowed":
+      return { category: "unauthenticated", message: "Claude authentication is required." };
+    case "billing_error":
+      return {
+        category: "provider-failed",
+        message: "Claude reported a billing problem on this account.",
+        usageLimit: { kind: "billing" },
+      };
+    case "rate_limit":
+    case "overloaded":
+      return {
+        category: "rate-limited",
+        message: "Claude is temporarily rate limited.",
+        usageLimit: { kind: "temporary" },
+      };
+    default:
+      return { category: "provider-failed", message: "Claude execution failed." };
+  }
 }
 
 function mapToolResults(
@@ -787,7 +802,19 @@ function mapResult(
   const providerFailure: ProviderFailure =
     message.permissionDenials.length > 0
       ? { category: "unauthorized", message: "Claude tool execution was denied." }
-      : { category: "provider-failed", message: "Claude execution failed." };
+      : message.terminalReason === "blocking_limit"
+        ? {
+            category: "rate-limited",
+            message: "Claude's usage allowance is exhausted.",
+            usageLimit: { kind: "exhausted" },
+          }
+        : message.terminalReason === "rapid_refill_breaker"
+          ? {
+              category: "rate-limited",
+              message: "Claude is temporarily rate limited.",
+              usageLimit: { kind: "temporary" },
+            }
+          : { category: "provider-failed", message: "Claude execution failed." };
   results.push(terminal(context, { kind: "failed", failure: providerFailure }));
   return results;
 }
@@ -892,6 +919,7 @@ export function mapClaudeMessage(
       if (window !== undefined) results.push(window);
       if (message.status !== "rejected") return withoutIgnored(results);
       const retry = retryAfterMs(context, message.resetsAt);
+      const resetsAt = resetTimestamp(message.resetsAt);
       results.push(
         terminal(context, {
           kind: "failed",
@@ -899,6 +927,10 @@ export function mapClaudeMessage(
             category: "rate-limited",
             message: "Claude is temporarily rate limited.",
             ...(retry === undefined ? {} : { retryAfterMs: retry }),
+            usageLimit: {
+              kind: "temporary",
+              ...(resetsAt === undefined ? {} : { resetsAt }),
+            },
           },
         }),
       );

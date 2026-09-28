@@ -26,6 +26,7 @@ import {
   type WorkThreadId,
   type WorkThreadTranscript,
   type WorkTurnCancelResult,
+  type WorkTurnFailure,
   type WorkTurnLookupResult,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -124,19 +125,7 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
 
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";
-  constructor(
-    readonly failure: {
-      readonly category:
-        | "invalid"
-        | "unauthorized"
-        | "unavailable"
-        | "unsupported"
-        | "interrupted"
-        | "failed"
-        | "stale";
-      readonly message: string;
-    },
-  ) {
+  constructor(readonly failure: WorkTurnFailure) {
     super(failure.message);
   }
 }
