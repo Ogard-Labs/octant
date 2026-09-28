@@ -523,6 +523,9 @@ export function useShellController(options: ShellControllerOptions) {
       announce(failure.message);
       return;
     }
+    // A reload that stays quiet leaves the current frame on screen; it must be
+    // the committed shell, not the optimistic value the rejected write set.
+    setAuthoritative(committedShell.current);
     await load(failure.category === "conflict" ? "conflict-reload" : "command-recovery");
   }
 
