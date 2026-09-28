@@ -1498,6 +1498,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       );
     const previous = recovered.session;
     const priorTurn = recovered.priorTurn;
+    const priorTurnSettled = recovered.priorTurnSettled;
     if (
       previous?.kind === "provider-session-ready" &&
       (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
@@ -1509,9 +1510,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       );
     // A recorded session without a resume cursor wedges the thread rather than
     // silently discarding the conversation the provider still holds. A prior
-    // turn that never reached its session (a send refused before acquisition,
-    // or one cut off before `provider-session-ready`) left nothing to discard,
-    // so the follow-up falls through to a fresh start.
+    // turn that never reached its session left nothing to discard only once it
+    // provably settled (a send refused before acquisition); one interrupted
+    // between its `running` result and its launch still owns a journaled
+    // prompt the provider never saw, and only that turn's own retry may
+    // recover it.
     if (
       priorTurn &&
       previous?.kind === "provider-session-ready" &&
@@ -1521,6 +1524,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         "This task has no resumable provider session. Start a new task; Octant will not silently discard its conversation.",
       );
     }
+    if (priorTurn && !priorTurnSettled && previous === undefined)
+      return failStart(
+        "The task's previous turn stopped before the provider started. Retry that message, or start a new task.",
+      );
     const driver = resolvedDriver;
     const browserSelections = command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
     if (

@@ -267,7 +267,7 @@ export class CodeOperationEventStore {
     };
   }
 
-  /** Indexed journal reads decode at most three frames, regardless of transcript size. */
+  /** Indexed journal reads decode at most eleven frames, regardless of transcript size. */
   providerSessionForThread(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
@@ -275,6 +275,7 @@ export class CodeOperationEventStore {
     | {
         readonly status: "ok";
         readonly priorTurn: boolean;
+        readonly priorTurnSettled: boolean;
         readonly session?: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }>;
       }
     | { readonly status: "rebuild-required" } {
@@ -305,12 +306,26 @@ export class CodeOperationEventStore {
             return frame;
           });
       const session = read("provider-session-ready", 1)[0]?.event;
-      const priorTurn = read("conversation-turn-started", 2).some(
+      const priorStart = read("conversation-turn-started", 2).find(
         (frame) => String(frame.operationId) !== String(operationId),
       );
+      // A prior turn counts as settled once its own operation-result left a
+      // terminal state; a `running` (or absent) record means it never reached
+      // its provider launch, so a different operation cannot start fresh
+      // without losing that turn's journaled prompt.
+      const priorTurnSettled =
+        priorStart !== undefined &&
+        read("operation-result", 8).some(
+          (frame) =>
+            String(frame.operationId) === String(priorStart.operationId) &&
+            frame.event.kind === "operation-result" &&
+            (frame.event.result.kind !== "provider-turn-state" ||
+              (frame.event.result.state !== "running" && frame.event.result.state !== "waiting")),
+        );
       return {
         status: "ok",
-        priorTurn,
+        priorTurn: priorStart !== undefined,
+        priorTurnSettled,
         ...(session?.kind === "provider-session-ready" ? { session } : {}),
       };
     } catch {

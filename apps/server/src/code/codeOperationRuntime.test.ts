@@ -3024,7 +3024,8 @@ it("lets a follow-up open a fresh provider session when a refused turn never rea
   const fixture = runtimeFixture({ provider: providerDriver(connection) });
   try {
     // The record the service leaves for a send a later check refused: the turn
-    // began on the journal but no provider session ever answered it.
+    // began on the journal, its refusal settled, and no provider session ever
+    // answered it.
     fixture.operationEvents.append({
       threadId,
       operationId: operationId(90),
@@ -3035,6 +3036,20 @@ it("lets a follow-up open a fresh provider session when a refused turn never rea
         modelId: thread().modelId,
         sessionId,
         prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(90),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId: operationId(90),
+          state: "failed",
+          failure: { category: "failed", message: "refused" },
+        },
       }),
     });
     await expect(
@@ -3048,6 +3063,60 @@ it("lets a follow-up open a fresh provider session when a refused turn never rea
       }),
     ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
     await vi.waitFor(() => expect(connection.start).toHaveBeenCalledOnce());
+    expect(connection.resume).not.toHaveBeenCalled();
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
+it("refuses a fresh start while an interrupted prior turn still owns an unseen prompt", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const fixture = runtimeFixture({ provider: providerDriver(connection) });
+  try {
+    // The record a host exit between the `running` result and the launch
+    // leaves: the prompt is journaled, the provider never saw it, and the
+    // original operation's own retry is still the only honest recovery.
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(92),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(92),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: { kind: "provider-turn-state", operationId: operationId(92), state: "running" },
+      }),
+    });
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(93),
+        threadId,
+        checkoutId,
+        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000093"),
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "failed",
+      failure: {
+        message:
+          "The task's previous turn stopped before the provider started. Retry that message, or start a new task.",
+      },
+    });
+    expect(connection.start).not.toHaveBeenCalled();
     expect(connection.resume).not.toHaveBeenCalled();
   } finally {
     await fixture.runtime.close();
