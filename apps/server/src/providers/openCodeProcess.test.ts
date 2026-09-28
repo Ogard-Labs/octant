@@ -712,6 +712,38 @@ describe("OpenCodeProcessPort", () => {
     expect(rules).toContain('(allow network-outbound (remote ip "localhost:41234"))');
   });
 
+  // Bubblewrap refuses any rule it cannot express: per-port loopback has no
+  // spelling there — loopback rides the launch's network egress choice — and
+  // the tool-home discovery reads are already covered by file-read-star.
+  it("sends no Seatbelt rules to a Linux confinement", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const captured: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured.push(input);
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "linux",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "work",
+          executionPolicy: "approval-gated",
+          loopbackPorts: [41_234],
+        }),
+      ),
+    );
+    expect(captured.length).toBeGreaterThan(0);
+    for (const input of captured) expect(input.extraRules).toBeUndefined();
+  });
+
   // OpenCode 2 resolves each bundled coding tool's home directory while it
   // lists providers, and a refusal there is fatal to the listing, so the
   // confined child has to resolve those paths without being able to read them.

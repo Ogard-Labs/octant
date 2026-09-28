@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeGitHistoryQuery } from "@octant/contracts/git-history";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 import { GitHistoryPort } from "./gitHistoryPort";
 
 const directories: string[] = [];
@@ -171,5 +172,35 @@ describe("local Git history", () => {
     expect(
       (await reader.read(inside, decodeGitHistoryQuery({ kind: "history", ...scope }))).status,
     ).toBe("unavailable");
+  });
+
+  it("reads a linked worktree's history on Linux without sending it extra rules", async () => {
+    const root = repository();
+    commit(root, "Initial note");
+    const sibling = mkdtempSync(join(tmpdir(), "octant-history-worktree-linux-"));
+    directories.push(sibling);
+    const worktree = join(sibling, "checkout");
+    git(root, "worktree", "add", "-qb", "linked", worktree);
+    const captured: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
+    const sandbox = createFakeSandboxConfinement();
+    directories.push(sandbox.root);
+    // The launch runs the same git the port resolved; the confinement shim is
+    // replaced by a capture so the assertion is about the request Linux sees.
+    const reader = new GitHistoryPort({
+      confinement: {
+        prepare: (input) => {
+          captured.push(input);
+          return { command: "/usr/bin/git", args: input.args };
+        },
+      },
+      platform: "linux",
+      temporaryDirectory: sandbox.temporaryDirectory,
+      gitExecutable: "/usr/bin/git",
+    });
+    expect(
+      await reader.read(worktree, decodeGitHistoryQuery({ kind: "history", ...scope })),
+    ).toMatchObject({ status: "history", branch: "linked" });
+    expect(captured.length).toBeGreaterThan(0);
+    for (const input of captured) expect(input.extraRules).toBeUndefined();
   });
 });

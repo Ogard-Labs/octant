@@ -118,25 +118,33 @@ export interface GitLinkedWorktreeMetadataOptions {
   readonly writable?: boolean;
 }
 
+export interface GitLinkedWorktreeMetadataPaths {
+  /** Out-of-root directories git has to read to see a linked worktree. */
+  readonly readPaths: ReadonlyArray<string>;
+  /** The same paths when the launch may write refs and objects. */
+  readonly writePaths: ReadonlyArray<string>;
+}
+
 /**
  * A linked worktree's .git file points at the main repository's
- * .git/worktrees/<name>, outside the bound root. Allow that metadata and its
- * commondir so git can see it is a repository, without opening the parent
- * working tree.
+ * .git/worktrees/<name>, outside the bound root. Resolve that gitdir and its
+ * commondir as plain paths so each confinement backend can translate them:
+ * Seatbelt writes them as rules, Bubblewrap binds them directly — its mounts
+ * create the bind-target ancestors the Darwin profile has to spell out.
  */
-export function gitLinkedWorktreeMetadataRules(
+export function gitLinkedWorktreeMetadataPaths(
   checkoutRoot: string,
   options: GitLinkedWorktreeMetadataOptions = {},
-): ReadonlyArray<string> {
+): GitLinkedWorktreeMetadataPaths {
   let gitdir: string | undefined;
   try {
     const text = readFileSync(join(checkoutRoot, ".git"), "utf8");
     const match = /^gitdir:\s*(.+?)\s*$/m.exec(text);
     const raw = match?.[1];
-    if (raw === undefined || raw === "") return [];
+    if (raw === undefined || raw === "") return { readPaths: [], writePaths: [] };
     gitdir = isAbsolute(raw) ? raw : join(checkoutRoot, raw);
   } catch {
-    return [];
+    return { readPaths: [], writePaths: [] };
   }
   const roots = [gitdir];
   try {
@@ -145,9 +153,24 @@ export function gitLinkedWorktreeMetadataRules(
   } catch {
     // Ordinary repositories have no commondir file.
   }
-  return roots.flatMap((path) => [
+  return {
+    readPaths: roots,
+    writePaths: options.writable === true ? roots : [],
+  };
+}
+
+/**
+ * Seatbelt form of `gitLinkedWorktreeMetadataPaths`: subtree rules plus the
+ * ancestor metadata entries the Darwin profile needs for the path walk.
+ */
+export function gitLinkedWorktreeMetadataRules(
+  checkoutRoot: string,
+  options: GitLinkedWorktreeMetadataOptions = {},
+): ReadonlyArray<string> {
+  const metadata = gitLinkedWorktreeMetadataPaths(checkoutRoot, options);
+  return metadata.readPaths.flatMap((path) => [
     seatbeltAllowRule("file-read*", path),
-    ...(options.writable === true ? [seatbeltAllowRule("file-write*", path)] : []),
+    ...(metadata.writePaths.includes(path) ? [seatbeltAllowRule("file-write*", path)] : []),
     ...ancestorMetadataRules(path),
   ]);
 }
@@ -213,11 +236,22 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
     );
   }
   const binaryDirectory = dirname(options.gitExecutable);
-  const extraRules = [
-    ...gitShimExtraRules(options.platform),
-    ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, {
-      writable: options.writable ?? false,
-    }),
+  const writable = options.writable ?? false;
+  const linkedMetadata = gitLinkedWorktreeMetadataPaths(options.checkoutRoot, { writable });
+  const extraRules =
+    options.platform === "darwin"
+      ? [
+          ...gitShimExtraRules(options.platform),
+          ...gitLinkedWorktreeMetadataRules(options.checkoutRoot, { writable }),
+        ]
+      : [];
+  // A bind target that does not exist refuses the whole launch on Linux, so
+  // only paths the filesystem confirmed are offered to it.
+  const bindableReadPaths = linkedMetadata.readPaths.filter(existsSync);
+  const bindableWritePaths = linkedMetadata.writePaths.filter(existsSync);
+  const additionalWriteRoots = [
+    ...(options.additionalWriteRoots ?? []),
+    ...(options.platform === "darwin" ? [] : bindableWritePaths),
   ];
   return options.confinement.prepare({
     executable: options.gitExecutable,
@@ -231,10 +265,11 @@ export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): Con
       options.temporaryDirectory,
       binaryDirectory,
       dirname(binaryDirectory),
+      // On non-Seatbelt backends the same metadata is a bind, not a rule:
+      // Bubblewrap creates the mount's ancestors itself.
+      ...(options.platform === "darwin" ? [] : bindableReadPaths),
     ],
-    ...(options.additionalWriteRoots === undefined
-      ? {}
-      : { additionalWriteRoots: options.additionalWriteRoots }),
+    ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
     ...(extraRules.length === 0 ? {} : { extraRules }),
   });
 }

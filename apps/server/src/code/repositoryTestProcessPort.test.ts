@@ -280,6 +280,38 @@ describe("RepositoryTestProcessPort", () => {
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });
 
+  it("carries no Seatbelt literal rules into a Linux launch", async () => {
+    // The literal-read paths are a Seatbelt spelling for paths beneath a
+    // denied ancestor; Bubblewrap refuses them, and Linux reads the same host
+    // paths through the file-read-star mount instead.
+    const child = fakeChild(96);
+    const spawn = vi.fn(() => child);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const captured: Parameters<typeof fake.confinement.prepare>[0][] = [];
+    const port = new RepositoryTestProcessPort({
+      platform: "linux",
+      confinement: {
+        prepare: (input) => {
+          captured.push(input);
+          return { command: "/usr/bin/true", args: [] };
+        },
+      },
+      temporaryDirectory: fake.temporaryDirectory,
+      spawn,
+      literalReadPaths: ["/private/var/select/developer_dir"],
+    });
+    const execution = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    expect(captured.at(-1)?.extraRules).toBeUndefined();
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
   it("forwards simulator control to the confinement only when the caller asks for it", async () => {
     // The Apple toolchain port is the only caller that sets this, and the
     // profile's Simulator rules only exist when it arrives. A regression that

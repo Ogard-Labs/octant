@@ -78,6 +78,11 @@ export interface OpenCodeProcessPort {
 export interface OpenCodeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly confinement?: SeatbeltConfinementPort;
+  /**
+   * The platform `confinement` confines for — the dialect launch-local rules
+   * are written in, not necessarily the platform this process runs on.
+   */
+  readonly platform?: NodeJS.Platform;
   /** Optional host-owned routing projection; credentials remain provider-owned. */
   readonly runtimeConfigResolver?: OpenCodeConfigResolver;
   readonly onDiagnostic?: (message: string) => void;
@@ -135,6 +140,7 @@ interface ResolvedOpenCodeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv | undefined;
   readonly runtimeConfig: PrivateRuntimeConfig;
   readonly confinement: SeatbeltConfinementPort;
+  readonly platform: NodeJS.Platform;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly shutdownTimeoutMs: number;
   readonly startupTimeoutMs: number;
@@ -840,6 +846,7 @@ function prepareOpenCodeLaunch(
   confinement: SeatbeltConfinementPort,
   runtime: OpenCodeRuntime,
   port: number,
+  platform: NodeJS.Platform,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = input.executionPolicy ?? "approval-gated";
@@ -923,16 +930,24 @@ function prepareOpenCodeLaunch(
         // listen on the port this launch reserved, not only reach the bridge.
         // Without the bind it exits before readiness in Plan, whose runtime
         // egress stays none; Chat and Work now materialize as allow (0132).
-        extraRules: [
-          `(allow network-bind (local ip "localhost:${port}"))`,
-          `(allow network-inbound (local ip "localhost:${port}"))`,
-          ...loopbackPorts.map(
-            (bridgePort) => `(allow network-outbound (remote ip "localhost:${bridgePort}"))`,
-          ),
-          // Its provider listing resolves the other coding tools' home
-          // directories first, and a refusal there fails the listing.
-          ...openCodeDiscoveryRules(profile.environment.HOME),
-        ],
+        // These spellings are Seatbelt-only: on Linux loopback rides the
+        // launch's network-egress choice (bwrap shares the host net when it
+        // allows, and cannot express per-port rules), and the discovery reads
+        // are already covered by file-read-star.
+        ...(platform === "darwin"
+          ? {
+              extraRules: [
+                `(allow network-bind (local ip "localhost:${port}"))`,
+                `(allow network-inbound (local ip "localhost:${port}"))`,
+                ...loopbackPorts.map(
+                  (bridgePort) => `(allow network-outbound (remote ip "localhost:${bridgePort}"))`,
+                ),
+                // Its provider listing resolves the other coding tools' home
+                // directories first, and a refusal there fails the listing.
+                ...openCodeDiscoveryRules(profile.environment.HOME),
+              ],
+            }
+          : {}),
       });
       return { ...launch, cwd: root, environment: profile.environment };
     },
@@ -1136,7 +1151,7 @@ function acquireOpenCodeServer(
       const username = runtime === "beta" ? "opencode" : "octant";
       const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
       const prepared = Effect.runSyncExit(
-        prepareOpenCodeLaunch(input, profile, options.confinement, runtime, port),
+        prepareOpenCodeLaunch(input, profile, options.confinement, runtime, port, options.platform),
       );
       if (Exit.isFailure(prepared)) {
         profile.cleanup();
@@ -1376,6 +1391,7 @@ export function makeOpenCodeProcessLive(
     terminateProcessGroup: dependencies.terminateProcessGroup,
     reserveLoopbackPort: dependencies.reserveLoopbackPort ?? reserveLoopbackPort,
     confinement: options.confinement ?? makeSeatbeltConfinementLive(),
+    platform: options.platform ?? process.platform,
   };
 
   return {

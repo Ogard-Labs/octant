@@ -170,6 +170,52 @@ describe("git Seatbelt launch", () => {
     }
   });
 
+  it("binds a linked worktree's out-of-root metadata instead of writing Seatbelt rules on Linux", () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-git-worktree-linux-"));
+    try {
+      const worktree = join(root, "worktree");
+      const gitdir = join(root, "main.git", "worktrees", "feature");
+      const common = join(root, "main.git");
+      mkdirSync(worktree);
+      mkdirSync(gitdir, { recursive: true });
+      writeFileSync(join(worktree, ".git"), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(gitdir, "commondir"), `${common}\n`);
+
+      for (const writable of [false, true]) {
+        let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+        prepareGitSeatbeltLaunch({
+          confinement: {
+            prepare: (input) => {
+              captured = input;
+              return { command: "/usr/bin/bwrap", args: [] };
+            },
+          },
+          platform: "linux",
+          gitExecutable: "/usr/bin/git",
+          checkoutRoot: worktree,
+          args: ["status"],
+          temporaryDirectory: "/tmp",
+          networkEgress: "none",
+          writable,
+        });
+        // The Linux backend refuses any rule it cannot express; the same
+        // authority is carried as binds, which is also what lets a linked
+        // worktree's history read run there at all.
+        expect(captured?.extraRules).toBeUndefined();
+        expect(captured?.readRoots).toContain(gitdir);
+        expect(captured?.readRoots).toContain(common);
+        if (writable) {
+          expect(captured?.additionalWriteRoots).toContain(gitdir);
+          expect(captured?.additionalWriteRoots).toContain(common);
+        } else {
+          expect(captured?.additionalWriteRoots ?? []).not.toContain(gitdir);
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("carries the worktree's ancestors into the final Darwin profile", () => {
     const root = mkdtempSync(join(tmpdir(), "octant-git-worktree-profile-"));
     try {
