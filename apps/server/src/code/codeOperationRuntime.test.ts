@@ -1322,6 +1322,106 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("journals a provider turn's completed state once", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(150);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+
+    await vi.waitFor(() => expect(fixture.boardActivity()).toMatchObject({ executing: false }));
+    const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+    const terminal = frames.filter(
+      (frame) => frame.event.kind === "operation-state" && frame.event.state === "completed",
+    );
+    expect(terminal).toHaveLength(1);
+    fixture.close();
+  });
+
+  it("journals a provider turn's interruption once, keeping the provider's reason", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(151);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "interrupted", message: "Provider stopped the turn." }),
+      ),
+    );
+
+    await vi.waitFor(() => expect(fixture.boardActivity()).toMatchObject({ executing: false }));
+    const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+    const terminal = frames.filter(
+      (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
+    );
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({
+      event: {
+        state: "interrupted",
+        failure: { category: "failed", message: "Provider stopped the turn." },
+      },
+    });
+    fixture.close();
+  });
+
+  it("journals a provider turn's failure once, keeping the provider's reason", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(152);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "failed",
+          failure: { category: "provider-failed", message: "Provider exploded mid-turn." },
+        }),
+      ),
+    );
+
+    await vi.waitFor(() => expect(fixture.boardActivity()).toMatchObject({ executing: false }));
+    const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+    const terminal = frames.filter(
+      (frame) => frame.event.kind === "operation-state" && frame.event.state === "failed",
+    );
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({
+      event: {
+        state: "failed",
+        failure: { category: "failed", message: "Provider exploded mid-turn." },
+      },
+    });
+    fixture.close();
+  });
+
   it("records no change list for a turn whose checkout could not be captured", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

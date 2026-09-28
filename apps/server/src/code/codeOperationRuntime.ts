@@ -1384,7 +1384,9 @@ interface ActiveTurn {
   /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
   interruptMessage?: string;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
-  lastPersistedState?: CodeTurnOutcome;
+  /** The `operation-state` value and reason last journaled, whichever path wrote the frame. */
+  lastPersistedState?: "running" | "waiting" | "completed" | "interrupted" | "failed";
+  lastPersistedFailure?: string | undefined;
   /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
   changedFilesRecording?: Promise<void>;
   launch?: () => void;
@@ -2170,6 +2172,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       event: operationEvent,
     });
     active.cursor = frame.cursor;
+    if (operationEvent.kind === "operation-state") {
+      active.lastPersistedState = operationEvent.state;
+      active.lastPersistedFailure = operationEvent.failure?.message;
+    }
   }
 
   /**
@@ -2240,19 +2246,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   ): void {
     active.state = outcome;
     if (outcome === "failed" || outcome === "interrupted") this.#revokeBrowserGrants(active);
-    if (active.lastPersistedState === outcome && failure === undefined) return;
-    active.lastPersistedState = outcome;
-    const frame = this.#events.append({
-      threadId: active.thread.id,
-      operationId: active.operationId,
-      expectedCursor: active.cursor,
-      event: {
-        kind: "operation-state",
-        state: outcome,
-        ...(failure === undefined ? {} : { failure }),
-      },
-    });
-    active.cursor = frame.cursor;
+    // The provider's own terminal event already journaled this state, reason
+    // and all; a second frame would only repeat it. The settle below is not
+    // part of that dedupe: the board reads runtime work, not this journal.
+    const alreadyJournaled =
+      active.lastPersistedState === outcome && active.lastPersistedFailure === failure?.message;
+    if (!alreadyJournaled) {
+      const frame = this.#events.append({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        expectedCursor: active.cursor,
+        event: {
+          kind: "operation-state",
+          state: outcome,
+          ...(failure === undefined ? {} : { failure }),
+        },
+      });
+      active.cursor = frame.cursor;
+      active.lastPersistedState = outcome;
+      active.lastPersistedFailure = failure?.message;
+    }
     this.#persistRuntimeWork(active, outcome);
   }
 
@@ -2441,7 +2454,23 @@ function normalizedOperationEvent(
   }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
-  if (event.category === "interruption") return { kind: "operation-state", state: "interrupted" };
+  if (event.category === "interruption") {
+    // The provider's sentence is the only reason the person will ever see, so
+    // the journaled frame carries it; a forced stop's own reason wins over the
+    // provider's generic cancellation copy, exactly like the outcome path.
+    const reason = active.interruptMessage ?? event.text;
+    const message =
+      reason === undefined
+        ? undefined
+        : boundProviderFailureMessage(
+            sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
+          );
+    return {
+      kind: "operation-state",
+      state: "interrupted",
+      ...(message === undefined ? {} : { failure: { category: "failed", message } }),
+    };
+  }
   // The provider's sentence is the only reason the person will ever see:
   // without it the transcript said "The provider turn failed" and nothing
   // else, whatever the driver had refused with.
