@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "[ \"$(uname -s)\" = \"Linux\" ] && bash \"${DEVIN_PROJECT_DIR:-.}/scripts/ade/start-secret-service-session.sh\" || true",
+          "command": "if [ \"$(uname -s)\" = \"Linux\" ] && [ -f \"${DEVIN_PROJECT_DIR:-.}/scripts/ade/start-secret-service-session.sh\" ]; then bash \"${DEVIN_PROJECT_DIR:-.}/scripts/ade/start-secret-service-session.sh\"; fi",
           "timeout": 90
         }
       ]
