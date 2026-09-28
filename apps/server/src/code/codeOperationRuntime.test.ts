@@ -12,6 +12,7 @@ import {
   decodeCodeRepositoryTestDefinition,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
+  decodeCodeOperationEvent,
   decodeCodeOperationId,
   decodeCodeThread,
   decodeCodeThreadId,
@@ -46,7 +47,7 @@ import {
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
 } from "../persistence/codeProjection";
-import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
+import { CODE_OPERATION_EVENT_RECORDED, CodeOperationEventStore } from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
@@ -2944,6 +2945,16 @@ function runtimeFixture(options: {
     /** The board reads the rebuildable Code projection, not journal history. */
     boardActivity: () => boardRuntimeActivityFromWorks(readCodeRuntimeWorks(connection, threadId)),
     runtimeWorkFailures,
+    /**
+     * The store the service writes a turn's opening frame through, so a test
+     * can put a prior turn on the journal the runtime reads.
+     */
+    operationEvents: new CodeOperationEventStore({
+      journal,
+      uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
+      clock: () => now,
+      actor,
+    }),
     close: () => connection.close(),
   };
 }
@@ -3114,6 +3125,112 @@ it("names why a turn whose provider cannot carry an app-managed tool was refused
       },
     });
   } finally {
+    fixture.close();
+  }
+});
+
+it("lets a follow-up open a fresh provider session when a refused turn never reached one", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const fixture = runtimeFixture({ provider: providerDriver(connection) });
+  try {
+    // The record the service leaves for a send a later check refused: the turn
+    // began on the journal, its refusal settled, and no provider session ever
+    // answered it.
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(90),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(90),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId: operationId(90),
+          state: "failed",
+          failure: { category: "failed", message: "refused" },
+        },
+      }),
+    });
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(91),
+        threadId,
+        checkoutId,
+        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000091"),
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.start).toHaveBeenCalledOnce());
+    expect(connection.resume).not.toHaveBeenCalled();
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
+it("refuses a fresh start while an interrupted prior turn still owns an unseen prompt", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const fixture = runtimeFixture({ provider: providerDriver(connection) });
+  try {
+    // The record a host exit between the `running` result and the launch
+    // leaves: the prompt is journaled, the provider never saw it, and the
+    // original operation's own retry is still the only honest recovery.
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(92),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(92),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: { kind: "provider-turn-state", operationId: operationId(92), state: "running" },
+      }),
+    });
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(93),
+        threadId,
+        checkoutId,
+        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000093"),
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "failed",
+      failure: {
+        message:
+          "The task's previous turn stopped before the provider started. Retry that message, or start a new task.",
+      },
+    });
+    expect(connection.start).not.toHaveBeenCalled();
+    expect(connection.resume).not.toHaveBeenCalled();
+  } finally {
+    await fixture.runtime.close();
     fixture.close();
   }
 });

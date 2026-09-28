@@ -160,6 +160,7 @@ describe("CodeOperationEventStore", () => {
     expect(store.providerSessionForThread(otherThreadId, otherOperationId)).toEqual({
       status: "ok",
       priorTurn: false,
+      priorTurnSettled: false,
     });
     expect(replay).not.toHaveBeenCalled();
     const plan = fixture.connection
