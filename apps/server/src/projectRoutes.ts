@@ -7,6 +7,7 @@ import {
 } from "@octant/contracts";
 import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
+import { readPrincipalRouteContext } from "./principalRouteContext";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -201,6 +202,22 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         return response(
           { category: "invalid", message: "Project command is invalid." },
           400,
+          origin,
+        );
+      }
+      // Remembering or dropping a Code access grant is host work — a persisted
+      // "project-default" is what lets thread creation skip native
+      // confirmation, so the decision cannot arrive from a paired device.
+      if (
+        command.kind === "change-code-project-access" &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Code Project's access grant is decided on the host.",
+          },
+          403,
           origin,
         );
       }
