@@ -1521,6 +1521,40 @@ CREATE INDEX provider_instance_projection_enabled_idx
   ON provider_instance_projection(enabled);
 `;
 
+const ADD_IMAGE_PROVIDER_PROJECTION_SQL = `
+DROP INDEX provider_instance_projection_driver_idx;
+DROP INDEX provider_instance_projection_enabled_idx;
+
+ALTER TABLE provider_instance_projection RENAME TO provider_instance_projection_v63;
+
+CREATE TABLE provider_instance_projection (
+  instance_id TEXT PRIMARY KEY CHECK(length(trim(instance_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  driver_kind TEXT NOT NULL CHECK(driver_kind IN (
+    'codex', 'claude', 'cursor', 'opencode', 'kilo', 'pi', 'oh-my-pi', 'devin',
+    'mistral-vibe', 'ollama', 'openai-compatible', 'kimi-code', 'anthropic-compatible',
+    'azure-foundry', 'grok', 'goose', 'glm', 'gemini', 'copilot', 'cline', 'qwen', 'fx',
+    'openai-image', 'gemini-native-image', 'bfl-image', 'ideogram-image'
+  )),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  instance_json TEXT NOT NULL CHECK(json_valid(instance_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0)
+) STRICT;
+
+INSERT INTO provider_instance_projection (
+  instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+)
+SELECT instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+FROM provider_instance_projection_v63;
+
+DROP TABLE provider_instance_projection_v63;
+
+CREATE INDEX provider_instance_projection_driver_idx
+  ON provider_instance_projection(driver_kind);
+CREATE INDEX provider_instance_projection_enabled_idx
+  ON provider_instance_projection(enabled);
+`;
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   {
     version: 1,
@@ -1865,6 +1899,11 @@ ALTER TABLE code_runtime_projection
       aggregate_type, CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END,
       CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END, global_sequence DESC
     );`,
+  },
+  {
+    version: 64,
+    name: "add_image_provider_projection",
+    sql: ADD_IMAGE_PROVIDER_PROJECTION_SQL,
   },
 ];
 

@@ -68,6 +68,17 @@ function providerSnapshot(options: { readonly enabled?: boolean } = {}): Provide
 }
 
 describe("ImageGenerationSettingsView", () => {
+  it("shows the provider controller's message instead of silently resetting the form", () => {
+    render(
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerController={{ ...providerController(), message: "Provider could not be created." }}
+        settings={{ customSources: [] }}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Provider could not be created.");
+  });
+
   it("explains how to add a provider when no image endpoint is configured", async () => {
     const onOpenProviders = vi.fn();
     render(
