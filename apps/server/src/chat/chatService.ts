@@ -2773,8 +2773,32 @@ export class ChatService {
       answer: command.answer,
     });
     if (answered === undefined) {
-      // The turn is not running in this host: its provider session is gone,
-      // so the question can no longer be answered on it.
+      // The turn is not running in this host: its provider session died with
+      // the process, so the question it is parked on can never be answered.
+      // A Waiting attempt kept after restart would otherwise hold an
+      // undeliverable card forever — settle it interrupted so the transcript
+      // names the outcome and the turn can be retried.
+      if (!this.#activeAttempts.has(String(command.attemptId))) {
+        const settled = transitionChatAttempt(attempt, {
+          outcome: "interrupted",
+          updatedAt: decodeTimestamp(this.#clock()),
+          failure: { code: decodeDiagnosticFailureCode("unavailable") },
+        });
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: readAggregateVersion(
+            this.#persistence.connection,
+            "chat-thread",
+            thread.id,
+          ),
+          events: [
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: settled,
+            }),
+          ],
+        });
+      }
       throw new ChatServiceError({
         category: "unavailable",
         message: "The provider is no longer running this turn; interrupt it and ask again.",

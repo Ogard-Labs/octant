@@ -593,12 +593,16 @@ export function transitionChatAttempt(
       "A failure reason belongs on a failed or interrupted outcome, not " + input.outcome,
     );
   }
-  const { failure: previousFailure, ...attemptWithoutFailure } = attempt;
+  const { failure: previousFailure, ...attemptRest } = attempt;
   const failure =
     input.failure ?? (failureOutcomes.includes(input.outcome) ? previousFailure : undefined);
+  // A question dies with the attempt that parked it: a terminal attempt can
+  // never deliver an answer, so the open card must not survive the outcome.
+  const { pendingQuestion: _deadQuestion, ...withoutQuestion } = attemptRest;
+  const kept = terminalOutcomes.includes(input.outcome) ? withoutQuestion : attemptRest;
 
   return decodeChatAttempt({
-    ...attemptWithoutFailure,
+    ...kept,
     outcome: input.outcome,
     updatedAt: input.updatedAt,
     ...(failure === undefined ? {} : { failure }),
