@@ -2673,7 +2673,11 @@ describe("useShellController", () => {
     act(() => {
       command = result.current.setMode("chat");
     });
-    await waitFor(() => expect(result.current.status).toBe("conflict-reload"));
+    await vi.waitFor(() => expect(client.bootstrap).toHaveBeenCalledTimes(2));
+    // The re-read is routine reconciliation: the committed shell stays on
+    // screen instead of repainting the whole surface as reloading.
+    expect(result.current.status).toBe("ready");
+    expect(result.current.workspace).toBeDefined();
     await act(async () => reload.resolve(initialBootstrap()));
     await act(async () => command);
     expect(result.current.status).toBe("ready");
@@ -2822,7 +2826,10 @@ describe("useShellController", () => {
         message: "Reload authoritative state.",
       }),
     );
-    await waitFor(() => expect(result.current.status).toBe("conflict-reload"));
+    await vi.waitFor(() => expect(client.bootstrap).toHaveBeenCalledTimes(2));
+    // The queued operation waits on the reload, but the committed shell stays
+    // on screen — the status does not repaint as a reload while it runs.
+    expect(result.current.status).toBe("ready");
     await act(async () => reload.resolve(recovered));
     await act(async () => newer);
     expect(result.current.workspace?.activeMode).toBe("chat");

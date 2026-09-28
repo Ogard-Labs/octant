@@ -315,8 +315,15 @@ export function useShellController(options: ShellControllerOptions) {
     ): Promise<void> => {
       const generation = ++requestGeneration.current;
       const isCommandReload = reason === "command-recovery" || reason === "conflict-reload";
-      // A refresh reconciles quietly — the person did not ask for a reload.
-      if (reason !== "refresh") setStatus(isCommandReload ? "conflict-reload" : "loading");
+      // A re-read while a committed shell is on screen is routine
+      // reconciliation — repainting the whole surface as loading made every
+      // post-conflict re-read flash "Reloading shell state" over live work.
+      // The status only paints when there is no committed shell to show, or
+      // when the re-read fails below. A refresh reconciles quietly the same
+      // way — the person did not ask for a reload.
+      if (reason !== "refresh" && committedShell.current === undefined) {
+        setStatus(isCommandReload ? "conflict-reload" : "loading");
+      }
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
       const task = (async () => {
