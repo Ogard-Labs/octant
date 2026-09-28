@@ -91,6 +91,11 @@ answer stays in the transcript under a **Regenerated** mark, and the thread
 carries the newest answer onward: later turns read the regenerated exchange,
 not the replaced one.
 
+A provider question left parked when the app restarts can no longer be
+answered — the provider session that was waiting on it is gone. Answering the
+restored card settles the turn as interrupted rather than leaving it parked,
+so retrying asks the question again on a live session.
+
 A reply's reasoning folds into a **Thinking** disclosure above the text: shut
 by default, opened only if you want it, and still findable while closed. While
 the reply is still streaming, you can expand the reasoning to watch it arrive.

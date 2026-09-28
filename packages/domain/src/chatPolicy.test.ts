@@ -530,6 +530,24 @@ describe("chat turn and attempt policy", () => {
     expect(interrupted.outcome).toBe("interrupted");
   });
 
+  it("drops an open question when the attempt reaches a terminal outcome", () => {
+    const waiting = makeAttempt("waiting", {
+      pendingQuestion: { requestId: "q-1", prompt: "Proceed?", options: [] },
+    });
+    const resumed = transitionChatAttempt(waiting, { outcome: "streaming", updatedAt: later });
+    expect(resumed.pendingQuestion?.requestId).toBe("q-1");
+
+    const interrupted = transitionChatAttempt(waiting, {
+      outcome: "interrupted",
+      updatedAt: later,
+      failure: { code: "unavailable" as never },
+    });
+    expect(interrupted.pendingQuestion).toBeUndefined();
+
+    const cancelled = transitionChatAttempt(waiting, { outcome: "cancelled", updatedAt: later });
+    expect(cancelled.pendingQuestion).toBeUndefined();
+  });
+
   it("carries a typed failure onto terminal attempts and refuses one on live outcomes", () => {
     const failed = transitionChatAttempt(makeAttempt("streaming"), {
       outcome: "failed",

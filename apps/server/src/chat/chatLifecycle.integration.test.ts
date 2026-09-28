@@ -47,7 +47,7 @@ const ids = {
   settingsEvent: "86000000-0000-4000-8000-000000000007",
 } as const;
 
-type DriverBehavior = "checkpoint-disconnect" | "complete" | "pending";
+type DriverBehavior = "checkpoint-disconnect" | "complete" | "pending" | "question";
 
 interface SentTurn {
   readonly providerInstanceId: string;
@@ -158,6 +158,16 @@ function makeDriver(input: {
               text: behavior === "checkpoint-disconnect" ? "checkpoint" : "streaming",
             } as never);
             if (behavior === "pending") return;
+            if (behavior === "question") {
+              yield* Queue.offer(queue, {
+                kind: "user-input-request",
+                sessionId: turn.sessionId,
+                requestId: "q-parked",
+                prompt: "Approve the plan?",
+                options: [{ label: "Yes" }, { label: "No" }],
+              } as never);
+              return;
+            }
             if (behavior === "checkpoint-disconnect") {
               yield* Queue.shutdown(queue);
               return;
@@ -525,6 +535,58 @@ describe("Chat lifecycle integration", () => {
     expect((await replayAll(fixture.service, created.thread.id)).at(-1)?.sequence).toBe(
       restarted.lastSequence,
     );
+    fixture.close();
+  });
+
+  it("settles a restored waiting attempt interrupted when its question outlived the provider session", async () => {
+    const fixture = createFixture({ providerA: ["question"] });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Waiting question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+
+    // The send parks on the provider's question and stays open on purpose —
+    // the turn never settles before the restart.
+    const pendingSend = fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Ask the question.",
+    });
+    void pendingSend.catch(() => undefined);
+    await until(() => {
+      const attempt = fixture.service.read(created.thread.id).turns[0]?.attempts[0];
+      return attempt?.outcome === "waiting" && attempt.pendingQuestion !== undefined;
+    });
+
+    await fixture.restart();
+
+    const restored = fixture.service.read(created.thread.id);
+    const turn = restored.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined)
+      throw new Error("Expected the waiting attempt after restart.");
+    expect(attempt.outcome).toBe("waiting");
+    expect(attempt.pendingQuestion?.requestId).toBe("q-parked");
+
+    await expect(
+      fixture.service.execute({
+        kind: "answer-chat-turn-question",
+        threadId: created.thread.id,
+        expectedVersion: restored.thread.version,
+        turnId: turn.id,
+        attemptId: attempt.id,
+        requestId: "q-parked",
+        answer: "Yes",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+
+    const settled = fixture.service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(settled?.outcome).toBe("interrupted");
+    expect(settled?.failure?.code).toBe("unavailable");
+    expect(settled?.pendingQuestion).toBeUndefined();
     fixture.close();
   });
 
