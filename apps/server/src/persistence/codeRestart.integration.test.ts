@@ -270,6 +270,7 @@ describe("Code persistence restart", () => {
       { projection_name: "thread-external-content-taint", reason: "unsupported-event-version" },
       { projection_name: "thread-retention", reason: "unsupported-event-version" },
       { projection_name: "usage", reason: "unsupported-event-version" },
+      { projection_name: "usage-resume", reason: "unsupported-event-version" },
       { projection_name: "validation-evidence", reason: "unsupported-event-version" },
       { projection_name: "zen", reason: "unsupported-event-version" },
     ]);
