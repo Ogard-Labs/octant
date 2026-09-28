@@ -247,6 +247,12 @@ interface TerminalOwner {
   readonly checkoutId: string;
   /** Every surface currently following this terminal, keyed by its operation. */
   readonly readers: Map<string, TerminalOutputReader>;
+  /**
+   * Set while the confined launch is in flight. A terminal that is starting
+   * is terminal truth, not a miss: commands for it wait on this rather than
+   * failing against a process that is already on its way.
+   */
+  starting?: Promise<CodeOperationTerminalSnapshot>;
   removeOutputListener?: () => void;
   /** How far the surface has already been caught up by the snapshot it was sent. */
   outputBaseline?: number;
@@ -906,7 +912,7 @@ export class CodeOperationService {
       // authority the root resolution established when the shell opened.
       // Resolving the root again spawned git four times per key and held
       // typing to about three characters a second.
-      result = this.#terminalInput(command, windowId, scope.thread, scope.checkout);
+      result = await this.#terminalInput(command, windowId, scope.thread, scope.checkout);
     } else {
       const root = await this.#options.authority.resolveCheckoutRoot(
         windowId,
@@ -1219,7 +1225,15 @@ export class CodeOperationService {
     ) {
       throw new CodeOperationServiceError("unavailable");
     }
-    const owner = this.#terminalOwners.get(input.terminalId);
+    let owner = this.#terminalOwners.get(input.terminalId);
+    if (owner?.starting !== undefined) {
+      try {
+        await owner.starting;
+      } catch {
+        // The start operation journaled the launch's own failure.
+      }
+      owner = this.#terminalOwners.get(input.terminalId);
+    }
     if (owner === undefined) throw new CodeOperationServiceError("unavailable");
     if (
       owner.windowId !== String(windowId) ||
@@ -1538,7 +1552,19 @@ export class CodeOperationService {
             "invalid",
             "Terminal credential authority is invalid.",
           );
-        const snapshot = await this.#options.terminals.launch({
+        if (this.#terminalOwners.has(command.terminalId))
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "This terminal identifier is already in use.",
+          );
+        const owner: TerminalOwner = {
+          windowId: String(windowId),
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          readers: new Map(),
+        };
+        const starting = this.#options.terminals.launch({
           terminalId: command.terminalId,
           shell: root.shell,
           cwd: workingDirectory,
@@ -1549,29 +1575,56 @@ export class CodeOperationService {
           credentialReferences,
           executionPolicy: thread.executionPolicy,
         });
-        this.#terminalOwners.set(command.terminalId, {
-          windowId: String(windowId),
-          threadId: thread.id,
-          checkoutId: checkout.id,
-          readers: new Map(),
-          outputBaseline: snapshot.transcript.characters,
-        });
+        owner.starting = starting;
+        this.#terminalOwners.set(command.terminalId, owner);
+        let snapshot: CodeOperationTerminalSnapshot;
+        try {
+          snapshot = await starting;
+        } catch (error) {
+          this.#terminalOwners.delete(command.terminalId);
+          throw error;
+        }
+        delete owner.starting;
+        owner.outputBaseline = snapshot.transcript.characters;
         return this.#terminal(command.operationId, snapshot);
       }
       case "attach-terminal": {
-        const ownerFailure = this.#requireTerminalOwner(command, windowId, thread, checkout);
-        if (ownerFailure !== undefined) return ownerFailure;
+        const owner = await this.#resolveTerminalOwner(command, windowId, thread, checkout);
+        if (owner === "unauthorized")
+          return this.#failed(
+            command.operationId,
+            "unauthorized",
+            "Terminal belongs to another code thread.",
+          );
+        // Asking for a shell that was never started is a lookup, not a
+        // failure — the journal records the state it found instead of an
+        // operation-failed row every first open would otherwise write.
+        if (owner === "absent")
+          return decodeCodeOperationResult({
+            kind: "terminal-state",
+            operationId: command.operationId,
+            terminalId: command.terminalId,
+            state: "unavailable",
+          });
         const snapshot = this.#options.terminals.attach(command.terminalId);
-        const owner = this.#terminalOwners.get(command.terminalId)!;
-        owner.outputBaseline = snapshot.transcript.characters;
+        const settledOwner = this.#terminalOwners.get(command.terminalId);
+        if (settledOwner !== undefined)
+          settledOwner.outputBaseline = snapshot.transcript.characters;
         return this.#terminal(command.operationId, snapshot);
       }
       case "write-terminal":
       case "resize-terminal":
-        return this.#terminalInput(command, windowId, thread, checkout);
+        return await this.#terminalInput(command, windowId, thread, checkout);
       case "stop-terminal": {
-        const owner = this.#requireTerminalOwner(command, windowId, thread, checkout);
-        if (owner !== undefined) return owner;
+        const owner = await this.#resolveTerminalOwner(command, windowId, thread, checkout);
+        if (owner === "unauthorized")
+          return this.#failed(
+            command.operationId,
+            "unauthorized",
+            "Terminal belongs to another code thread.",
+          );
+        if (owner === "absent")
+          return this.#failed(command.operationId, "unavailable", "Terminal is unavailable.");
         return this.#terminal(
           command.operationId,
           await this.#options.terminals.terminate(command.terminalId),
@@ -2061,14 +2114,21 @@ export class CodeOperationService {
     this.#terminalOwners.delete(terminalId);
   }
 
-  #terminalInput(
+  async #terminalInput(
     command: Extract<CodeOperationCommand, { readonly kind: "write-terminal" | "resize-terminal" }>,
     windowId: WindowId,
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
-  ): CodeOperationResult {
-    const owner = this.#requireTerminalOwner(command, windowId, thread, checkout);
-    if (owner !== undefined) return owner;
+  ): Promise<CodeOperationResult> {
+    const owner = await this.#resolveTerminalOwner(command, windowId, thread, checkout);
+    if (owner === "unauthorized")
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Terminal belongs to another code thread.",
+      );
+    if (owner === "absent")
+      return this.#failed(command.operationId, "unavailable", "Terminal is unavailable.");
     if (command.kind === "write-terminal") {
       this.#options.terminals.write(command.terminalId, command.data);
     } else {
@@ -2081,24 +2141,32 @@ export class CodeOperationService {
     );
   }
 
-  #requireTerminalOwner(
+  /**
+   * Resolves the terminal a command targets, waiting out an in-flight launch.
+   * `absent` means no start was ever recorded for the identifier; `ok` means
+   * the launch — pending or finished — belongs to this scope.
+   */
+  async #resolveTerminalOwner(
     command: Extract<CodeOperationCommand, { readonly terminalId: string }>,
     windowId: WindowId,
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
-  ): CodeOperationResult | undefined {
+  ): Promise<"ok" | "absent" | "unauthorized"> {
     const owner = this.#terminalOwners.get(command.terminalId);
-    if (owner === undefined)
-      return this.#failed(command.operationId, "unavailable", "Terminal is unavailable.");
+    if (owner === undefined) return "absent";
+    if (owner.starting !== undefined) {
+      try {
+        await owner.starting;
+      } catch {
+        // The start operation journaled the launch's own failure.
+      }
+      if (this.#terminalOwners.get(command.terminalId) !== owner) return "absent";
+    }
     return owner.windowId === String(windowId) &&
       owner.threadId === thread.id &&
       owner.checkoutId === checkout.id
-      ? undefined
-      : this.#failed(
-          command.operationId,
-          "unauthorized",
-          "Terminal belongs to another code thread.",
-        );
+      ? "ok"
+      : "unauthorized";
   }
 
   /**

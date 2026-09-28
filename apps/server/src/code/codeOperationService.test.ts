@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CodeOperationService,
   CodeOperationServiceError,
+  type CodeOperationTerminalSnapshot,
   CodeOperationSnapshotRequiredError,
   type CodeOperationServiceOptions,
 } from "./codeOperationService";
@@ -2310,6 +2311,83 @@ describe("CodeOperationService terminal readers", () => {
     expect(outputCursorsFor(events, ids.operation)).toEqual([1]);
     expect(outputCursorsFor(events, String(abandoned[0]))).toEqual([]);
     expect(outputCursorsFor(events, String(abandoned[3]))).toEqual([1]);
+  });
+
+  it("reports a shell that was never started as unavailable rather than journaling a failure", async () => {
+    const { events, service } = readerFixture();
+    const result = await service.execute(ids.window, {
+      kind: "attach-terminal",
+      operationId: ids.operation,
+      ...scope,
+    });
+    // First open probes with an attach before starting; the answer is a state
+    // the surface can act on, not an operation-failed row on the journal.
+    expect(result).toMatchObject({ kind: "terminal-state", state: "unavailable" });
+    expect(events.append).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      operationId: ids.operation,
+      expectedCursor: 0,
+      event: { kind: "operation-result", result },
+    });
+  });
+
+  it("waits for a starting shell to finish launching before attaching to it", async () => {
+    const { service, terminals } = readerFixture();
+    let release!: (snapshot: CodeOperationTerminalSnapshot) => void;
+    terminals.launch.mockImplementation(
+      () =>
+        new Promise<CodeOperationTerminalSnapshot>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const start = service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    await vi.waitFor(() => expect(terminals.launch).toHaveBeenCalledOnce());
+    const attach = service.execute(ids.window, {
+      kind: "attach-terminal",
+      operationId: second,
+      ...scope,
+    });
+    release({
+      terminalId: ids.terminal,
+      status: "running",
+      canRerun: false,
+      transcript: { chunks: ["boot"], byteLength: 4, truncated: false, characters: 4 },
+    });
+    await expect(start).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
+    await expect(attach).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(terminals.attach).toHaveBeenCalledWith(ids.terminal);
+  });
+
+  it("refuses to start a shell whose identifier is already in use", async () => {
+    const { service, terminals } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    const again = await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: second,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    expect(again).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    expect(terminals.launch).toHaveBeenCalledOnce();
   });
 
   it("stops a terminal nothing can be journaled to any more", async () => {
