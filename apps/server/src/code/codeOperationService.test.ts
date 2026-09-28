@@ -16,7 +16,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CodeOperationService,
   CodeOperationServiceError,
-  type CodeOperationTerminalSnapshot,
   CodeOperationSnapshotRequiredError,
   type CodeOperationServiceOptions,
 } from "./codeOperationService";
@@ -2333,11 +2332,22 @@ describe("CodeOperationService terminal readers", () => {
 
   it("waits for a starting shell to finish launching before attaching to it", async () => {
     const { service, terminals } = readerFixture();
-    let release!: (snapshot: CodeOperationTerminalSnapshot) => void;
+    let release!: () => void;
     terminals.launch.mockImplementation(
       () =>
-        new Promise<CodeOperationTerminalSnapshot>((resolve) => {
-          release = resolve;
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              terminalId: ids.terminal,
+              status: "running" as const,
+              canRerun: false,
+              transcript: {
+                chunks: ["boot"],
+                byteLength: 4,
+                truncated: false,
+                characters: 4,
+              },
+            });
         }),
     );
     const start = service.execute(ids.window, {
@@ -2354,12 +2364,7 @@ describe("CodeOperationService terminal readers", () => {
       operationId: second,
       ...scope,
     });
-    release({
-      terminalId: ids.terminal,
-      status: "running",
-      canRerun: false,
-      transcript: { chunks: ["boot"], byteLength: 4, truncated: false, characters: 4 },
-    });
+    release();
     await expect(start).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
     await expect(attach).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
     expect(terminals.attach).toHaveBeenCalledWith(ids.terminal);
