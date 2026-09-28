@@ -221,6 +221,40 @@ describe("ACP event normalization", () => {
     ).toMatchObject({ kind: "tool-failure", message: "Tool failed." });
   });
 
+  it("does not journal a raw provider payload as the failure reason", async () => {
+    const ctx = context();
+    event(
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "acp-session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "provider-tool-1",
+          },
+        },
+      }),
+    );
+    expect(
+      event(
+        mapAcpNotification(ctx, {
+          kind: "notification",
+          method: "session/update",
+          params: {
+            sessionId: "acp-session-1",
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "provider-tool-1",
+              status: "failed",
+              rawOutput: "s3cr3t file contents dumped by the tool",
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "tool-failure", message: "Tool failed." });
+  });
+
   it("maps plan entries conservatively and ignores config metadata", () => {
     const ctx = context();
     expect(

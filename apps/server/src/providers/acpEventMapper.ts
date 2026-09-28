@@ -134,6 +134,9 @@ function taskId(summary: string): string {
 
 // A failed ACP tool call carries its reason as a text content item, not in the
 // title; a provider that sends none still renders the honest generic sentence.
+// `rawOutput` is deliberately not a fallback: it is an opaque provider payload
+// that can hold stdout, file contents, or credentials, and this text is
+// journaled and exported, where raw provider payloads must never appear.
 function toolFailureReason(update: Readonly<Record<string, unknown>>): string | undefined {
   const items = Array.isArray(update.content) ? update.content : [];
   for (const item of items) {
@@ -142,7 +145,7 @@ function toolFailureReason(update: Readonly<Record<string, unknown>>): string | 
     const text = normalized(record(entry.content)?.text, SUMMARY_MAX_CHARACTERS);
     if (text !== undefined) return text;
   }
-  return normalized(update.rawOutput, SUMMARY_MAX_CHARACTERS);
+  return undefined;
 }
 
 function mapTool(
