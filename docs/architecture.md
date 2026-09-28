@@ -1098,6 +1098,16 @@ mechanisms are:
   devices forever. An empty `ANDROID_AVD_HOME` is treated as unset rather than
   forwarded, since a non-absolute grant path would make the confinement
   builder refuse every Android command.
+  The Apple `test` action stays confined too, and splits so the extra reach
+  touches only the phase that needs it: `build-for-testing` runs under the
+  ordinary profile while `test-without-building` carries a closed set of
+  measured per-launch grants through `extraRules` — literal reads of the SDK
+  index plist and the launchd socket's ancestors, read-write over the
+  per-boot launchd session socket family, four named `mach-lookup` services,
+  the pseudo-terminal pair it allocates, `job-creation`, and `signal` for
+  the session's stale-app teardown — recorded with each measurement in
+  [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
+  No other Apple launch receives any of them.
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use

@@ -312,6 +312,80 @@ describe("RepositoryTestProcessPort", () => {
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });
 
+  it("grants a launch only the host reads and operations it asks for, over the port defaults", async () => {
+    // The confinement contract keeps per-launch grants attached to the launch
+    // that names them: the test action that needs its measured host reads,
+    // Mach lookups, pseudo-terminal, job creation, and signal scope carries
+    // each one, and a plain launch carries none of them.
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const recorded: Parameters<typeof fake.confinement.prepare>[0][] = [];
+    const children: Array<ReturnType<typeof fakeChild>> = [];
+    const spawn = vi.fn(() => {
+      const spawned = fakeChild(96);
+      children.push(spawned);
+      return spawned;
+    });
+    const port = new RepositoryTestProcessPort({
+      platform: "darwin",
+      sandboxPath: fake.sandboxPath,
+      temporaryDirectory: fake.temporaryDirectory,
+      seatbeltHomeDirectory: fake.root,
+      seatbeltUsersDirectory: fake.root,
+      confinement: {
+        prepare: (input) => {
+          recorded.push(input);
+          return fake.confinement.prepare(input);
+        },
+      },
+      spawn,
+      networkEgress: "none",
+      literalReadPaths: ["/private/var/select/developer_dir"],
+    });
+    const granted = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+      literalReadPaths: ["/Users/octant/Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist"],
+      literalMetadataPaths: ["/private/var/tmp"],
+      regexReadWritePaths: ["^/private/var/tmp/com\\\\.apple\\\\.launchd\\\\.[^/]+$"],
+      machLookupNames: ["com.apple.PowerManagement.control"],
+      allowPseudoTty: true,
+      allowJobCreation: true,
+      allowSignal: true,
+    });
+    children.at(-1)?.close(0, null);
+    await granted;
+    const plain = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    children.at(-1)?.close(0, null);
+    await plain;
+
+    expect(recorded).toHaveLength(2);
+    expect(recorded[0]?.extraRules).toEqual(
+      expect.arrayContaining([
+        '(allow file-read* (literal "/private/var/select/developer_dir"))',
+        '(allow file-read* (literal "/Users/octant/Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist"))',
+        '(allow file-read-metadata (literal "/private/var/tmp"))',
+        '(allow file-read* file-write* (regex #"^/private/var/tmp/com\\\\.apple\\\\.launchd\\\\.[^/]+$"))',
+        '(allow mach-lookup (global-name "com.apple.PowerManagement.control"))',
+        "(allow pseudo-tty)",
+        '(allow file-write* file-ioctl (literal "/dev/ptmx"))',
+        '(allow file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
+        "(allow job-creation)",
+        "(allow signal)",
+      ]),
+    );
+    expect(recorded[1]?.extraRules).toEqual([
+      '(allow file-read* (literal "/private/var/select/developer_dir"))',
+    ]);
+  });
+
   it("forwards simulator control to the confinement only when the caller asks for it", async () => {
     // The Apple toolchain port is the only caller that sets this, and the
     // profile's Simulator rules only exist when it arrives. A regression that

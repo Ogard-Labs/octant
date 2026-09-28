@@ -180,6 +180,7 @@ links from specifications remain useful for rationale and supporting detail.
 | [0157](0157-native-resume-keeps-a-durable-identity.md) | Native resume keeps a durable identity | Accepted |
 
 | [0158](0158-first-task-entry-keeps-setup-optional.md) | First task entry keeps setup optional | Accepted |
+| [0159](0159-a-confined-apple-test-carries-its-measured-grants.md) | A confined Apple test carries its measured grants | Accepted |
 
 ## Recording architectural rationale
 

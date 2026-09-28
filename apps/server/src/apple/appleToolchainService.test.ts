@@ -158,47 +158,59 @@ function processResult(
 }
 
 function discoveryExecutor() {
-  return vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
-    const command = input.argv.join(" ");
-    if (command === "xcode-select -p") {
-      return processResult("/Applications/Xcode.app/Contents/Developer\n");
-    }
-    if (command === "xcodebuild -version") return processResult("Xcode 16.4\nBuild version 16F6\n");
-    if (command === "swift --version") return processResult("Apple Swift version 6.1\n");
-    if (command === "xcodebuild -showsdks") {
-      return processResult(
-        "iOS Simulator 18.5 -sdk iphonesimulator18.5\nmacOS 15.5 -sdk macosx15.5\n",
-      );
-    }
-    if (command === "xcrun simctl list devices available --json") {
-      return processResult(
-        JSON.stringify({
-          devices: {
-            "com.apple.CoreSimulator.SimRuntime.iOS-18-5": [
-              {
-                name: "iPhone 16",
-                udid: ids.simulator,
-                state: "Booted",
-                isAvailable: true,
-              },
-            ],
-          },
-        }),
-      );
-    }
-    if (command.includes("-list -json")) {
-      return processResult(
-        JSON.stringify({
-          project: {
-            schemes: ["Fixture"],
-            configurations: ["Debug", "Release"],
-            targets: ["Fixture", "FixtureTests"],
-          },
-        }),
-      );
-    }
-    return processResult("", { exitCode: 1, stderr: `unexpected command: ${command}` });
-  });
+  return vi.fn(
+    async (input: {
+      readonly argv: ReadonlyArray<string>;
+      readonly literalReadPaths?: ReadonlyArray<string>;
+      readonly literalMetadataPaths?: ReadonlyArray<string>;
+      readonly regexReadWritePaths?: ReadonlyArray<string>;
+      readonly machLookupNames?: ReadonlyArray<string>;
+      readonly allowPseudoTty?: boolean;
+      readonly allowJobCreation?: boolean;
+      readonly allowSignal?: boolean;
+    }) => {
+      const command = input.argv.join(" ");
+      if (command === "xcode-select -p") {
+        return processResult("/Applications/Xcode.app/Contents/Developer\n");
+      }
+      if (command === "xcodebuild -version")
+        return processResult("Xcode 16.4\nBuild version 16F6\n");
+      if (command === "swift --version") return processResult("Apple Swift version 6.1\n");
+      if (command === "xcodebuild -showsdks") {
+        return processResult(
+          "iOS Simulator 18.5 -sdk iphonesimulator18.5\nmacOS 15.5 -sdk macosx15.5\n",
+        );
+      }
+      if (command === "xcrun simctl list devices available --json") {
+        return processResult(
+          JSON.stringify({
+            devices: {
+              "com.apple.CoreSimulator.SimRuntime.iOS-18-5": [
+                {
+                  name: "iPhone 16",
+                  udid: ids.simulator,
+                  state: "Booted",
+                  isAvailable: true,
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (command.includes("-list -json")) {
+        return processResult(
+          JSON.stringify({
+            project: {
+              schemes: ["Fixture"],
+              configurations: ["Debug", "Release"],
+              targets: ["Fixture", "FixtureTests"],
+            },
+          }),
+        );
+      }
+      return processResult("", { exitCode: 1, stderr: `unexpected command: ${command}` });
+    },
+  );
 }
 
 describe("AppleToolchainService discovery", () => {
@@ -423,6 +435,79 @@ describe("AppleToolchainService lifecycle", () => {
         bundleIdentifier: "app.octant.fixture",
       }),
     ]);
+  });
+
+  it("confines only the test session launch to the measured grant set it asks for", async () => {
+    // The test action splits into build-for-testing, which needs no grants,
+    // and test-without-building, which carries the closed set the session
+    // measured. Widening either way would hand an unmeasured launch
+    // capabilities it never asked for.
+    const execute = discoveryExecutor();
+    execute.mockImplementation(
+      async (input: {
+        readonly argv: ReadonlyArray<string>;
+        readonly literalReadPaths?: ReadonlyArray<string>;
+        readonly literalMetadataPaths?: ReadonlyArray<string>;
+        readonly regexReadWritePaths?: ReadonlyArray<string>;
+        readonly machLookupNames?: ReadonlyArray<string>;
+        readonly allowPseudoTty?: boolean;
+        readonly allowJobCreation?: boolean;
+        readonly allowSignal?: boolean;
+      }) => {
+        const command = input.argv.join(" ");
+        const discovered = await discoveryExecutor()(input);
+        if (!String(new TextDecoder().decode(discovered.stderr)).startsWith("unexpected"))
+          return discovered;
+        if (command.startsWith("xcodebuild ")) return processResult("ok\n");
+        return discovered;
+      },
+    );
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    await service.execute(buildRequest({ kind: "test" }), context);
+    await service.execute(buildRequest({ kind: "build" }), context);
+
+    const launchFor = (verb: string) =>
+      execute.mock.calls.find(
+        ([input]) =>
+          input.argv.join(" ").startsWith("xcodebuild ") &&
+          input.argv.join(" ").split(" ").at(-1) === verb,
+      )?.[0];
+    const testLaunch = launchFor("test-without-building");
+    expect(testLaunch?.literalReadPaths).toEqual([
+      expect.stringContaining("Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist"),
+    ]);
+    expect(testLaunch?.literalMetadataPaths).toEqual([
+      "/private",
+      "/private/var",
+      "/private/var/tmp",
+    ]);
+    expect(testLaunch?.regexReadWritePaths).toEqual([
+      "^/private/var/tmp/com\\.apple\\.launchd\\.[^/]+(/.*)?$",
+    ]);
+    expect(testLaunch?.machLookupNames).toEqual([
+      "com.apple.PowerManagement.control",
+      "com.apple.testmanagerd.control",
+      "com.apple.dt.instruments.dtarbiter.xpc",
+      "com.apple.dt.instruments.dtsecurity.xpc",
+    ]);
+    expect(testLaunch?.allowPseudoTty).toBe(true);
+    expect(testLaunch?.allowJobCreation).toBe(true);
+    expect(testLaunch?.allowSignal).toBe(true);
+    for (const ungranted of [launchFor("build-for-testing"), launchFor("build")]) {
+      expect(ungranted?.literalReadPaths).toBeUndefined();
+      expect(ungranted?.literalMetadataPaths).toBeUndefined();
+      expect(ungranted?.regexReadWritePaths).toBeUndefined();
+      expect(ungranted?.machLookupNames).toBeUndefined();
+      expect(ungranted?.allowPseudoTty).toBeUndefined();
+      expect(ungranted?.allowJobCreation).toBeUndefined();
+      expect(ungranted?.allowSignal).toBeUndefined();
+    }
   });
 
   it("maps cancellation, timeout, process death, and cleanup uncertainty distinctly", async () => {

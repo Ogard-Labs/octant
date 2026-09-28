@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
+import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeAppleBuildEvidence,
@@ -45,6 +46,73 @@ export const APPLE_TOOLCHAIN_HOST_READ_PATHS = [
   "/private/var/select/developer_dir",
   "/private/var/db/xcode_select_link",
 ] as const;
+
+/**
+ * Host capabilities a confined launch names for itself, on top of the port's
+ * defaults. macOS only; other platforms ignore both fields.
+ */
+export interface AppleLaunchGrants {
+  readonly literalReadPaths?: ReadonlyArray<string>;
+  readonly literalMetadataPaths?: ReadonlyArray<string>;
+  readonly regexReadWritePaths?: ReadonlyArray<string>;
+  readonly machLookupNames?: ReadonlyArray<string>;
+  readonly allowPseudoTty?: boolean;
+  readonly allowJobCreation?: boolean;
+  readonly allowSignal?: boolean;
+}
+
+/**
+ * Regex over resolved paths naming the per-boot launchd session directories
+ * the simulator's test runner uses for its host-side unix socket. The session
+ * suffix is minted per boot, so only a pattern can name the family; nothing
+ * outside `/private/var/tmp` matches.
+ */
+const APPLE_TESTMANAGERD_SOCKET_REGEX = "^/private/var/tmp/com\\.apple\\.launchd\\.[^/]+(/.*)?$";
+
+/**
+ * Confinement grants only the `test` launch carries, rather than widening
+ * the port-wide read set: discovery, build, and run launches never reach
+ * these host surfaces.
+ *
+ * - `xcodebuild test` reads Xcode's per-user SDK-to-runtime index while it
+ *   resolves the destination. Without the read the destination reports an
+ *   empty supported-platform list and the run cannot start.
+ * - The same run holds a no-idle-sleep assertion with powerd over XPC for
+ *   its whole duration, reaches the simulator's `testmanagerd` control
+ *   endpoint to drive the session, and its spawned DTServiceHub helpers
+ *   coordinate the runner through the Instruments arbiter. Denied a lookup,
+ *   `xcodebuild` aborts the test action outright or the runner hangs before
+ *   establishing connection.
+ * - Test communication happens over a unix socket the simulator's launchd
+ *   session publishes beneath `/private/var/tmp/com.apple.launchd.<session>`.
+ *   Denied the stat, the run reports "no file was found at that path" and
+ *   the test runner never connects. The literal metadata grants reopen only
+ *   the ancestors under `/private` needed to reach it.
+ * - The runner installs and launches behind a pseudo-terminal inside its own
+ *   session job, and the session terminates a stale copy of the target app
+ *   before installing and again at teardown. Denied `signal`, the old
+ *   instance survives and the session hangs waiting on the runner; denied
+ *   the job or the terminal, the run ends with "Pseudo Terminal Setup
+ *   Error" or "Failed to install or launch the test runner".
+ */
+function appleToolchainTestGrants(homeDirectory: string): AppleLaunchGrants {
+  return {
+    literalReadPaths: [
+      join(homeDirectory, "Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist"),
+    ],
+    literalMetadataPaths: ["/private", "/private/var", "/private/var/tmp"],
+    regexReadWritePaths: [APPLE_TESTMANAGERD_SOCKET_REGEX],
+    machLookupNames: [
+      "com.apple.PowerManagement.control",
+      "com.apple.testmanagerd.control",
+      "com.apple.dt.instruments.dtarbiter.xpc",
+      "com.apple.dt.instruments.dtsecurity.xpc",
+    ],
+    allowPseudoTty: true,
+    allowJobCreation: true,
+    allowSignal: true,
+  };
+}
 
 export interface AppleProcessResult {
   readonly termination: "exited" | "cancelled" | "timed-out" | "unavailable";
@@ -91,6 +159,13 @@ export interface AppleToolchainServiceOptions {
       readonly cwd: string;
       readonly environment: Readonly<Record<string, string>>;
       readonly timeoutMs: number;
+      readonly literalReadPaths?: ReadonlyArray<string>;
+      readonly literalMetadataPaths?: ReadonlyArray<string>;
+      readonly regexReadWritePaths?: ReadonlyArray<string>;
+      readonly machLookupNames?: ReadonlyArray<string>;
+      readonly allowPseudoTty?: boolean;
+      readonly allowJobCreation?: boolean;
+      readonly allowSignal?: boolean;
     },
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
@@ -831,17 +906,42 @@ export class AppleToolchainService {
             signal,
           );
         }
-        terminal =
-          readiness !== undefined && !succeeded(readiness)
-            ? readiness
-            : await this.#command(
-                xcodebuildCommand(request, projectPath, context.artifactRoot, resultBundle),
+        if (request.kind === "test") {
+          // `xcodebuild test` builds and tests in one launch, which would run
+          // the project's Run Script phases under the test session's widened
+          // profile. Splitting the phases confines the granted launch to the
+          // session that measured the need; the build phase needs none of it,
+          // exactly like the `build` action that already runs ungranted.
+          const sharedArguments = xcodebuildArguments(request, projectPath, context.artifactRoot);
+          const buildPhase = await this.#command(
+            [...sharedArguments, "build-for-testing"],
+            context,
+            request.timeoutMs,
+            signal,
+          );
+          terminal = succeeded(buildPhase)
+            ? await this.#command(
+                [...sharedArguments, "-resultBundlePath", resultBundle, "test-without-building"],
                 context,
                 request.timeoutMs,
                 signal,
-              );
-        if (request.kind === "test") {
+                appleToolchainTestGrants(homedir()),
+              )
+            : buildPhase;
           artifacts = [{ kind: "xcresult", reference: `apple-xcresult-${request.actionId}` }];
+        } else {
+          terminal =
+            readiness !== undefined && !succeeded(readiness)
+              ? readiness
+              : await this.#command(
+                  [
+                    ...xcodebuildArguments(request, projectPath, context.artifactRoot),
+                    request.kind === "clean" ? "clean" : "build",
+                  ],
+                  context,
+                  request.timeoutMs,
+                  signal,
+                );
         }
         if (request.kind === "run" && succeeded(terminal)) {
           const settings = await this.#command(
@@ -936,9 +1036,16 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
     timeoutMs: number,
     signal?: AbortSignal,
+    grants?: AppleLaunchGrants,
   ): Promise<AppleProcessResult> {
     return await this.#options.execute(
-      { argv, cwd: context.checkoutRoot, environment: {}, timeoutMs },
+      {
+        argv,
+        cwd: context.checkoutRoot,
+        environment: {},
+        timeoutMs,
+        ...(grants === undefined ? {} : grants),
+      },
       signal,
     );
   }
@@ -1376,13 +1483,12 @@ function boundedStrings(value: unknown, maximum: number): ReadonlyArray<string> 
     : [];
 }
 
-function xcodebuildCommand(
+function xcodebuildArguments(
   request: AppleBuildRequest,
   projectPath: string,
   artifactRoot: string,
-  resultBundle: string,
 ): ReadonlyArray<string> {
-  const argv = [
+  return [
     "xcodebuild",
     projectSelector(request.projectPath),
     projectPath,
@@ -1394,9 +1500,6 @@ function xcodebuildCommand(
     ...destinationArguments(request),
     "CODE_SIGNING_ALLOWED=NO",
   ];
-  if (request.kind === "test") argv.push("-resultBundlePath", resultBundle, "test");
-  else argv.push(request.kind === "clean" ? "clean" : "build");
-  return argv;
 }
 
 function xcodebuildSettingsCommand(
