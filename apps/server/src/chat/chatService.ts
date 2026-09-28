@@ -3595,9 +3595,7 @@ export class ChatService {
         ? first.probe.readiness === "unavailable" ||
           first.probe.readiness === "checking" ||
           (first.probe.readiness === "degraded" &&
-            !first.probe.models.some(
-              (candidate) => String(candidate.id) === String(modelId),
-            ))
+            !first.probe.models.some((candidate) => String(candidate.id) === String(modelId)))
         : first.error instanceof ChatServiceError && first.error.failure.category === "unavailable";
     if (!worthRetrying) {
       if ("probe" in first) return first.probe;
