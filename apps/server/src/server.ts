@@ -44,6 +44,7 @@ import {
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
   ReplayCursor,
+  USAGE_RESUME_SETTLED,
   type AgentRun,
   type AgentRunParentThreadId,
   type CodeCheckoutId,
@@ -74,6 +75,8 @@ import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
 import { ChatService } from "./chat/chatService";
+import { UsageResumeService } from "./usage/usageResumeService";
+import { createUsageResumePorts } from "./usage/usageResumePorts";
 import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
@@ -5826,6 +5829,7 @@ export function startOctantServer(
       persistence,
       projects: projectService,
       projection: workThreadProjection,
+      turnProjection: workTurnProjection,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
@@ -6373,6 +6377,67 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     };
+    // Host-owned recovery for provider usage-limited stops: the journal record
+    // is the opt-in, the projection rebuilds what is armed after a restart, and
+    // every reset fires through the mode's ordinary turn admission.
+    const usageResumeService = new UsageResumeService({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      clock: () => new Date(),
+      uuid: randomUUID,
+      ports: createUsageResumePorts({
+        connection: persistence.connection,
+        journal: persistence.journal,
+        clock: () => new Date(),
+        uuid: randomUUID,
+        windowId: firstRegisteredWindowId,
+        chat: {
+          readThread: (threadId) => persistence.readChatThread(threadId),
+          readThreadView: (threadId) => persistence.readChatThreadView(threadId),
+          execute: (input) => chatService.execute(input),
+        },
+        work: {
+          readThread: (threadId) => workThreadProjection.read(threadId),
+          listTurns: (threadId) => workTurnProjection.listForThread(threadId),
+          startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+          applySettled: (usageResumePayload, threadUpdate) => {
+            workThreadProjection.applyUsageResume({
+              eventName: USAGE_RESUME_SETTLED,
+              payload: usageResumePayload,
+            });
+            if (threadUpdate !== undefined) {
+              workThreadProjection.apply(threadUpdate);
+            }
+          },
+        },
+        code: {
+          readThread: (threadId) => persistence.readCodeThread(threadId),
+          readRuntimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+          ...(routeCodeService.readOperationContents === undefined
+            ? {}
+            : { readOperationContents: routeCodeService.readOperationContents }),
+          ...(routeCodeService.stageEvidence === undefined
+            ? {}
+            : { stageEvidence: routeCodeService.stageEvidence }),
+          ...(routeCodeService.executeOperation === undefined
+            ? {}
+            : { executeOperation: routeCodeService.executeOperation }),
+        },
+      }),
+      onError: (message, error) => console.error(`[usage-resume] ${message}`, error),
+    });
+    const unsubscribeUsageResume = persistence.journal.subscribeCommitted((append) =>
+      usageResumeService.onCommittedAppend(append),
+    );
+    // Armed timers can sit hours out; both must go down with the server or a
+    // late fire would read and append against a closed store.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeUsageResume();
+        usageResumeService.stop();
+      }),
+    );
+    usageResumeService.start();
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
       localHostDisplayName: localHostDisplayName(),

@@ -1,7 +1,8 @@
 import { CircleAlert } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ProviderUsageLimit } from "@octant/contracts";
+import type { ProviderUsageLimit, UsageResumeThreadState } from "@octant/contracts";
 import { resetCountdownLabel } from "../lib/relativeTime";
+import { OctantButton } from "../ui/base/OctantButton";
 
 /**
  * What the person is told when a provider's own protocol signal stopped a
@@ -34,12 +35,51 @@ export function usageLimitResetLine(limit: ProviderUsageLimit, now: number): str
   return resetCountdownLabel(limit.resetsAt, now);
 }
 
+/**
+ * The recovery the notice can offer for this stop. A scheduled resume is the
+ * durable opt-in the host will fire at the declared reset; offering it needs
+ * a clock to wait on, and a billing stop has no clock it would be honest to
+ * wait on.
+ */
+const canOfferResume = (limit: ProviderUsageLimit): boolean =>
+  limit.resetsAt !== undefined && limit.kind !== "billing";
+
+/**
+ * The settled outcome's honest line. `dispatched` reads as in-flight, the
+ * other two name the outcome and carry the detail the host journaled.
+ */
+function settledResumeLine(resume: UsageResumeThreadState): string {
+  switch (resume.status) {
+    case "dispatched":
+      return "Resuming…";
+    case "invalidated":
+      return resume.detail === undefined
+        ? "The scheduled resume was invalidated."
+        : `The scheduled resume was invalidated: ${resume.detail}`;
+    case "failed":
+      return resume.detail === undefined
+        ? "The scheduled resume could not start."
+        : `The scheduled resume could not start: ${resume.detail}`;
+    case "scheduled":
+      return "";
+  }
+}
+
 export function UsageLimitNotice(props: {
   readonly limit: ProviderUsageLimit;
   /** "Codex — luna" style label so the sentence names who stopped the turn. */
   readonly provider: string;
   /** The existing manual retry affordance for the mode; no auto-retry. */
   readonly action?: ReactNode;
+  /**
+   * The thread's durable resume opt-in, when its record names this stop.
+   * `resumable` is the caller's word for "this stop is still the thread's
+   * latest stopped turn" — the host re-checks the whole premise either way.
+   */
+  readonly usageResume?: UsageResumeThreadState;
+  readonly resumable?: boolean;
+  readonly onScheduleResume?: () => void;
+  readonly onCancelResume?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   // A named reset time becomes a countdown that must keep moving while the
@@ -53,12 +93,64 @@ export function UsageLimitNotice(props: {
     return () => clearInterval(tick);
   }, [countdown]);
   const reset = usageLimitResetLine(props.limit, now);
+  const resume = props.usageResume;
   return (
     <div className="callout callout-warn" role="alert">
       <CircleAlert aria-hidden="true" size={16} />
       <div>
         <p>{usageLimitExplanation(props.limit, props.provider)}</p>
         {reset === undefined ? null : <p>{reset}</p>}
+        {resume === undefined ? (
+          canOfferResume(props.limit) &&
+          props.resumable === true &&
+          props.onScheduleResume !== undefined ? (
+            <p>
+              <OctantButton
+                onClick={props.onScheduleResume}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Resume when the limit resets
+              </OctantButton>
+            </p>
+          ) : null
+        ) : resume.status === "scheduled" ? (
+          <>
+            <p>Resume scheduled — {resetCountdownLabel(resume.record.resetsAt, now)}</p>
+            {props.onCancelResume === undefined ? null : (
+              <p>
+                <OctantButton
+                  onClick={props.onCancelResume}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Cancel resume
+                </OctantButton>
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p>{settledResumeLine(resume)}</p>
+            {resume.status === "dispatched" ||
+            !canOfferResume(props.limit) ||
+            props.resumable !== true ||
+            props.onScheduleResume === undefined ? null : (
+              <p>
+                <OctantButton
+                  onClick={props.onScheduleResume}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Resume when the limit resets
+                </OctantButton>
+              </p>
+            )}
+          </>
+        )}
         {props.action}
       </div>
     </div>

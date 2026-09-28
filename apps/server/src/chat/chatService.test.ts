@@ -212,6 +212,7 @@ function openFixture(options?: {
     readonly windowId?: WindowId;
   }) => Promise<ReadonlyArray<import("./chatService").ChatThreadMentionContext>>;
   readonly turnOutcome?: "completed" | "waiting" | "interrupted" | "limited";
+  readonly usageLimitResetsAt?: string;
   readonly providerNativeExecute?: (
     input: import("./research/researchRouter").ResearchExecuteInput,
   ) => Promise<import("./research/researchRouter").ProviderNativeResearchResultSet>;
@@ -498,7 +499,12 @@ function openFixture(options?: {
           return yield* Effect.fail({
             category: "rate-limited",
             message: "The provider's usage window is spent.",
-            usageLimit: { kind: "exhausted" },
+            usageLimit: {
+              kind: "exhausted",
+              ...(options?.usageLimitResetsAt === undefined
+                ? {}
+                : { resetsAt: options.usageLimitResetsAt }),
+            },
           } as never);
         }
         if (outcome === "interrupted") {
@@ -4209,6 +4215,135 @@ describe("ChatService", () => {
     expect(after?.attempts[1]?.id).not.toBe(attempt.id);
     expect(after?.attempts[1]?.providerSessionId).not.toBe(attempt.providerSessionId);
     expect(fakeDriver.sentTurns).toHaveLength(2);
+  });
+
+  it("schedules a host-owned resume for an attempt parked on a provider usage limit", async () => {
+    const { service } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2026-07-19T13:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+
+    const scheduled = await service.execute({
+      kind: "schedule-chat-usage-resume",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    expect(scheduled).toMatchObject({ kind: "thread-updated" });
+
+    const view = service.read(created.thread.id);
+    expect(view.thread.usageResume?.status).toBe("scheduled");
+    expect(view.thread.usageResume?.record.turnId).toBe(String(turn.id));
+    expect(view.thread.usageResume?.record.attemptId).toBe(String(attempt.id));
+    expect(view.thread.usageResume?.record.resetsAt).toBe("2026-07-19T13:00:00.000Z");
+  });
+
+  it("withdraws the scheduled resume when the person cancels it", async () => {
+    const { service } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2026-07-19T13:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    const scheduled = await service.execute({
+      kind: "schedule-chat-usage-resume",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    if (scheduled.kind !== "thread-updated") throw new Error("Expected schedule.");
+    const armed = service.read(created.thread.id);
+    expect(armed.thread.usageResume?.status).toBe("scheduled");
+
+    const cancelled = await service.execute({
+      kind: "cancel-chat-usage-resume",
+      threadId: created.thread.id,
+      expectedVersion: armed.thread.version,
+    });
+    expect(cancelled).toMatchObject({ kind: "thread-updated" });
+    expect(service.read(created.thread.id).thread.usageResume).toBeUndefined();
+  });
+
+  it("refuses to schedule a resume for a parked attempt that discloses no reset", async () => {
+    const { service } = openFixture({ nativeConversation: true, turnOutcome: "limited" });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    await expect(
+      service.execute({
+        kind: "schedule-chat-usage-resume",
+        threadId: created.thread.id,
+        expectedVersion: parked.thread.version,
+        turnId: turn.id,
+        attemptId: attempt.id,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(service.read(created.thread.id).thread.usageResume).toBeUndefined();
   });
 
   it("refuses to retry an older turn in a provider-owned conversation", async () => {

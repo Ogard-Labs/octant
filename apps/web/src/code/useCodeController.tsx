@@ -294,6 +294,10 @@ export function useCodeController(options: CodeControllerOptions) {
   // about. Kept separate so arbitrary failure text can never grow a
   // countdown; only a contract fact the host journaled can.
   const [turnUsageLimit, setTurnUsageLimit] = useState<ProviderUsageLimit>();
+  // The conversation-tail provider turn's operationId, kept beside
+  // `turnUsageLimit`: a resume opt-in names exactly this operation.
+  const [latestProviderTurnOperationId, setLatestProviderTurnOperationId] =
+    useState<CodeOperationId>();
   /**
    * Whether the current failure already reads in the transcript. A turn the
    * host projected as failed carries its reason in its own assistant row; a
@@ -806,6 +810,11 @@ export function useCodeController(options: CodeControllerOptions) {
       // The journal is the only authority a reopen can trust for a limit: a
       // completed later turn carries none, so this also clears a stale one.
       setTurnUsageLimit(latestTurn?.failure?.usageLimit);
+      // The resume opt-in binds the turn the displayed limit belongs to; a
+      // tail without a limit must not leave an older turn's id behind.
+      setLatestProviderTurnOperationId(
+        latestTurn?.failure?.usageLimit === undefined ? undefined : latestTurn.operationId,
+      );
       const incomplete = latestTurn?.status === "incomplete";
       const waiting = latestTurn?.status === "waiting";
       if (latestTurn !== undefined && (incomplete || waiting)) {
@@ -1005,6 +1014,10 @@ export function useCodeController(options: CodeControllerOptions) {
                   let terminalState: "completed" | "waiting" | "interrupted" | "failed" | undefined;
                   let terminalMessage: string | undefined;
                   let terminalUsageLimit: ProviderUsageLimit | undefined;
+                  // Only a provider-turn-state result is the journaled stop a
+                  // resume opt-in can bind to; other terminal frames show the
+                  // limit but carry no schedulable stop.
+                  let terminalProviderTurnOperationId: CodeOperationId | undefined;
                   if (event.kind === "operation-state" && event.state !== "running") {
                     terminalState = event.state;
                     terminalMessage = event.failure?.message;
@@ -1016,6 +1029,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   ) {
                     terminalState = event.result.state;
                     terminalUsageLimit = event.result.failure?.usageLimit;
+                    terminalProviderTurnOperationId = operationId;
                   } else if (
                     event.kind === "operation-result" &&
                     event.result.kind === "operation-failed"
@@ -1048,6 +1062,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     void recordSeenActivity(threadId);
                     if (!isActive(request, threadGeneration, mounted)) return;
                     setTurnUsageLimit(terminalUsageLimit);
+                    setLatestProviderTurnOperationId(terminalProviderTurnOperationId);
                     if (terminalState === "completed") {
                       if (hydrated?.incomplete !== true) {
                         setTurnStatus("idle");
@@ -1330,6 +1345,7 @@ export function useCodeController(options: CodeControllerOptions) {
     // Activation rehydrates the journal's own fact; nothing carried over from
     // the thread being left is allowed to speak for this one.
     setTurnUsageLimit(undefined);
+    setLatestProviderTurnOperationId(undefined);
     if (firstTurnFailure !== undefined) {
       setPendingDraft(firstTurnFailure.prompt);
       firstTurnFailures.current.delete(String(options.activeThreadId));
@@ -1594,6 +1610,7 @@ export function useCodeController(options: CodeControllerOptions) {
       clearFailure();
       setTurnError(undefined);
       setTurnUsageLimit(undefined);
+      setLatestProviderTurnOperationId(undefined);
       setTurnStatus("sending");
       const failFirstTurn = (message: string) => {
         firstTurnFailures.current.set(String(input.threadId), { prompt, message });
@@ -1617,6 +1634,8 @@ export function useCodeController(options: CodeControllerOptions) {
           if (started.failure.usageLimit !== undefined) {
             setTurnUsageLimit(started.failure.usageLimit);
           }
+          // An operation failure records no provider-turn stop to resume.
+          setLatestProviderTurnOperationId(undefined);
           return false;
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
@@ -1951,6 +1970,7 @@ export function useCodeController(options: CodeControllerOptions) {
       clearFailure();
       setTurnError(undefined);
       setTurnUsageLimit(undefined);
+      setLatestProviderTurnOperationId(undefined);
       setTurnStatus("sending");
       const sendingThreadId = String(view.thread.id);
       const draftRevisionAtDispatch = composerDraftRef.current.revisionFor(sendingThreadId);
@@ -2006,6 +2026,7 @@ export function useCodeController(options: CodeControllerOptions) {
           setTurnStatus("failed");
           setTurnError(started.failure.message);
           setTurnUsageLimit(started.failure.usageLimit);
+          setLatestProviderTurnOperationId(undefined);
           restoreFailedPrompt();
           return false;
         }
@@ -2016,6 +2037,9 @@ export function useCodeController(options: CodeControllerOptions) {
           setTurnError(refusal ?? "The provider turn could not be started.");
           if (started.kind === "provider-turn-state") {
             setTurnUsageLimit(started.failure?.usageLimit);
+            setLatestProviderTurnOperationId(
+              started.failure?.usageLimit === undefined ? undefined : operationId,
+            );
           }
           restoreFailedPrompt();
           return false;
@@ -2378,6 +2402,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnErrorInTranscript,
     turnStatus,
     turnUsageLimit,
+    latestProviderTurnOperationId,
     updateSettings,
   };
 }

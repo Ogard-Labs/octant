@@ -48,6 +48,13 @@ export interface ChatTranscriptProps {
    */
   readonly onRetryAttempt?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
   /**
+   * Opts the named stopped attempt into the host-owned resume at its declared
+   * reset. Absent when the surface cannot schedule one.
+   */
+  readonly onScheduleUsageResume?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
+  /** Withdraws the thread's scheduled resume opt-in. */
+  readonly onCancelUsageResume?: () => void;
+  /**
    * Answers a question a running attempt asked and is blocked on. Absent when
    * the surface cannot answer, which keeps the question read-only instead of
    * offering a control nothing would deliver.
@@ -444,9 +451,16 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
+                  onScheduleUsageResume={props.onScheduleUsageResume}
+                  onCancelUsageResume={props.onCancelUsageResume}
                   previousAttempt={turn.attempts[index - 1]}
                   providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? NO_CITATIONS}
+                  tailAttempt={
+                    String(turn.id) === String(turns.at(-1)?.id) &&
+                    index === turn.attempts.length - 1
+                  }
+                  threadUsageResume={props.view.thread.usageResume}
                 />
               ))}
             </TurnActionMenu>
@@ -577,10 +591,15 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
+  readonly onScheduleUsageResume: ChatTranscriptProps["onScheduleUsageResume"];
+  readonly onCancelUsageResume: ChatTranscriptProps["onCancelUsageResume"];
   readonly onFork: (() => void) | undefined;
   readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
   readonly providerGroups: ChatTranscriptProps["providerGroups"];
+  /** This attempt is the conversation's tail — the only stop a resume can continue. */
+  readonly tailAttempt: boolean;
+  readonly threadUsageResume: ChatThreadView["thread"]["usageResume"];
 }) {
   const handoff = handoffLabel(props.previousAttempt, props.attempt);
   const responseContents = props.attempt.responseRefs.map((reference) =>
@@ -674,6 +693,24 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 ? "The provider"
                 : providerModelLabel(props.providerGroups, props.attempt)
             }
+            // The opt-in belongs to exactly this stop: the scheduled record
+            // names turn and attempt, so an older attempt's notice never
+            // borrows a newer record and vice versa.
+            {...(props.threadUsageResume === undefined ||
+            String(props.threadUsageResume.record.turnId) !== String(props.attempt.turnId) ||
+            String(props.threadUsageResume.record.attemptId) !== String(props.attempt.id)
+              ? {}
+              : { usageResume: props.threadUsageResume })}
+            resumable={props.tailAttempt}
+            {...(props.onScheduleUsageResume === undefined
+              ? {}
+              : {
+                  onScheduleResume: () =>
+                    props.onScheduleUsageResume?.(props.attempt.turnId, props.attempt.id),
+                })}
+            {...(props.onCancelUsageResume === undefined
+              ? {}
+              : { onCancelResume: props.onCancelUsageResume })}
           />
         )}
         {props.attempt.outcome === "failed" || props.attempt.failure !== undefined ? (

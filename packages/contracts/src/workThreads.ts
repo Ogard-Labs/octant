@@ -14,6 +14,7 @@ import {
   ProviderModelOptionValues,
   ThreadProviderHandoff,
 } from "./providers";
+import { UsageResumeThreadState } from "./usageResume";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -61,6 +62,12 @@ export const WorkThread = Schema.Struct({
    * which is what it had.
    */
   access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
+  /**
+   * The thread's pending usage-resume opt-in, when a person asked the host to
+   * resume a usage-limited turn at the provider's declared reset. Journaled on
+   * this thread's own stream; absent means no recovery is pending.
+   */
+  usageResume: Schema.optional(UsageResumeThreadState),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -162,6 +169,30 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 
 /**
+ * Opts this thread into resuming a usage-limited turn when the provider's
+ * declared reset arrives. The server reads the limit and reset from the
+ * journaled turn rather than trusting the command, and journals the opt-in on
+ * the thread's stream so every client and the host scheduler see it.
+ */
+export const ScheduleWorkUsageResumeCommand = Schema.Struct({
+  kind: Schema.Literal("schedule-work-usage-resume"),
+  ...WorkThreadCommandFields,
+  // Branded inline: importing WorkTurnId would cycle with workTurns.ts, which
+  // already reads WorkThreadId from this module.
+  turnId: brandedUuid("WorkTurnId"),
+}).annotations(strict);
+export type ScheduleWorkUsageResumeCommand = typeof ScheduleWorkUsageResumeCommand.Type;
+
+/**
+ * Withdraws the thread's pending usage-resume opt-in before it fires.
+ */
+export const CancelWorkUsageResumeCommand = Schema.Struct({
+  kind: Schema.Literal("cancel-work-usage-resume"),
+  ...WorkThreadCommandFields,
+}).annotations(strict);
+export type CancelWorkUsageResumeCommand = typeof CancelWorkUsageResumeCommand.Type;
+
+/**
  * Defaults for new Work threads: the model a new thread starts on and the
  * access it starts with. A thread keeps what it started with; changing these
  * never changes a thread that already exists.
@@ -211,6 +242,8 @@ export const WorkThreadCommand = Schema.Union(
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
   ChangeWorkThreadProviderCommand,
+  ScheduleWorkUsageResumeCommand,
+  CancelWorkUsageResumeCommand,
   UpdateWorkSettingsCommand,
 );
 export type WorkThreadCommand = typeof WorkThreadCommand.Type;

@@ -27,7 +27,11 @@ import {
   type ProviderModel,
   type ProviderProbeResult,
   type WorkStatusDatedItem,
+  type WorkTurnState,
   type ThreadWorkingDirectory,
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  type UsageResumeRecord,
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -131,6 +135,9 @@ export interface WorkThreadServiceDependencies {
     }>;
   };
   readonly projection: WorkThreadProjection;
+  readonly turnProjection: {
+    readonly listForThread: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
+  };
   readonly probeProvider?: (
     providerInstanceId: WorkThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
@@ -185,6 +192,9 @@ export class WorkThreadService {
   readonly #persistence: WorkThreadServiceDependencies["persistence"];
   readonly #projects: WorkThreadServiceDependencies["projects"];
   readonly #projection: WorkThreadProjection;
+  readonly #turnProjection: {
+    readonly listForThread: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
+  };
   readonly #probeProvider: WorkThreadServiceDependencies["probeProvider"];
   readonly #readProviderModel: WorkThreadServiceDependencies["readProviderModel"];
   readonly #uuid: () => string;
@@ -202,6 +212,7 @@ export class WorkThreadService {
     this.#projection = dependencies.projection;
     this.#probeProvider = dependencies.probeProvider;
     this.#readProviderModel = dependencies.readProviderModel;
+    this.#turnProjection = dependencies.turnProjection;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#workingDirectories = dependencies.workingDirectories;
@@ -510,6 +521,76 @@ export class WorkThreadService {
           thread: confirmed,
         });
         return { kind: "thread-completion-confirmed", thread: confirmed };
+      }
+      const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
+      if (command.kind === "schedule-work-usage-resume") {
+        if (current.lifecycle !== "active") {
+          throw this.#failure("invalid", "Only an active Work thread can resume at reset.");
+        }
+        const turn = this.#turnProjection.listForThread(command.threadId).at(-1);
+        if (turn === undefined || String(turn.turnId) !== String(command.turnId)) {
+          throw this.#failure(
+            "invalid",
+            "Only the thread's latest stopped turn can resume at reset.",
+          );
+        }
+        if (turn.status !== "waiting" || turn.failure?.usageLimit === undefined) {
+          throw this.#failure("invalid", "The turn is not waiting on a usage limit.");
+        }
+        if (turn.failure.usageLimit.resetsAt === undefined) {
+          throw this.#failure("invalid", "The provider did not disclose when the limit resets.");
+        }
+        if (turn.resumeCursor === undefined) {
+          throw this.#failure("invalid", "The turn preserved no provider resume state.");
+        }
+        const record: UsageResumeRecord = {
+          threadId: String(current.id),
+          turnId: String(turn.turnId),
+          providerInstanceId: current.providerInstanceId,
+          usageLimit: turn.failure.usageLimit,
+          resetsAt: turn.failure.usageLimit.resetsAt,
+          scheduledAt: usageResumeUpdatedAt,
+        };
+        const updated = decodeWorkThread({
+          ...current,
+          usageResume: { record, status: "scheduled" },
+          version: command.expectedVersion + 2,
+          updatedAt: usageResumeUpdatedAt,
+        });
+        this.#appendBoth(current.id, command.expectedVersion, [
+          [USAGE_RESUME_SCHEDULED, { resume: record }],
+          ["work.thread-updated@1", { kind: "thread-updated", thread: updated }],
+        ]);
+        this.#projection.applyUsageResume({
+          eventName: USAGE_RESUME_SCHEDULED,
+          payload: { resume: record },
+        });
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
+      if (command.kind === "cancel-work-usage-resume") {
+        const scheduled = current.usageResume;
+        if (scheduled === undefined || scheduled.status !== "scheduled") {
+          throw this.#failure("invalid", "The thread has no scheduled resume to cancel.");
+        }
+        // The cancel event already deleted the resume row; the emitted thread
+        // must not keep reporting the opt-in it just withdrew.
+        const { usageResume: _withdrawn, ...withdrawnThread } = current;
+        const updated = decodeWorkThread({
+          ...withdrawnThread,
+          version: command.expectedVersion + 2,
+          updatedAt: usageResumeUpdatedAt,
+        });
+        this.#appendBoth(current.id, command.expectedVersion, [
+          [USAGE_RESUME_CANCELLED, { resume: scheduled.record }],
+          ["work.thread-updated@1", { kind: "thread-updated", thread: updated }],
+        ]);
+        this.#projection.applyUsageResume({
+          eventName: USAGE_RESUME_CANCELLED,
+          payload: { resume: scheduled.record },
+        });
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
       }
       if (command.kind === "change-work-thread-provider") {
         await this.#requireProviderModel(
@@ -932,6 +1013,34 @@ export class WorkThreadService {
           payload,
         },
       ],
+    });
+  }
+
+  /**
+   * A schedule or cancel is two facts about the same aggregate head: the
+   * resume record itself and the thread row surfaces refresh through. They
+   * land in one append so a replay can never see one without the other.
+   */
+  #appendBoth(
+    threadId: WorkThreadId,
+    expectedVersion: number,
+    events: ReadonlyArray<readonly [string, unknown]>,
+  ): void {
+    this.#persistence.journal.append({
+      aggregate: {
+        aggregateType: "work-thread",
+        aggregateId: String(threadId),
+      },
+      expectedVersion,
+      events: events.map(([eventName, payload]) => ({
+        eventId: decodeEventId(this.#uuid()),
+        eventName,
+        eventVersion: 1,
+        correlationId: decodeCorrelationId(this.#uuid()),
+        actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+        occurredAt: decodeTimestamp(this.#clock()),
+        payload,
+      })),
     });
   }
 

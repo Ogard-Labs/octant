@@ -277,6 +277,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "project-terminal",
       "thread-retention",
       "thread-external-content-taint",
+      "usage-resume",
       "spend-ceilings",
     ]);
     expect(second.projections.all().map((projection) => projection.name)).toEqual([
@@ -306,6 +307,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "project-terminal",
       "thread-retention",
       "thread-external-content-taint",
+      "usage-resume",
       "spend-ceilings",
     ]);
     expect(first.projections.all()[0]).not.toBe(second.projections.all()[0]);

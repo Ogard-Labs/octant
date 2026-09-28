@@ -8,8 +8,12 @@ import {
   decodeProjectId,
   decodeProviderInstance,
   decodeWindowId,
+  decodeWorkTurnAuthority,
+  decodeWorkTurnState,
   type EventEnvelope,
   type Project,
+  type WorkThreadId,
+  type WorkTurnState,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -1000,12 +1004,19 @@ function serviceFixture(
     readonly linearIssueContext?: WorkThreadServiceDependencies["linearIssueContext"];
     readonly observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
     readonly projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
+    readonly turns?: ReadonlyArray<WorkTurnState>;
   } = {},
 ) {
   const projection = new WorkThreadProjection();
   for (const entry of options.threads ?? [thread()]) {
     projection.apply({ kind: "thread-created", thread: entry });
   }
+  const turnProjection = {
+    listForThread: vi.fn(
+      (threadId: WorkThreadId): ReadonlyArray<WorkTurnState> =>
+        (options.turns ?? []).filter((turn) => String(turn.threadId) === String(threadId)),
+    ),
+  };
   const persistence = {
     status: vi.fn(() => ({ state: "current", integrity: "ok" })),
     readProject: vi.fn(() => options.project ?? workProject()),
@@ -1068,6 +1079,7 @@ function serviceFixture(
     persistence: persistence as never,
     projects: projects as never,
     projection,
+    turnProjection,
     uuid: () => "72000000-0000-4000-8000-000000000099",
     clock: () => now,
     workingDirectories,
@@ -1266,5 +1278,129 @@ describe("completing and snoozing a Work thread", () => {
       }),
     );
     expect(fixture.projection.read(ids.thread)?.lifecycle).toBe("archived");
+  });
+});
+
+describe("scheduling a Work thread's usage-limit resume", () => {
+  const usageLimitTurn = (
+    usageLimit: object = { kind: "exhausted", resetsAt: "2026-07-19T13:00:00.000Z" },
+  ) =>
+    decodeWorkTurnState({
+      requestId: "72000000-0000-4000-8000-0000000000a1",
+      threadId: ids.thread,
+      turnId: "72000000-0000-4000-8000-0000000000b2",
+      projectId: ids.project,
+      authority: decodeWorkTurnAuthority({
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+      }),
+      providerSessionId: "72000000-0000-4000-8000-0000000000c3",
+      resumeCursor: { driverKind: "openai-compatible", value: "session-1" },
+      status: "waiting",
+      prompt: "Keep going.",
+      transcript: [],
+      failure: {
+        category: "rate-limited",
+        message: "The provider's usage window is spent.",
+        usageLimit,
+      },
+      capabilities: {
+        workspace: "project-backed",
+        confinement: "project-root-confined",
+        shell: "denied",
+        git: "denied",
+        worktree: "denied",
+        pullRequest: "denied",
+        code: "denied",
+      },
+      version: 1,
+      acceptedAt: now,
+      updatedAt: now,
+    });
+
+  it("schedules a host-owned resume for a turn waiting on a provider usage limit", async () => {
+    const turn = usageLimitTurn();
+    const fixture = serviceFixture({ threads: [thread()], turns: [turn] });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "schedule-work-usage-resume",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      turnId: turn.turnId,
+    });
+    expect(result).toMatchObject({ kind: "thread-updated" });
+    expect(fixture.projection.read(ids.thread)?.usageResume).toMatchObject({
+      status: "scheduled",
+      record: {
+        turnId: String(turn.turnId),
+        providerInstanceId: String(ids.provider),
+        resetsAt: "2026-07-19T13:00:00.000Z",
+      },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({ eventName: "usage-resume.scheduled@1" }),
+          expect.objectContaining({ eventName: "work.thread-updated@1" }),
+        ],
+      }),
+    );
+  });
+
+  it("withdraws the scheduled resume when the person cancels it", async () => {
+    const turn = usageLimitTurn();
+    const fixture = serviceFixture({ threads: [thread()], turns: [turn] });
+    fixture.projection.applyUsageResume({
+      eventName: "usage-resume.scheduled@1",
+      payload: {
+        resume: {
+          threadId: String(ids.thread),
+          turnId: String(turn.turnId),
+          providerInstanceId: String(ids.provider),
+          usageLimit: { kind: "exhausted", resetsAt: "2026-07-19T13:00:00.000Z" },
+          resetsAt: "2026-07-19T13:00:00.000Z",
+          scheduledAt: now,
+        },
+      },
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "cancel-work-usage-resume",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(result).toMatchObject({ kind: "thread-updated" });
+    expect(fixture.projection.read(ids.thread)?.usageResume).toBeUndefined();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({ eventName: "usage-resume.cancelled@1" }),
+          expect.objectContaining({ eventName: "work.thread-updated@1" }),
+        ],
+      }),
+    );
+  });
+
+  it("refuses to schedule a resume for a waiting turn that discloses no reset", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      turns: [usageLimitTurn({ kind: "exhausted" })],
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "schedule-work-usage-resume",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        turnId: "72000000-0000-4000-8000-0000000000b2" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 });

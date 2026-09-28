@@ -1115,6 +1115,28 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               return { value: undefined, base: baseFromResult(result) };
             }).catch(() => undefined);
           }}
+          onScheduleUsageResume={(turnId, attemptId) => {
+            void enqueueThreadCommand(async (previous) => {
+              const result = await props.controller.execute({
+                kind: "schedule-chat-usage-resume",
+                threadId: view.thread.id,
+                expectedVersion: queuedVersion(previous),
+                turnId,
+                attemptId,
+              });
+              return { value: undefined, base: baseFromResult(result) };
+            }).catch(() => undefined);
+          }}
+          onCancelUsageResume={() => {
+            void enqueueThreadCommand(async (previous) => {
+              const result = await props.controller.execute({
+                kind: "cancel-chat-usage-resume",
+                threadId: view.thread.id,
+                expectedVersion: queuedVersion(previous),
+              });
+              return { value: undefined, base: baseFromResult(result) };
+            }).catch(() => undefined);
+          }}
           onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
             void enqueueThreadCommand(async (previous) => {
               const result = await props.controller.execute({

@@ -1905,6 +1905,19 @@ ALTER TABLE code_runtime_projection
     name: "add_image_provider_projection",
     sql: ADD_IMAGE_PROVIDER_PROJECTION_SQL,
   },
+  {
+    version: 65,
+    name: "create_usage_resume_projection",
+    sql: `CREATE TABLE IF NOT EXISTS usage_resume_projection (
+      aggregate_type TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      resume_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail TEXT,
+      last_sequence INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (aggregate_type, aggregate_id)
+    );`,
+  },
 ];
 
 interface AppliedMigrationRow {

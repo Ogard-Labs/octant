@@ -478,9 +478,40 @@ affected turn: each later attempt transition, successful recovery, provider or
 account switch, and replacement error clears it. In Chat the fact rides the
 parked `waiting` attempt (which records no failure); in Work it rides the
 turn's `rate-limited` failure category; in Code it rides the journaled turn
-failure and parks the turn as `waiting` so the existing manual retry path —
-never an automatic resume — remains the recovery. Drafts, queued input, and
-completed tool results are untouched.
+failure and parks the turn as `waiting`. Drafts, queued input, and completed
+tool results are untouched.
+
+A stop that disclosed `resetsAt` additionally offers an explicit per-thread
+opt-in: Resume when the limit resets. A billing stop never offers it, and a
+stop that preserved no resumable provider state — the parked Chat attempt's or
+Work turn's `resumeCursor`, or the Code turn's journaled evidence — cannot
+take it. Accepting journals `usage-resume.scheduled@1` on the thread's own
+aggregate with a record naming the exact turn or attempt, provider instance,
+limit fact, and reset instant; the same commit emits the mode's
+`thread-updated` so every connected client sees the scheduled state and its
+cancel affordance. At the reset instant a host-owned scheduler re-reads the
+journaled record, rechecks the thread's mode, lifecycle, provider account, and
+that the bound stop still waits on the limit, then continues through the
+ordinary serialized turn-admission path — the same command shape a manual
+retry takes — so capacity gates, admission ordering, and the single-continuation
+bound all hold unchanged. The dispatch settles by appending
+`usage-resume.settled@1` plus the mode's `thread-updated` in one commit; the
+outcome it records (`dispatched`, `invalidated`, or `failed` with the refusal
+detail) stays on the thread until a newer thread event replaces it.
+Cancellation, a manual retry, archival, a provider change, or any superseding
+turn transition settles a stale recovery as `invalidated` rather than letting
+it fire against newer state; a dispatch the admission path refuses settles as
+`failed`. A dispatch that cannot yet reach its admission path — the mode has
+no window registered on this host to carry the continuation — is deferred
+rather than settled: the opt-in stays armed and re-evaluates on a bounded
+retry cadence until it dispatches, invalidates, or is cancelled. The scheduler
+is deliberately narrow under the release boundary: an
+in-process host timer over journaled opt-ins, not a scheduling product — no
+cloud wake, no background claim beyond the host's own running process, and no
+billing automation. A host that was down or unreachable at the reset instant
+rescans `status = scheduled` rows on return and dispatches the still-valid
+ones; a record that cannot be re-validated settles `invalidated` and never
+re-arms.
 
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in

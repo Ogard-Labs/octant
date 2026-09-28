@@ -16,11 +16,13 @@ import {
   decodeWorkTurnRequestId,
   type MentionableThreadId,
   type ProviderModelOptionValues,
+  type UsageResumeThreadState,
   type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
   type WorkThreadTranscript,
+  type WorkTurnId,
   type WorkTurnState,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
@@ -181,6 +183,10 @@ function WorkTurnHeader(props: {
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
+  readonly usageResume?: UsageResumeThreadState;
+  readonly resumable?: boolean;
+  readonly onScheduleResume?: (turnId: WorkTurnId) => void;
+  readonly onCancelResume?: () => void;
 }) {
   const outcome = turnHeaderOutcome(props.turn);
   const usageLimit = props.turn.failure?.usageLimit;
@@ -199,6 +205,14 @@ function WorkTurnHeader(props: {
         <UsageLimitNotice
           limit={usageLimit}
           provider={providerModelLabel(props.providerGroups, props.turn.authority)}
+          {...(props.usageResume === undefined ? {} : { usageResume: props.usageResume })}
+          {...(props.resumable === undefined ? {} : { resumable: props.resumable })}
+          {...(props.onScheduleResume === undefined
+            ? {}
+            : {
+                onScheduleResume: () => props.onScheduleResume?.(props.turn.turnId),
+              })}
+          {...(props.onCancelResume === undefined ? {} : { onCancelResume: props.onCancelResume })}
           {...(props.onRestorePrompt === undefined
             ? {}
             : {
@@ -929,6 +943,63 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     [props.threadClient, providerChanging, thread],
   );
 
+  // The resume opt-in rides the ordinary serialized command path and answers
+  // the updated thread, so the banner flips to its scheduled state only from
+  // what the host journaled.
+  const scheduleUsageResume = useCallback(
+    (turnId: WorkTurnId) => {
+      if (thread === undefined) return;
+      const threadKey = currentThreadKeyRef.current;
+      void props.threadClient
+        .execute({
+          kind: "schedule-work-usage-resume",
+          threadId: thread.id,
+          expectedVersion: thread.version,
+          turnId,
+        })
+        .then((result) => {
+          // The workspace may have switched threads while the command was in
+          // flight; only the initiating thread's answer is allowed to land.
+          if (currentThreadKeyRef.current !== threadKey) return;
+          if ("kind" in result && result.kind === "thread-updated") {
+            setThread(result.thread);
+            props.onThreadUpdated?.(result.thread);
+            return;
+          }
+          setErrorMessage("The usage-limit resume could not be scheduled.");
+        })
+        .catch(() => {
+          if (currentThreadKeyRef.current !== threadKey) return;
+          setErrorMessage("The usage-limit resume could not be scheduled.");
+        });
+    },
+    [props, thread],
+  );
+
+  const cancelUsageResume = useCallback(() => {
+    if (thread === undefined) return;
+    const threadKey = currentThreadKeyRef.current;
+    void props.threadClient
+      .execute({
+        kind: "cancel-work-usage-resume",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+      })
+      .then((result) => {
+        if (currentThreadKeyRef.current !== threadKey) return;
+        if ("kind" in result && result.kind === "thread-updated") {
+          setThread(result.thread);
+          props.onThreadUpdated?.(result.thread);
+          return;
+        }
+        setErrorMessage("The scheduled resume could not be withdrawn.");
+      })
+      .catch(() => {
+        if (currentThreadKeyRef.current !== threadKey) return;
+        setErrorMessage("The scheduled resume could not be withdrawn.");
+      });
+  }, [props, thread]);
+
   const sendWorkTurn = useCallback(
     async (message?: WorkSteeredMessage): Promise<boolean> => {
       if (
@@ -1329,8 +1400,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <WorkTurnHeader
                     copyValue={row.entry.text}
                     onRestorePrompt={composerDraft.setDraft}
+                    onCancelResume={cancelUsageResume}
+                    onScheduleResume={scheduleUsageResume}
                     providerGroups={props.providerGroups ?? []}
+                    resumable={String(row.head.turnId) === String(turns.at(-1)?.turnId)}
                     turn={row.head}
+                    {...(thread?.usageResume === undefined ||
+                    String(thread.usageResume.record.turnId) !== String(row.head.turnId)
+                      ? {}
+                      : { usageResume: thread.usageResume })}
                   />
                 )}
                 {row.entry.text === "" ? null : (
@@ -1343,9 +1421,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             return (
               <div className="turn-agent">
                 <WorkTurnHeader
+                  onCancelResume={cancelUsageResume}
                   onRestorePrompt={composerDraft.setDraft}
+                  onScheduleResume={scheduleUsageResume}
                   providerGroups={props.providerGroups ?? []}
+                  resumable={String(row.turn.turnId) === String(turns.at(-1)?.turnId)}
                   turn={row.turn}
+                  {...(thread?.usageResume === undefined ||
+                  String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
+                    ? {}
+                    : { usageResume: thread.usageResume })}
                 />
               </div>
             );
