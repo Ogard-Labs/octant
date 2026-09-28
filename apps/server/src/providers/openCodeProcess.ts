@@ -916,8 +916,10 @@ function prepareOpenCodeLaunch(
         privateHomeAllowPaths,
         networkEgress,
         writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
-        allowProcessExec: !(executionPolicy === "plan" || mode === "chat"),
-        allowProcessFork: !(executionPolicy === "plan" || mode === "chat"),
+        // Work declares shell "denied"; an in-process provider shell emits
+        // no permission request, so the jail itself must refuse to spawn it.
+        allowProcessExec: !(executionPolicy === "plan" || mode !== "code"),
+        allowProcessFork: !(executionPolicy === "plan" || mode !== "code"),
         allowFileReadStar: true,
         // The agent is a loopback HTTP server: the confinement has to let it
         // listen on the port this launch reserved, not only reach the bridge.

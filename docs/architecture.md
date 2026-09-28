@@ -350,7 +350,11 @@ arrives is declined at the agent. An ACP agent's `execute` permission request
 is refused at the agent. The declared kind is all Octant sees of an ACP call,
 and `other` also covers Octant's own managed MCP tools, so an agent that labels
 a command `other` still reaches a person's approval rather than running unasked.
-Octant's own harness gives Work no shell port. File writes inside the Project
+Because a provider's in-process shell can emit no protocol request at all —
+observed on Linux where a Vibe Work turn ran real commands inside its jail —
+every Work-mode provider launch also confines with process exec and fork
+denied, so the OS itself refuses a shell the protocol never sees. Octant's
+own harness gives Work no shell port. File writes inside the Project
 remain approval-gated in every driver. Work that needs a shell or Git is
 promoted to Code (below).
 
