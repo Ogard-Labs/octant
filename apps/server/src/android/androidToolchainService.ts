@@ -908,12 +908,37 @@ function unavailableSdk(discoveredAt: string): AndroidSdkDiscovery {
   });
 }
 
+/**
+ * Directories a confined toolchain command must read and write even though
+ * they sit beneath the private-home deny: `~/.android` holds the AVD store,
+ * the adb keys, and the emulator's lock and launch files, and a configured
+ * `ANDROID_AVD_HOME` replaces where the AVDs themselves live. Without the
+ * grant `emulator -list-avds` exits 0 with an empty list on a host that has
+ * devices, so the pane reports none forever.
+ */
+export function androidToolchainStorePaths(
+  environment: Readonly<Record<string, string | undefined>>,
+): ReadonlyArray<string> {
+  const paths = [join(homedir(), ".android")];
+  const avdHome = environment.ANDROID_AVD_HOME;
+  if (avdHome !== undefined && !paths.includes(avdHome)) paths.push(avdHome);
+  return paths;
+}
+
 function androidEnv(
   env: Readonly<Record<string, string | undefined>>,
   sdk: AndroidSdkDiscovery,
 ): Record<string, string> {
   const next: Record<string, string> = {};
-  for (const name of ["HOME", "TMPDIR", "TEMP", "TMP", "ANDROID_HOME", "ANDROID_SDK_ROOT"]) {
+  for (const name of [
+    "HOME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "ANDROID_HOME",
+    "ANDROID_SDK_ROOT",
+    "ANDROID_AVD_HOME",
+  ]) {
     const value = env[name];
     if (value !== undefined) next[name] = value;
   }

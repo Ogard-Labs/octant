@@ -80,6 +80,14 @@ interface RepositoryTestProcessPortOptions {
    */
   readonly literalReadPaths?: ReadonlyArray<string>;
   /**
+   * Directories a confined child may read and write even though they sit
+   * beneath the private-home deny. The Android toolchain is the caller: the
+   * AVD store, adb keys, and emulator locks all live under `~/.android`, and
+   * without the grant `emulator -list-avds` exits 0 with an empty list on a
+   * host that has devices.
+   */
+  readonly additionalWritePaths?: ReadonlyArray<string>;
+  /**
    * Whether confined commands may drive the iOS Simulator. Only the Apple
    * toolchain port turns this on; the repository-test runner does not need it.
    */
@@ -126,6 +134,7 @@ export class RepositoryTestProcessPort {
   readonly #temporaryDirectory: string;
   readonly #networkEgress: OsNetworkEgress;
   readonly #literalReadPaths: ReadonlyArray<string>;
+  readonly #additionalWritePaths: ReadonlyArray<string>;
   readonly #allowSimulatorControl: boolean;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
@@ -144,6 +153,7 @@ export class RepositoryTestProcessPort {
     this.#temporaryDirectory = options.temporaryDirectory ?? defaultTemporaryDirectory();
     this.#networkEgress = options.networkEgress ?? "allow";
     this.#literalReadPaths = options.literalReadPaths ?? [];
+    this.#additionalWritePaths = options.additionalWritePaths ?? [];
     this.#allowSimulatorControl = options.allowSimulatorControl === true;
     this.#confinement =
       options.confinement ??
@@ -188,6 +198,9 @@ export class RepositoryTestProcessPort {
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [input.cwd, this.#temporaryDirectory, binaryDirectory, dirname(binaryDirectory)],
+        ...(this.#additionalWritePaths.length === 0
+          ? {}
+          : { additionalWriteRoots: this.#additionalWritePaths }),
         ...(this.#literalReadPaths.length === 0
           ? {}
           : { extraRules: this.#literalReadPaths.map(seatbeltAllowLiteralReadRule) }),
