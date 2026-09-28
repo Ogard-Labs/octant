@@ -33,6 +33,7 @@ import type {
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -2654,6 +2655,10 @@ describe("managed Code creation approval", () => {
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
+  computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
+  computerUseUnattachedTools?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["computerUseUnattachedTools"];
   /** Whether the thread's provider can carry app-managed tools (default true). */
   supportsAppManagedTools?: boolean;
   /** Whether the provider natively serves ACP client capabilities. */
@@ -2774,6 +2779,12 @@ function runtimeFixture(options: {
       environment: {},
     }),
     resolveProviderDriver: async () => options.provider,
+    ...(options.computerUseTools === undefined
+      ? {}
+      : { computerUseTools: options.computerUseTools }),
+    ...(options.computerUseUnattachedTools === undefined
+      ? {}
+      : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
     ...(options.browserAutomation === undefined &&
     options.supportsAppManagedTools === undefined &&
     options.supportsAcpClientCapabilities === undefined
@@ -3181,5 +3192,87 @@ it("does not include ACP client tools when only bridge support is enabled", asyn
   });
 
   expect(starts[0]?.tools?.some((tool) => tool.name.startsWith("octant_acp_"))).toBeFalsy();
+  fixture.close();
+});
+
+it("registers a refusal-only Computer tool on a turn that carried no Computer selection", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const starts: Array<ProviderSessionStart> = [];
+  const provider = providerDriver(providerConnection(queue, starts));
+  const unattachedCalls: string[] = [];
+  const fixture = runtimeFixture({
+    provider,
+    supportsAppManagedTools: true,
+    computerUseUnattachedTools: () => {
+      unattachedCalls.push("called");
+      return {
+        definitions: [
+          {
+            name: "octant_computer",
+            description: "Not attached to this turn.",
+            inputSchema: { type: "object" },
+          },
+        ],
+        execute: async () => ({
+          result: {
+            error: "computer-use-not-attached",
+            message: "Tell the user to add @Computer and send again.",
+          },
+          isError: true,
+        }),
+      };
+    },
+  });
+
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(80),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+
+  expect(unattachedCalls).toHaveLength(1);
+  expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
+  fixture.close();
+});
+
+it("keeps the selected Computer tool instead of the refusal stub when @Computer is attached", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const starts: Array<ProviderSessionStart> = [];
+  const provider = providerDriver(providerConnection(queue, starts));
+  const unattachedCalls: string[] = [];
+  const fixture = runtimeFixture({
+    provider,
+    supportsAppManagedTools: true,
+    computerUseTools: () => ({
+      definitions: [
+        {
+          name: "octant_computer",
+          description: "The real tool.",
+          inputSchema: { type: "object" },
+        },
+      ],
+      execute: async () => ({ result: { kind: "apps", apps: [] } }),
+    }),
+    computerUseUnattachedTools: () => {
+      unattachedCalls.push("called");
+      return undefined;
+    },
+  });
+
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(81),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+    computerUseSelection: computerUseSelection("selected"),
+  });
+
+  expect(unattachedCalls).toHaveLength(0);
+  expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
   fixture.close();
 });

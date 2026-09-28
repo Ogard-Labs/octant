@@ -3988,6 +3988,17 @@ export function startOctantServer(
             }),
             selection,
           ),
+        computerUseUnattachedTools: ({ windowId, thread }) =>
+          computerUseTools?.unattachedToolSet(
+            decodeComputerUseOwner({
+              windowId,
+              threadId: thread.id,
+              mode: "code",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              executionPolicy: thread.executionPolicy,
+            }),
+          ),
         spendCeiling,
         terminalProcessPort,
         repositoryTestProcessPort,
@@ -5376,6 +5387,25 @@ export function startOctantServer(
           }),
           selection,
         ),
+      resolveUnattachedComputerUseTools: ({ windowId, thread }) => {
+        const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+        const supported =
+          observed?.capabilities.appManagedTools === "supported" ||
+          observed?.verifiedToolModelIds?.some(
+            (candidate) => String(candidate) === String(thread.modelId),
+          ) === true;
+        if (!supported) return undefined;
+        return computerUseTools?.unattachedToolSet(
+          decodeComputerUseOwner({
+            windowId,
+            threadId: thread.id,
+            mode: "chat",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+            executionPolicy: "approval-gated",
+          }),
+        );
+      },
       spendCeiling,
       persistence,
       issueContext: githubIssueContextService,
@@ -5867,22 +5897,27 @@ export function startOctantServer(
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
-        if (native === undefined && browser === undefined && sideTaskTools === undefined)
-          return undefined;
+        const computerOwner = decodeComputerUseOwner({
+          windowId: input.windowId,
+          threadId: input.thread.id,
+          mode: "work",
+          providerInstanceId: input.thread.providerInstanceId,
+          modelId: input.thread.modelId,
+          executionPolicy: "approval-gated",
+        });
         const computer =
           input.computerUseSelection === undefined
-            ? undefined
-            : computerToolsFor(
-                decodeComputerUseOwner({
-                  windowId: input.windowId,
-                  threadId: input.thread.id,
-                  mode: "work",
-                  providerInstanceId: input.thread.providerInstanceId,
-                  modelId: input.thread.modelId,
-                  executionPolicy: "approval-gated",
-                }),
-                input.computerUseSelection,
-              );
+            ? browserSupported
+              ? computerUseTools?.unattachedToolSet(computerOwner)
+              : undefined
+            : computerToolsFor(computerOwner, input.computerUseSelection);
+        if (
+          native === undefined &&
+          browser === undefined &&
+          sideTaskTools === undefined &&
+          computer === undefined
+        )
+          return undefined;
         return combineAppManagedToolSets(native, browser, computer, sideTaskTools);
       },
       nativeHarness: nativeHarnessHooks,

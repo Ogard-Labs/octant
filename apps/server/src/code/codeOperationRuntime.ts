@@ -183,6 +183,15 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly selection: import("@octant/contracts/extensions").ExtensionSelection;
   }) => AppManagedToolSet | undefined;
+  /**
+   * A refusal-only `octant_computer` for turns that carry no Computer
+   * selection: registering the name lets a stale call return the
+   * re-attach recovery instead of a provider-side unknown-tool failure.
+   */
+  readonly computerUseUnattachedTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
@@ -1825,7 +1834,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (supportsAppManagedTools && service !== undefined) {
       sets.push(
         active.computerUseSelection === undefined
-          ? undefined
+          ? this.#options.computerUseUnattachedTools?.({
+              windowId: active.windowId,
+              thread: active.thread,
+            })
           : this.#options.computerUseTools?.({
               windowId: active.windowId,
               thread: active.thread,

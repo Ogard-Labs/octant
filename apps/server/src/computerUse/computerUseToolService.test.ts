@@ -22,9 +22,14 @@ const authority = decodeToolActionAuthority({
   extension: { kind: "core" },
 });
 
-function fixture() {
+function fixture(overrides?: {
+  readonly enabled?: boolean;
+  readonly toolConstraints?: ReadonlyArray<string>;
+}) {
   let current = true;
   let tainted = false;
+  const settings = { enabled: overrides?.enabled ?? true, automaticUpdates: true };
+  const toolConstraints = overrides?.toolConstraints ?? [];
   const execute = vi.fn(async () =>
     decodeComputerControlResult({
       kind: "windows",
@@ -49,19 +54,21 @@ function fixture() {
       execute,
       release,
     },
-    settings: () => ({ enabled: true, automaticUpdates: true }),
+    settings: () => settings,
     authority: () => authority,
     ownerIsCurrent: () => current,
-    toolConstraints: () => [],
+    toolConstraints: () => toolConstraints,
     externalContentIngested: () => tainted,
     threadTitle: () => "Fixture task",
     record: async () => {},
   });
   const tools = service.toolSet(owner, computerUseSelection("test"));
-  if (tools === undefined) throw new Error("Expected selected plugin.");
   return {
     service,
-    tools,
+    get tools() {
+      if (tools === undefined) throw new Error("Expected selected plugin.");
+      return tools;
+    },
     execute,
     release,
     revoke: () => {
@@ -489,6 +496,54 @@ describe("Computer use through a provider tool", () => {
             "Owned native action or evidence recording failed: Computer-use desktop connection is unavailable.",
         },
       });
+    } finally {
+      await f.service.close();
+    }
+  });
+});
+
+describe("a turn without a Computer selection", () => {
+  it("registers the tool name so a stale call returns the re-attach recovery", async () => {
+    const f = fixture();
+    try {
+      const unattached = f.service.unattachedToolSet(owner);
+      if (unattached === undefined) throw new Error("Expected a refusal definition.");
+      expect(unattached.definitions.map((definition) => definition.name)).toEqual([
+        "octant_computer",
+      ]);
+      const answer = await unattached.execute({ name: "octant_computer", inputJson: "{}" });
+      expect(answer.isError).toBe(true);
+      expect(answer.result).toMatchObject({ error: "computer-use-not-attached" });
+      expect(JSON.stringify(answer.result)).toContain("@Computer");
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("ships no definition while Computer use is disabled, since nothing could reattach it", async () => {
+    const f = fixture({ enabled: false });
+    try {
+      expect(f.service.unattachedToolSet(owner)).toBeUndefined();
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("ships no definition when the thread's tool constraints exclude it", async () => {
+    const f = fixture({ toolConstraints: ["octant_terminal"] });
+    try {
+      expect(f.service.unattachedToolSet(owner)).toBeUndefined();
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("ships no definition in Plan mode, since a re-attached call would still be refused", async () => {
+    const f = fixture();
+    try {
+      expect(
+        f.service.unattachedToolSet(decodeComputerUseOwner({ ...owner, executionPolicy: "plan" })),
+      ).toBeUndefined();
     } finally {
       await f.service.close();
     }

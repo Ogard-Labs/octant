@@ -15,6 +15,7 @@ import {
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { validateComputerUseSelection } from "@octant/plugin-host/computer-use";
+import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
 import { createComputerUseRuntime, type ComputerUseEvidenceEvent } from "./computerUseRuntime";
@@ -407,6 +408,51 @@ export function createComputerUseToolService(options: {
           .filter(({ owner }) => owner.windowId === windowId)
           .map(({ owner }) => execute(owner, { operation: "stop" })),
       );
+    },
+    /**
+     * A refusal-only `octant_computer` for turns whose message carried no
+     * @Computer selection. The capability binds to one send, so a model
+     * that saw the tool on an earlier turn calls it again on a follow-up;
+     * registering the name lets that call return the recovery instead of
+     * the provider's bare unknown-tool failure, which the model reports as
+     * "currently unavailable". No definition when the composer cannot offer
+     * the chip — disabled globally or constrained out — since nothing could
+     * reattach it. Plan mode is the same dead end: Plan owners are refused
+     * every non-stop Computer command, so the re-attach instruction could
+     * never succeed.
+     */
+    unattachedToolSet: (rawOwner: ComputerUseOwner): AppManagedToolSet | undefined => {
+      const owner = decodeComputerUseOwner(rawOwner);
+      if (
+        !options.settings().enabled ||
+        owner.executionPolicy === "plan" ||
+        !isToolAllowedByAllowlist(options.toolConstraints(owner), "octant_computer")
+      )
+        return undefined;
+      return {
+        definitions: [
+          {
+            name: "octant_computer",
+            description:
+              "Octant Computer use operates applications on this Mac. It is not attached to this turn: a turn carries it only when the message includes the @Computer selection. Ask the user to add @Computer and send the request again.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: { operation: { type: "string" } },
+            },
+          },
+        ],
+        execute: () =>
+          Promise.resolve({
+            result: {
+              error: "computer-use-not-attached",
+              message: options.settings().enabled
+                ? "Octant's Computer tool is not attached to this turn. Tell the user to add @Computer to the message and send it again."
+                : "Computer use is turned off in Settings, so it cannot be attached. Answer without it.",
+            },
+            isError: true,
+          }),
+      };
     },
     toolSet: (
       rawOwner: ComputerUseOwner,

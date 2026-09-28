@@ -2112,6 +2112,41 @@ it("forwards ACP client capability requests through managed tools and answers th
           yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
           expect(client.reject).toHaveBeenCalledWith("read-2", -32000, "file-unreadable");
 
+          const thirdEvents = yield* connection.subscribe;
+          const thirdEventFiber = yield* Effect.fork(
+            Stream.runHead(
+              thirdEvents.pipe(Stream.filter((event) => event.kind === "tool-request")),
+            ),
+          );
+          client.request({
+            kind: "request",
+            id: "read-3",
+            method: "fs/read_text_file",
+            capability: "readTextFile",
+            params: { sessionId: "agent-session-1", path: "/tmp/detached" },
+          });
+          const thirdOption = yield* Fiber.join(thirdEventFiber);
+          if (thirdOption._tag === "None")
+            throw new Error("Expected the message-carrying tool request.");
+          const thirdEvent = thirdOption.value;
+          if (thirdEvent.kind !== "tool-request")
+            throw new Error("Expected the message-carrying tool request.");
+          yield* connection.answerTool({
+            sessionId,
+            requestId: thirdEvent.requestId,
+            resultJson: JSON.stringify({
+              error: "computer-use-not-attached",
+              message: "Octant's Computer tool is not attached to this turn.",
+            }),
+            isError: true,
+          });
+          yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+          expect(client.reject).toHaveBeenCalledWith(
+            "read-3",
+            -32000,
+            "Octant's Computer tool is not attached to this turn.",
+          );
+
           client.request({
             kind: "request",
             id: "missing-1",

@@ -912,7 +912,10 @@ prompt, schema, tool, route, model, or capability.
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
 selection and supplies `octant_computer` through the provider's existing
-app-managed tool transport. The public plugin capability is bound to one
+app-managed tool transport. The capability binds to one send: a turn whose
+message carried no selection still registers the name, as a refusal-only
+definition that tells the agent to ask for @Computer again rather than a
+provider-side unknown-tool failure. The public plugin capability is bound to one
 task, window, provider, model, and access posture. Each application needs a
 five-minute approval; stop, cancellation, changed authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
