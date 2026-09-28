@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   unlinkSync,
@@ -140,8 +141,6 @@ describe("GitMutationPort", () => {
       {
         execFile,
         pathExists: async () => false,
-        copyFile: async () => undefined,
-        removeFile: async () => undefined,
       },
       options,
     );
@@ -238,8 +237,6 @@ describe("GitMutationPort", () => {
     const indeterminate: GitMutationDependencies = {
       execFile: async () => ({ exitCode: 128, stdout: "", stderr: "" }),
       pathExists: async () => false,
-      copyFile: async () => undefined,
-      removeFile: async () => undefined,
     };
     const port = new GitMutationPort(indeterminate, confinedOptions());
 
@@ -301,8 +298,6 @@ describe("GitMutationPort", () => {
               stderr: "",
             },
       pathExists: async () => false,
-      copyFile: async () => undefined,
-      removeFile: async () => undefined,
     };
     const port = new GitMutationPort(identityMissing, confinedOptions());
 
@@ -662,6 +657,76 @@ describe("GitMutationPort", () => {
     ).resolves.toEqual({ status: "applied" });
   });
 
+  it("copies a linked worktree's scratch index through the confined launch and cleans it up", async () => {
+    const root = temporaryDirectory();
+    const repository = createRepository(root);
+    const linked = join(root, "linked");
+    git(repository, "worktree", "add", "--detach", linked);
+    // The worktree's index lives in the parent's gitdir, outside the bound
+    // root — exactly where a host-side copy would escape the sandbox.
+    const gitdir = readFileSync(join(linked, ".git"), "utf8")
+      .replace(/^gitdir:\s*/, "")
+      .trim();
+    writeFileSync(join(linked, "staged.txt"), "staged\n");
+    git(linked, "add", "--", "staged.txt");
+
+    const launches: { readonly file: string; readonly args: readonly string[] }[] = [];
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const port = new GitMutationPort(
+      {
+        execFile: (file, args, environment, signal) => {
+          launches.push({ file, args });
+          return liveExecFile(file, args, environment, signal);
+        },
+        pathExists: async (path) => existsSync(path),
+      },
+      {
+        confinement: fake.confinement,
+        temporaryDirectory: fake.temporaryDirectory,
+        gitExecutable: "/usr/bin/git",
+      },
+    );
+
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: linked, checkoutId });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    // Every child — Git, the copy in, and the discard out — ran through the
+    // confined launch; nothing touched the worktree's gitdir as this host
+    // process.
+    expect(launches).not.toHaveLength(0);
+    expect(launches.every((launch) => launch.file === fake.sandboxPath)).toBe(true);
+    const scratchOps = launches.filter((launch) =>
+      launch.args.some((arg) => arg.includes("octant-checkpoint-index")),
+    );
+    expect(scratchOps.length).toBeGreaterThanOrEqual(2);
+    // The copy's profile carried the linked worktree's out-of-root gitdir
+    // write grant, so the write was a confinement decision rather than an
+    // ambient host write. The argv shape is `-p PROFILE -- COMMAND ...`.
+    const copy = scratchOps.find((launch) => launch.args.includes("/bin/cp"));
+    expect(copy?.args[1]).toContain(`(allow file-write* (subpath "${gitdir}"))`);
+
+    // The scratch index is gone and the checkout kept its staged set.
+    expect(
+      readdirSync(gitdir).filter((name) => name.startsWith("octant-checkpoint-index")),
+    ).toEqual([]);
+    expect(gitOutput(linked, "status", "--porcelain").trimEnd()).toBe("A  staged.txt");
+
+    // A restore on the same worktree exercises the other copy site.
+    writeFileSync(join(linked, "staged.txt"), "edited later\n");
+    writeFileSync(join(linked, "new.txt"), "new\n");
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: linked, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(readFileSync(join(linked, "staged.txt"), "utf8")).toBe("staged\n");
+    expect(existsSync(join(linked, "new.txt"))).toBe(false);
+    expect(gitOutput(linked, "status", "--porcelain").trimEnd()).toBe("A  staged.txt");
+    expect(
+      readdirSync(gitdir).filter((name) => name.startsWith("octant-checkpoint-index")),
+    ).toEqual([]);
+  });
+
   it("refuses to capture against a checkout id it cannot name a ref from", async () => {
     const repository = createRepository(temporaryDirectory());
     const port = new GitMutationPort(undefined, confinedOptions());
@@ -792,3 +857,20 @@ function checkpointRefs(root: string, id: string): string[] {
 function gitOutput(root: string, ...args: string[]): string {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
 }
+
+/** The production execFile shape, so recorded launches still really run. */
+const liveExecFile: GitMutationDependencies["execFile"] = (file, args, environment, signal) =>
+  new Promise((resolve) => {
+    execFile(
+      file,
+      [...args],
+      { encoding: "utf8", env: environment, shell: false, signal, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        resolve({
+          exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+          stdout,
+          stderr,
+        });
+      },
+    );
+  });

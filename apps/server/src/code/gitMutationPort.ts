@@ -1,11 +1,12 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, copyFile, rm } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { access } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
+  gitLinkedWorktreeMetadataRules,
   prepareGitSeatbeltLaunch,
   type GitSeatbeltPortOptions,
 } from "../process/gitSeatbeltLaunch";
@@ -39,9 +40,6 @@ export interface GitMutationDependencies {
     signal: AbortSignal,
   ) => Promise<CommandResult>;
   readonly pathExists: (path: string) => Promise<boolean>;
-  /** Copy the checkout's index so a checkpoint can stage into a throwaway one. */
-  readonly copyFile: (from: string, to: string) => Promise<void>;
-  readonly removeFile: (path: string) => Promise<void>;
 }
 
 /**
@@ -105,8 +103,6 @@ const liveDependencies: GitMutationDependencies = {
       return isRecord(error) && error.code === "ENOENT" ? false : Promise.reject(error);
     }
   },
-  copyFile: (from, to) => copyFile(from, to),
-  removeFile: (path) => rm(path, { force: true }),
 };
 
 type GitMutationPolicy = {
@@ -495,7 +491,7 @@ export class GitMutationPort {
       }
       return { status: "captured", snapshot, anchorId };
     } finally {
-      await this.#discardScratchIndex(scratch);
+      await this.#discardScratchIndex(input.checkoutRoot, scratch, input.executionPolicy);
     }
   }
 
@@ -640,7 +636,7 @@ export class GitMutationPort {
       );
       return worktree.exitCode === 0 ? { status: "applied" } : failedMutation(worktree.stderr);
     } finally {
-      await this.#discardScratchIndex(scratch);
+      await this.#discardScratchIndex(input.checkoutRoot, scratch, input.executionPolicy);
     }
   }
 
@@ -750,18 +746,28 @@ export class GitMutationPort {
     const index = await this.#gitPath(checkoutRoot, "index", signal, executionPolicy);
     if (index === undefined) return false;
     try {
-      if (await this.#dependencies.pathExists(index))
-        await this.#dependencies.copyFile(index, scratch);
-      else await this.#dependencies.removeFile(scratch);
-      return true;
+      // The scratch index lives in the Git directory, which a linked worktree
+      // keeps outside the bound root: this copy has to run confined like every
+      // other write, not as this host process.
+      const command = (await this.#dependencies.pathExists(index))
+        ? this.#runFileTool(checkoutRoot, "cp", [index, scratch], signal, executionPolicy)
+        : this.#runFileTool(checkoutRoot, "rm", ["-f", scratch], signal, executionPolicy);
+      return (await command).exitCode === 0;
     } catch {
       return false;
     }
   }
 
-  async #discardScratchIndex(scratch: string): Promise<void> {
+  async #discardScratchIndex(
+    checkoutRoot: string,
+    scratch: string,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<void> {
     try {
-      await this.#dependencies.removeFile(scratch);
+      // Cleanup runs in a finally after the turn's outcome is settled, so it
+      // outlives the caller's signal: a canceled turn still removes the scratch
+      // index it copied, under this launch's own timeout.
+      await this.#runFileTool(checkoutRoot, "rm", ["-f", scratch], undefined, executionPolicy);
     } catch {
       // A leftover scratch index is inert: every use overwrites it first.
     }
@@ -868,11 +874,15 @@ export class GitMutationPort {
     return result.exitCode === 0 ? { status: "applied" } : failedMutation(result.stderr);
   }
 
-  async #run(
-    args: readonly string[],
-    parentSignal?: AbortSignal,
-    environment?: Readonly<Record<string, string>>,
-    executionPolicy?: ProviderExecutionPolicy,
+  /**
+   * One child process under the port's abort/timeout scope, launched through
+   * confinement so no filesystem effect happens as this host process. The
+   * file tools a checkpoint copies its scratch index with are as confined as
+   * the Git commands around them.
+   */
+  async #confined(
+    parentSignal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<CommandResult>,
   ): Promise<CommandResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -881,6 +891,81 @@ export class GitMutationPort {
     const timeout = setTimeout(abort, this.#commandTimeoutMs);
     try {
       if (controller.signal.aborted) throw new Error("Git mutation aborted.");
+      return await run(controller.signal);
+    } catch (error) {
+      if (error instanceof SeatbeltConfinementError) {
+        return { exitCode: 1, stdout: "", stderr: "" };
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", abort);
+    }
+  }
+
+  /**
+   * `cp`/`rm` for the throwaway index, confined like the Git children. A
+   * linked worktree's index lives in its gitdir outside the bound root, so
+   * the launch carries the same out-of-root write grant a mutation gets —
+   * and stays read-only under Plan.
+   */
+  async #runFileTool(
+    checkoutRoot: string,
+    tool: "cp" | "rm",
+    args: readonly string[],
+    parentSignal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<CommandResult> {
+    return this.#confined(parentSignal, async (signal) => {
+      const executable = await this.#fileToolExecutable(tool);
+      if (executable === undefined) return { exitCode: 1, stdout: "", stderr: "" };
+      const binaryDirectory = dirname(executable);
+      const extraRules = gitLinkedWorktreeMetadataRules(checkoutRoot, {
+        writable: executionPolicy !== "plan",
+      });
+      const launch = (
+        executionPolicy === "plan"
+          ? planGitMutationConfinement(this.#confinement.confinement)
+          : this.#confinement.confinement
+      ).prepare({
+        executable,
+        args,
+        boundRoot: checkoutRoot,
+        temporaryDirectory: this.#confinement.temporaryDirectory,
+        networkEgress: "none",
+        allowFileReadStar: true,
+        allowProcessExec: false,
+        allowProcessFork: false,
+        // cp/rm sit in /bin, whose parent is the filesystem root — the Git
+        // launch's parent-directory grant cannot apply here.
+        readRoots: [checkoutRoot, binaryDirectory],
+        ...(extraRules.length === 0 ? {} : { extraRules }),
+      });
+      return await this.#dependencies.execFile(
+        launch.command,
+        launch.args,
+        createGitCommandEnvironment(process.env),
+        signal,
+      );
+    });
+  }
+
+  /** A file tool's absolute path, probed where the platform keeps it. */
+  async #fileToolExecutable(name: "cp" | "rm"): Promise<string | undefined> {
+    for (const directory of ["/bin", "/usr/bin"]) {
+      const candidate = join(directory, name);
+      if (await this.#dependencies.pathExists(candidate)) return candidate;
+    }
+    return undefined;
+  }
+
+  async #run(
+    args: readonly string[],
+    parentSignal?: AbortSignal,
+    environment?: Readonly<Record<string, string>>,
+    executionPolicy?: ProviderExecutionPolicy,
+  ): Promise<CommandResult> {
+    return this.#confined(parentSignal, async (signal) => {
       const checkoutRoot = args[0] === "-C" ? args[1] : undefined;
       if (checkoutRoot === undefined || !isAbsolute(checkoutRoot)) {
         return { exitCode: 1, stdout: "", stderr: "" };
@@ -907,17 +992,9 @@ export class GitMutationPort {
         // The overlay is named by this port, never inherited, so widening it
         // cannot leak a caller's environment past the allowlist.
         { ...createGitCommandEnvironment(process.env), ...environment },
-        controller.signal,
+        signal,
       );
-    } catch (error) {
-      if (error instanceof SeatbeltConfinementError) {
-        return { exitCode: 1, stdout: "", stderr: "" };
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-      parentSignal?.removeEventListener("abort", abort);
-    }
+    });
   }
 }
 
