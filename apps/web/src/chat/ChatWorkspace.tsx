@@ -1137,6 +1137,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               return { value: undefined, base: baseFromResult(result) };
             }).catch(() => undefined);
           }}
+          onSnoozeAtUsageReset={() => {
+            void enqueueThreadCommand(async (previous) => {
+              const result = await props.controller.execute({
+                kind: "snooze-chat-thread-at-usage-reset",
+                threadId: view.thread.id,
+                expectedVersion: queuedVersion(previous),
+              });
+              return { value: undefined, base: baseFromResult(result) };
+            }).catch(() => undefined);
+          }}
           onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
             void enqueueThreadCommand(async (previous) => {
               const result = await props.controller.execute({

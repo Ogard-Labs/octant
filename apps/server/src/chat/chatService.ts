@@ -1161,6 +1161,10 @@ export class ChatService {
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#answerTurnQuestion(command),
           );
+        case "snooze-chat-thread-at-usage-reset":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#snoozeAtUsageReset(command),
+          );
         case "schedule-chat-usage-resume":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#scheduleUsageResume(command),
@@ -2584,9 +2588,12 @@ export class ChatService {
       const updatedTurn: ChatTurn = { ...turn, attempts: [...turn.attempts, nextAttempt] };
       // A person sending the thread a message is re-engaging with it: a
       // completed thread comes back and a snoozed one wakes, in the same
-      // thread update the turn already journals.
+      // thread update the turn already journals. The host's own limit
+      // recovery is not the person re-engaging, so it leaves the rest fields
+      // as they were; the spent limit-owned snooze goes in the settle.
+      const restFields = command.limitRecovery === true ? thread : withoutThreadRest(thread);
       const updatedThread = {
-        ...withoutThreadRest(thread),
+        ...restFields,
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -2696,6 +2703,70 @@ export class ChatService {
       expectedVersion: command.expectedVersion,
       events: [
         this.#pending(USAGE_RESUME_SCHEDULED, { resume: record }),
+        this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
+      ],
+    });
+    return { kind: "thread-updated", thread: updatedThread };
+  }
+
+  async #snoozeAtUsageReset(
+    command: Extract<
+      ReturnType<typeof decodeChatCommand>,
+      { kind: "snooze-chat-thread-at-usage-reset" }
+    >,
+  ): Promise<ChatCommandResult> {
+    const thread = this.#requireActiveThread(command.threadId);
+    this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+    const view = this.#requireThreadView(command.threadId);
+    const attempt = view.turns.at(-1)?.attempts.at(-1);
+    if (
+      attempt === undefined ||
+      attempt.outcome !== "waiting" ||
+      attempt.usageLimit === undefined
+    ) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The thread has no usage-limited stop to hide until.",
+        }),
+      );
+    }
+    const resetsAt = attempt.usageLimit.resetsAt;
+    if (resetsAt === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The provider did not disclose when the limit resets.",
+        }),
+      );
+    }
+    const timestamp = decodeTimestamp(this.#clock());
+    const decision = decideSnoozeThread({
+      lifecycle: thread.lifecycle,
+      awaitingInput: false,
+      until: resetsAt,
+      now: timestamp,
+    });
+    if (decision.status === "refused") {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: CHAT_SNOOZE_REFUSALS[decision.reason],
+      });
+    }
+    // Snoozing is the person's shelving act, so it rewrites the rest fields a
+    // manual snooze rewrites and preserves the others — an armed resume stays
+    // armed. The origin marks this snooze as limit-owned: the resume service
+    // lifts it when it dispatches and nothing else may touch it.
+    const updatedThread = {
+      ...withoutThreadRest(thread),
+      snooze: { until: resetsAt, at: timestamp, origin: "usage-limit" as const },
+      version: (command.expectedVersion + 1) as AggregateVersion,
+      updatedAt: timestamp,
+    };
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: command.expectedVersion,
+      events: [
         this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
       ],
     });

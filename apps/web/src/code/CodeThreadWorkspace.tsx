@@ -590,6 +590,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       threadId: thread.id,
       expectedVersion: thread.version,
     });
+  // Shelving until the limit's reset authorizes nothing; the host derives
+  // the wake time from the journaled stop the same way the resume offer does.
+  const snoozeAtUsageReset =
+    providerTurnOperationId === undefined || thread.snooze !== undefined
+      ? undefined
+      : () =>
+          void props.controller.execute({
+            kind: "snooze-code-thread-at-usage-reset",
+            threadId: thread.id,
+            expectedVersion: thread.version,
+          });
   // A running turn never blocks the composer: the host admits one turn per
   // thread, so a message sent during one is held by the surface and sent the
   // moment that turn stops, without the user having to manage it.
@@ -1063,6 +1074,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ? {}
                 : { onScheduleResume: scheduleUsageResume })}
               onCancelResume={cancelUsageResume}
+              {...(snoozeAtUsageReset === undefined ? {} : { onSnoozeAtReset: snoozeAtUsageReset })}
             />
           </div>
         )
@@ -1111,6 +1123,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               ? {}
               : { onScheduleResume: scheduleUsageResume })}
             onCancelResume={cancelUsageResume}
+            {...(snoozeAtUsageReset === undefined ? {} : { onSnoozeAtReset: snoozeAtUsageReset })}
           />
         </div>
       ) : null}

@@ -449,7 +449,10 @@ export class WorkTurnService {
         `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
       );
     }
-    if (thread !== undefined) this.#onTurnRequested?.(thread.id);
+    // The host's own limit-recovery dispatch is not the person re-engaging,
+    // so it must not wake a snooze or reopen a completion the way their turn
+    // would; the spent limit-owned snooze goes in the settle instead.
+    if (thread !== undefined && command.limitRecovery !== true) this.#onTurnRequested?.(thread.id);
     const project = this.#persistence.readProject(command.authority.projectId);
     const decision = decideWorkTurnAuthority({
       authority: command.authority,

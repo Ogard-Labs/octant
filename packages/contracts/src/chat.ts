@@ -480,6 +480,16 @@ export const WakeChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("wake-chat-thread"),
   ...ChatThreadCommandFields,
 }).annotations(strict);
+/**
+ * Hide the thread until the current usage-limited stop's declared reset. The
+ * host derives the wake time from the journaled limit fact rather than the
+ * caller's clock and refuses when there is no current stop or its reset is
+ * unknown or already past. Carries no `until`: the client never supplies it.
+ */
+export const SnoozeChatThreadAtUsageResetCommand = Schema.Struct({
+  kind: Schema.Literal("snooze-chat-thread-at-usage-reset"),
+  ...ChatThreadCommandFields,
+}).annotations(strict);
 
 /**
  * Selects the thread's provider/model and, optionally, its model option values.
@@ -594,6 +604,13 @@ export const RetryChatTurnCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
+  /**
+   * Set by the host's own usage-limit recovery when it dispatches the
+   * authorized retry: the send is not the person re-engaging, so the thread's
+   * rest fields are preserved rather than cleared the way a person's retry
+   * clears them.
+   */
+  limitRecovery: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 
 export const ResumeChatTurnCommand = Schema.Struct({
@@ -763,6 +780,7 @@ export const ChatCommand = Schema.Union(
   CompleteChatThreadCommand,
   ReopenChatThreadCommand,
   SnoozeChatThreadCommand,
+  SnoozeChatThreadAtUsageResetCommand,
   WakeChatThreadCommand,
   ChangeChatProviderCommand,
   SelectChatMultiModelPoolCommand,

@@ -55,6 +55,12 @@ export interface ChatTranscriptProps {
   /** Withdraws the thread's scheduled resume opt-in. */
   readonly onCancelUsageResume?: () => void;
   /**
+   * Hides the thread until the current limit's declared reset without
+   * authorizing another provider turn. Absent once the thread carries a
+   * snooze of its own.
+   */
+  readonly onSnoozeAtUsageReset?: () => void;
+  /**
    * Answers a question a running attempt asked and is blocked on. Absent when
    * the surface cannot answer, which keeps the question read-only instead of
    * offering a control nothing would deliver.
@@ -453,6 +459,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onRetryAttempt={props.onRetryAttempt}
                   onScheduleUsageResume={props.onScheduleUsageResume}
                   onCancelUsageResume={props.onCancelUsageResume}
+                  {...(props.view.thread.snooze === undefined &&
+                  props.onSnoozeAtUsageReset !== undefined
+                    ? { onSnoozeAtReset: props.onSnoozeAtUsageReset }
+                    : {})}
                   previousAttempt={turn.attempts[index - 1]}
                   providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? NO_CITATIONS}
@@ -593,6 +603,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly onScheduleUsageResume: ChatTranscriptProps["onScheduleUsageResume"];
   readonly onCancelUsageResume: ChatTranscriptProps["onCancelUsageResume"];
+  readonly onSnoozeAtReset?: () => void;
   readonly onFork: (() => void) | undefined;
   readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
@@ -711,6 +722,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             {...(props.onCancelUsageResume === undefined
               ? {}
               : { onCancelResume: props.onCancelUsageResume })}
+            {...(props.onSnoozeAtReset === undefined
+              ? {}
+              : { onSnoozeAtReset: props.onSnoozeAtReset })}
           />
         )}
         {props.attempt.outcome === "failed" || props.attempt.failure !== undefined ? (

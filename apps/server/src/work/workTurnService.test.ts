@@ -89,6 +89,25 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("does not announce a host-dispatched limit recovery as a person's turn request", async () => {
+    const onTurnRequested = vi.fn();
+    const fixture = serviceFixture({ onTurnRequested });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(onTurnRequested).toHaveBeenCalledTimes(1);
+    onTurnRequested.mockClear();
+    await fixture.waitForIdle();
+
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"),
+      turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"),
+      limitRecovery: true,
+    });
+    expect(onTurnRequested).not.toHaveBeenCalled();
+    await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"));
+  });
+
   it("refuses a Work request that exceeds the provider-reported context window", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
     attachmentRoots.push(root);
@@ -1427,6 +1446,7 @@ function serviceFixture(
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
+    readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -1587,6 +1607,7 @@ function serviceFixture(
     ...(options.turnFileObserver === undefined
       ? {}
       : { turnFileObserver: options.turnFileObserver }),
+    ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
     uuid: (() => {
       let n = 0;
       return () => {

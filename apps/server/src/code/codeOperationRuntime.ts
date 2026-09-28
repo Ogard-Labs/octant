@@ -635,7 +635,10 @@ export function createCodeOperationRuntime(
       // Bringing the thread back comes before any runtime-work record: a
       // reset that fails must leave no "running" record behind for a turn
       // that never starts.
-      if (command.kind === "start-provider-turn")
+      // The host's own limit-recovery dispatch is not the person re-engaging,
+      // so it must not wake a snooze or reopen a completion the way their
+      // turn would; the spent limit-owned snooze goes in the settle instead.
+      if (command.kind === "start-provider-turn" && command.limitRecovery !== true)
         options.onProviderTurnRequested?.(command.threadId);
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)

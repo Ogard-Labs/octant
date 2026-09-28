@@ -44,9 +44,31 @@ import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
-import type { UsageResumeModePort, UsageResumePorts } from "./usageResumeService";
+import type {
+  UsageResumeModePort,
+  UsageResumePorts,
+  UsageResumeSettledOutcome,
+} from "./usageResumeService";
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+/**
+ * The settle update is the single place the host lifts the shelf mark it
+ * owns: a dispatched resume consumes the snooze that was set against the
+ * limit it just dispatched, and nothing else — a snooze the person set, or
+ * one already lifted, stays untouched.
+ */
+function settledThread<
+  T extends {
+    readonly snooze?: { readonly origin?: "user" | "usage-limit" | undefined } | undefined;
+  },
+>(thread: T, outcome: UsageResumeSettledOutcome): T {
+  if (outcome === "dispatched" && thread.snooze?.origin === "usage-limit") {
+    const { snooze: _spent, ...rest } = thread;
+    return rest as T;
+  }
+  return thread;
+}
 
 /**
  * What the ports need from the host. Every function is a narrow cut of the
@@ -181,6 +203,7 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
           ),
           turnId: decodeChatTurnId(record.turnId),
           attemptId: decodeChatAttemptId(attemptId),
+          limitRecovery: true,
         });
         return { kind: "dispatched" };
       } catch (error) {
@@ -190,12 +213,13 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
     settleUpdate: (record, outcome, detail, nextVersion) => {
       const thread = deps.chat.readThread(decodeChatThreadId(record.threadId));
       if (thread === undefined) return undefined;
+      const next = settledThread(thread, outcome);
       return {
         eventName: "chat.thread-updated@1",
         payload: {
           kind: "thread-updated",
           thread: decodeChatThread({
-            ...thread,
+            ...next,
             usageResume: {
               record,
               status: outcome,
@@ -273,6 +297,7 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
           },
+          limitRecovery: true,
         });
         return result.kind === "accepted"
           ? { kind: "dispatched" }
@@ -284,12 +309,13 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
     settleUpdate: (record, outcome, detail, nextVersion) => {
       const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
       if (thread === undefined) return undefined;
+      const next = settledThread(thread, outcome);
       return {
         eventName: "work.thread-updated@1",
         payload: {
           kind: "thread-updated",
           thread: decodeWorkThread({
-            ...thread,
+            ...next,
             usageResume: {
               record,
               status: outcome,
@@ -435,6 +461,7 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
           checkoutId: thread.checkoutId,
           sessionId: decodeProviderSessionId(deps.uuid()),
           prompt,
+          limitRecovery: true,
         });
         return result.kind === "provider-turn-state" &&
           (result.state === "running" || result.state === "waiting" || result.state === "completed")
@@ -451,12 +478,13 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
     settleUpdate: (record, outcome, detail, nextVersion) => {
       const thread = deps.code.readThread(decodeCodeThreadId(record.threadId));
       if (thread === undefined) return undefined;
+      const next = settledThread(thread, outcome);
       return {
         eventName: "code.thread-updated@1",
         payload: {
           kind: "thread-updated",
           thread: decodeCodeThread({
-            ...thread,
+            ...next,
             usageResume: {
               record,
               status: outcome,
