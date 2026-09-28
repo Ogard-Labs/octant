@@ -507,6 +507,14 @@ export interface ChatServiceOptions {
    * the request itself. The user's send waits behind both.
    */
   readonly contextMaintenanceShutdownTimeoutMs?: number;
+  /**
+   * Settle window before the one re-probe a provider change is allowed. This
+   * command path probes the driver directly, so a provider still running its
+   * first (cold) spawn can answer "unavailable"/"checking" even though it is
+   * about to report ready; one settle lets that probe land instead of
+   * rejecting a valid first send.
+   */
+  readonly providerChangeProbeSettleMs?: number;
   readonly providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
@@ -721,6 +729,7 @@ export class ChatService {
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
+  readonly #providerChangeProbeSettleMs: number;
   readonly #providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
@@ -790,6 +799,7 @@ export class ChatService {
     if (options.contextMaintenanceShutdownTimeoutMs !== undefined) {
       this.#contextMaintenanceShutdownTimeoutMs = options.contextMaintenanceShutdownTimeoutMs;
     }
+    this.#providerChangeProbeSettleMs = options.providerChangeProbeSettleMs ?? 1_500;
     this.#hiddenThreadIds = options.hiddenThreadIds ?? (() => EMPTY_HIDDEN_THREAD_IDS);
     if (options.resolveSideChatSourceContext !== undefined) {
       this.#resolveSideChatSourceContext = options.resolveSideChatSourceContext;
@@ -1843,10 +1853,7 @@ export class ChatService {
       };
     } else if (command.kind === "change-chat-provider") {
       const providerInstanceId = decodeProviderInstanceId(command.providerInstanceId);
-      const targetProbe = await this.#probeProvider(
-        this.#driver(providerInstanceId),
-        providerInstanceId,
-      );
+      const targetProbe = await this.#probeProviderForChange(providerInstanceId);
       if (targetProbe.readiness !== "ready") {
         // Allow degraded Foundry providers when the selected model is in the
         // catalog (manual deployment IDs remain available even when /models
@@ -3558,6 +3565,36 @@ export class ChatService {
     } catch (error) {
       throw this.#mapProviderProbeFailure(error);
     }
+  }
+
+  /**
+   * The provider-change probe, allowed one settle-and-reprobe. A provider
+   * still running its first (cold) spawn — a newly created ACP instance, say —
+   * can answer "unavailable"/"checking"/"degraded" moments before it reports
+   * ready; refusing there turns a valid first send into a rejection the second
+   * send would not hit. Terminal readiness is not retried, and neither is a
+   * failure other than the transient "unavailable" category.
+   */
+  async #probeProviderForChange(
+    providerInstanceId: ProviderInstanceId,
+  ): Promise<ProviderProbeResult> {
+    const driver = this.#driver(providerInstanceId);
+    const first = await this.#probeProvider(driver, providerInstanceId).then(
+      (probe) => ({ probe }),
+      (error: unknown) => ({ error }),
+    );
+    const worthRetrying =
+      "probe" in first
+        ? first.probe.readiness === "unavailable" ||
+          first.probe.readiness === "checking" ||
+          first.probe.readiness === "degraded"
+        : first.error instanceof ChatServiceError && first.error.failure.category === "unavailable";
+    if (!worthRetrying) {
+      if ("probe" in first) return first.probe;
+      throw first.error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, this.#providerChangeProbeSettleMs));
+    return this.#probeProvider(driver, providerInstanceId);
   }
 
   #mapProviderProbeFailure(error: unknown): ChatServiceError {

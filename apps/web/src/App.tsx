@@ -4735,7 +4735,10 @@ function LaunchedShell(
             ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
-            setDraftError("The selected Chat provider and model could not be applied.");
+            setDraftError(
+              chatController.errorMessage ??
+                "The selected Chat provider and model could not be applied.",
+            );
             return;
           }
           thread = changed.thread;

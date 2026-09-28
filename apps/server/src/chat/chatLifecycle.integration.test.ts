@@ -127,13 +127,14 @@ function probe(
 function makeDriver(input: {
   readonly instanceId: string;
   readonly probe: ProviderProbeResult;
+  readonly probeSequence?: Array<ProviderProbeResult>;
   readonly behaviors: Array<DriverBehavior>;
   readonly sentTurns: Array<SentTurn>;
   readonly interruptedSessions: Array<string>;
 }): ProviderDriver {
   return {
     kind: "openai-compatible",
-    probe: () => Effect.succeed(input.probe),
+    probe: () => Effect.succeed(input.probeSequence?.shift() ?? input.probe),
     acquire: () => {
       const behavior = input.behaviors.shift() ?? "complete";
       const queue = Effect.runSync(Queue.unbounded<never>());
@@ -250,6 +251,7 @@ function createFixture(behaviors?: {
   readonly providerA?: Array<DriverBehavior>;
   readonly providerB?: Array<DriverBehavior>;
   readonly providerBReadiness?: ProviderProbeResult["readiness"];
+  readonly providerBProbeSequence?: Array<ProviderProbeResult["readiness"]>;
 }): LifecycleFixture {
   const dataDirectory = mkdtempSync(join(tmpdir(), "octant-chat-lifecycle-"));
   directories.push(dataDirectory);
@@ -264,15 +266,20 @@ function createFixture(behaviors?: {
     sentTurns,
     interruptedSessions,
   });
+  const providerBBaseProbe = probe(ids.providerB, "model-b", {
+    readiness: behaviors?.providerBReadiness ?? "ready",
+    capabilities: {
+      ...probe(ids.providerB, "model-b").capabilities,
+      nativeAttachments: "unsupported",
+    },
+  });
   const providerB = makeDriver({
     instanceId: ids.providerB,
-    probe: probe(ids.providerB, "model-b", {
-      readiness: behaviors?.providerBReadiness ?? "ready",
-      capabilities: {
-        ...probe(ids.providerB, "model-b").capabilities,
-        nativeAttachments: "unsupported",
-      },
-    }),
+    probe: providerBBaseProbe,
+    probeSequence: (behaviors?.providerBProbeSequence ?? []).map((readiness) => ({
+      ...providerBBaseProbe,
+      readiness,
+    })),
     behaviors: [...(behaviors?.providerB ?? [])],
     sentTurns,
     interruptedSessions,
@@ -315,6 +322,7 @@ function createFixture(behaviors?: {
           }),
         }),
         turnTimeoutMs: 5_000,
+        providerChangeProbeSettleMs: 0,
       }),
     };
   };
@@ -474,6 +482,55 @@ describe("Chat lifecycle integration", () => {
       kind: "create-chat-thread",
       hostId: "local",
       title: "Readiness-gated handoff",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+
+    await expect(
+      fixture.service.execute({
+        kind: "change-chat-provider",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        providerInstanceId: ids.providerB,
+        modelId: "model-b",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(fixture.service.read(created.thread.id).thread.providerInstanceId).toBe(ids.providerA);
+    fixture.close();
+  });
+
+  it("applies a provider change once a still-settling provider reports ready on re-probe", async () => {
+    const fixture = createFixture({
+      providerBProbeSequence: ["unavailable", "ready"],
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Settling provider",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+
+    const changed = await fixture.service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      providerInstanceId: ids.providerB,
+      modelId: "model-b",
+    });
+    expect(changed).toMatchObject({
+      kind: "thread-updated",
+      thread: { providerInstanceId: ids.providerB, modelId: "model-b" },
+    });
+    fixture.close();
+  });
+
+  it("still refuses a provider change that stays unready after the settle window", async () => {
+    const fixture = createFixture({
+      providerBProbeSequence: ["unavailable", "unavailable"],
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unready provider",
     });
     if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
 
