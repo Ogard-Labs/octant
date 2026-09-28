@@ -1,0 +1,14 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "if [ \"$(uname -s)\" = \"Linux\" ] && [ -f \"${DEVIN_PROJECT_DIR:-.}/scripts/ade/start-secret-service-session.sh\" ]; then bash \"${DEVIN_PROJECT_DIR:-.}/scripts/ade/start-secret-service-session.sh\"; fi",
+          "timeout": 90
+        }
+      ]
+    }
+  ]
+}
