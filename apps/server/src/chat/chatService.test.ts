@@ -3760,6 +3760,36 @@ describe("ChatService", () => {
     expect(planTurn).not.toHaveBeenCalled();
   });
 
+  it("accepts a provider change whose degraded probe already lists the selected model, without re-probing", async () => {
+    let probeCalls = 0;
+    const driver = {
+      probe: () =>
+        Effect.sync(() => {
+          probeCalls += 1;
+          return probeFixture({ readiness: "degraded" });
+        }),
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Degraded change",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const updated = await service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+    });
+    expect(updated.kind).toBe("thread-updated");
+    // The degraded answer the change already permits is kept: a settle
+    // re-probe could only turn a valid result into a refusal.
+    expect(probeCalls).toBe(1);
+  });
+
   it("persists declared model option values on the thread and hands them to session start", async () => {
     const probeResult = probeFixture();
     const effortModel = {

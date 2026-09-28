@@ -1853,7 +1853,10 @@ export class ChatService {
       };
     } else if (command.kind === "change-chat-provider") {
       const providerInstanceId = decodeProviderInstanceId(command.providerInstanceId);
-      const targetProbe = await this.#probeProviderForChange(providerInstanceId);
+      const targetProbe = await this.#probeProviderForChange(
+        providerInstanceId,
+        decodeProviderModelId(command.modelId),
+      );
       if (targetProbe.readiness !== "ready") {
         // Allow degraded Foundry providers when the selected model is in the
         // catalog (manual deployment IDs remain available even when /models
@@ -3573,10 +3576,14 @@ export class ChatService {
    * can answer "unavailable"/"checking"/"degraded" moments before it reports
    * ready; refusing there turns a valid first send into a rejection the second
    * send would not hit. Terminal readiness is not retried, and neither is a
-   * failure other than the transient "unavailable" category.
+   * failure other than the transient "unavailable" category. A degraded probe
+   * that already lists the selected model is retried neither: the change
+   * accepts that state, so waiting only adds a probe whose transient failure
+   * would refuse a valid change.
    */
   async #probeProviderForChange(
     providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
   ): Promise<ProviderProbeResult> {
     const driver = this.#driver(providerInstanceId);
     const first = await this.#probeProvider(driver, providerInstanceId).then(
@@ -3587,7 +3594,10 @@ export class ChatService {
       "probe" in first
         ? first.probe.readiness === "unavailable" ||
           first.probe.readiness === "checking" ||
-          first.probe.readiness === "degraded"
+          (first.probe.readiness === "degraded" &&
+            !first.probe.models.some(
+              (candidate) => String(candidate.id) === String(modelId),
+            ))
         : first.error instanceof ChatServiceError && first.error.failure.category === "unavailable";
     if (!worthRetrying) {
       if ("probe" in first) return first.probe;
