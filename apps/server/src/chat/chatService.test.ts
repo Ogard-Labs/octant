@@ -227,6 +227,18 @@ function openFixture(options?: {
         readonly execute: () => Promise<{ readonly result: unknown }>;
       }
     | undefined;
+  readonly resolveUnattachedComputerUseTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: ChatThread;
+  }) =>
+    | {
+        readonly definitions: ReadonlyArray<{
+          readonly name: string;
+          readonly inputSchema: Record<string, unknown>;
+        }>;
+        readonly execute: () => Promise<{ readonly result: unknown }>;
+      }
+    | undefined;
   readonly resolveExtensionSelectionContext?: (input: {
     readonly phase: "send" | "replay" | "resume" | "provider-handoff";
     readonly thread: ChatThread;
@@ -578,6 +590,9 @@ function openFixture(options?: {
     ...(options?.resolveAppManagedTools === undefined
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
+    ...(options?.resolveUnattachedComputerUseTools === undefined
+      ? {}
+      : { resolveUnattachedComputerUseTools: options.resolveUnattachedComputerUseTools }),
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
@@ -1091,6 +1106,46 @@ describe("ChatService", () => {
         String(entry.label).includes("user selected Octant's built-in Browser"),
       ),
     ).toBe(true);
+  });
+
+  it("registers a refusal-only Computer tool when the send carries no @Computer selection", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
+    const unattachedCalls: string[] = [];
+    const { service, fakeDriver } = openFixture({
+      resolveUnattachedComputerUseTools: () => {
+        unattachedCalls.push("called");
+        return {
+          definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          execute: async () => ({
+            result: {
+              error: "computer-use-not-attached",
+              message: "Tell the user to add @Computer and send again.",
+            },
+            isError: true,
+          }),
+        };
+      },
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unattached computer",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Follow up without the chip",
+      },
+      { windowId: window },
+    );
+
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    expect(unattachedCalls).toHaveLength(1);
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("octant_computer");
   });
 
   it("refuses an invalid Browser receipt before provider acquisition", async () => {

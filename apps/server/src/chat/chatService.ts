@@ -521,6 +521,15 @@ export interface ChatServiceOptions {
     readonly selection: ExtensionSelection;
   }) => AppManagedToolSet | undefined;
   /**
+   * A refusal-only `octant_computer` for turns that carry no Computer
+   * selection: registering the name lets a stale call return the
+   * re-attach recovery instead of a provider-side unknown-tool failure.
+   */
+  readonly resolveUnattachedComputerUseTools?: (input: {
+    readonly thread: ChatThread;
+    readonly windowId: WindowId;
+  }) => AppManagedToolSet | undefined;
+  /**
    * The native harness around a turn on a provider it drives: stable
    * instructions in front of the context, and the completed reply observed
    * for follow-ups and the advisor. Absent means turns run without it.
@@ -726,6 +735,7 @@ export class ChatService {
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
+  readonly #resolveUnattachedComputerUseTools?: ChatServiceOptions["resolveUnattachedComputerUseTools"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   /**
@@ -784,6 +794,8 @@ export class ChatService {
     }
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
+    if (options.resolveUnattachedComputerUseTools !== undefined)
+      this.#resolveUnattachedComputerUseTools = options.resolveUnattachedComputerUseTools;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
       this.#contextMaintenanceTimeoutMs = options.contextMaintenanceTimeoutMs;
     }
@@ -3367,7 +3379,13 @@ export class ChatService {
     readonly toolSet?: AppManagedToolSet;
   }> {
     if (selections === undefined || selections.length === 0) {
-      return { selections: [], entries: [] };
+      const unattachedComputer =
+        windowId === undefined
+          ? undefined
+          : this.#resolveUnattachedComputerUseTools?.({ thread, windowId });
+      return unattachedComputer === undefined
+        ? { selections: [], entries: [] }
+        : { selections: [], entries: [], toolSet: unattachedComputer };
     }
     const computer = selections.filter(isComputerUseSelection);
     const browser = selections.filter(isBrowserUseSelection);
@@ -3401,9 +3419,11 @@ export class ChatService {
       (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
     );
     const computerTools =
-      computer.length === 1 && computer[0] !== undefined && windowId !== undefined
-        ? this.#resolveComputerUseTools?.({ thread, windowId, selection: computer[0] })
-        : undefined;
+      windowId === undefined || computer.length > 1
+        ? undefined
+        : computer.length === 1 && computer[0] !== undefined
+          ? this.#resolveComputerUseTools?.({ thread, windowId, selection: computer[0] })
+          : this.#resolveUnattachedComputerUseTools?.({ thread, windowId });
     if (computer.length > 0 && computerTools === undefined)
       throw new ChatServiceError({
         category: "unavailable",

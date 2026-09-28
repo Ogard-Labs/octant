@@ -837,13 +837,12 @@ function makeConnection(
         let message = "Client capability failed.";
         try {
           const result = JSON.parse(answer.resultJson);
-          if (
-            typeof result === "object" &&
-            result !== null &&
-            "error" in result &&
-            typeof result.error === "string"
-          )
-            message = result.error;
+          if (typeof result === "object" && result !== null) {
+            // `message` carries the sentence a reader needs — the error slug
+            // is for matching, so prefer the sentence when both are present.
+            if ("message" in result && typeof result.message === "string") message = result.message;
+            else if ("error" in result && typeof result.error === "string") message = result.error;
+          }
         } catch {
           // Use the stable protocol error when an app-managed tool broke its contract.
         }
