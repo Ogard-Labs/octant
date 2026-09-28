@@ -146,6 +146,40 @@ describe("AndroidToolchainService", () => {
       join(homedir(), ".android"),
       "/store/avds",
     ]);
+    // An explicitly empty override is unset: forwarding "" would make the
+    // confinement builder refuse every Android command, not just this one.
+    expect(androidToolchainStorePaths({ ANDROID_AVD_HOME: "" })).toEqual([
+      join(homedir(), ".android"),
+    ]);
+  });
+
+  it("drops an empty ANDROID_AVD_HOME instead of forwarding it to toolchain commands", async () => {
+    const environments: Array<Record<string, string>> = [];
+    const base = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute: vi.fn(
+        async (input: {
+          readonly argv: ReadonlyArray<string>;
+          readonly environment: Record<string, string>;
+        }) => {
+          environments.push(input.environment);
+          return base(input);
+        },
+      ),
+      access: async () => undefined,
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk", ANDROID_AVD_HOME: "" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+    });
+    try {
+      await service.discover(discoveryRequest, context);
+      expect(environments.length).toBeGreaterThan(0);
+      expect(environments.every((env) => env.ANDROID_AVD_HOME === undefined)).toBe(true);
+    } finally {
+      await service.close();
+    }
   });
 
   it("passes a configured ANDROID_AVD_HOME through to toolchain commands", async () => {

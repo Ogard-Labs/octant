@@ -921,7 +921,10 @@ export function androidToolchainStorePaths(
 ): ReadonlyArray<string> {
   const paths = [join(homedir(), ".android")];
   const avdHome = environment.ANDROID_AVD_HOME;
-  if (avdHome !== undefined && !paths.includes(avdHome)) paths.push(avdHome);
+  // An explicitly empty override is unset: an empty string is not an absolute
+  // path, and forwarding it would make the confinement builder refuse every
+  // Android command instead of just one override.
+  if (avdHome !== undefined && avdHome !== "" && !paths.includes(avdHome)) paths.push(avdHome);
   return paths;
 }
 
@@ -940,7 +943,8 @@ function androidEnv(
     "ANDROID_AVD_HOME",
   ]) {
     const value = env[name];
-    if (value !== undefined) next[name] = value;
+    // Empty is unset: an empty path override is not usable toolchain state.
+    if (value !== undefined && value !== "") next[name] = value;
   }
   if (sdk.sdkRoot !== undefined) {
     next.ANDROID_HOME = sdk.sdkRoot;
