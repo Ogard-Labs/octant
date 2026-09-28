@@ -141,6 +141,120 @@ describe("ACP event normalization", () => {
     ]);
   });
 
+  it("shows the provider's reason when a tool call fails", () => {
+    const ctx = context();
+    event(
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "acp-session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "provider-tool-1",
+            title: "fs/write_text_file",
+          },
+        },
+      }),
+    );
+    expect(
+      event(
+        mapAcpNotification(ctx, {
+          kind: "notification",
+          method: "session/update",
+          params: {
+            sessionId: "acp-session-1",
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "provider-tool-1",
+              status: "failed",
+              content: [
+                {
+                  type: "content",
+                  content: {
+                    type: "text",
+                    text: "Malformed arguments: expected an object with path and content.",
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "tool-failure",
+      message: "Malformed arguments: expected an object with path and content.",
+    });
+  });
+
+  it("still says something honest when a tool failure carries no reason", () => {
+    const ctx = context();
+    event(
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "acp-session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "provider-tool-1",
+          },
+        },
+      }),
+    );
+    expect(
+      event(
+        mapAcpNotification(ctx, {
+          kind: "notification",
+          method: "session/update",
+          params: {
+            sessionId: "acp-session-1",
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "provider-tool-1",
+              status: "failed",
+              content: [],
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "tool-failure", message: "Tool failed." });
+  });
+
+  it("does not journal a raw provider payload as the failure reason", async () => {
+    const ctx = context();
+    event(
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "acp-session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "provider-tool-1",
+          },
+        },
+      }),
+    );
+    expect(
+      event(
+        mapAcpNotification(ctx, {
+          kind: "notification",
+          method: "session/update",
+          params: {
+            sessionId: "acp-session-1",
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "provider-tool-1",
+              status: "failed",
+              rawOutput: "s3cr3t file contents dumped by the tool",
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "tool-failure", message: "Tool failed." });
+  });
+
   it("maps plan entries conservatively and ignores config metadata", () => {
     const ctx = context();
     expect(

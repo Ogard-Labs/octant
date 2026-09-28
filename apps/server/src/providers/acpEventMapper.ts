@@ -132,6 +132,22 @@ function taskId(summary: string): string {
   return `task-${createHash("sha256").update(summary).digest("hex").slice(0, 16)}`;
 }
 
+// A failed ACP tool call carries its reason as a text content item, not in the
+// title; a provider that sends none still renders the honest generic sentence.
+// `rawOutput` is deliberately not a fallback: it is an opaque provider payload
+// that can hold stdout, file contents, or credentials, and this text is
+// journaled and exported, where raw provider payloads must never appear.
+function toolFailureReason(update: Readonly<Record<string, unknown>>): string | undefined {
+  const items = Array.isArray(update.content) ? update.content : [];
+  for (const item of items) {
+    const entry = record(item);
+    if (entry?.type !== "content") continue;
+    const text = normalized(record(entry.content)?.text, SUMMARY_MAX_CHARACTERS);
+    if (text !== undefined) return text;
+  }
+  return undefined;
+}
+
 function mapTool(
   context: AcpEventContext,
   update: Readonly<Record<string, unknown>>,
@@ -181,7 +197,7 @@ function mapTool(
       event(context, {
         kind: "tool-failure",
         toolCallId: state.toolCallId,
-        message: "Tool failed.",
+        message: toolFailureReason(update) ?? "Tool failed.",
       }),
     ];
   }
