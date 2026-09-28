@@ -152,9 +152,9 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   unauthorized/not-connected state (empty `hosts:` map).
 - "Set up GitHub" runs a real GitHub device flow: shows a one-time code to enter at
   github.com/login/device — completing it needs a github.com browser session (user side).
-- There is NO token-paste field by design; provisioning via `printf '%s' "$GH_TOKEN" | gh auth login
---hostname github.com --with-token` (stdin, never argv or shell history) works for gh but not past the
-`scopes` decode.
+- There is NO token-paste field by design; provisioning with the token on stdin — `printf '%s'
+"$GH_TOKEN" | gh auth login --hostname github.com --with-token` — works for gh but not past the
+  `scopes` decode.
 
 ## Hidden/unreachable features
 
