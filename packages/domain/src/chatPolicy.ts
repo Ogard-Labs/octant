@@ -606,11 +606,7 @@ export function transitionChatAttempt(
       "A failure reason belongs on a failed or interrupted outcome, not " + input.outcome,
     );
   }
-  const {
-    failure: previousFailure,
-    usageLimit: _previousLimit,
-    ...attemptRest
-  } = attempt;
+  const { failure: previousFailure, usageLimit: _previousLimit, ...attemptRest } = attempt;
   const failure =
     input.failure ?? (failureOutcomes.includes(input.outcome) ? previousFailure : undefined);
   // A question dies with the attempt that parked it: a terminal attempt can
