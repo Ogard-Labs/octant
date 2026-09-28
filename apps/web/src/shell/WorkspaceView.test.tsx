@@ -269,7 +269,7 @@ describe("WorkspaceView Code tab registration", () => {
       activeView: {
         ...(base.codeController.activeView as object),
         thread: {
-          ...(base.codeController.activeView.thread as object),
+          ...(base.codeController.activeView?.thread as object),
           providerInstanceId: "50000000-0000-4000-8000-000000000001",
           modelId: "model-a",
         },
