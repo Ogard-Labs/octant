@@ -2042,12 +2042,19 @@ export class ChatService {
       // Resolve them before route gathering because a provider probe can touch
       // a CLI, credentials, or network.  Preparation reuses these approved
       // facts after route resolution rather than resolving them twice.
-      const resolvedExtensions = await this.#resolveExtensionContext(
-        thread,
-        command.extensionSelections,
-        "send",
-        executionContext?.windowId,
-      );
+      // With no selections there is nothing to check, and resolving then
+      // would compose the unattached-Computer refusal stub against the
+      // persisted provider — preparation must build it against the provider
+      // the turn actually routes to.
+      const resolvedExtensions =
+        command.extensionSelections === undefined || command.extensionSelections.length === 0
+          ? undefined
+          : await this.#resolveExtensionContext(
+              thread,
+              command.extensionSelections,
+              "send",
+              executionContext?.windowId,
+            );
       const routing = await this.#computeTurnRouting(thread, turnId);
       if (routing !== undefined && routing.decision.decision.kind === "waiting") {
         // Durably recorded as the actionable Waiting reason (chat-turn-route
@@ -2192,12 +2199,15 @@ export class ChatService {
       // The revised turn's own extension selections are re-resolved, not
       // trusted: a selection that was revoked since the original send must
       // fail closed here exactly as it does on a fresh send.
-      const resolvedExtensions = await this.#resolveExtensionContext(
-        thread,
-        revised.extensionSelections,
-        "send",
-        executionContext?.windowId,
-      );
+      const resolvedExtensions =
+        revised.extensionSelections === undefined || revised.extensionSelections.length === 0
+          ? undefined
+          : await this.#resolveExtensionContext(
+              thread,
+              revised.extensionSelections,
+              "send",
+              executionContext?.windowId,
+            );
       const routing = await this.#computeTurnRouting(thread, turnId);
       if (routing !== undefined && routing.decision.decision.kind === "waiting") {
         await this.#multiModelRoute.persistTurnRoute(routing.decision);

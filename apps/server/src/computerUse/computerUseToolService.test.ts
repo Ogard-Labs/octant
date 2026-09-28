@@ -537,4 +537,17 @@ describe("a turn without a Computer selection", () => {
       await f.service.close();
     }
   });
+
+  it("ships no definition in Plan mode, since a re-attached call would still be refused", async () => {
+    const f = fixture();
+    try {
+      expect(
+        f.service.unattachedToolSet(
+          decodeComputerUseOwner({ ...owner, executionPolicy: "plan" }),
+        ),
+      ).toBeUndefined();
+    } finally {
+      await f.service.close();
+    }
+  });
 });

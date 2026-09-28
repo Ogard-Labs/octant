@@ -417,12 +417,15 @@ export function createComputerUseToolService(options: {
      * the provider's bare unknown-tool failure, which the model reports as
      * "currently unavailable". No definition when the composer cannot offer
      * the chip — disabled globally or constrained out — since nothing could
-     * reattach it.
+     * reattach it. Plan mode is the same dead end: Plan owners are refused
+     * every non-stop Computer command, so the re-attach instruction could
+     * never succeed.
      */
     unattachedToolSet: (rawOwner: ComputerUseOwner): AppManagedToolSet | undefined => {
       const owner = decodeComputerUseOwner(rawOwner);
       if (
         !options.settings().enabled ||
+        owner.executionPolicy === "plan" ||
         !isToolAllowedByAllowlist(options.toolConstraints(owner), "octant_computer")
       )
         return undefined;
