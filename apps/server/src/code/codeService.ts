@@ -2961,22 +2961,30 @@ export class CodeService {
    * authoritative copy of the stop the schedule opt-in binds to.
    */
   #latestProviderTurnState(operationId: string): CodeProviderTurnRecordedState | undefined {
-    const frames = this.#persistence.journal.replayAggregate({
-      aggregateType: "code-operation",
-      aggregateId: operationId,
-      afterVersion: 0,
-      limit: 1_000,
-    });
+    // Provider turns journal an event per streamed frame, so a long turn can
+    // outgrow one page; the recorded stop always sits at the stream's tail.
+    const pageSize = 1_000;
     let latest: CodeProviderTurnRecordedState | undefined;
-    for (const committed of frames) {
-      if (committed.eventName !== "code.operation-event-recorded@1") continue;
-      const frame = decodeCodeOperationEventFrame(committed.payload);
-      if (
-        frame.event.kind === "operation-result" &&
-        frame.event.result.kind === "provider-turn-state"
-      ) {
-        latest = frame.event.result;
+    let afterVersion = 0;
+    for (;;) {
+      const frames = this.#persistence.journal.replayAggregate({
+        aggregateType: "code-operation",
+        aggregateId: operationId,
+        afterVersion,
+        limit: pageSize,
+      });
+      for (const committed of frames) {
+        afterVersion = committed.aggregateVersion;
+        if (committed.eventName !== "code.operation-event-recorded@1") continue;
+        const frame = decodeCodeOperationEventFrame(committed.payload);
+        if (
+          frame.event.kind === "operation-result" &&
+          frame.event.result.kind === "provider-turn-state"
+        ) {
+          latest = frame.event.result;
+        }
       }
+      if (frames.length < pageSize) break;
     }
     return latest;
   }

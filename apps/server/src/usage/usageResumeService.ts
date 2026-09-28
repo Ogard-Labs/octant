@@ -62,7 +62,9 @@ export interface UsageResumeModePort {
   readonly dispatch: (
     record: UsageResumeRecord,
   ) => Promise<
-    { readonly kind: "dispatched" } | { readonly kind: "refused"; readonly detail: string }
+    | { readonly kind: "dispatched" }
+    | { readonly kind: "refused"; readonly detail: string }
+    | { readonly kind: "deferred"; readonly detail: string }
   >;
   /**
    * The thread row clients refresh through, rebuilt with the settle's
@@ -76,6 +78,16 @@ export interface UsageResumeModePort {
     detail: string | undefined,
     nextVersion: number,
   ) => { readonly eventName: string; readonly payload: unknown } | undefined;
+  /**
+   * Applied after the settle append commits. Modes whose live state the
+   * journal does not rebuild for them — the in-memory Work projection —
+   * fold the settled record and the emitted thread row back in here; modes
+   * that read a journaled projection need nothing.
+   */
+  readonly settleApplied?: (
+    usageResumePayload: unknown,
+    emitted: { readonly eventName: string; readonly payload: unknown } | undefined,
+  ) => void;
 }
 
 export interface UsageResumePorts {
@@ -103,9 +115,19 @@ interface UsageResumeServiceOptions {
   /** Injectable so tests drive the reset boundary by hand. */
   readonly schedule?: (atEpochMs: number, fire: () => void) => UsageResumeTimerHandle;
   readonly unschedule?: (handle: UsageResumeTimerHandle) => void;
+  /** How long a deferred dispatch or a failed settle waits before re-arming. */
+  readonly retryAfterMs?: number;
   /** Watches committed appends for schedule, cancel, and supersede events. */
   readonly onError?: (message: string, error: unknown) => void;
 }
+
+/**
+ * `setTimeout` silently clamps a delay above 2^31-1 ms (about 24.8 days) to
+ * one millisecond, so a further-out reset is armed in bounded chunks instead.
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+const DEFER_RETRY_AFTER_MS = 30_000;
 
 const pendingKey = (aggregateType: string, aggregateId: string) =>
   `${aggregateType}::${aggregateId}`;
@@ -324,11 +346,22 @@ export class UsageResumeService {
       queueMicrotask(() => void this.#evaluate(key));
       return;
     }
+    this.#armTimer(pending, at);
+  }
+
+  #armTimer(pending: PendingResume, atEpochMs: number): void {
     const schedule =
       this.#options.schedule ??
-      ((atEpochMs: number, fire: () => void) =>
-        setTimeout(fire, Math.max(0, atEpochMs - Date.now())));
-    pending.timer = schedule(at, () => void this.#evaluate(key));
+      ((at: number, fire: () => void) => setTimeout(fire, Math.max(0, at - Date.now())));
+    const next = Math.min(atEpochMs, this.#options.clock().getTime() + MAX_TIMER_DELAY_MS);
+    pending.timer = schedule(
+      next,
+      () => void this.#evaluate(pendingKey(pending.aggregateType, pending.aggregateId)),
+    );
+  }
+
+  #retryAfterMs(): number {
+    return this.#options.retryAfterMs ?? DEFER_RETRY_AFTER_MS;
   }
 
   #clearTimer(pending: PendingResume): void {
@@ -354,6 +387,13 @@ export class UsageResumeService {
     pending.timer = undefined;
     const port = this.#portFor(pending.aggregateType);
     try {
+      const at = Date.parse(pending.record.resetsAt);
+      if (!Number.isNaN(at) && at > this.#options.clock().getTime()) {
+        // A chunked wait fired early: re-arm for the rest of the reset rather
+        // than inspecting against a limit that has not lifted yet.
+        this.#armTimer(pending, at);
+        return;
+      }
       const verdict = await port.inspect(pending.record);
       if (verdict.kind === "invalid") {
         await this.#settle(pending, "invalidated", verdict.detail);
@@ -362,6 +402,11 @@ export class UsageResumeService {
       const result = await port.dispatch(pending.record);
       if (result.kind === "dispatched") {
         await this.#settle(pending, "dispatched");
+      } else if (result.kind === "deferred") {
+        // The opt-in is still valid but cannot fire yet — for example no
+        // local window has registered since the host restarted. Keep it
+        // armed and re-check on the retry cadence instead of settling.
+        this.#armTimer(pending, this.#options.clock().getTime() + this.#retryAfterMs());
       } else {
         await this.#settle(pending, "failed", result.detail);
       }
@@ -388,23 +433,32 @@ export class UsageResumeService {
     outcome: UsageResumeSettledOutcome,
     detail?: string,
   ): Promise<void> {
-    this.#pending.delete(pendingKey(pending.aggregateType, pending.aggregateId));
+    // Settle details surface to the person and sit in the journal forever;
+    // raw internal error text arrives unbounded, so bound what is kept.
+    const normalizedDetail =
+      detail === undefined ? undefined : detail.trim().slice(0, 512).trim() || undefined;
     const expectedVersion = readAggregateVersion(
       this.#options.connection,
       pending.aggregateType,
       pending.aggregateId,
     );
+    const port = this.#portFor(pending.aggregateType);
     let threadUpdate: { readonly eventName: string; readonly payload: unknown } | undefined;
     try {
-      threadUpdate = this.#portFor(pending.aggregateType).settleUpdate?.(
+      threadUpdate = port.settleUpdate?.(
         pending.record,
         outcome,
-        detail,
+        normalizedDetail,
         expectedVersion + 2,
       );
     } catch (error) {
       this.#options.onError?.("Usage-resume settle could not rebuild the thread update.", error);
     }
+    const settledPayload = {
+      resume: pending.record,
+      outcome,
+      ...(normalizedDetail === undefined ? {} : { detail: normalizedDetail }),
+    };
     try {
       this.#options.journal.append({
         aggregate: {
@@ -421,11 +475,7 @@ export class UsageResumeService {
             correlationId: decodeCorrelationId(this.#options.uuid()),
             actor: { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
             occurredAt: decodeTimestamp(this.#options.clock().toISOString()),
-            payload: {
-              resume: pending.record,
-              outcome,
-              ...(detail === undefined ? {} : { detail }),
-            },
+            payload: settledPayload,
           },
           ...(threadUpdate === undefined
             ? []
@@ -447,7 +497,18 @@ export class UsageResumeService {
         ],
       });
     } catch (error) {
+      // The durable opt-in is still armed: dropping the pending entry here
+      // would strand it until the next restart, so keep it and re-try the
+      // settlement on the retry cadence.
       this.#options.onError?.("Usage-resume settle append failed.", error);
+      this.#armTimer(pending, this.#options.clock().getTime() + this.#retryAfterMs());
+      return;
+    }
+    this.#pending.delete(pendingKey(pending.aggregateType, pending.aggregateId));
+    try {
+      port.settleApplied?.(settledPayload, threadUpdate);
+    } catch (error) {
+      this.#options.onError?.("Usage-resume settle could not update the live mode state.", error);
     }
   }
 

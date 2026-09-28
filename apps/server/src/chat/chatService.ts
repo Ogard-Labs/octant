@@ -2683,8 +2683,10 @@ export class ChatService {
       scheduledAt: decodeTimestamp(this.#clock()),
     };
     const usageResume: UsageResumeThreadState = { record, status: "scheduled" };
+    // Opting in is not a message from the person: it must not unsnooze or
+    // reopen the thread the way a sent turn does.
     const updatedThread = {
-      ...withoutThreadRest(thread),
+      ...thread,
       usageResume,
       version: (command.expectedVersion + 2) as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),
@@ -2719,8 +2721,9 @@ export class ChatService {
       );
     }
     // The cancel event already deleted the resume row; the emitted thread
-    // must not keep reporting the opt-in it just withdrew.
-    const { usageResume: _withdrawn, ...withdrawnThread } = withoutThreadRest(thread);
+    // must not keep reporting the opt-in it just withdrew. Withdrawing is not
+    // a message either, so the thread's snooze or completion stays as it was.
+    const { usageResume: _withdrawn, ...withdrawnThread } = thread;
     const updatedThread = {
       ...withdrawnThread,
       version: (command.expectedVersion + 2) as AggregateVersion,

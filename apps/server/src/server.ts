@@ -44,6 +44,7 @@ import {
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
   ReplayCursor,
+  USAGE_RESUME_SETTLED,
   type AgentRun,
   type AgentRunParentThreadId,
   type CodeCheckoutId,
@@ -6399,6 +6400,15 @@ export function startOctantServer(
           readThread: (threadId) => workThreadProjection.read(threadId),
           listTurns: (threadId) => workTurnProjection.listForThread(threadId),
           startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+          applySettled: (usageResumePayload, threadUpdate) => {
+            workThreadProjection.applyUsageResume({
+              eventName: USAGE_RESUME_SETTLED,
+              payload: usageResumePayload,
+            });
+            if (threadUpdate !== undefined) {
+              workThreadProjection.apply(threadUpdate);
+            }
+          },
         },
         code: {
           readThread: (threadId) => persistence.readCodeThread(threadId),
@@ -6416,8 +6426,16 @@ export function startOctantServer(
       }),
       onError: (message, error) => console.error(`[usage-resume] ${message}`, error),
     });
-    persistence.journal.subscribeCommitted((append) =>
+    const unsubscribeUsageResume = persistence.journal.subscribeCommitted((append) =>
       usageResumeService.onCommittedAppend(append),
+    );
+    // Armed timers can sit hours out; both must go down with the server or a
+    // late fire would read and append against a closed store.
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeUsageResume();
+        usageResumeService.stop();
+      }),
     );
     usageResumeService.start();
     const zenThreadCatalog = new ZenThreadCatalog({

@@ -69,6 +69,15 @@ export interface UsageResumePortDependencies {
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
     readonly startFirstTurn: (windowId: WindowId, input: unknown) => Promise<WorkTurnLookupResult>;
+    /**
+     * The live Work projection is kept in memory rather than rebuilt from a
+     * journaled row, so a settle committed by the scheduler has to be folded
+     * back into it or reads keep reporting `scheduled`.
+     */
+    readonly applySettled?: (
+      usageResumePayload: unknown,
+      threadUpdate: { readonly kind: "thread-updated"; readonly thread: WorkThread } | undefined,
+    ) => void;
   };
   readonly code: {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
@@ -97,6 +106,9 @@ export interface UsageResumePortDependencies {
 
 const invalid = (detail: string) => ({ kind: "invalid" as const, detail });
 const refused = (detail: string) => ({ kind: "refused" as const, detail });
+// The opt-in is still valid but cannot fire yet; the scheduler keeps it
+// armed and re-checks instead of settling a durable record away.
+const deferred = (detail: string) => ({ kind: "deferred" as const, detail });
 const refusalDetail = (error: unknown): string =>
   error instanceof Error ? error.message : "The continuation could not be admitted.";
 
@@ -158,8 +170,11 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         return refused("The recorded stop names no attempt.");
       }
       try {
+        // A limit retry must actually send: `resume-chat-turn` only reattaches
+        // the provider session and persists another waiting attempt, while
+        // `retry-chat-turn` is the admission path that runs a new attempt.
         await deps.chat.execute({
-          kind: "resume-chat-turn",
+          kind: "retry-chat-turn",
           threadId,
           expectedVersion: decodeAggregateVersion(
             readAggregateVersion(deps.connection, "chat-thread", String(threadId)),
@@ -232,7 +247,7 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
     dispatch: async (record) => {
       const windowId = deps.windowId();
       if (windowId === undefined) {
-        return refused("No local window is registered for this host.");
+        return deferred("No local window is registered for this host.");
       }
       const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
       const turn = stoppedTurn(record);
@@ -286,6 +301,17 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         },
       };
     },
+    settleApplied: (usageResumePayload, emitted) => {
+      deps.work.applySettled?.(
+        usageResumePayload,
+        emitted === undefined
+          ? undefined
+          : (emitted.payload as {
+              readonly kind: "thread-updated";
+              readonly thread: WorkThread;
+            }),
+      );
+    },
   };
 }
 
@@ -308,20 +334,29 @@ const codeStoppedTurnState = (
         { kind: "provider-turn-state" }
       >
     | undefined;
-  for (const committed of deps.journal.replayAggregate({
-    aggregateType: "code-operation",
-    aggregateId: operationId,
-    afterVersion: 0,
-    limit: 1_000,
-  })) {
-    if (committed.eventName !== "code.operation-event-recorded@1") continue;
-    const frame = decodeCodeOperationEventFrame(committed.payload);
-    if (
-      frame.event.kind === "operation-result" &&
-      frame.event.result.kind === "provider-turn-state"
-    ) {
-      latest = frame.event.result;
+  // A provider turn journals operation events as it streams, so a long turn
+  // can outgrow one page; the recorded stop always sits at the stream's tail.
+  const pageSize = 1_000;
+  let afterVersion = 0;
+  for (;;) {
+    const page = deps.journal.replayAggregate({
+      aggregateType: "code-operation",
+      aggregateId: operationId,
+      afterVersion,
+      limit: pageSize,
+    });
+    for (const committed of page) {
+      afterVersion = committed.aggregateVersion;
+      if (committed.eventName !== "code.operation-event-recorded@1") continue;
+      const frame = decodeCodeOperationEventFrame(committed.payload);
+      if (
+        frame.event.kind === "operation-result" &&
+        frame.event.result.kind === "provider-turn-state"
+      ) {
+        latest = frame.event.result;
+      }
     }
+    if (page.length < pageSize) break;
   }
   return latest;
 };
@@ -366,7 +401,7 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
     dispatch: async (record) => {
       const windowId = deps.windowId();
       if (windowId === undefined) {
-        return refused("No local window is registered for this host.");
+        return deferred("No local window is registered for this host.");
       }
       const threadId = decodeCodeThreadId(record.threadId);
       const thread = deps.code.readThread(threadId);

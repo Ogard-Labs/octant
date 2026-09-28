@@ -949,6 +949,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const scheduleUsageResume = useCallback(
     (turnId: WorkTurnId) => {
       if (thread === undefined) return;
+      const threadKey = currentThreadKeyRef.current;
       void props.threadClient
         .execute({
           kind: "schedule-work-usage-resume",
@@ -957,10 +958,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           turnId,
         })
         .then((result) => {
+          // The workspace may have switched threads while the command was in
+          // flight; only the initiating thread's answer is allowed to land.
+          if (currentThreadKeyRef.current !== threadKey) return;
           if ("kind" in result && result.kind === "thread-updated") {
             setThread(result.thread);
             props.onThreadUpdated?.(result.thread);
+            return;
           }
+          setErrorMessage("The usage-limit resume could not be scheduled.");
+        })
+        .catch(() => {
+          if (currentThreadKeyRef.current !== threadKey) return;
+          setErrorMessage("The usage-limit resume could not be scheduled.");
         });
     },
     [props, thread],
@@ -968,6 +978,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   const cancelUsageResume = useCallback(() => {
     if (thread === undefined) return;
+    const threadKey = currentThreadKeyRef.current;
     void props.threadClient
       .execute({
         kind: "cancel-work-usage-resume",
@@ -975,10 +986,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         expectedVersion: thread.version,
       })
       .then((result) => {
+        if (currentThreadKeyRef.current !== threadKey) return;
         if ("kind" in result && result.kind === "thread-updated") {
           setThread(result.thread);
           props.onThreadUpdated?.(result.thread);
+          return;
         }
+        setErrorMessage("The scheduled resume could not be withdrawn.");
+      })
+      .catch(() => {
+        if (currentThreadKeyRef.current !== threadKey) return;
+        setErrorMessage("The scheduled resume could not be withdrawn.");
       });
   }, [props, thread]);
 
@@ -1387,7 +1405,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     providerGroups={props.providerGroups ?? []}
                     resumable={String(row.head.turnId) === String(turns.at(-1)?.turnId)}
                     turn={row.head}
-                    {...(thread?.usageResume === undefined
+                    {...(thread?.usageResume === undefined ||
+                    String(thread.usageResume.record.turnId) !== String(row.head.turnId)
                       ? {}
                       : { usageResume: thread.usageResume })}
                   />
@@ -1408,7 +1427,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   providerGroups={props.providerGroups ?? []}
                   resumable={String(row.turn.turnId) === String(turns.at(-1)?.turnId)}
                   turn={row.turn}
-                  {...(thread?.usageResume === undefined
+                  {...(thread?.usageResume === undefined ||
+                  String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
                     ? {}
                     : { usageResume: thread.usageResume })}
                 />

@@ -501,7 +501,11 @@ detail) stays on the thread until a newer thread event replaces it.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as
-`failed`. The scheduler is deliberately narrow under the release boundary: an
+`failed`. A dispatch that cannot yet reach its admission path — the mode has
+no window registered on this host to carry the continuation — is deferred
+rather than settled: the opt-in stays armed and re-evaluates on a bounded
+retry cadence until it dispatches, invalidates, or is cancelled. The scheduler
+is deliberately narrow under the release boundary: an
 in-process host timer over journaled opt-ins, not a scheduling product — no
 cloud wake, no background claim beyond the host's own running process, and no
 billing automation. A host that was down or unreachable at the reset instant

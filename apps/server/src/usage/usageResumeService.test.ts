@@ -154,11 +154,13 @@ function turn(overrides: Record<string, unknown> = {}) {
 }
 
 type SettleUpdateFn = NonNullable<UsageResumeModePort["settleUpdate"]>;
+type SettleAppliedFn = NonNullable<UsageResumeModePort["settleApplied"]>;
 
 interface PortSpies {
   readonly inspect: MockedFunction<UsageResumeModePort["inspect"]>;
   readonly dispatch: MockedFunction<UsageResumeModePort["dispatch"]>;
   readonly settleUpdate: MockedFunction<SettleUpdateFn>;
+  readonly settleApplied: MockedFunction<SettleAppliedFn>;
 }
 
 function portSpies(overrides: Partial<UsageResumeModePort> = {}): PortSpies {
@@ -170,6 +172,7 @@ function portSpies(overrides: Partial<UsageResumeModePort> = {}): PortSpies {
       overrides.dispatch ?? (async () => ({ kind: "dispatched" }) as const),
     ),
     settleUpdate: vi.fn<SettleUpdateFn>(overrides.settleUpdate ?? (() => undefined)),
+    settleApplied: vi.fn<SettleAppliedFn>(overrides.settleApplied ?? (() => undefined)),
   };
 }
 
@@ -177,8 +180,9 @@ function serviceWith(
   connection: SqliteConnection,
   spies: { chat: PortSpies; work: PortSpies; code: PortSpies },
 ) {
+  const store = journal(connection);
   const service = new UsageResumeService({
-    journal: journal(connection),
+    journal: store,
     connection,
     clock: () => new Date(nowMs),
     uuid: () => crypto.randomUUID(),
@@ -187,16 +191,19 @@ function serviceWith(
         inspect: spies.chat.inspect,
         dispatch: spies.chat.dispatch,
         settleUpdate: spies.chat.settleUpdate,
+        settleApplied: spies.chat.settleApplied,
       },
       work: {
         inspect: spies.work.inspect,
         dispatch: spies.work.dispatch,
         settleUpdate: spies.work.settleUpdate,
+        settleApplied: spies.work.settleApplied,
       },
       code: {
         inspect: spies.code.inspect,
         dispatch: spies.code.dispatch,
         settleUpdate: spies.code.settleUpdate,
+        settleApplied: spies.code.settleApplied,
       },
     },
     schedule: (at, fire) => {
@@ -211,12 +218,13 @@ function serviceWith(
       console.error("[usage-resume-test]", message, error);
     },
   });
-  const store = journal(connection);
   store.subscribeCommitted((append) => service.onCommittedAppend(append));
   return { service, store };
 }
 
 function fireDue(atMs: number) {
+  // Firing a timer means the clock reached it.
+  nowMs = Math.max(nowMs, atMs);
   for (const [handle, timer] of timers) {
     if (timer.at <= atMs) {
       timers.delete(handle);
@@ -271,6 +279,10 @@ describe("UsageResumeService", () => {
       expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
     );
     expect(listPendingUsageResumes(connection)).toHaveLength(0);
+    expect(spies.chat.settleApplied).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "dispatched" }),
+      undefined,
+    );
   });
 
   it("journals the settle and the thread's updated resume state in one append", async () => {
@@ -546,6 +558,105 @@ describe("UsageResumeService", () => {
       expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("failed"),
     );
     expect(resumeRow(connection, "chat-thread", ids.thread)?.detail).toBe("A request is pending.");
+  });
+
+  it("stays armed on the retry cadence while the mode cannot dispatch yet", async () => {
+    const connection = openConnection();
+    const dispatch = vi
+      .fn<UsageResumeModePort["dispatch"]>()
+      .mockResolvedValueOnce({
+        kind: "deferred",
+        detail: "No local window is registered for this host.",
+      })
+      .mockResolvedValue({ kind: "dispatched" });
+    const spies = { chat: portSpies({ dispatch }), work: portSpies(), code: portSpies() };
+    const { store } = serviceWith(connection, spies);
+    seededChatThread(connection);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: record() })],
+    });
+
+    fireDue(Date.parse(RESET));
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+    // Nothing settled: the durable opt-in stays armed for the retry cadence.
+    expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("scheduled");
+    expect(listPendingUsageResumes(connection)).toHaveLength(1);
+    expect(timers.size).toBe(1);
+
+    fireDue(nowMs + 30_000);
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
+    );
+  });
+
+  it("keeps the opt-in armed when its settlement cannot commit", async () => {
+    const connection = openConnection();
+    const spies = { chat: portSpies(), work: portSpies(), code: portSpies() };
+    const { store } = serviceWith(connection, spies);
+    seededChatThread(connection);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: record() })],
+    });
+    const appendSpy = vi.spyOn(store, "append");
+    appendSpy.mockImplementationOnce(() => {
+      throw new Error("commit failed");
+    });
+
+    fireDue(Date.parse(RESET));
+    await vi.waitFor(() => expect(spies.chat.dispatch).toHaveBeenCalledOnce());
+    // The projection still says scheduled and the pending entry re-armed
+    // instead of disappearing until the next restart.
+    expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("scheduled");
+    expect(listPendingUsageResumes(connection)).toHaveLength(1);
+    expect(timers.size).toBe(1);
+
+    fireDue(nowMs + 30_000);
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
+    );
+  });
+
+  it("waits out a reset further than a single timer can hold", async () => {
+    const connection = openConnection();
+    const spies = { chat: portSpies(), work: portSpies(), code: portSpies() };
+    const { store } = serviceWith(connection, spies);
+    seededChatThread(connection);
+    const farReset = new Date(Date.parse(RESET) + 2_200_000_000).toISOString();
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending(USAGE_RESUME_SCHEDULED, {
+          resume: record({
+            resetsAt: farReset as UtcTimestamp,
+            usageLimit: { kind: "exhausted", resetsAt: farReset as UtcTimestamp },
+          }),
+        }),
+      ],
+    });
+
+    // The wait is armed in a bounded chunk rather than overflowing the timer.
+    const first = [...timers.values()].at(0);
+    expect(first?.at).toBeLessThan(Date.parse(farReset));
+
+    fireDue(first?.at ?? 0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(spies.chat.inspect).not.toHaveBeenCalled();
+    expect(spies.chat.dispatch).not.toHaveBeenCalled();
+    expect(timers.size).toBe(1);
+    expect([...timers.values()].at(0)?.at).toBe(Date.parse(farReset));
+
+    fireDue(Date.parse(farReset));
+    await vi.waitFor(() => expect(spies.chat.dispatch).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
+    );
   });
 
   it("evaluates a resume whose reset passed while the host was away on start", async () => {
