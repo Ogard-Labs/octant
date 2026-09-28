@@ -21,6 +21,7 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 1. Scratch Code project: `git init /tmp/ade-demo && git -C /tmp/ade-demo commit --allow-empty -qm init` (Code binding inspects git — an empty dir fails; `--allow-empty` is required since nothing is staged), then from the Octant repo root `bun run packages/cli/src/bin.ts project add /tmp/ade-demo --type code --name ade-demo`.
 2. `octant project access <name> full-access` sets `codeAccessPersistence: "project-default"` (the "Project remembers Full access" flag); `... approval-gated` resets to `current-session`.
 3. Codex CLI instance auto-registers on first app load via discovery (no manual scan needed if `codex` is on PATH and logged in).
+4. If a provider turn fails in the UI with "Provider execution failed." minutes after working, suspect a stale codex key: `~/.codex/auth.json` keeps the key from the last login, and a new session `OPENAI_API_KEY` makes the stored one return 401 `invalid_api_key`. Confirm with `codex exec --model <m> "Reply with exactly: PING-OK"` in a scratch repo, then re-login (`printenv OPENAI_API_KEY | codex login --with-api-key`) — `--with-api-key` reads stdin, it does not take the key as an argument.
 
 ## UI paths
 
