@@ -38,6 +38,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
+import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
 import { Check, CirclePause, Ellipsis, FileText, FolderOpen } from "lucide-react";
 import {
   useCallback,
@@ -828,6 +829,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       setBrowserApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
       );
+      // An always-allow grant is journaled by the server, outside this
+      // window's shell commands — the shell controller re-reads on the signal
+      // so its next settings edit does not conflict on a stale version.
+      if (decision === "approved" && remember === true) announceShellSettingsWritten();
     } catch {
       setBrowserApprovalMessage(
         "Browser approval could not be sent. Keep this request open and retry.",

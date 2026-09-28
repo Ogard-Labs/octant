@@ -234,7 +234,10 @@ the prompt with "always allow" journals the origin into shell settings, so a
 new browsing context for that origin opens without asking — in Code, in Work,
 and for later sessions — until the person forgets it under Settings; rebinding
 an existing context to a different model or authority still asks, because the
-remembered grant covers the page, not who drives it. See
+remembered grant covers the page, not who drives it. The remembered set grows
+only through that approval answer: `replace-settings` may remove an origin but
+rejects additions, so a client cannot grant itself origins the prompt never
+showed. See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
 Tool definitions carry the agent's usage guidance alongside their argument

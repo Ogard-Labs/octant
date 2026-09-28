@@ -3754,24 +3754,23 @@ export function startOctantServer(
     const rememberedBrowserOrigins = () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings())
         .rememberedBrowserOrigins;
-    // An "always allow" answer journals the origin into shell settings; a
-    // concurrent settings write can lose the race, so the append retries on
-    // the fresh version once. A window that went away between prompt and
-    // answer cannot journal — its grant is then session-only, like approve-once.
+    // An "always allow" answer journals the origin into shell settings through
+    // the host-owned path — `replace-settings` itself cannot add origins, since
+    // a window capability would let a client grant itself an origin the prompt
+    // never showed. A concurrent settings write can lose the race, so the
+    // append retries on the fresh version once. A window that went away between
+    // prompt and answer cannot journal — its grant is then session-only, like
+    // approve-once.
     const rememberBrowserOrigin = (windowId: WindowId, origin: string) => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const stored = persistence.readShellSettings();
         const current = stored?.settings ?? defaultShellSettings();
         if (current.rememberedBrowserOrigins.includes(origin)) return;
         try {
-          shellService.execute({
-            kind: "replace-settings",
+          shellService.rememberBrowserOrigins({
             windowId,
             expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
-            settings: {
-              ...current,
-              rememberedBrowserOrigins: [...current.rememberedBrowserOrigins, origin],
-            },
+            origins: [origin],
           });
           return;
         } catch (error) {

@@ -62,6 +62,17 @@ export interface ShellServiceApi {
   readonly hasLiveWindow: (windowId: WindowId) => boolean;
   readonly revokeWindow: (windowId: WindowId) => void;
   readonly execute: (command: unknown) => ShellCommandResult;
+  /**
+   * Host-owned growth of the remembered Browser grants. `replace-settings`
+   * deliberately cannot add origins — a window capability would let a client
+   * grant itself origins the approval prompt never showed — so the approval
+   * decision path journals the merge through here instead.
+   */
+  readonly rememberBrowserOrigins: (input: {
+    readonly windowId: WindowId;
+    readonly expectedVersion: AggregateVersion;
+    readonly origins: ReadonlyArray<string>;
+  }) => ShellCommandResult;
 }
 
 export interface ShellServiceOptions {
@@ -114,6 +125,41 @@ export class ShellService implements ShellServiceApi {
 
   revokeWindow(windowId: WindowId): void {
     this.#registeredWindowIds.delete(windowId);
+  }
+
+  rememberBrowserOrigins(input: {
+    readonly windowId: WindowId;
+    readonly expectedVersion: AggregateVersion;
+    readonly origins: ReadonlyArray<string>;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      if (!this.#registeredWindowIds.has(input.windowId)) {
+        throw new ShellServiceError({
+          category: "invalid",
+          message: "Shell command window is not registered with this server session.",
+        });
+      }
+      const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const merged = current.rememberedBrowserOrigins.concat(
+        input.origins.filter((origin) => !current.rememberedBrowserOrigins.includes(origin)),
+      );
+      const settings = this.#withJudgedDefaultFolder({
+        ...current,
+        rememberedBrowserOrigins: merged,
+      });
+      const committed = this.#persistence.journal.append({
+        aggregate: {
+          aggregateType: "shell-settings",
+          aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
+        },
+        expectedVersion: input.expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+      });
+      return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
   }
 
   /**
