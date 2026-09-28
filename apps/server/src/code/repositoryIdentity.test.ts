@@ -136,6 +136,7 @@ function makeDependencies(options: {
   readonly notRepository?: boolean;
   readonly failCommand?: string;
   readonly failStderr?: string;
+  readonly gitVersion?: string;
 }) {
   const canonicalRoot = options.canonicalRoot ?? options.root;
   const commonDirectory = options.commonDirectory ?? "/identity/common";
@@ -161,6 +162,9 @@ function makeDependencies(options: {
       const command = args.slice(2).join(" ");
       if (command === options.failCommand) {
         return { exitCode: 1, stdout: "", stderr: options.failStderr ?? "" };
+      }
+      if (command === "--version") {
+        return { exitCode: 0, stdout: `git version ${options.gitVersion ?? "2.50.0"}\n` };
       }
       if (command === "rev-parse --is-bare-repository") {
         return options.notRepository
@@ -275,6 +279,21 @@ describe("observeRepositoryIdentity", () => {
         command: "worktree list --porcelain -z",
         stderr: "error: unknown switch `z'",
       },
+    });
+  });
+
+  it("refuses by version before any repository command when the host Git is older than the minimum", async () => {
+    const tooOld = makeDependencies({ root: "/repo", gitVersion: "2.34.1" });
+    expect(await observeRepositoryIdentity("/repo", tooOld, signal)).toEqual({
+      status: "failed",
+      git: { command: "--version", stderr: "", version: "2.34.1" },
+    });
+  });
+
+  it("observes a bound checkout on the minimum Git version", async () => {
+    const atMinimum = makeDependencies({ root: "/repo", gitVersion: "2.36" });
+    expect(await observeRepositoryIdentity("/repo", atMinimum, signal)).toMatchObject({
+      status: "available",
     });
   });
 

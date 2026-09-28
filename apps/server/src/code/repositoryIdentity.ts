@@ -55,6 +55,14 @@ export type ObservedGitWorktree =
   | Readonly<ParsedGitWorktree & { status: "present"; canonicalPath: string }>
   | Readonly<ParsedGitWorktree & { status: "missing-prunable" }>;
 
+/**
+ * `git worktree list --porcelain -z` — the inventory read every binding and
+ * observation depends on — needs Git 2.36. Older stock installs (Ubuntu
+ * 22.04 ships 2.34) must be refused by version rather than by a generic
+ * command failure.
+ */
+export const MINIMUM_GIT_VERSION = "2.36";
+
 export type RepositoryIdentityObservation =
   | Readonly<{
       status: "available";
@@ -69,7 +77,7 @@ export type RepositoryIdentityObservation =
   | Readonly<{ status: "ineligible"; reason: "bare" | "submodule" | "not-worktree" }>
   | Readonly<{
       status: "failed";
-      git?: Readonly<{ command: string; stderr: string }>;
+      git?: Readonly<{ command: string; stderr: string; version?: string }>;
     }>;
 
 class GitObservationFailure extends Error {
@@ -128,6 +136,17 @@ export async function observeRepositoryIdentity(
   try {
     const run = (args: readonly string[]) =>
       dependencies.runGit(["-C", repositoryRoot, ...args], signal);
+    const versionResult = await run(["--version"]);
+    const foundVersion =
+      versionResult.exitCode === 0
+        ? /git version (\d+\.\d+(?:\.\d+)?)/.exec(versionResult.stdout)?.[1]
+        : undefined;
+    if (foundVersion !== undefined && compareGitVersions(foundVersion, MINIMUM_GIT_VERSION) < 0) {
+      return {
+        status: "failed",
+        git: { command: "--version", stderr: "", version: foundVersion },
+      };
+    }
     const repositoryProbe = await run(["rev-parse", "--is-bare-repository"]);
     if (repositoryProbe.exitCode !== 0) {
       return { status: "unavailable", reason: "not-repository" };
@@ -192,6 +211,16 @@ export async function observeRepositoryIdentity(
       ? { status: "failed", git: { command: error.command, stderr: error.stderr } }
       : { status: "failed" };
   }
+}
+
+export function compareGitVersions(found: string, required: string): number {
+  const foundParts = found.split(".").map(Number);
+  const requiredParts = required.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const delta = (foundParts[index] ?? 0) - (requiredParts[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
 }
 
 export function parseWorktreePorcelain(value: string): readonly ParsedGitWorktree[] {

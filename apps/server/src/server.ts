@@ -14,7 +14,7 @@ import {
   type ComputerUseOwner,
 } from "@octant/contracts/computer-use-plugin";
 import { GitHistoryPort } from "./code/gitHistoryPort";
-import type { RepositoryIdentityObservation } from "./code/repositoryIdentity";
+import { MINIMUM_GIT_VERSION, type RepositoryIdentityObservation } from "./code/repositoryIdentity";
 import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
@@ -1173,8 +1173,11 @@ function unavailableCheckoutMessage(
 ): string {
   if (observation.status === "failed") {
     if (observation.git !== undefined) {
+      if (observation.git.version !== undefined) {
+        return `Git ${observation.git.version} found; Octant needs Git ${MINIMUM_GIT_VERSION} or newer on the host.`;
+      }
       const detail = observation.git.stderr === "" ? "" : ` (${observation.git.stderr})`;
-      return `Git could not inspect the bound Code folder: \`git ${observation.git.command}\` failed${detail}. Octant needs Git 2.36 or newer on the host.`;
+      return `Git could not inspect the bound Code folder: \`git ${observation.git.command}\` failed${detail}. Octant needs Git ${MINIMUM_GIT_VERSION} or newer on the host.`;
     }
     return "The bound Code folder could not be inspected. Check that Octant still has access to it.";
   }
