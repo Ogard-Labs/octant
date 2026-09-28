@@ -1601,6 +1601,12 @@ describe("startOctantServer", () => {
         git: { command: "worktree list --porcelain -z", stderr: "error: unknown switch `z'" },
       }),
     ).rejects.toThrow(/Git 2\.36 or newer/);
+    await expect(
+      observing({
+        status: "failed",
+        git: { command: "--version", stderr: "", version: "2.34.1" },
+      }),
+    ).rejects.toThrow(/Git 2\.34\.1 found; Octant needs Git 2\.36 or newer/);
 
     // Only the genuinely repository-less folder is told to run git init.
     for (const observed of [
