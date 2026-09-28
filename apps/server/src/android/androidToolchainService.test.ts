@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   AndroidDiscoveryRequest,
   AndroidEmulatorRequest,
@@ -26,6 +28,9 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
 
 let AndroidToolchainService: ServiceConstructor;
 let isReplayedAndroidEvidence: (value: unknown) => boolean;
+let androidToolchainStorePaths: (
+  environment: Readonly<Record<string, string | undefined>>,
+) => ReadonlyArray<string>;
 
 beforeAll(async () => {
   const path = "./androidToolchainService";
@@ -34,6 +39,8 @@ beforeAll(async () => {
   expect(loaded?.AndroidToolchainService).toBeTypeOf("function");
   AndroidToolchainService = loaded!.AndroidToolchainService as ServiceConstructor;
   isReplayedAndroidEvidence = loaded!.isReplayedAndroidEvidence as typeof isReplayedAndroidEvidence;
+  androidToolchainStorePaths = loaded!
+    .androidToolchainStorePaths as typeof androidToolchainStorePaths;
 });
 
 const ids = {
@@ -133,6 +140,77 @@ function action(kind: AndroidEmulatorRequest["kind"], extra: Record<string, unkn
 }
 
 describe("AndroidToolchainService", () => {
+  it("names the AVD store, and a configured ANDROID_AVD_HOME, as state confined commands may write", () => {
+    expect(androidToolchainStorePaths({})).toEqual([join(homedir(), ".android")]);
+    expect(androidToolchainStorePaths({ ANDROID_AVD_HOME: "/store/avds" })).toEqual([
+      join(homedir(), ".android"),
+      "/store/avds",
+    ]);
+    // An explicitly empty override is unset: forwarding "" would make the
+    // confinement builder refuse every Android command, not just this one.
+    expect(androidToolchainStorePaths({ ANDROID_AVD_HOME: "" })).toEqual([
+      join(homedir(), ".android"),
+    ]);
+  });
+
+  it("drops an empty ANDROID_AVD_HOME instead of forwarding it to toolchain commands", async () => {
+    const environments: Array<Record<string, string>> = [];
+    const base = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute: vi.fn(
+        async (input: {
+          readonly argv: ReadonlyArray<string>;
+          readonly environment: Record<string, string>;
+        }) => {
+          environments.push(input.environment);
+          return base(input);
+        },
+      ),
+      access: async () => undefined,
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk", ANDROID_AVD_HOME: "" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+    });
+    try {
+      await service.discover(discoveryRequest, context);
+      expect(environments.length).toBeGreaterThan(0);
+      expect(environments.every((env) => env.ANDROID_AVD_HOME === undefined)).toBe(true);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("passes a configured ANDROID_AVD_HOME through to toolchain commands", async () => {
+    const environments: Array<Record<string, string>> = [];
+    const base = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute: vi.fn(
+        async (input: {
+          readonly argv: ReadonlyArray<string>;
+          readonly environment: Record<string, string>;
+        }) => {
+          environments.push(input.environment);
+          return base(input);
+        },
+      ),
+      access: async () => undefined,
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk", ANDROID_AVD_HOME: "/store/avds" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+    });
+    try {
+      await service.discover(discoveryRequest, context);
+      expect(environments.length).toBeGreaterThan(0);
+      expect(environments.every((env) => env.ANDROID_AVD_HOME === "/store/avds")).toBe(true);
+    } finally {
+      await service.close();
+    }
+  });
+
   it.each([false, true])(
     "keeps a newer empty discovery when an older listing finishes (initially populated: %s)",
     async (populated) => {

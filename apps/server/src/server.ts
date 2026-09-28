@@ -659,6 +659,7 @@ import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDeskt
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import {
   AndroidToolchainService,
+  androidToolchainStorePaths,
   isReplayedAndroidEvidence,
   type AndroidExecutionContext,
 } from "./android/androidToolchainService";
@@ -4682,6 +4683,7 @@ export function startOctantServer(
     );
     const androidProcess = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "android-runtime", "test-receipts"),
+      additionalWritePaths: androidToolchainStorePaths(process.env),
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => androidProcess.reconcile());

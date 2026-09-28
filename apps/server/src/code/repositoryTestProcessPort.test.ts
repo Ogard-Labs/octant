@@ -236,6 +236,50 @@ describe("RepositoryTestProcessPort", () => {
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });
 
+  it("lets a confined child read and write a store directory beneath the denied private home", async () => {
+    const child = fakeChild(96);
+    const spawn = vi.fn(() => child);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const store = join(fake.root, ".android");
+    const sibling = join(fake.root, ".codex");
+    mkdirSync(store);
+    mkdirSync(sibling);
+    const port = new RepositoryTestProcessPort({
+      platform: "darwin",
+      sandboxPath: fake.sandboxPath,
+      temporaryDirectory: fake.temporaryDirectory,
+      seatbeltHomeDirectory: fake.root,
+      seatbeltUsersDirectory: fake.root,
+      spawn,
+      networkEgress: "none",
+      additionalWritePaths: [store],
+    });
+    const execution = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    const firstCall = spawn.mock.calls[0] as unknown as [string, string[], unknown?];
+    const profile = String(firstCall[1][1]);
+    const resolvedStore = realpathSync(store);
+    // A sibling private directory stays denied; the named store is allowed
+    // for both reads and writes, and the allowances land after the denial so
+    // last-match-wins resolution keeps them.
+    const siblingDenial = profile.indexOf(`(deny file-read* (subpath "${realpathSync(sibling)}"))`);
+    expect(siblingDenial).toBeGreaterThanOrEqual(0);
+    expect(profile).not.toContain(`(deny file-read* (subpath "${resolvedStore}"))`);
+    expect(profile.indexOf(`(allow file-read* (subpath "${resolvedStore}"))`)).toBeGreaterThan(
+      siblingDenial,
+    );
+    expect(profile.indexOf(`(allow file-write* (subpath "${resolvedStore}"))`)).toBeGreaterThan(
+      siblingDenial,
+    );
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
   it("forwards simulator control to the confinement only when the caller asks for it", async () => {
     // The Apple toolchain port is the only caller that sets this, and the
     // profile's Simulator rules only exist when it arrives. A regression that

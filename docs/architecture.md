@@ -1050,6 +1050,14 @@ mechanisms are:
   runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+  Toolchain commands the Android workbench issues keep their own deliberate
+  carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
+  plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even
+  under the private-home deny, because `emulator -list-avds` exits 0 with an
+  empty list when it cannot reach the store and the pane would report no
+  devices forever. An empty `ANDROID_AVD_HOME` is treated as unset rather than
+  forwarded, since a non-absolute grant path would make the confinement
+  builder refuse every Android command.
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use
