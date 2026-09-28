@@ -185,6 +185,7 @@ describe("PersistenceLive", () => {
         { name: "project-terminal", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
+        { name: "usage-resume", lastSequence: 1, lag: 0 },
         { name: "spend-ceilings", lastSequence: 1, lag: 0 },
       ],
     });
@@ -471,6 +472,7 @@ describe("PersistenceLive", () => {
         { projection_name: "project-terminal", global_sequence: 1, reason },
         { projection_name: "thread-retention", global_sequence: 1, reason },
         { projection_name: "thread-external-content-taint", global_sequence: 1, reason },
+        { projection_name: "usage-resume", global_sequence: 1, reason },
         { projection_name: "spend-ceilings", global_sequence: 1, reason },
       ]);
       inspected.close();
