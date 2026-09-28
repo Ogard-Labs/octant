@@ -2395,6 +2395,38 @@ describe("CodeOperationService terminal readers", () => {
     expect(terminals.launch).toHaveBeenCalledOnce();
   });
 
+  it("restarts a shell whose settled identifier still lingers in the owner record", async () => {
+    const { service, terminals } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    // The process is already gone but the owner record has not caught up —
+    // its exit emission is delayed, or no observer ever armed to deliver it.
+    terminals.attach.mockReturnValue({
+      terminalId: ids.terminal,
+      status: "exited",
+      canRerun: true,
+      exitCode: 0,
+      transcript: { chunks: ["boot"], byteLength: 4, truncated: false, characters: 4 },
+    } as never);
+
+    const restarted = await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: second,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    expect(restarted).toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(terminals.launch).toHaveBeenCalledTimes(2);
+  });
+
   it("stops a terminal nothing can be journaled to any more", async () => {
     const { emit, events, service, terminals } = readerFixture();
     await service.execute(ids.window, {

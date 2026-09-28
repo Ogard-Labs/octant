@@ -1552,12 +1552,30 @@ export class CodeOperationService {
             "invalid",
             "Terminal credential authority is invalid.",
           );
-        if (this.#terminalOwners.has(command.terminalId))
-          return this.#failed(
-            command.operationId,
-            "unavailable",
-            "This terminal identifier is already in use.",
-          );
+        const existingOwner = this.#terminalOwners.get(command.terminalId);
+        if (existingOwner !== undefined) {
+          // The identifier is taken while the launch is in flight or the
+          // process still runs. A settled owner's record can linger past the
+          // exit — until its emission lands, and forever when the launch's own
+          // snapshot already said exited and no observer ever armed — so
+          // ownership alone cannot be the collision test the terminal port
+          // itself applies.
+          let running = existingOwner.starting !== undefined;
+          if (!running) {
+            try {
+              running = this.#options.terminals.attach(command.terminalId).status === "running";
+            } catch {
+              running = false;
+            }
+          }
+          if (running)
+            return this.#failed(
+              command.operationId,
+              "unavailable",
+              "This terminal identifier is already in use.",
+            );
+          this.#deactivateTerminalOutput(command.terminalId);
+        }
         const owner: TerminalOwner = {
           windowId: String(windowId),
           threadId: thread.id,
