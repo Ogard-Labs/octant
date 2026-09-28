@@ -1211,6 +1211,65 @@ describe("ShellService", () => {
     expect(append).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses remembered browser origins added through replace-settings and journals them through the host path", () => {
+    const { persistence, append } = persistenceStub();
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const remembered = {
+      ...defaultShellSettings(),
+      rememberedBrowserOrigins: ["https://a.example"],
+    };
+
+    expect(() =>
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 0,
+          settings: remembered,
+        }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(append).not.toHaveBeenCalled();
+
+    expect(
+      service.rememberBrowserOrigins({
+        windowId: ids.window,
+        expectedVersion: 0 as never,
+        origins: ["https://a.example"],
+      }),
+    ).toEqual({ kind: "settings-replaced", settings: remembered, version: 1 });
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 0,
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            payload: { settings: remembered },
+          }),
+        ],
+      }),
+    );
+
+    // Forgetting an origin stays an ordinary settings write.
+    expect(
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 1,
+          settings: { ...remembered, rememberedBrowserOrigins: [] },
+        }),
+      ),
+    ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserOrigins: [] } });
+  });
+
   it("refuses a default folder outside the home folder before journaling it", () => {
     const { persistence, append } = persistenceStub();
     const service = new ShellService({

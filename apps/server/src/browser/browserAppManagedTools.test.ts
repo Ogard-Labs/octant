@@ -77,6 +77,62 @@ describe("createBrowserAppManagedTools", () => {
     expect(create).toHaveBeenCalledOnce();
   });
 
+  it("opens a remembered origin in a new context without asking again", async () => {
+    const create = vi.fn(async () =>
+      snapshot({
+        status: "running",
+        context: {
+          contextId: "50000000-0000-4000-8000-000000000001" as never,
+          threadId,
+          actionId: "60000000-0000-4000-8000-000000000001" as never,
+          correlationId: "70000000-0000-4000-8000-000000000001" as never,
+          authority,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 8,
+            sessionTimeoutMs: 600_000,
+          },
+          state: "active",
+          createdAt: "2026-09-09T10:00:00.000Z" as never,
+        },
+      }),
+    );
+    const act = vi.fn(async () =>
+      snapshot({ status: "running", observation: { revision: 7 } as never }),
+    );
+    const approval = vi.fn(async () => "approved" as const);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => snapshot(),
+        create,
+        act,
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      approvals: { request: approval, isRemembered: () => true } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/path" }),
+    });
+    expect(result).toMatchObject({
+      isError: false,
+      result: { page: { observationRevision: 7 } },
+    });
+    expect(approval).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
+  });
+
   it("keeps the active context's approved model binding across turn tool sets", async () => {
     const contextId = "50000000-0000-4000-8000-000000000009";
     const modelBindings = new Map<string, BrowserModelBinding>([

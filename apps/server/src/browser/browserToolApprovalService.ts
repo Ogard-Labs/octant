@@ -17,6 +17,17 @@ interface BrowserToolApprovalServiceOptions {
     authority: ToolActionAuthority,
     windowId: WindowId,
   ) => boolean;
+  /**
+   * Persist a granted origin so later requests for it never prompt. Wired to
+   * the journaled shell settings at composition; absent, "always allow"
+   * decisions approve once and remember nothing.
+   */
+  readonly rememberOrigin?: (origin: string, windowId: WindowId) => void;
+  /**
+   * Whether the origin already holds a remembered grant. Read live: a grant
+   * forgotten in Settings stops satisfying this at once.
+   */
+  readonly isOriginRemembered?: (origin: string) => boolean;
 }
 
 interface PendingApproval {
@@ -111,7 +122,18 @@ export class BrowserToolApprovalService {
       return false;
     }
     pending.resolve(decision.decision);
+    if (decision.decision === "approved" && decision.remember === true) {
+      this.#options.rememberOrigin?.(pending.view.origin, pending.windowId);
+    }
     return true;
+  }
+
+  /**
+   * Whether a request for this origin settles approved without a prompt — a
+   * grant remembered from an earlier "always allow" decision.
+   */
+  isRemembered(origin: string): boolean {
+    return this.#options.isOriginRemembered?.(origin) === true;
   }
 
   revokeWindow(windowId: WindowId): void {

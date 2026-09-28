@@ -88,6 +88,7 @@ const settings = {
   imageGeneration: { customSources: [] },
   computerUse: { enabled: true, automaticUpdates: true },
   standaloneSkillActivations: {},
+  rememberedBrowserOrigins: [],
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

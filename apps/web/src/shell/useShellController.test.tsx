@@ -32,6 +32,7 @@ import { createShellClient, type ShellClient } from "@octant/client-runtime";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useShellController } from "./useShellController";
+import { SHELL_SETTINGS_WRITTEN } from "./shellSettingsNotifications";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000601");
 
@@ -131,7 +132,15 @@ function statefulClient(initial = codeBootstrap()) {
     return { kind: "workspace-replaced", workspace, version: state.workspaceVersion };
   });
   const client: ShellClient = { bootstrap, execute };
-  return { client, execute, bootstrap, read: () => state };
+  return {
+    client,
+    execute,
+    bootstrap,
+    read: () => state,
+    write: (next: typeof initial) => {
+      state = next;
+    },
+  };
 }
 
 type PaneNode = Extract<WorkspaceLayoutNode, { kind: "pane" }>;
@@ -3119,5 +3128,59 @@ describe("useShellController", () => {
     act(() => result.current.closeSettings());
     expect(result.current.settingsOpen).toBe(false);
     expect(result.current.workspace).toBe(workspace);
+  });
+
+  it("picks up a settings write the host journaled when Settings opens", async () => {
+    // The approval path writes a remembered browser grant on the server; no
+    // execute ran through this window, so only a fresh bootstrap sees it.
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.settings?.rememberedBrowserOrigins).toEqual([]);
+
+    const journaled = server.read();
+    server.write({
+      ...journaled,
+      settings: {
+        ...journaled.settings,
+        rememberedBrowserOrigins: ["https://example.com"],
+      },
+      settingsVersion: (journaled.settingsVersion + 1) as ShellBootstrap["settingsVersion"],
+    });
+
+    await act(async () => result.current.openSettings());
+    await waitFor(() =>
+      expect(result.current.settings?.rememberedBrowserOrigins).toEqual(["https://example.com"]),
+    );
+    expect(result.current.status).toBe("ready");
+  });
+
+  it("re-reads shell state when the host announces a settings write it journaled itself", async () => {
+    // An always-allow approval writes remembered origins on the server; the
+    // window that answered refreshes quietly so its next settings edit does
+    // not conflict on the version it never saw.
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    const journaled = server.read();
+    server.write({
+      ...journaled,
+      settings: {
+        ...journaled.settings,
+        rememberedBrowserOrigins: ["https://example.com"],
+      },
+      settingsVersion: (journaled.settingsVersion + 1) as ShellBootstrap["settingsVersion"],
+    });
+
+    act(() => window.dispatchEvent(new Event(SHELL_SETTINGS_WRITTEN)));
+    await waitFor(() =>
+      expect(result.current.settings?.rememberedBrowserOrigins).toEqual(["https://example.com"]),
+    );
+    expect(result.current.status).toBe("ready");
   });
 });

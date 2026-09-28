@@ -119,4 +119,45 @@ describe("BrowserToolApprovalService", () => {
     ).toBe(false);
     await expect(pending).resolves.toBe("expired");
   });
+
+  it("remembers an origin only when an approved answer asks to", async () => {
+    const remembered: Array<{ origin: string; window: string }> = [];
+    const service = new BrowserToolApprovalService({
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+      authorityIsCurrent: () => true,
+      rememberOrigin: (origin, rememberedWindowId) =>
+        remembered.push({ origin, window: rememberedWindowId }),
+      isOriginRemembered: (origin) => remembered.some((entry) => entry.origin === origin),
+    });
+    const first = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+    });
+    service.decide(windowId, {
+      approvalId: service.list(windowId)[0]?.approvalId as never,
+      decision: "approved",
+      remember: true,
+    });
+    await expect(first).resolves.toBe("approved");
+    expect(remembered).toEqual([{ origin: "https://example.com", window: windowId }]);
+    expect(service.isRemembered("https://example.com")).toBe(true);
+    expect(service.isRemembered("https://other.example")).toBe(false);
+
+    const second = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://second.example",
+    });
+    service.decide(windowId, {
+      approvalId: service.list(windowId)[0]?.approvalId as never,
+      decision: "denied",
+      remember: true,
+    });
+    await expect(second).resolves.toBe("denied");
+    expect(remembered).toHaveLength(1);
+  });
 });

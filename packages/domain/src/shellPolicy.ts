@@ -53,6 +53,7 @@ export type ShellPolicyRejectionCode =
   | "cross-context"
   | "duplicate-id"
   | "invalid-active-pane"
+  | "invalid-settings"
   | "invalid-focus"
   | "invalid-layout"
   | "limit-exceeded"
@@ -175,6 +176,7 @@ export function defaultShellSettings(): ShellSettings {
     imageGeneration: { customSources: [] },
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
     standaloneSkillActivations: {},
+    rememberedBrowserOrigins: [],
   };
 }
 
@@ -650,6 +652,21 @@ export function resolveFirstRunOnboarding(
   return current === "pending" ? requested : current;
 }
 
+function resolveRememberedBrowserOrigins(
+  current: ReadonlyArray<string>,
+  replacement: ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> {
+  if (replacement === undefined) return current;
+  const added = replacement.find((origin) => !current.includes(origin));
+  if (added !== undefined) {
+    reject(
+      "invalid-settings",
+      "Remembered browser origins can only be added by the approval decision.",
+    );
+  }
+  return replacement;
+}
+
 export function replaceShellSettings(
   current: ShellSettings,
   replacement: ShellSettings,
@@ -672,6 +689,13 @@ export function replaceShellSettings(
     ) as ShellSettings["contextSidebarWidth"],
     standaloneSkillActivations:
       replacement.standaloneSkillActivations ?? current.standaloneSkillActivations,
+    // Remembered browser grants grow only through the approval decision path —
+    // a replacement may revoke entries but a settings client cannot grant itself
+    // an origin the prompt never showed.
+    rememberedBrowserOrigins: resolveRememberedBrowserOrigins(
+      current.rememberedBrowserOrigins,
+      replacement.rememberedBrowserOrigins,
+    ),
   };
 }
 

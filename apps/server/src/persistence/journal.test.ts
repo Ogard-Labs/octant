@@ -189,6 +189,7 @@ describe("Journal", () => {
         voice: {},
         imageGeneration: { customSources: [] },
         standaloneSkillActivations: {},
+        rememberedBrowserOrigins: [],
         computerUse: { enabled: false, automaticUpdates: false },
         projectViewSwitcherPresentation: "dropdown",
         transcriptTextSize: "medium",

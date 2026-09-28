@@ -471,7 +471,7 @@ import {
   isAllowedRendererOrigin,
   isLoopbackHostname,
 } from "./shellRoutes";
-import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "./shellService";
+import { OCTANT_LOCAL_ACTOR_ID, ShellService, ShellServiceError } from "./shellService";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createWebAssetsHandler } from "./webAssets";
 import { createZenRouteHandler } from "./zenRoutes";
@@ -680,6 +680,7 @@ import {
   decodeNativeHarnessTurnId,
   decodeCodeOperationId,
   decodeProviderSessionId,
+  decodeAggregateVersion,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   decodeMultiModelRoutingVendorId,
@@ -3750,6 +3751,40 @@ export function startOctantServer(
       persistence,
       workThreads: workThreadProjection,
     });
+    const rememberedBrowserOrigins = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .rememberedBrowserOrigins;
+    // An "always allow" answer journals the origin into shell settings through
+    // the host-owned path — `replace-settings` itself cannot add origins, since
+    // a window capability would let a client grant itself an origin the prompt
+    // never showed. A concurrent settings write can lose the race, so the
+    // append retries on the fresh version once. A window that went away between
+    // prompt and answer cannot journal — its grant is then session-only, like
+    // approve-once.
+    const rememberBrowserOrigin = (windowId: WindowId, origin: string) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const stored = persistence.readShellSettings();
+        const current = stored?.settings ?? defaultShellSettings();
+        if (current.rememberedBrowserOrigins.includes(origin)) return;
+        try {
+          shellService.rememberBrowserOrigins({
+            windowId,
+            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+            origins: [origin],
+          });
+          return;
+        } catch (error) {
+          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+            console.warn(
+              `Octant could not remember a browser origin approval: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return;
+          }
+        }
+      }
+    };
     browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
@@ -3762,6 +3797,8 @@ export function startOctantServer(
           browserAuthority.canAccessWindow(windowId, decodedThreadId, authority.mode)
         );
       },
+      rememberOrigin: (origin, windowId) => rememberBrowserOrigin(windowId, origin),
+      isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
     });
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
@@ -4058,6 +4095,8 @@ export function startOctantServer(
           releaseThread: (windowId, threadId) =>
             requireBrowserAutomationService().releaseThread(windowId, threadId),
         },
+        isBrowserOriginRemembered: (origin) =>
+          requireBrowserToolApprovalService().isRemembered(origin),
         // The agent's Apple capability resolves its execution context through
         // exactly the resolver the workbench route uses, so a tool call and a
         // click are the same request to the same policy.

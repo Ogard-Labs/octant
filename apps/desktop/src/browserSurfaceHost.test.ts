@@ -375,6 +375,44 @@ describe("BrowserSurfaceHost", () => {
     expect(observation.screenshotDataUrl).toBeUndefined();
   });
 
+  it("captures a detached surface's page through the renderer when compositing paints nothing", async () => {
+    // A surface that is not in a window produces an empty capturePage image;
+    // the renderer itself still holds the page, so the debugger takes the
+    // picture directly.
+    const created = view();
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => true,
+      toJPEG: () => new Uint8Array(0),
+    });
+    vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) =>
+      method === "Page.captureScreenshot" ? { data: "aGk=" } : undefined,
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+
+    const observation = await host.act(contextId, {
+      kind: "navigate",
+      target: "https://example.com/docs",
+    });
+
+    expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+      "Page.captureScreenshot",
+      expect.objectContaining({ fromSurface: false }),
+    );
+    expect(observation.screenshotDataUrl).toBe("data:image/jpeg;base64,aGk=");
+    expect(created.webContents.debugger.isAttached()).toBe(false);
+  });
+
   it("answers a peek for a context whose page has not committed a document", async () => {
     // A fresh surface has no committed document, and Chromium never settles a
     // script evaluation queued against it: the probe would wait forever while

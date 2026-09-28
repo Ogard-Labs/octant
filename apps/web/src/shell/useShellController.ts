@@ -54,6 +54,7 @@ import { sideChatTitle } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import type { ProjectWindowTarget } from "./hostBridge";
+import { SHELL_SETTINGS_WRITTEN } from "./shellSettingsNotifications";
 import { createBrowserActivityAnnouncementStore } from "./browserActivityReveal";
 import { createTabActivationRegistry, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
@@ -310,11 +311,12 @@ export function useShellController(options: ShellControllerOptions) {
 
   const load = useCallback(
     (
-      reason: "bootstrap" | "retry" | "command-recovery" | "conflict-reload" = "retry",
+      reason: "bootstrap" | "retry" | "command-recovery" | "conflict-reload" | "refresh" = "retry",
     ): Promise<void> => {
       const generation = ++requestGeneration.current;
       const isCommandReload = reason === "command-recovery" || reason === "conflict-reload";
-      setStatus(isCommandReload ? "conflict-reload" : "loading");
+      // A refresh reconciles quietly — the person did not ask for a reload.
+      if (reason !== "refresh") setStatus(isCommandReload ? "conflict-reload" : "loading");
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
       const task = (async () => {
@@ -372,6 +374,20 @@ export function useShellController(options: ShellControllerOptions) {
       for (const timer of bootstrapTimers.current) clearTimeout(timer);
       bootstrapTimers.current.clear();
     };
+  }, [load]);
+
+  // Settings answers "what did the host remember" — opening it re-reads before
+  // showing, and a settings write journaled outside this controller (an
+  // always-allow browser approval) arrives as a window event that quietly
+  // refreshes versions before the next settings edit would conflict on them.
+  useEffect(() => {
+    if (settingsOpen) void load("refresh");
+  }, [load, settingsOpen]);
+
+  useEffect(() => {
+    const refresh = () => void load("refresh");
+    window.addEventListener(SHELL_SETTINGS_WRITTEN, refresh);
+    return () => window.removeEventListener(SHELL_SETTINGS_WRITTEN, refresh);
   }, [load]);
 
   /**

@@ -501,11 +501,17 @@ function serviceStub(failure?: ConstructorParameters<typeof ShellServiceError>[0
   const readBootstrap = vi.fn(makeBootstrap);
   const hasLiveWindow = vi.fn(() => true);
   const revokeWindow = vi.fn();
+  const rememberBrowserOrigins = vi.fn(() => ({
+    kind: "settings-replaced" as const,
+    settings: defaultShellSettings(),
+    version: 1 as never,
+  }));
   return {
     bootstrap,
     readBootstrap,
     hasLiveWindow,
     execute,
     revokeWindow,
+    rememberBrowserOrigins,
   } satisfies ShellServiceApi;
 }

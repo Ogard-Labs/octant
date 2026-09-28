@@ -546,6 +546,16 @@ export const ShellSettings = Schema.Struct({
   standaloneSkillActivations: Schema.optionalWith(StandaloneSkillActivationMap, {
     default: () => ({}),
   }),
+  /**
+   * Origins the person approved with "always allow" for the bundled Browser
+   * tool. A remembered origin opens without asking again — the browsing
+   * context is still confined to it — until the person forgets it in
+   * Settings. A store persisted before this shipped decodes to none.
+   */
+  rememberedBrowserOrigins: Schema.optionalWith(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
+    { default: () => [] },
+  ),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;
 

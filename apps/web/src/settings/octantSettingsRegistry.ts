@@ -544,6 +544,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "thread retention window purge journal erase delete history",
         },
+        {
+          id: settingId("browser-site-approvals"),
+          label: "Remembered websites",
+          scope: "host",
+          keywords:
+            "remembered websites browser origin site approval allow always forget revoke open page permission",
+        },
       ],
     },
     {
