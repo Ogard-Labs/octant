@@ -1000,6 +1000,13 @@ mechanisms are:
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
+  On a host with no native confirmation surface — a headless Linux station
+  has none — session-only Full access cannot be raised from any client: the
+  access picker refuses the raise and names the remembered route, so Full
+  access arrives only through the host's recorded
+  `octant project access <name> full-access` decision. The desktop-owned
+  challenge invariant is preserved by not offering the grant the challenge
+  cannot guard.
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
   (`docs/decisions/0110`); that planned path does not yet run.
