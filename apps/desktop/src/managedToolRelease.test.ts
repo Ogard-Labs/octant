@@ -97,19 +97,24 @@ function releaseFor(bytes: Uint8Array, version = "0.1.46"): ManagedToolRelease {
 }
 
 describe("Managed tool release channel", () => {
-  it("reads the registry latest document into a verifiable release", async () => {
+  it("reads the latest release from the package document's dist-tags", async () => {
     const bytes = new TextEncoder().encode(
       JSON.stringify({
-        version: "0.1.46",
-        dist: {
-          tarball: "https://registry.npmjs.org/serve-sim/-/serve-sim-0.1.46.tgz",
-          integrity: "sha512-AAAA",
+        "dist-tags": { latest: "0.1.46", beta: "0.1.47-beta.1" },
+        versions: {
+          "0.1.46": {
+            version: "0.1.46",
+            dist: {
+              tarball: "https://registry.npmjs.org/serve-sim/-/serve-sim-0.1.46.tgz",
+              integrity: "sha512-AAAA",
+            },
+          },
         },
       }),
     );
     const fetchJson: ManagedFetch = (url, signal) => {
       void signal;
-      expect(url).toBe("https://registry.npmjs.org/serve-sim/latest");
+      expect(url).toBe("https://registry.npmjs.org/serve-sim");
       return Promise.resolve(bytes);
     };
     const release = await latestManagedToolRelease(

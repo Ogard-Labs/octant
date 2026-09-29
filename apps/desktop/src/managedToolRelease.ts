@@ -101,7 +101,7 @@ export function isManagedToolRelease(value: ManagedToolRelease): boolean {
   );
 }
 
-/** Reads the registry's `/latest` document into a verifiable release. */
+/** Reads one version entry of the registry package document into a verifiable release. */
 export function managedToolReleaseFromResponse(
   packageName: string,
   value: unknown,
@@ -166,18 +166,28 @@ export async function boundedRegistryDownload(
   throw new Error("Tool download redirected too many times.");
 }
 
+/**
+ * Reads the latest release from the full package document's `dist-tags`.
+ * The registry's `/<name>/latest` shortcut has been observed answering 200
+ * with the body `[object Object]`, so it is not trusted as the source.
+ */
 export async function latestManagedToolRelease(
   packageName: string,
   fetchJson: ManagedFetch,
   signal: AbortSignal,
 ): Promise<ManagedToolRelease> {
   if (!PACKAGE_NAME.test(packageName)) throw new Error("Tool name is invalid.");
-  const bytes = await fetchJson(`https://${REGISTRY_ORIGIN}/${packageName}/latest`, signal);
+  const bytes = await fetchJson(`https://${REGISTRY_ORIGIN}/${packageName}`, signal);
   if (bytes.byteLength > MAX_DOCUMENT_BYTES) throw new Error("Tool metadata is too large.");
-  const release = managedToolReleaseFromResponse(
-    packageName,
-    JSON.parse(new TextDecoder().decode(bytes)),
-  );
+  const document: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  const tags =
+    record(document) && record(document["dist-tags"]) ? document["dist-tags"] : undefined;
+  const latest = tags === undefined ? undefined : readString(tags.latest);
+  const versions = record(document) && record(document.versions) ? document.versions : undefined;
+  const release =
+    latest === undefined || versions === undefined
+      ? undefined
+      : managedToolReleaseFromResponse(packageName, versions[latest]);
   if (release === undefined) throw new Error("No verifiable tool release was found.");
   return release;
 }

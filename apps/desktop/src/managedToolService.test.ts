@@ -46,8 +46,14 @@ function latestDocument(
   return new TextEncoder().encode(
     JSON.stringify({
       name,
-      version,
-      dist: { tarball: url, integrity: sha512Integrity(tarballBytes) },
+      "dist-tags": { latest: version },
+      versions: {
+        [version]: {
+          name,
+          version,
+          dist: { tarball: url, integrity: sha512Integrity(tarballBytes) },
+        },
+      },
     }),
   );
 }
@@ -157,7 +163,7 @@ describe("managed tool service", () => {
     const tarballUrl = `https://registry.npmjs.org/${descriptor.packageName}/-/${descriptor.packageName}-${nextVersion}.tgz`;
     const document = latestDocument(descriptor.packageName, nextVersion, tarball, tarballUrl);
     const service = makeService(async (url: string) => {
-      if (url === `https://registry.npmjs.org/${descriptor.packageName}/latest`) return document;
+      if (url === `https://registry.npmjs.org/${descriptor.packageName}`) return document;
       if (url === tarballUrl) return tarball;
       throw new Error(`unexpected fetch ${url}`);
     });
