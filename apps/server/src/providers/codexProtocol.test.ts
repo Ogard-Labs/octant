@@ -115,6 +115,35 @@ describe("Codex stable 0.144.4 protocol", () => {
     expect(decodeTurnInterruptResult({ futureField: true })).toEqual({});
   });
 
+  it("decodes turns whose error field arrives as explicit null", () => {
+    const completedTurn = {
+      id: "turn-9",
+      status: "completed",
+      error: null,
+      itemsView: [],
+      startedAt: null,
+      completedAt: 1_700_000_000_000,
+      durationMs: null,
+    };
+
+    expect(decodeTurnStartResult({ turn: completedTurn })).toEqual({
+      turn: { id: "turn-9", status: "completed" },
+    });
+
+    for (const method of ["turn/started", "turn/completed"] as const) {
+      expect(
+        decodeCodexServerMessage({
+          method,
+          params: { threadId: "thread-1", turn: completedTurn },
+        }),
+      ).toEqual({
+        kind: "notification",
+        method,
+        params: { threadId: "thread-1", turn: { id: "turn-9", status: "completed" } },
+      });
+    }
+  });
+
   it("decodes responses without requiring a jsonrpc member", () => {
     expect(decodeCodexServerMessage({ id: 1, result: { ok: true }, futureField: true })).toEqual({
       kind: "response",
