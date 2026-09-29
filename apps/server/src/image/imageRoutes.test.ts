@@ -138,6 +138,16 @@ describe("image routes", () => {
     expect(body.jobs[0]?.id).toBe(jobId);
   });
 
+  it("lists the image library's jobs for the library scope", async () => {
+    const { handler } = setup();
+    const response = await handler(
+      request(`/api/image/jobs?threadKind=image-library&scopeId=${scopeId}`),
+    );
+    expect(response?.status).toBe(200);
+    const body = decodeImageGenerationJobsResponse(await response!.json());
+    expect(body.jobs[0]?.id).toBe(jobId);
+  });
+
   it("enqueues a job for an authorized thread", async () => {
     const { handler, enqueue } = setup();
     const response = await handler(
