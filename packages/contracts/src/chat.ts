@@ -230,11 +230,14 @@ const Usage = Schema.Struct({
  * or the runner's own slug when the turn ended without the provider
  * answering. The free-form provider message stays off the wire: it can quote
  * provider output, so only the typed code and the already client-safe process
- * diagnostic cross.
+ * diagnostic cross. The one exception is `message`, which the journal only
+ * ever fills from the host's own refusal text — Octant-authored and already
+ * what the live path renders, so replay reads the same honest sentence.
  */
 export const ChatAttemptFailure = Schema.Struct({
   code: DiagnosticFailureCode,
   diagnostic: Schema.optional(ProviderProcessDiagnostic),
+  message: Schema.optional(Schema.NonEmptyTrimmedString),
 }).annotations(strict);
 export type ChatAttemptFailure = typeof ChatAttemptFailure.Type;
 

@@ -94,6 +94,37 @@ describe("ThemeService", () => {
     );
   });
 
+  it("carries a saved profile from the former Inter default onto the current interface face", () => {
+    const test = fixture();
+    const withUi = (family: string) => ({
+      settings: {
+        ...DEFAULT_THEME_SETTINGS,
+        mode: "dark" as const,
+        typography: {
+          ...DEFAULT_THEME_SETTINGS.typography,
+          ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family },
+        },
+      },
+      aggregateVersion: 3,
+    });
+
+    test.setProjected(
+      withUi(
+        "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      ),
+    );
+    const migrated = test.service.bootstrap();
+    expect(migrated.settings.typography.ui.family).toBe(
+      DEFAULT_THEME_SETTINGS.typography.ui.family,
+    );
+    expect(migrated.settings.mode).toBe("dark");
+
+    test.setProjected(withUi("'Inter Variable', sans-serif"));
+    expect(test.service.bootstrap().settings.typography.ui.family).toBe(
+      "'Inter Variable', sans-serif",
+    );
+  });
+
   it("rejects stale or invalid changes without journaling", () => {
     const test = fixture();
     test.setProjected({ settings: DEFAULT_THEME_SETTINGS, aggregateVersion: 2 });

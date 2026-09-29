@@ -64,6 +64,13 @@
   border-bottom: 1px solid var(--oct-border-soft);
 }
 
+.command-palette__field > input {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
 .command-palette__scope {
   display: flex;
   align-items: center;
@@ -171,4 +178,9 @@
   padding: 0 6px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
+}
+
+.command-palette .command-palette__field > input:focus-visible,
+.thread-search .thread-search__field input:focus-visible {
+  background-color: transparent;
 }

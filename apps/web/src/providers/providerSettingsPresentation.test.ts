@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   driverLabel,
   incompatibleReadinessFacts,
+  providerProcessFailureSummary,
   providerRefusalGuidance,
   providerRowReadinessLabel,
 } from "./providerSettingsPresentation";
@@ -150,5 +151,40 @@ describe("provider Settings presentation", () => {
       { label: "Authentication", value: "Claude subscription" },
       { label: "Capabilities", value: "Not confirmed" },
     ]);
+  });
+
+  it("names how an unavailable provider process last failed and at which stage", () => {
+    const observed = decodeProviderObservedState({
+      instanceId: "90000000-0000-4000-8000-000000000010",
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "unavailable",
+        resume: "unavailable",
+        interruption: "unavailable",
+        approvals: "unavailable",
+        userQuestions: "unavailable",
+        reasoning: "unavailable",
+        usage: "unavailable",
+        toolActivity: "unavailable",
+        fileChanges: "unavailable",
+        diffs: "unavailable",
+        taskProgress: "unavailable",
+        nativeChildAgents: "unavailable",
+        harnessAutoReview: "unsupported",
+        nativeAttachments: "unavailable",
+        nativeWebResearch: "unavailable",
+        appManagedTools: "unavailable",
+        citations: "unavailable",
+      },
+      diagnostic: { stage: "launch", kind: "exited", exitCode: 65 },
+      observedAt: "2026-07-14T10:00:00.000Z",
+    });
+
+    expect(providerProcessFailureSummary("OpenCode CLI", observed)).toBe(
+      "OpenCode CLI exited with code 65 during launch.",
+    );
+    expect(providerProcessFailureSummary("OpenCode CLI", undefined)).toBeUndefined();
   });
 });

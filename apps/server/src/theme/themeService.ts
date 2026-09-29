@@ -53,7 +53,7 @@ export class ThemeService implements ThemeServiceApi {
       settings:
         projected === undefined
           ? DEFAULT_THEME_SETTINGS
-          : withCurrentTerminalFontDefault(projected.settings),
+          : withCurrentFontDefaults(projected.settings),
       version: projected?.aggregateVersion ?? 0,
     });
   }
@@ -153,17 +153,22 @@ export class ThemeService implements ThemeServiceApi {
  * theirs and is left alone.
  */
 const LEGACY_DEFAULT_TERMINAL_FONT_FAMILY = "'JetBrains Mono', 'SF Mono', Menlo, monospace";
+const LEGACY_DEFAULT_UI_FONT_FAMILY =
+  "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
-function withCurrentTerminalFontDefault(settings: ThemeSettings): ThemeSettings {
-  if (settings.typography.terminal.family !== LEGACY_DEFAULT_TERMINAL_FONT_FAMILY) return settings;
+function withCurrentFontDefaults(settings: ThemeSettings): ThemeSettings {
+  const { ui, terminal } = settings.typography;
+  const uiIsLegacy = ui.family === LEGACY_DEFAULT_UI_FONT_FAMILY;
+  const terminalIsLegacy = terminal.family === LEGACY_DEFAULT_TERMINAL_FONT_FAMILY;
+  if (!uiIsLegacy && !terminalIsLegacy) return settings;
   return {
     ...settings,
     typography: {
       ...settings.typography,
-      terminal: {
-        ...settings.typography.terminal,
-        family: DEFAULT_THEME_SETTINGS.typography.terminal.family,
-      },
+      ui: uiIsLegacy ? { ...ui, family: DEFAULT_THEME_SETTINGS.typography.ui.family } : ui,
+      terminal: terminalIsLegacy
+        ? { ...terminal, family: DEFAULT_THEME_SETTINGS.typography.terminal.family }
+        : terminal,
     },
   };
 }

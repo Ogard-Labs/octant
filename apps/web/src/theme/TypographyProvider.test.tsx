@@ -19,7 +19,7 @@ const appStyles = [
 ].join("\n");
 
 describe("ThemeTypographyProvider", () => {
-  it("projects Inter at the compact size by default", () => {
+  it("projects Geist at the compact size by default", () => {
     const rendered = render(
       <ThemeTypographyProvider>
         <div />
@@ -27,7 +27,7 @@ describe("ThemeTypographyProvider", () => {
     );
 
     expect(document.documentElement.style.getPropertyValue("--octant-ui-font-family")).toBe(
-      "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
     );
     expect(document.documentElement.style.getPropertyValue("--octant-ui-font-size")).toBe("13px");
     expect(document.documentElement.style.getPropertyValue("--octant-editor-font-size")).toBe(

@@ -51,8 +51,8 @@ afterEach(() => {
 const APP_GROUND: ResolvedAppBackground = {
   kind: "builtin",
   backgroundId: "perspective-dot-plane-animated",
-  backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
-  backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+  backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
+  backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
   backgroundAnimated: true,
   effect: { kind: "none", cell: 3, levels: 8 },
   photoOpacity: 0.42,
@@ -243,7 +243,7 @@ describe("ZenSurface", () => {
     );
     const surface = screen.getByRole("application", { name: "Zen workspace" });
     expect(surface).toHaveStyle({
-      backgroundImage: 'url("/zen-backgrounds/nordic-fjord-aurora.jpg")',
+      backgroundImage: 'url("zen-backgrounds/nordic-fjord-aurora.jpg")',
       backgroundSize: "contain",
     });
     expect(surface.querySelector(".zen-surface__overlay")).not.toBeNull();
@@ -340,7 +340,7 @@ describe("ZenSurface", () => {
     );
     // A moving built-in shows its still frame instead.
     expect(container.querySelector(".app-backdrop__builtin")).toHaveStyle({
-      backgroundImage: 'url("/zen-backgrounds/perspective-dot-plane.jpg")',
+      backgroundImage: 'url("zen-backgrounds/perspective-dot-plane.jpg")',
     });
     vi.restoreAllMocks();
   });

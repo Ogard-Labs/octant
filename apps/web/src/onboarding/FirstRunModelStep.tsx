@@ -65,6 +65,7 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
           ariaLabel={props.ariaLabel}
           groups={props.groups}
           onSelect={props.onSelect}
+          onOpenProviderSettings={props.onOpenProviderSettings}
           {...(props.selectedModelId === undefined
             ? {}
             : { selectedModelId: props.selectedModelId })}

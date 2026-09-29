@@ -519,6 +519,37 @@ describe("ChatTranscript", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("replays the journaled refusal message instead of its category sentence", () => {
+    const failed = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                {
+                  ...failed,
+                  outcome: "failed",
+                  failure: {
+                    code: "unsupported",
+                    message:
+                      "This provider cannot revise earlier native turns without replacing its conversation. Send a correction as a new message to keep the same session.",
+                  },
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Send a correction as a new message to keep the same session\./),
+    ).toBeVisible();
+    expect(screen.queryByText("The provider does not support this turn.")).not.toBeInTheDocument();
+  });
+
   it("announces a failure when the open attempt newly fails", async () => {
     const streaming = viewFixture().turns[0]!.attempts[1]!;
     const turn = viewFixture().turns[0]!;

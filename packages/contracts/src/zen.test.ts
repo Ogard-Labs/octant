@@ -287,7 +287,7 @@ describe("ZEN_BUILTIN_BACKGROUNDS", () => {
     expect(ZEN_BUILTIN_BACKGROUNDS.length).toBeGreaterThan(0);
     for (const preset of ZEN_BUILTIN_BACKGROUNDS) {
       expect(preset.id).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-      expect(preset.src.startsWith("/zen-backgrounds/")).toBe(true);
+      expect(preset.src.startsWith("zen-backgrounds/")).toBe(true);
       expect(preset.src.includes("://")).toBe(false);
       expect(["still", "animated"]).toContain(preset.motion);
       Schema.decodeUnknownSync(ZenBuiltinBackgroundId)(preset.id);

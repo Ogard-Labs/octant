@@ -250,6 +250,28 @@ export function providerProcessDiagnosticFacts(
   ];
 }
 
+/** One sentence naming how the provider process last failed, for the card's first line. */
+export function providerProcessFailureSummary(
+  label: string,
+  observed: ProviderObservedState | undefined,
+): string | undefined {
+  const diagnostic = observed?.diagnostic;
+  if (diagnostic === undefined) return undefined;
+  const stage = diagnostic.stage.replaceAll("-", " ");
+  const result =
+    diagnostic.kind === "exited" && diagnostic.exitCode !== undefined
+      ? `exited with code ${diagnostic.exitCode}`
+      : diagnostic.kind === "signaled" && diagnostic.signal !== undefined
+        ? `was ended by ${diagnostic.signal}`
+        : diagnostic.kind === "spawn-failed"
+          ? "could not be started"
+          : diagnostic.kind === "timed-out"
+            ? "timed out"
+            : `stopped (${diagnostic.kind.replaceAll("-", " ")})`;
+  const detail = diagnostic.stderrContext === undefined ? "" : ` ${diagnostic.stderrContext}`;
+  return `${label} ${result} during ${stage}.${detail}`;
+}
+
 export function formatProbeTimestamp(value: string): string {
   return probeTimestampFormatter.format(new Date(value));
 }

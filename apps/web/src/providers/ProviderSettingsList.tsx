@@ -52,6 +52,7 @@ import {
   protocolLabel,
   providerDetectionBlockedReason,
   providerProcessDiagnosticFacts,
+  providerProcessFailureSummary,
   providerRowReadinessLabel,
   titleCase,
 } from "./providerSettingsPresentation";
@@ -144,6 +145,10 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
+      } else if (isImageProfileDriverKind(instance.driverKind)) {
+        // Image profiles have no runtime to observe — probing one is refused —
+        // so an enabled one has no readiness this summary could state.
+        continue;
       } else if (
         !props.updatingIds?.has(instance.id) &&
         presentationObserved.get(instance.id)?.readiness === "ready"
@@ -284,7 +289,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             ? "Use the arrow controls to change the model-picker order."
             : (props.note ?? "The first ready provider is the default for new threads.")}
         </p>
-        {ordered.length === 0 ? null : (
+        {readinessSummary.ready + readinessSummary.needsSetup + readinessSummary.off ===
+        0 ? null : (
           <p
             aria-label="Provider readiness summary"
             className="oct-meta provider-settings__summary"
@@ -643,7 +649,12 @@ function ProviderRow(props: ProviderRowProps) {
     ((isClaude || isVibe || isGrok || isGlm || isGemini || isCline || isQwen) &&
       props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
-  const setupGuidance = guidance(props.instance, readiness, props.observed);
+  const setupGuidance = guidance(
+    props.instance,
+    readiness,
+    props.onUpdateProviderCli !== undefined && supportsProviderCliUpdate(props.instance.driverKind),
+    props.observed,
+  );
   const hasSetupGuidance =
     detectedButDisabled ||
     usesCredential ||
@@ -1741,6 +1752,7 @@ function authenticationGuidance(instance: ProviderInstance): string {
 function guidance(
   instance: ProviderInstance,
   readiness: ProviderObservedState["readiness"] | undefined,
+  canUpdateCli: boolean,
   observed?: ProviderObservedState,
 ) {
   const driverKind = instance.driverKind;
@@ -1816,16 +1828,22 @@ function guidance(
         </>
       );
     }
+    const failure = providerProcessFailureSummary(label, observed);
     return (
-      <p className="provider-card__guidance">
-        {driverKind === "openai-compatible" ||
-        driverKind === "anthropic-compatible" ||
-        driverKind === "azure-foundry"
-          ? "Verify the API base URL and endpoint availability, then retry."
-          : driverKind === "ollama"
-            ? "Start the user-managed Ollama service and verify the loopback API base URL, then retry."
-            : `Verify the binary path and that ${label} can start, then retry.`}
-      </p>
+      <>
+        {failure === undefined ? null : <p className="provider-card__guidance">{failure}</p>}
+        <p className="provider-card__guidance">
+          {driverKind === "openai-compatible" ||
+          driverKind === "anthropic-compatible" ||
+          driverKind === "azure-foundry"
+            ? "Verify the API base URL and endpoint availability, then retry."
+            : driverKind === "ollama"
+              ? "Start the user-managed Ollama service and verify the loopback API base URL, then retry."
+              : canUpdateCli
+                ? `Verify the binary path and that ${label} can start, or use Update CLI, then check the connection again.`
+                : `Verify the binary path and that ${label} can start, then check the connection again.`}
+        </p>
+      </>
     );
   }
   return message === undefined ? null : <p className="provider-card__guidance">{message}</p>;

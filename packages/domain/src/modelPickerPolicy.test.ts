@@ -548,6 +548,34 @@ describe("model picker policy", () => {
       expect(groups[0]!.unavailableCurrent?.unavailableReason).toBeDefined();
     });
 
+    it("carries the host's own reason for a group that cannot serve models", () => {
+      const instance = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000101",
+        displayName: "G",
+      });
+      const observedByInstance = new Map([
+        [
+          instance.id,
+          observed(instance.id, [model({ id: "m", displayName: "M" })], {
+            readiness: "incompatible",
+            message: "Provider configuration is incompatible.",
+          }),
+        ],
+      ]);
+      const groups = buildModelPickerGroups(
+        input({
+          instances: [instance],
+          observedByInstance,
+          currentSelection: {
+            providerInstanceId: instance.id,
+            modelId: decodeProviderModelId("m"),
+          },
+        }),
+      );
+      expect(groups[0]!.readiness).toBe("incompatible");
+      expect(groups[0]!.readinessReason).toBe("Provider configuration is incompatible.");
+    });
+
     it("hides configured models while keeping a hidden current selection bound", () => {
       const instance = openAiInstance({
         id: "00000000-0000-4000-8000-000000000101",

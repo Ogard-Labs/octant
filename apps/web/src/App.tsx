@@ -5564,6 +5564,7 @@ function LaunchedShell(
               : {})}
             {...(presentedSidebarCollapsed
               ? {
+                  newThreadLabel: activeMode === "chat" ? "New chat" : "New task",
                   onNewThread: () => {
                     if (activeMode === "chat") createChat();
                     else void openDraftInActiveProject(activeMode);
@@ -5728,15 +5729,16 @@ function LaunchedShell(
                     {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
                       ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
                       : {})}
-                    {...((activeMode === "chat" &&
+                    {...(activeSidebarDestination === undefined &&
+                    ((activeMode === "chat" &&
                       chatController.status === "ready" &&
                       activeChatThreadId !== undefined) ||
-                    (activeMode === "code" &&
-                      codeController.status === "ready" &&
-                      activeCodeThreadId !== undefined) ||
-                    (activeMode === "work" &&
-                      workNavigation.status === "ready" &&
-                      activeWorkThreadId !== undefined)
+                      (activeMode === "code" &&
+                        codeController.status === "ready" &&
+                        activeCodeThreadId !== undefined) ||
+                      (activeMode === "work" &&
+                        workNavigation.status === "ready" &&
+                        activeWorkThreadId !== undefined))
                       ? {
                           activeThreadId:
                             activeMode === "code"

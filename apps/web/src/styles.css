@@ -1,4 +1,5 @@
 @import "@fontsource-variable/inter/opsz.css";
+@import "@fontsource-variable/geist/index.css";
 @import "./styles/tailwind.css";
 /* Octant design system, then the adapter that repoints its colour and font
    tokens at the runtime theme. Import order is deliberate and load-bearing:
@@ -5944,6 +5945,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.keybinding-settings__group {
+  margin-top: var(--oct-space-4);
 }
 
 .keybinding-settings__group + .keybinding-settings__group {

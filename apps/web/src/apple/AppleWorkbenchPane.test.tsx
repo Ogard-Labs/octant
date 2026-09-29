@@ -277,6 +277,16 @@ describe("AppleWorkbenchPane", () => {
     );
   });
 
+  it("offers Retry only once loading the Apple toolchain has settled", () => {
+    const retry = () => undefined;
+    expect(
+      renderToStaticMarkup(<AppleWorkbenchPane status="loading" onRetry={retry} />),
+    ).not.toContain("Retry");
+    expect(
+      renderToStaticMarkup(<AppleWorkbenchPane status="unavailable" onRetry={retry} />),
+    ).toContain("Retry");
+  });
+
   it("shows an unavailable live frame on a host without Apple tooling", () => {
     const html = renderToStaticMarkup(
       <AppleWorkbenchPane

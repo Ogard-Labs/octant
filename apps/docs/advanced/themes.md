@@ -72,7 +72,7 @@ UI, editor, and terminal typography are independent. UI uses family, size,
 and weight; editor and terminal add line height and ligatures. Font sizes run
 8–32, weights 300–700, and line heights 1–2.5. Missing fonts fall back safely
 per client; no remote or untrusted fonts are loaded. The default interface is
-the bundled Inter face at 13px, falling back to the platform stack. The default editor is JetBrains Mono Variable (or
+the bundled Geist face at 13px, falling back to the platform stack. The default editor is JetBrains Mono Variable (or
 its declared local fallbacks) at 13px, and the terminal uses JetBrains Mono
 Variable, JetBrains Mono, SF Mono, Menlo, Symbols Nerd Font Mono, and monospace
 at 12px. Transcript text starts at 13px; the existing small, medium, and
