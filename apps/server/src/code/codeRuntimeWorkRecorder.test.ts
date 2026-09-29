@@ -125,6 +125,56 @@ describe("CodeRuntimeWorkRecorder", () => {
     }
   });
 
+  it("settles a record a previous process left open without owning it", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-recorder-orphan-"));
+    const connection = openSqlite(join(directory, "journal.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, clock);
+      const registry = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registry.events,
+        projections: registry.projections,
+        clock,
+      });
+      const createRecorder = () =>
+        new CodeRuntimeWorkRecorder({
+          journal,
+          readVersion: (id) => readCodeRuntimeWorkAggregateVersion(connection, id),
+          uuid,
+          clock,
+          actor,
+        });
+      const id = decodeCodeOperationId("90000000-0000-4000-8000-000000000094");
+      const input = { id, threadId, kind: "provider-turn" as const };
+      // The process that opened the record is gone: a restarted recorder only
+      // sees the journaled aggregate, never the dead owner's map.
+      expect(createRecorder().open(input)).toEqual({ status: "recorded" });
+      const restarted = createRecorder();
+      expect(restarted.settle({ ...input, state: "interrupted" })).toEqual({
+        status: "not-owned",
+      });
+      expect(restarted.settleOrphaned({ ...input, state: "interrupted" })).toEqual({
+        status: "recorded",
+      });
+      expect(readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(id)))).toMatchObject({
+        state: "interrupted",
+      });
+      const missing = createRecorder();
+      expect(
+        missing.settleOrphaned({
+          id: decodeCodeOperationId("90000000-0000-4000-8000-000000000095"),
+          threadId,
+          kind: "provider-turn",
+          state: "interrupted",
+        }),
+      ).toEqual({ status: "not-owned" });
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns a typed failure when a runtime work id cannot be decoded", () => {
     const append = vi.fn();
     const runtime = recorder(append);
