@@ -22,6 +22,7 @@ import {
   REQUIRED_PACKAGED_FILES,
   REQUIRED_STAGED_PACKAGED_FILES,
   REQUIRED_DARWIN_HELPER_FILES,
+  REQUIRED_DARWIN_MANAGED_TOOL_FILES,
   REQUIRED_CODE_WEB_ASSET_PATTERNS,
   APPIMAGE_TOOL_URL,
   APPIMAGE_TOOL_SHA256,
@@ -221,10 +222,19 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
       "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
     ]);
+    expect(REQUIRED_DARWIN_MANAGED_TOOL_FILES).toEqual([
+      "Octant.app/Contents/Resources/managed-tools/serve-sim/package.json",
+      "Octant.app/Contents/Resources/managed-tools/serve-sim/LICENSE",
+      "Octant.app/Contents/Resources/managed-tools/serve-sim/dist/serve-sim.js",
+      "Octant.app/Contents/Resources/managed-tools/serve-avd/package.json",
+      "Octant.app/Contents/Resources/managed-tools/serve-avd/LICENSE",
+      "Octant.app/Contents/Resources/managed-tools/serve-avd/dist/serve-avd.js",
+    ]);
     expect(REQUIRED_PACKAGED_FILES).toEqual([
       ...REQUIRED_STAGED_PACKAGED_FILES,
       "apps/server/node_modules/node-pty/build/Release/spawn-helper",
       ...REQUIRED_DARWIN_HELPER_FILES,
+      ...REQUIRED_DARWIN_MANAGED_TOOL_FILES,
     ]);
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-keychain-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-code-file-helper");
