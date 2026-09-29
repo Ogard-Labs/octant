@@ -64,7 +64,6 @@
   border-bottom: 1px solid var(--oct-border-soft);
 }
 
-/* The field row is the input's frame; a second border would nest a box in it. */
 .command-palette__field > input {
   height: auto;
   padding: 0;
@@ -179,4 +178,9 @@
   padding: 0 6px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
+}
+
+.command-palette .command-palette__field > input:focus-visible,
+.thread-search .thread-search__field input:focus-visible {
+  background-color: transparent;
 }
