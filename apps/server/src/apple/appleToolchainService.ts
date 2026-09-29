@@ -173,6 +173,7 @@ export interface AppleToolchainServiceOptions {
       readonly allowJobCreation?: boolean;
       readonly allowSignal?: boolean;
       readonly additionalWriteRoots?: ReadonlyArray<string>;
+      readonly isolatedRoots?: ReadonlyArray<string>;
     },
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
@@ -1065,6 +1066,11 @@ export class AppleToolchainService {
         cwd: context.checkoutRoot,
         environment: {},
         timeoutMs,
+        // Every launch denies the capture directory after its broad grants, so
+        // a checkout bound to an ancestor cannot read another thread's raw
+        // screen. The screenshot launch alone re-allows it by carrying the
+        // same directory as an additional write root (0160).
+        isolatedRoots: [this.#captureDirectory],
         ...(grants === undefined ? {} : grants),
       },
       signal,

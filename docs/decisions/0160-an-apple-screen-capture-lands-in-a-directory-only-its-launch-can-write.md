@@ -22,9 +22,12 @@ Captures move to a host-private directory under the host's own data root
 added write root: the screenshot launch carries it as a per-launch
 `additionalWriteRoots` entry — the first caller of that grant, which the
 confinement `prepare` already accepted but no launch could name — and no
-other launch, Apple or otherwise, receives it. Every other confined launch's
-private-home denial already covers the directory because none of their
-allowed paths reach beneath it.
+other launch, Apple or otherwise, receives it. Every Apple launch also
+carries the directory in the profile's `isolatedRoots` denial, which is
+emitted after the broad launch-root grants: a checkout bound to an ancestor
+of the data root (its own home, say) would otherwise re-allow the subtree
+through its `cwd` read root. Seatbelt's last-match ordering then re-allows
+the directory only for the launch whose `additionalWriteRoots` names it.
 
 A subtree is acceptable here, where 0133 would prefer a literal node, because
 the directory holds only files the host itself mints and sweeps: the capture

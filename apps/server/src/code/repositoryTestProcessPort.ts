@@ -161,6 +161,13 @@ export interface RepositoryTestProcessInput {
    * confined launch is granted, and only this launch may write it there.
    */
   readonly additionalWriteRoots?: ReadonlyArray<string>;
+  /**
+   * Host-private directories this launch is denied outright, after its broad
+   * grants: a checkout bound to an ancestor of one would otherwise re-allow
+   * it through the `cwd` read root. The launch that owns the directory still
+   * reaches it when it also carries the path in `additionalWriteRoots`.
+   */
+  readonly isolatedRoots?: ReadonlyArray<string>;
 }
 
 export interface RepositoryTestArtifactReadInput {
@@ -295,6 +302,7 @@ export class RepositoryTestProcessPort {
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [input.cwd, this.#temporaryDirectory, binaryDirectory, dirname(binaryDirectory)],
         ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
+        ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
         ...(this.#platform === "darwin" && launchReadRules.length > 0
           ? { extraRules: launchReadRules }
           : {}),

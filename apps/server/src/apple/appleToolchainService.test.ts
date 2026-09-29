@@ -1011,7 +1011,10 @@ describe("AppleToolchainService lifecycle", () => {
 
     expect(evidence.outcome).toBe("succeeded");
     expect((await stat(captureDirectory)).isDirectory()).toBe(true);
-    expect((await stat(captureDirectory)).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      // Windows has no POSIX mode bits to assert.
+      expect((await stat(captureDirectory)).mode & 0o777).toBe(0o700);
+    }
   });
 
   it("reports a capture directory it cannot create instead of launching the screenshot", async () => {

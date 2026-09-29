@@ -299,6 +299,13 @@ Apple artifact and restart-receipt reads validate regular-file identity and size
 on an open handle before allocation. Reads reject linked files and size changes,
 with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
 rewritten.
+A screenshot's raw capture lands in a host-private directory under the data root
+(`<data>/apple-runtime/captures`, created `0700`) that the confinement profile
+denies outright to every launch except the one taking the capture — the deny is
+emitted after the broad launch-root grants, so a checkout bound to an ancestor
+of the directory cannot read another thread's screen either, and only the
+capture launch re-allows it through its own write root
+([decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md](decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md)).
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
 ([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
