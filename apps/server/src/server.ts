@@ -6399,12 +6399,13 @@ export function startOctantServer(
         chat: {
           readThread: (threadId) => persistence.readChatThread(threadId),
           readThreadView: (threadId) => persistence.readChatThreadView(threadId),
-          execute: (input) => chatService.execute(input),
+          execute: (input, executionContext) => chatService.execute(input, executionContext),
         },
         work: {
           readThread: (threadId) => workThreadProjection.read(threadId),
           listTurns: (threadId) => workTurnProjection.listForThread(threadId),
-          startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+          startFirstTurn: (windowId, input, options) =>
+            workTurnService.startFirstTurn(windowId, input, options),
           applySettled: (usageResumePayload, threadUpdate) => {
             workThreadProjection.applyUsageResume({
               eventName: USAGE_RESUME_SETTLED,

@@ -1842,7 +1842,9 @@ export class CodeService {
       // runtime work it projects — never from what the renderer believed a
       // moment ago — whether hiding it would hide work in flight.
       const restSignals =
-        command.kind === "complete-code-thread" || command.kind === "snooze-code-thread"
+        command.kind === "complete-code-thread" ||
+        command.kind === "snooze-code-thread" ||
+        command.kind === "snooze-code-thread-at-usage-reset"
           ? boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(current.id))
           : undefined;
       if (command.kind === "complete-code-thread" && restSignals !== undefined) {
@@ -1855,11 +1857,26 @@ export class CodeService {
           throw this.#failure("invalid", COMPLETE_REFUSALS[decision.reason]);
         }
       }
-      if (command.kind === "snooze-code-thread" && restSignals !== undefined) {
+      // The wake time of a limit-owned snooze comes from the journaled limit
+      // fact on the current stop, never from the command: the host refuses
+      // when there is no such stop or its reset is unknown or already past.
+      const snoozeUntil: UtcTimestamp | undefined =
+        command.kind === "snooze-code-thread"
+          ? command.until
+          : command.kind === "snooze-code-thread-at-usage-reset"
+            ? this.#usageResetUntil(current.id)
+            : undefined;
+      if (snoozeUntil !== undefined && restSignals !== undefined) {
         const decision = decideSnoozeThread({
           lifecycle: current.lifecycle,
-          awaitingInput: restSignals.awaitingInput,
-          until: command.until,
+          // A limit-owned snooze only exists once the tail stop is verified as
+          // the provider's usage limit — that waiting is the provider's, never
+          // the person's, so it cannot be awaiting input.
+          awaitingInput:
+            command.kind === "snooze-code-thread-at-usage-reset"
+              ? false
+              : restSignals.awaitingInput,
+          until: snoozeUntil,
           now: updatedAt,
         });
         if (decision.status === "refused") {
@@ -1900,15 +1917,27 @@ export class CodeService {
                       version: command.expectedVersion + 1,
                       updatedAt,
                     }
-                  : command.kind === "snooze-code-thread"
+                  : command.kind === "snooze-code-thread" ||
+                      command.kind === "snooze-code-thread-at-usage-reset"
                     ? {
                         ...withoutRest(current),
                         snooze: {
-                          until: command.until,
+                          until:
+                            command.kind === "snooze-code-thread"
+                              ? command.until
+                              : this.#usageResetUntil(current.id),
                           at: updatedAt,
-                          // A turn running now is what "something happened"
-                          // means later: its end wakes the thread early.
-                          ...(restSignals?.executing === true ? { duringTurn: true } : {}),
+                          // A limit-owned snooze is what lets the resume
+                          // service lift it when it dispatches without
+                          // touching a snooze the person set. For a person's
+                          // own snooze, a turn running now is what
+                          // "something happened" means later: its end wakes
+                          // the thread early.
+                          ...(command.kind === "snooze-code-thread-at-usage-reset"
+                            ? { origin: "usage-limit" as const }
+                            : restSignals?.executing === true
+                              ? { duringTurn: true }
+                              : {}),
                         },
                         version: command.expectedVersion + 1,
                         updatedAt,
@@ -2954,6 +2983,33 @@ export class CodeService {
         payload,
       })),
     });
+  }
+
+  /**
+   * The wake time a limit-owned snooze binds: the declared reset of the
+   * thread's current usage-limited stop, read from the journaled provider-turn
+   * state rather than the caller. Refuses when the latest provider turn is
+   * not a waiting limited stop or the provider never disclosed a reset.
+   */
+  #usageResetUntil(threadId: CodeThreadId): UtcTimestamp {
+    const providerTurn = this.#persistence
+      .readCodeRuntimeWorks(threadId)
+      .filter(({ work }) => work.kind === "provider-turn")
+      .at(-1);
+    const stopped =
+      providerTurn === undefined ? undefined : this.#latestProviderTurnState(providerTurn.work.id);
+    if (
+      stopped === undefined ||
+      stopped.state !== "waiting" ||
+      stopped.failure?.usageLimit === undefined
+    ) {
+      throw this.#failure("invalid", "The thread has no usage-limited stop to hide until.");
+    }
+    const resetsAt = stopped.failure.usageLimit.resetsAt;
+    if (resetsAt === undefined) {
+      throw this.#failure("invalid", "The provider did not disclose when the limit resets.");
+    }
+    return resetsAt;
   }
 
   /**

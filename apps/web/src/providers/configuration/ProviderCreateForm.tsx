@@ -115,6 +115,7 @@ export function ProviderCreateForm(
   props: ProviderCreateFormProps & ProviderCreateFormPresentationProps,
 ) {
   const [creating, setCreating] = useState(false);
+  const [validationMessage, setValidationMessage] = useState<string | undefined>(undefined);
   const [manualOpen, setManualOpen] = useState(false);
   const initialProviderType =
     props.initialProviderType ?? props.allowedProviderTypes?.[0] ?? "opencode";
@@ -198,6 +199,25 @@ export function ProviderCreateForm(
             onSubmit={(event) => {
               event.preventDefault();
               const form = event.currentTarget;
+              if (!form.checkValidity()) {
+                const invalid = form.querySelector(":invalid");
+                const field =
+                  invalid instanceof HTMLInputElement ||
+                  invalid instanceof HTMLSelectElement ||
+                  invalid instanceof HTMLTextAreaElement
+                    ? invalid
+                    : undefined;
+                const label =
+                  field?.getAttribute("aria-label") ?? field?.getAttribute("name") ?? "This field";
+                setValidationMessage(
+                  field === undefined || field.validity.valueMissing
+                    ? `${label} is required.`
+                    : `${label} isn't valid.`,
+                );
+                field?.focus();
+                return;
+              }
+              setValidationMessage(undefined);
               const data = new FormData(form);
               setCreating(true);
               let operation: Promise<boolean>;
@@ -847,6 +867,11 @@ export function ProviderCreateForm(
                 login in your terminal, then check the connection.
               </p>
             ) : null}
+            {validationMessage === undefined ? null : (
+              <p className="provider-settings__alert" role="alert">
+                {validationMessage}
+              </p>
+            )}
             <OctantButton
               className="settings-view__action window-no-drag"
               disabled={

@@ -1403,4 +1403,89 @@ describe("scheduling a Work thread's usage-limit resume", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
+
+  it("hides the thread until the provider's declared reset without a provider turn", async () => {
+    const turn = usageLimitTurn({ kind: "exhausted", resetsAt: "2099-01-02T09:00:00.000Z" });
+    const fixture = serviceFixture({ threads: [thread()], turns: [turn] });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "snooze-work-thread-at-usage-reset",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        snooze: { until: "2099-01-02T09:00:00.000Z", at: now, origin: "usage-limit" },
+      },
+    });
+    expect(fixture.projection.read(ids.thread)?.snooze).toMatchObject({
+      until: "2099-01-02T09:00:00.000Z",
+      origin: "usage-limit",
+    });
+  });
+
+  it("keeps an armed resume when the thread hides until the reset", async () => {
+    const turn = usageLimitTurn({ kind: "exhausted", resetsAt: "2099-01-02T09:00:00.000Z" });
+    const fixture = serviceFixture({ threads: [thread()], turns: [turn] });
+    await fixture.service.execute(ids.window, {
+      kind: "schedule-work-usage-resume",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      turnId: turn.turnId,
+    });
+    const armed = fixture.projection.read(ids.thread);
+    if (armed === undefined) throw new Error("Expected the thread.");
+
+    await fixture.service.execute(ids.window, {
+      kind: "snooze-work-thread-at-usage-reset",
+      threadId: ids.thread,
+      expectedVersion: armed.version,
+    });
+    const view = fixture.projection.read(ids.thread);
+    expect(view?.snooze?.origin).toBe("usage-limit");
+    expect(view?.usageResume?.status).toBe("scheduled");
+  });
+
+  it("refuses to hide a thread whose latest turn is not waiting on a usage limit", async () => {
+    const fixture = serviceFixture({ threads: [thread()], turns: [] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-work-thread-at-usage-reset",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to hide a thread when the limited turn discloses no reset", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      turns: [usageLimitTurn({ kind: "exhausted" })],
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-work-thread-at-usage-reset",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to hide a thread whose declared reset has already passed", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      turns: [usageLimitTurn({ kind: "exhausted", resetsAt: "2020-01-01T00:00:00.000Z" })],
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-work-thread-at-usage-reset",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
 });

@@ -51,6 +51,15 @@ for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
 
+A thread stopped on a provider usage limit that disclosed a reset can also be
+hidden until that reset — a distinct command whose wake time the host derives
+from the journaled limit fact, never from the caller, and refuses when no such
+stop exists or its reset is unknown or already past. `snooze.origin` records
+who parked the thread: absent means a person's ordinary snooze, `usage-limit`
+means the host's. The choice is independent of the durable resume opt-in —
+hiding authorizes no provider turn, and a dispatched recovery lifts only the
+snooze the host set, never one the person set.
+
 ## Panes and content navigation
 
 The central workspace is one persistent recursive

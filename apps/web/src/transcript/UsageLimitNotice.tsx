@@ -80,6 +80,13 @@ export function UsageLimitNotice(props: {
   readonly resumable?: boolean;
   readonly onScheduleResume?: () => void;
   readonly onCancelResume?: () => void;
+  /**
+   * Hide the thread until this stop's declared reset without authorizing
+   * another provider turn. The host derives the wake time from the journaled
+   * limit fact; the caller withholds the callback once the thread carries a
+   * snooze of its own.
+   */
+  readonly onSnoozeAtReset?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   // A named reset time becomes a countdown that must keep moving while the
@@ -94,6 +101,25 @@ export function UsageLimitNotice(props: {
   }, [countdown]);
   const reset = usageLimitResetLine(props.limit, now);
   const resume = props.usageResume;
+  // Snoozing shares the resume offer's premise — a current stop that
+  // disclosed a real reset — but authorizes nothing: it only shelves the row.
+  // A reset already past means the host would refuse the snooze, so the offer
+  // hides once its clock runs out rather than inviting a rejected command.
+  const snoozeOffer =
+    canOfferResume(props.limit) &&
+    props.limit.resetsAt !== undefined &&
+    new Date(props.limit.resetsAt).getTime() > now &&
+    props.resumable === true &&
+    props.onSnoozeAtReset !== undefined &&
+    // A dispatched recovery just consumed the reset it was waiting on —
+    // snoozing until a time that already arrived can only be refused.
+    (resume === undefined || resume.status !== "dispatched") ? (
+      <p>
+        <OctantButton onClick={props.onSnoozeAtReset} size="sm" type="button" variant="secondary">
+          Snooze until reset
+        </OctantButton>
+      </p>
+    ) : null;
   return (
     <div className="callout callout-warn" role="alert">
       <CircleAlert aria-hidden="true" size={16} />
@@ -101,20 +127,23 @@ export function UsageLimitNotice(props: {
         <p>{usageLimitExplanation(props.limit, props.provider)}</p>
         {reset === undefined ? null : <p>{reset}</p>}
         {resume === undefined ? (
-          canOfferResume(props.limit) &&
-          props.resumable === true &&
-          props.onScheduleResume !== undefined ? (
-            <p>
-              <OctantButton
-                onClick={props.onScheduleResume}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Resume when the limit resets
-              </OctantButton>
-            </p>
-          ) : null
+          <>
+            {canOfferResume(props.limit) &&
+            props.resumable === true &&
+            props.onScheduleResume !== undefined ? (
+              <p>
+                <OctantButton
+                  onClick={props.onScheduleResume}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Resume when the limit resets
+                </OctantButton>
+              </p>
+            ) : null}
+            {snoozeOffer}
+          </>
         ) : resume.status === "scheduled" ? (
           <>
             <p>Resume scheduled — {resetCountdownLabel(resume.record.resetsAt, now)}</p>
@@ -130,6 +159,7 @@ export function UsageLimitNotice(props: {
                 </OctantButton>
               </p>
             )}
+            {snoozeOffer}
           </>
         ) : (
           <>
@@ -149,6 +179,7 @@ export function UsageLimitNotice(props: {
                 </OctantButton>
               </p>
             )}
+            {snoozeOffer}
           </>
         )}
         {props.action}

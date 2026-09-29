@@ -443,6 +443,32 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("does not announce a host-dispatched limit recovery as a person's turn request", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const onProviderTurnRequested = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      onProviderTurnRequested,
+    });
+
+    await fixture.runtime.execute(
+      windowId,
+      {
+        kind: "start-provider-turn",
+        operationId: operationId(12),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      },
+      { limitRecovery: true },
+    );
+    expect(onProviderTurnRequested).not.toHaveBeenCalled();
+    fixture.close();
+  });
+
   it("refuses a saved reasoning choice that discovery no longer offers before admitting the turn", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

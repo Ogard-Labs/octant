@@ -591,6 +591,17 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
   }).annotations(strict),
   /**
+   * Hide the thread until the current usage-limited stop's declared reset.
+   * The host derives the wake time from the journaled limit fact rather than
+   * the caller's clock and refuses when there is no current stop or its reset
+   * is unknown or already past. Carries no `until`: the client never
+   * supplies it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("snooze-code-thread-at-usage-reset"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
    * Move a thread onto the checkout its Project binds now.
    *
    * A thread's checkout id is derived from the binding revision it was created

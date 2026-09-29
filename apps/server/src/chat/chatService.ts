@@ -458,9 +458,20 @@ interface PreparedChatTurn {
 }
 
 export interface ChatServiceExecutionContext {
-  readonly windowId: WindowId;
+  /**
+   * A renderer window the caller speaks for; absent for host-owned callers
+   * (usage-limit recovery) that have no window to attach.
+   */
+  readonly windowId?: WindowId;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
+  /**
+   * Set by the host's own usage-limit recovery when it dispatches the
+   * authorized retry: the send is not the person re-engaging, so the thread's
+   * rest fields are preserved rather than cleared the way a person's retry
+   * clears them. Host-only: the wire commands cannot carry it.
+   */
+  readonly limitRecovery?: boolean;
   /**
    * Called once a sent turn is journaled and before it runs, for a caller
    * that must answer as soon as the message is in rather than when the
@@ -1160,6 +1171,10 @@ export class ChatService {
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#answerTurnQuestion(command),
+          );
+        case "snooze-chat-thread-at-usage-reset":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#snoozeAtUsageReset(command),
           );
         case "schedule-chat-usage-resume":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -2174,7 +2189,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2312,7 +2327,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2584,9 +2599,13 @@ export class ChatService {
       const updatedTurn: ChatTurn = { ...turn, attempts: [...turn.attempts, nextAttempt] };
       // A person sending the thread a message is re-engaging with it: a
       // completed thread comes back and a snoozed one wakes, in the same
-      // thread update the turn already journals.
+      // thread update the turn already journals. The host's own limit
+      // recovery is not the person re-engaging, so it leaves the rest fields
+      // as they were; the spent limit-owned snooze goes in the settle.
+      const restFields =
+        executionContext?.limitRecovery === true ? thread : withoutThreadRest(thread);
       const updatedThread = {
-        ...withoutThreadRest(thread),
+        ...restFields,
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -2609,7 +2628,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -2696,6 +2715,70 @@ export class ChatService {
       expectedVersion: command.expectedVersion,
       events: [
         this.#pending(USAGE_RESUME_SCHEDULED, { resume: record }),
+        this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
+      ],
+    });
+    return { kind: "thread-updated", thread: updatedThread };
+  }
+
+  async #snoozeAtUsageReset(
+    command: Extract<
+      ReturnType<typeof decodeChatCommand>,
+      { kind: "snooze-chat-thread-at-usage-reset" }
+    >,
+  ): Promise<ChatCommandResult> {
+    const thread = this.#requireActiveThread(command.threadId);
+    this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+    const view = this.#requireThreadView(command.threadId);
+    const attempt = view.turns.at(-1)?.attempts.at(-1);
+    if (
+      attempt === undefined ||
+      attempt.outcome !== "waiting" ||
+      attempt.usageLimit === undefined
+    ) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The thread has no usage-limited stop to hide until.",
+        }),
+      );
+    }
+    const resetsAt = attempt.usageLimit.resetsAt;
+    if (resetsAt === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "The provider did not disclose when the limit resets.",
+        }),
+      );
+    }
+    const timestamp = decodeTimestamp(this.#clock());
+    const decision = decideSnoozeThread({
+      lifecycle: thread.lifecycle,
+      awaitingInput: false,
+      until: resetsAt,
+      now: timestamp,
+    });
+    if (decision.status === "refused") {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: CHAT_SNOOZE_REFUSALS[decision.reason],
+      });
+    }
+    // Snoozing is the person's shelving act, so it rewrites the rest fields a
+    // manual snooze rewrites and preserves the others — an armed resume stays
+    // armed. The origin marks this snooze as limit-owned: the resume service
+    // lifts it when it dispatches and nothing else may touch it.
+    const updatedThread = {
+      ...withoutThreadRest(thread),
+      snooze: { until: resetsAt, at: timestamp, origin: "usage-limit" as const },
+      version: (command.expectedVersion + 1) as AggregateVersion,
+      updatedAt: timestamp,
+    };
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: command.expectedVersion,
+      events: [
         this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
       ],
     });
@@ -2880,7 +2963,7 @@ export class ChatService {
       prompt: accepted.prompt,
       prepared: accepted.prepared,
       mode: "resume",
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -3099,7 +3182,7 @@ export class ChatService {
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
     const appManagedTools =
-      executionContext !== undefined &&
+      executionContext?.windowId !== undefined &&
       this.#resolveAppManagedTools !== undefined &&
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported"
         ? this.#resolveAppManagedTools({
@@ -3331,7 +3414,9 @@ export class ChatService {
     try {
       source = await this.#resolveSideChatSourceContext({
         sidecarThreadId: thread.id,
-        ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        ...(executionContext?.windowId === undefined
+          ? {}
+          : { windowId: executionContext.windowId }),
         readToolNames,
       });
     } catch {
@@ -3419,7 +3504,9 @@ export class ChatService {
     try {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
-        ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        ...(executionContext?.windowId === undefined
+          ? {}
+          : { windowId: executionContext.windowId }),
         ...(dialogueEnabled ? { dialogueEnabled: true } : {}),
       });
     } catch {

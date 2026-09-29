@@ -187,6 +187,8 @@ function WorkTurnHeader(props: {
   readonly resumable?: boolean;
   readonly onScheduleResume?: (turnId: WorkTurnId) => void;
   readonly onCancelResume?: () => void;
+  /** Hides the thread until this stop's declared reset; no provider turn. */
+  readonly onSnoozeAtReset?: () => void;
 }) {
   const outcome = turnHeaderOutcome(props.turn);
   const usageLimit = props.turn.failure?.usageLimit;
@@ -213,6 +215,9 @@ function WorkTurnHeader(props: {
                 onScheduleResume: () => props.onScheduleResume?.(props.turn.turnId),
               })}
           {...(props.onCancelResume === undefined ? {} : { onCancelResume: props.onCancelResume })}
+          {...(props.onSnoozeAtReset === undefined
+            ? {}
+            : { onSnoozeAtReset: props.onSnoozeAtReset })}
           {...(props.onRestorePrompt === undefined
             ? {}
             : {
@@ -1000,6 +1005,33 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       });
   }, [props, thread]);
 
+  // Shelving until the limit's reset rides the same serialized command path;
+  // the host derives the wake time from the journaled stop, so a stale offer
+  // is refused honestly rather than binding an old reset to a new run.
+  const snoozeAtUsageReset = useCallback(() => {
+    if (thread === undefined) return;
+    const threadKey = currentThreadKeyRef.current;
+    void props.threadClient
+      .execute({
+        kind: "snooze-work-thread-at-usage-reset",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+      })
+      .then((result) => {
+        if (currentThreadKeyRef.current !== threadKey) return;
+        if ("kind" in result && result.kind === "thread-updated") {
+          setThread(result.thread);
+          props.onThreadUpdated?.(result.thread);
+          return;
+        }
+        setErrorMessage("The thread could not be hidden until the limit resets.");
+      })
+      .catch(() => {
+        if (currentThreadKeyRef.current !== threadKey) return;
+        setErrorMessage("The thread could not be hidden until the limit resets.");
+      });
+  }, [props, thread]);
+
   const sendWorkTurn = useCallback(
     async (message?: WorkSteeredMessage): Promise<boolean> => {
       if (
@@ -1404,6 +1436,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     onScheduleResume={scheduleUsageResume}
                     providerGroups={props.providerGroups ?? []}
                     resumable={String(row.head.turnId) === String(turns.at(-1)?.turnId)}
+                    {...(thread?.snooze === undefined
+                      ? { onSnoozeAtReset: snoozeAtUsageReset }
+                      : {})}
                     turn={row.head}
                     {...(thread?.usageResume === undefined ||
                     String(thread.usageResume.record.turnId) !== String(row.head.turnId)
@@ -1426,6 +1461,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   onScheduleResume={scheduleUsageResume}
                   providerGroups={props.providerGroups ?? []}
                   resumable={String(row.turn.turnId) === String(turns.at(-1)?.turnId)}
+                  {...(thread?.snooze === undefined ? { onSnoozeAtReset: snoozeAtUsageReset } : {})}
                   turn={row.turn}
                   {...(thread?.usageResume === undefined ||
                   String(thread.usageResume.record.turnId) !== String(row.turn.turnId)

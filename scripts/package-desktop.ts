@@ -1,6 +1,6 @@
 import { packager, type Options as PackagerOptions } from "@electron/packager";
 import { rebuild, type RebuildOptions } from "@electron/rebuild";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import {
@@ -547,6 +547,112 @@ export function createNativeRebuildOptions(
   };
 }
 
+export interface LinuxNativeToolchain {
+  readonly CC: string;
+  readonly CXX: string;
+}
+
+/**
+ * Electron's V8 headers declare deprecated classes as
+ * `class [[deprecated]] __attribute__((visibility)) Name`, an attribute
+ * ordering GCC 12 and earlier rejects ("expected identifier before
+ * '__attribute__'"). V8 is upstream-tested on clang, so clang is preferred;
+ * GCC 13 is the oldest GCC that accepts the ordering. Versioned binaries are
+ * probed before the bare names so a stale default `clang`/`g++` does not win
+ * over a newer versioned install.
+ */
+const LINUX_NATIVE_TOOLCHAIN_CANDIDATES: ReadonlyArray<{
+  readonly cc: string;
+  readonly cxx: string;
+  readonly minimumMajor: number;
+}> = [
+  { cc: "clang-19", cxx: "clang++-19", minimumMajor: 14 },
+  { cc: "clang-18", cxx: "clang++-18", minimumMajor: 14 },
+  { cc: "clang-17", cxx: "clang++-17", minimumMajor: 14 },
+  { cc: "clang-16", cxx: "clang++-16", minimumMajor: 14 },
+  { cc: "clang-15", cxx: "clang++-15", minimumMajor: 14 },
+  { cc: "clang-14", cxx: "clang++-14", minimumMajor: 14 },
+  { cc: "clang", cxx: "clang++", minimumMajor: 14 },
+  { cc: "gcc-14", cxx: "g++-14", minimumMajor: 13 },
+  { cc: "gcc-13", cxx: "g++-13", minimumMajor: 13 },
+  { cc: "gcc", cxx: "g++", minimumMajor: 13 },
+];
+
+/**
+ * Pick the C/C++ pair node-gyp uses to rebuild native modules on Linux.
+ *
+ * node-gyp reads `CC`/`CXX` from the process environment and @electron/rebuild
+ * offers no env passthrough, so the caller applies the returned pair around the
+ * rebuild. An explicit `CC`/`CXX` pair already in the environment wins
+ * unchanged — an override is meaningless if the caller can only fix one half.
+ * Throws when no candidate is installed so a missing toolchain fails before the
+ * multi-minute staging rebuild rather than inside it.
+ */
+export function resolveLinuxNativeToolchain(
+  environment: Record<string, string | undefined> = process.env,
+  which: (command: string) => string | null = resolveNodeWhich,
+  compilerMajorVersion: (command: string) => number | undefined = probeCompilerMajorVersion,
+): LinuxNativeToolchain {
+  const configuredCC = environment.CC?.trim();
+  const configuredCXX = environment.CXX?.trim();
+  if (configuredCC && configuredCXX) {
+    return { CC: configuredCC, CXX: configuredCXX };
+  }
+  for (const candidate of LINUX_NATIVE_TOOLCHAIN_CANDIDATES) {
+    if (which(candidate.cc) === null || which(candidate.cxx) === null) continue;
+    const major = compilerMajorVersion(candidate.cxx);
+    if (major !== undefined && major >= candidate.minimumMajor) {
+      return { CC: candidate.cc, CXX: candidate.cxx };
+    }
+  }
+  throw new Error(
+    "Packaging for Linux needs clang or GCC 13+ to compile Electron's V8 " +
+      "headers; earlier GCC rejects their attribute ordering. Install clang " +
+      "(apt-get install clang) or set CC/CXX to a C++20-capable toolchain.",
+  );
+}
+
+function probeCompilerMajorVersion(command: string): number | undefined {
+  try {
+    const banner = execFileSync(command, ["--version"], { encoding: "utf8" });
+    const versions = [...banner.matchAll(/ (\d+)\.\d+\.\d+/g)];
+    const last = versions[versions.length - 1];
+    return last === undefined ? undefined : Number(last[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+async function rebuildNativeModules(
+  stageRoot: string,
+  target: DesktopPackageTarget,
+): Promise<void> {
+  const options = createNativeRebuildOptions(stageRoot, target);
+  if (target.platform !== "linux") {
+    await rebuild(options);
+    return;
+  }
+  const toolchain = resolveLinuxNativeToolchain();
+  const previousCC = process.env.CC;
+  const previousCXX = process.env.CXX;
+  process.env.CC = toolchain.CC;
+  process.env.CXX = toolchain.CXX;
+  try {
+    await rebuild(options);
+  } finally {
+    if (previousCC === undefined) {
+      delete process.env.CC;
+    } else {
+      process.env.CC = previousCC;
+    }
+    if (previousCXX === undefined) {
+      delete process.env.CXX;
+    } else {
+      process.env.CXX = previousCXX;
+    }
+  }
+}
+
 export function createServerRuntimeManifest() {
   return {
     name: "@octant/server-runtime",
@@ -648,7 +754,7 @@ export async function stageDesktopRuntime(
       ["@trycua/cua-driver", "@trycua/cua-driver-darwin-arm64"],
       "desktop",
     );
-  await rebuild(createNativeRebuildOptions(stageRoot, target));
+  await rebuildNativeModules(stageRoot, target);
   await pruneUnusedNativePayloads(stageRoot);
   await stripNativeDebugMetadata(
     stageRoot,

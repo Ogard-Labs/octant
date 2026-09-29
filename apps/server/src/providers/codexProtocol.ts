@@ -88,15 +88,17 @@ const TurnStatus = Schema.Literal("completed", "interrupted", "failed", "inProgr
  */
 const TurnError = Schema.Struct({
   message: Schema.String,
-  codexErrorInfo: Schema.optional(
+  codexErrorInfo: Schema.optionalWith(
     Schema.Union(Schema.String, Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+    { nullable: true },
   ),
   additionalDetails: Schema.optional(NullableString),
 });
 const TurnReference = Schema.Struct({
   id: Schema.String,
   status: TurnStatus,
-  error: Schema.optional(TurnError),
+  // 0.157.x emits `"error": null` on healthy turns; null reads as absent.
+  error: Schema.optionalWith(TurnError, { nullable: true }),
 });
 export type CodexTurnReference = typeof TurnReference.Type;
 

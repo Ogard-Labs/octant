@@ -14,6 +14,13 @@ export const ThreadSnooze = Schema.Struct({
   until: UtcTimestamp,
   at: UtcTimestamp,
   duringTurn: Schema.optional(Schema.Boolean),
+  /**
+   * Who parked the thread. A snooze the limit-recovery surface wrote carries
+   * `usage-limit` so automated cleanup can drop exactly that record and never
+   * erase a wake time the person chose; absent means an ordinary user snooze
+   * (including every record written before this field existed).
+   */
+  origin: Schema.optional(Schema.Literal("user", "usage-limit")),
 }).annotations(strict);
 export type ThreadSnooze = typeof ThreadSnooze.Type;
 

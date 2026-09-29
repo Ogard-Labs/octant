@@ -631,7 +631,8 @@ html[data-octant-native-host="true"]
 /* Space separates the navigation actions from the Project tree. A rule here
    reads as a third section boundary in a rail that already has section
    headings, and it is the only horizontal line in the sidebar. */
-.sidebar-navigation__projects {
+.sidebar-navigation__projects,
+.sidebar-navigation__project-threads {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1894,6 +1895,10 @@ html[data-octant-native-host="true"]
   }
 
   .sidebar-navigation__projects {
+    flex: 0 0 auto;
+  }
+
+  .sidebar-navigation__project-threads {
     flex: 0 0 auto;
   }
 

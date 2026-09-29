@@ -667,6 +667,13 @@ export type CodeOperationInitiator = "user" | "agent";
 
 export interface CodeOperationExecuteOptions {
   readonly initiator?: CodeOperationInitiator;
+  /**
+   * Set by the host's own usage-limit recovery when it dispatches the
+   * authorized continuation: the send is not the person re-engaging, so it
+   * must not wake a snooze or reopen a completion. Host-only: the wire
+   * command cannot carry it.
+   */
+  readonly limitRecovery?: boolean;
 }
 
 export interface CodeOperationServiceOptions {
@@ -683,6 +690,7 @@ export interface CodeOperationServiceOptions {
     readonly command: CodeOperationCommand;
     readonly thread: CodeThread;
     readonly checkout: CodeCheckoutIdentity;
+    readonly executeOptions?: CodeOperationExecuteOptions;
   }) => void;
   /** Refuses a new provider turn when the Project policy changed since thread creation. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
@@ -879,6 +887,7 @@ export class CodeOperationService {
       command,
       thread: scope.thread,
       checkout: scope.checkout,
+      executeOptions: options,
     });
 
     let result: CodeOperationResult;

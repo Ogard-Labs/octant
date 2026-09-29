@@ -4346,6 +4346,247 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).thread.usageResume).toBeUndefined();
   });
 
+  it("hides the thread until the provider's declared reset without another provider turn", async () => {
+    const { service, fakeDriver } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+
+    const snoozed = await service.execute({
+      kind: "snooze-chat-thread-at-usage-reset",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+    });
+    expect(snoozed).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        snooze: { until: "2099-01-02T09:00:00.000Z", at: now, origin: "usage-limit" },
+      },
+    });
+    // Hiding the row is the whole action — nothing asked the provider for
+    // another turn.
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
+  it("keeps an armed resume when the thread hides until the reset, and keeps the snooze when the resume is withdrawn", async () => {
+    const { service } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    const scheduled = await service.execute({
+      kind: "schedule-chat-usage-resume",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    if (scheduled.kind !== "thread-updated") throw new Error("Expected schedule.");
+    const armed = service.read(created.thread.id);
+
+    const snoozed = await service.execute({
+      kind: "snooze-chat-thread-at-usage-reset",
+      threadId: created.thread.id,
+      expectedVersion: armed.thread.version,
+    });
+    expect(snoozed).toMatchObject({ kind: "thread-updated" });
+    const hidden = service.read(created.thread.id);
+    expect(hidden.thread.snooze?.origin).toBe("usage-limit");
+    expect(hidden.thread.usageResume?.status).toBe("scheduled");
+
+    await service.execute({
+      kind: "cancel-chat-usage-resume",
+      threadId: created.thread.id,
+      expectedVersion: hidden.thread.version,
+    });
+    const after = service.read(created.thread.id);
+    expect(after.thread.usageResume).toBeUndefined();
+    expect(after.thread.snooze?.origin).toBe("usage-limit");
+  });
+
+  it("keeps the armed resume when the thread wakes from a limit-owned snooze", async () => {
+    const { service } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2099-01-02T09:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    const turn = parked.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected the parked attempt.");
+    }
+    await service.execute({
+      kind: "schedule-chat-usage-resume",
+      threadId: created.thread.id,
+      expectedVersion: parked.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    const armed = service.read(created.thread.id);
+    await service.execute({
+      kind: "snooze-chat-thread-at-usage-reset",
+      threadId: created.thread.id,
+      expectedVersion: armed.thread.version,
+    });
+    const hidden = service.read(created.thread.id);
+
+    await service.execute({
+      kind: "wake-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: hidden.thread.version,
+    });
+    const after = service.read(created.thread.id);
+    expect(after.thread).not.toHaveProperty("snooze");
+    expect(after.thread.usageResume?.status).toBe("scheduled");
+  });
+
+  it("refuses to hide a thread whose latest attempt is not waiting on a usage limit", async () => {
+    const { service } = openFixture({ nativeConversation: true });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Ordinary turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Just talking",
+    });
+    await until(() => service.read(created.thread.id).turns.length === 1, {
+      timeoutMs: 10_000,
+    });
+    const view = service.read(created.thread.id);
+    await expect(
+      service.execute({
+        kind: "snooze-chat-thread-at-usage-reset",
+        threadId: created.thread.id,
+        expectedVersion: view.thread.version,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(service.read(created.thread.id).thread).not.toHaveProperty("snooze");
+  });
+
+  it("refuses to hide a thread when the limited stop discloses no reset", async () => {
+    const { service } = openFixture({ nativeConversation: true, turnOutcome: "limited" });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    await expect(
+      service.execute({
+        kind: "snooze-chat-thread-at-usage-reset",
+        threadId: created.thread.id,
+        expectedVersion: parked.thread.version,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(service.read(created.thread.id).thread).not.toHaveProperty("snooze");
+  });
+
+  it("refuses to hide a thread whose declared reset has already passed", async () => {
+    const { service } = openFixture({
+      nativeConversation: true,
+      turnOutcome: "limited",
+      usageLimitResetsAt: "2020-01-01T00:00:00.000Z",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Limited turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Spend it",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "waiting",
+      { timeoutMs: 10_000 },
+    );
+    const parked = service.read(created.thread.id);
+    await expect(
+      service.execute({
+        kind: "snooze-chat-thread-at-usage-reset",
+        threadId: created.thread.id,
+        expectedVersion: parked.thread.version,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(service.read(created.thread.id).thread).not.toHaveProperty("snooze");
+  });
+
   it("refuses to retry an older turn in a provider-owned conversation", async () => {
     const { service, fakeDriver } = openFixture({ nativeConversation: true });
     const created = await service.execute({

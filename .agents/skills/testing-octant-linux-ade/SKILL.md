@@ -22,6 +22,17 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 2. `octant project access <name> full-access` sets `codeAccessPersistence: "project-default"` (the "Project remembers Full access" flag); `... approval-gated` resets to `current-session`.
 3. Codex CLI instance auto-registers on first app load via discovery (no manual scan needed if `codex` is on PATH and logged in).
 4. If a provider turn fails in the UI with "Provider execution failed." minutes after working, suspect a stale codex key: `~/.codex/auth.json` keeps the key from the last login, and a new session `OPENAI_API_KEY` makes the stored one return 401 `invalid_api_key`. Confirm with `codex exec --model <m> "Reply with exactly: PING-OK"` in a scratch repo, then re-login (`printenv OPENAI_API_KEY | codex login --with-api-key`) — `--with-api-key` reads stdin, it does not take the key as an argument.
+5. If every provider turn fails within milliseconds with "Codex returned an invalid protocol response" (journal `failure.code:"protocol"`), suspect codex-cli wire drift, not auth: codex 0.157.x emits `"error": null` inside `turn/start` and `turn/started|completed` TurnReferences, and strict `Schema.optional` fields reject `null`. Diagnose by replaying the captured `turn/start` JSON-RPC result through `decodeTurnStartResult` in `apps/server/src/providers/codexProtocol.ts` — `{id,status}` decodes, `{id,status,error:null}` throws pre-fix. The decode-side fix shape is `Schema.optionalWith(X, { nullable: true })` (null → `undefined`), which keeps `?.` consumers safe; newly added unknown fields (e.g. `itemsView`, `startedAt`, `durationMs`) are already stripped.
+
+## Packaged desktop
+
+- `bun run build && bun run package:desktop` emits `out/Octant-*-linux-x64.AppImage` (native rebuilds need clang — installed by the repo blueprint; GCC ≤ 12 cannot parse Electron's V8 headers). Launch for UI testing: `DISPLAY=:0 APPIMAGE_EXTRACT_AND_RUN=1 ./out/Octant-*-linux-x64.AppImage` — it spawns its own bundled server on :13773, so stop any dev server/ Electron instance first (single-instance lock quits silently). The packaged app has a native "Allow full access" approval dialog the web surface lacks on Linux.
+
+## Journal inspection
+
+- No `sqlite3` CLI on this host — use python3's sqlite3 module against `~/.local/share/octant/octant.sqlite3`, table `event_journal`, columns `global_sequence`, `event_name`, `payload_json` (the payload wraps entities, e.g. `attempt.outcome`, `turn.capabilities` — inspect shape before filtering).
+- Chat attempt verdicts: `chat.attempt-updated@1` → `attempt.outcome` = queued/streaming/completed/failed + `attempt.failure.code` (e.g. `"protocol"`).
+- Work-turn confinement posture: `work.turn-updated@1` → `capabilities` = `{shell:"denied", git:"denied", worktree:"denied", pullRequest:"denied", code:"denied", confinement:"project-root-confined"}` on Work turns.
 
 ## UI paths
 

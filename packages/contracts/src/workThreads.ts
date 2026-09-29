@@ -140,6 +140,17 @@ export const WakeWorkThreadCommand = Schema.Struct({
   ...WorkThreadCommandFields,
 }).annotations(strict);
 export type WakeWorkThreadCommand = typeof WakeWorkThreadCommand.Type;
+/**
+ * Hide the thread until the current usage-limited stop's declared reset. The
+ * host derives the wake time from the journaled limit fact rather than the
+ * caller's clock and refuses when there is no current stop or its reset is
+ * unknown or already past. Carries no `until`: the client never supplies it.
+ */
+export const SnoozeWorkThreadAtUsageResetCommand = Schema.Struct({
+  kind: Schema.Literal("snooze-work-thread-at-usage-reset"),
+  ...WorkThreadCommandFields,
+}).annotations(strict);
+export type SnoozeWorkThreadAtUsageResetCommand = typeof SnoozeWorkThreadAtUsageResetCommand.Type;
 
 export const ConfirmWorkThreadCompletionCommand = Schema.Struct({
   kind: Schema.Literal("confirm-work-thread-completion"),
@@ -238,6 +249,7 @@ export const WorkThreadCommand = Schema.Union(
   CompleteWorkThreadCommand,
   ReopenWorkThreadCommand,
   SnoozeWorkThreadCommand,
+  SnoozeWorkThreadAtUsageResetCommand,
   WakeWorkThreadCommand,
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
