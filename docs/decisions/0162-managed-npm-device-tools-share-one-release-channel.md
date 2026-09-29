@@ -1,4 +1,4 @@
-# 0160. Managed npm device tools share one release channel
+# 0162. Managed npm device tools share one release channel
 
 **Status:** Proposed
 

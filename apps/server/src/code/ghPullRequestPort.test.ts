@@ -96,7 +96,7 @@ describe("GhPullRequestPort", () => {
         "--base",
         target.baseBranch,
         "--head",
-        target.head,
+        "feature/phase-7",
         "--state",
         "open",
         "--limit",

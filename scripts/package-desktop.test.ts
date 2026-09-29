@@ -26,6 +26,7 @@ import {
   REQUIRED_CODE_WEB_ASSET_PATTERNS,
   APPIMAGE_TOOL_URL,
   APPIMAGE_TOOL_SHA256,
+  buildPackagedApps,
   createActivateAppleScript,
   createLinuxAppRunScript,
   createLinuxDesktopEntry,
@@ -515,6 +516,16 @@ describe("desktop packaging boundary", () => {
     await stripNativeDebugMetadata("/tmp/octant-stage", strip, nativePayloadsToStrip("linux"));
     expect(strip.mock.calls).toEqual([
       ["/tmp/octant-stage/apps/server/node_modules/node-pty/build/Release/pty.node"],
+    ]);
+  });
+
+  it("rebuilds the applications before packaging so a stale dist cannot ship", async () => {
+    const invocations: { argv: ReadonlyArray<string>; cwd: string }[] = [];
+    await buildPackagedApps(repositoryRoot, async (argv, options) => {
+      invocations.push({ argv, cwd: options.cwd });
+    });
+    expect(invocations).toEqual([
+      { argv: [process.execPath, "run", "build"], cwd: repositoryRoot },
     ]);
   });
 

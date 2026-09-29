@@ -5,6 +5,7 @@ import type {
   AgentRunCreationPosture,
   AgentRunLifecycleStatus,
   AgentRunResult,
+  AgentRunResultDeliveryOutcome,
   AgentRunRoutingReceipt,
   AggregateVersion,
   UtcTimestamp,
@@ -24,6 +25,7 @@ export type AgentRunPolicyRejectionCode =
   | "fallback-forbidden"
   | "invalid-completion"
   | "invalid-acknowledgement"
+  | "invalid-delivery"
   | "invalid-depth"
   | "invalid-workspace"
   | "pool-route-invalid";
@@ -551,6 +553,43 @@ export function acknowledgeAgentRunResult(
   };
 }
 
+/**
+ * Journals how a finished run's result reached its parent. A delivery is
+ * owed only for a genuinely final outcome — `interrupted` runs may still be
+ * retried, so they carry no delivery until their retry's own terminal state
+ * lands — and each run settles at most once, so a delivery retried after a
+ * crash can never mark the same result twice.
+ */
+export function settleAgentRunResultDelivery(
+  run: AgentRun,
+  now: UtcTimestamp,
+  expectedVersion: AggregateVersion,
+  outcome: AgentRunResultDeliveryOutcome,
+  detail?: string,
+): AgentRun {
+  assertExpectedVersion(run, expectedVersion);
+  if (
+    run.lifecycleStatus !== "completed" &&
+    run.lifecycleStatus !== "failed" &&
+    run.lifecycleStatus !== "cancelled"
+  ) {
+    reject("invalid-delivery", "Only a finally-finished AgentRun can settle result delivery.");
+  }
+  if (run.resultDelivery !== undefined) {
+    reject("invalid-delivery", "AgentRun result delivery is already settled.");
+  }
+  return {
+    ...run,
+    resultDelivery: {
+      outcome,
+      ...(detail === undefined ? {} : { detail }),
+      settledAt: now,
+    },
+    version: nextVersion(run.version),
+    updatedAt: now,
+  };
+}
+
 export function evaluateAgentRunCommand(
   run: AgentRun | undefined,
   command: AgentRunCommand,
@@ -586,6 +625,18 @@ export function evaluateAgentRunCommand(
         reject("unsupported-transition", "AgentRun does not exist.");
       }
       return acknowledgeAgentRunResult(run, now, command.expectedVersion);
+    }
+    case "settle-agent-run-result-delivery": {
+      if (run === undefined) {
+        reject("unsupported-transition", "AgentRun does not exist.");
+      }
+      return settleAgentRunResultDelivery(
+        run,
+        now,
+        command.expectedVersion,
+        command.outcome,
+        command.detail,
+      );
     }
   }
 

@@ -411,6 +411,29 @@ describe("CodeThreadWorkspace", () => {
     expect(container.querySelector(".code-thread-workspace__callout")).not.toBeNull();
   });
 
+  it("records a failed limited stop without offering recovery that can only refuse", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "failed",
+          turnUsageLimit: {
+            kind: "temporary",
+            resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          },
+          latestProviderTurnOperationId: "op-1",
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("temporary rate limit");
+    expect(
+      screen.queryByRole("button", { name: "Resume when the limit resets" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+  });
+
   it("keeps the retry control off an ordinary turn error", () => {
     render(
       <CodeThreadWorkspace

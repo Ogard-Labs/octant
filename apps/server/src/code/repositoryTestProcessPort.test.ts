@@ -386,6 +386,61 @@ describe("RepositoryTestProcessPort", () => {
     ]);
   });
 
+  it("unions a launch's own write roots onto the port's, so a launch without them carries none", async () => {
+    // The Apple screenshot names a host-private captures directory at launch
+    // time; the port's wider set and the launch's set both reach the profile,
+    // and a launch that names nothing gets only the port's.
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const recorded: Parameters<typeof fake.confinement.prepare>[0][] = [];
+    const children: Array<ReturnType<typeof fakeChild>> = [];
+    const spawn = vi.fn(() => {
+      const spawned = fakeChild(96);
+      children.push(spawned);
+      return spawned;
+    });
+    const port = new RepositoryTestProcessPort({
+      platform: "darwin",
+      sandboxPath: fake.sandboxPath,
+      temporaryDirectory: fake.temporaryDirectory,
+      seatbeltHomeDirectory: fake.root,
+      seatbeltUsersDirectory: fake.root,
+      confinement: {
+        prepare: (input) => {
+          recorded.push(input);
+          return fake.confinement.prepare(input);
+        },
+      },
+      spawn,
+      networkEgress: "none",
+      additionalWritePaths: [join(fake.root, "port-wide")],
+    });
+    const granted = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+      additionalWriteRoots: [join(fake.root, "launch-only")],
+    });
+    children.at(-1)?.close(0, null);
+    await granted;
+    const plain = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    children.at(-1)?.close(0, null);
+    await plain;
+
+    expect(recorded).toHaveLength(2);
+    expect(recorded[0]?.additionalWriteRoots).toEqual([
+      join(fake.root, "port-wide"),
+      join(fake.root, "launch-only"),
+    ]);
+    expect(recorded[1]?.additionalWriteRoots).toEqual([join(fake.root, "port-wide")]);
+  });
+
   it("forwards simulator control to the confinement only when the caller asks for it", async () => {
     // The Apple toolchain port is the only caller that sets this, and the
     // profile's Simulator rules only exist when it arrives. A regression that

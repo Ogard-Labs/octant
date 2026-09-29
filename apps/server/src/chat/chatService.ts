@@ -53,6 +53,8 @@ import {
   type ChatTranscriptSearch,
   type ChatTurn,
   type ChatTurnRouteDecision,
+  type AgentRun,
+  type AgentRunId,
   type AggregateVersion,
   type ChatAttachmentId,
   type ContextInspectorSnapshot,
@@ -156,6 +158,7 @@ import {
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
+import { agentResultDeliveryPrompt } from "../agentRun/agentResultDeliveryPrompt";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -633,6 +636,16 @@ export interface ChatServiceOptions {
    * or empty, leaves the conservative built-in limits in place.
    */
   readonly reviewedModelManifest?: ReviewedModelManifest;
+  /**
+   * Read access to journaled subagent runs. A `deliver-chat-agent-result`
+   * command resolves the named run here, so the turn it begins is provably
+   * the reply of a run that belongs to this thread — never text a caller
+   * supplied. Absent means this host delivers no subagent results into Chat.
+   */
+  readonly agentRuns?: {
+    readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+    readonly resultText: (runId: AgentRunId) => string | undefined;
+  };
 }
 
 /**
@@ -778,6 +791,7 @@ export class ChatService {
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #reviewedModelManifest?: ReviewedModelManifest;
+  readonly #agentRuns?: ChatServiceOptions["agentRuns"];
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
   readonly #threadAdmissions = new Map<string, Promise<void>>();
@@ -806,6 +820,9 @@ export class ChatService {
     }
     if (options.reviewedModelManifest !== undefined) {
       this.#reviewedModelManifest = options.reviewedModelManifest;
+    }
+    if (options.agentRuns !== undefined) {
+      this.#agentRuns = options.agentRuns;
     }
     if (options.resolveAppManagedTools !== undefined) {
       this.#resolveAppManagedTools = options.resolveAppManagedTools;
@@ -1156,6 +1173,8 @@ export class ChatService {
           return await this.#updateThread(command);
         case "send-chat-turn":
           return await this.#sendTurn(command, executionContext);
+        case "deliver-chat-agent-result":
+          return await this.#deliverAgentResult(command, executionContext);
         case "edit-chat-turn":
           return await this.#editTurn(command, executionContext);
         case "branch-chat-thread":
@@ -2190,6 +2209,167 @@ export class ChatService {
       prompt: command.prompt,
       prepared: accepted.prepared,
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
+    });
+    return { kind: "turn-created", turn: accepted.turn };
+  }
+
+  /**
+   * Wake the thread with the finished subagent run the command names.
+   *
+   * The host composes the turn's input from the journaled run and marks the
+   * turn with that run's identity, so a delivery replayed after a crash finds
+   * the turn it already made instead of minting a second one. The journaled
+   * events carry a system actor — a subagent run finishing is host activity,
+   * not a person sending.
+   */
+  async #deliverAgentResult(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "deliver-chat-agent-result" }>,
+    executionContext?: ChatServiceExecutionContext,
+  ): Promise<ChatCommandResult> {
+    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+      const thread = this.#requireActiveThread(command.threadId);
+      if (this.#agentRuns === undefined) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "unsupported",
+            message: "This host does not deliver subagent results into Chat.",
+          }),
+        );
+      }
+      const run = this.#agentRuns.getById(command.runId);
+      if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "invalid",
+            message: "The named subagent run does not belong to this Chat thread.",
+          }),
+        );
+      }
+      if (
+        run.lifecycleStatus !== "completed" &&
+        run.lifecycleStatus !== "failed" &&
+        run.lifecycleStatus !== "cancelled"
+      ) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "invalid",
+            message: "The named subagent run has not finished.",
+          }),
+        );
+      }
+      this.#admitHarnessTurn(thread);
+      this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+      const timestamp = decodeTimestamp(this.#clock());
+      const prompt = agentResultDeliveryPrompt(run, this.#agentRuns?.resultText(run.id));
+      const userMessage = this.#prepareContent(thread.id, "user", prompt);
+      const userMessageRef = userMessage.reference;
+      const view = this.#persistence.readChatThreadView(thread.id);
+      const existing = view?.turns.find(
+        (candidate) =>
+          candidate.delivery !== undefined &&
+          String(candidate.delivery.runId) === String(command.runId),
+      );
+      if (existing !== undefined) {
+        return { kind: "existing" as const, turn: existing };
+      }
+      this.#assertNoActiveTurn(view, thread.id);
+      const sequence = (view?.turns.length ?? 0) + 1;
+      const turnId = this.#uuid() as ChatTurn["id"];
+      const routing = await this.#computeTurnRouting(thread, turnId);
+      if (routing !== undefined && routing.decision.decision.kind === "waiting") {
+        await this.#multiModelRoute.persistTurnRoute(routing.decision);
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "waiting",
+            message: routing.decision.decision.message,
+          }),
+        );
+      }
+      const executionThread = routing?.executionThread ?? thread;
+      const prepared = await this.#prepareTurnExecution(
+        executionThread,
+        prompt,
+        userMessageRef,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "send",
+        executionContext,
+        undefined,
+      );
+      const turn = beginChatTurn(prepared.executionThread, {
+        turnId,
+        attemptId: this.#uuid() as ChatAttempt["id"],
+        providerSessionId:
+          prepared.nativeSession?.providerSessionId ?? decodeProviderSessionId(this.#uuid()),
+        ...(prepared.nativeSession?.resumeCursor === undefined
+          ? {}
+          : { resumeCursor: prepared.nativeSession.resumeCursor }),
+        contextManifestId: prepared.context.snapshot.next.manifest.id,
+        userMessageRef,
+        delivery: { kind: "agent-result", runId: run.id },
+        sequence,
+        expectedVersion: command.expectedVersion,
+        createdAt: timestamp,
+      });
+      const updatedThread = {
+        ...withoutThreadRest(thread),
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      };
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: command.expectedVersion,
+          events: [
+            this.#pending(
+              "chat.thread-updated@1",
+              {
+                kind: "thread-updated",
+                thread: updatedThread,
+              },
+              { actorKind: "system" },
+            ),
+            this.#pending(
+              "chat.turn-created@1",
+              { kind: "turn-created", turn },
+              { actorKind: "system" },
+            ),
+            ...(routing !== undefined && routing.decision.decision.kind === "selected"
+              ? [
+                  this.#pending(
+                    "chat.turn-route-decided@1",
+                    {
+                      kind: "turn-route-decided",
+                      decision: routing.decision,
+                    },
+                    { actorKind: "system" },
+                  ),
+                ]
+              : []),
+          ],
+        },
+        { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
+      );
+      return {
+        kind: "accepted" as const,
+        thread: updatedThread,
+        turn,
+        attempt: turn.attempts[0]!,
+        prepared,
+        prompt,
+      };
+    });
+    if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
+    await this.#runAttempt({
+      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
+      turn: accepted.turn,
+      attempt: accepted.attempt,
+      prompt: accepted.prompt,
+      prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }

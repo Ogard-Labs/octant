@@ -667,6 +667,41 @@ describe("ChatTranscript", () => {
     expect(alert).not.toHaveTextContent("did not say when");
   });
 
+  it("offers no scheduled recovery on a limited stop that already failed", () => {
+    const failed = viewFixture().turns[0]!.attempts[0]!;
+    render(
+      <ChatTranscript
+        onScheduleUsageResume={vi.fn()}
+        onSnoozeAtUsageReset={vi.fn()}
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [
+                {
+                  ...failed,
+                  outcome: "failed",
+                  failure: { code: "provider-failed" },
+                  usageLimit: {
+                    kind: "temporary",
+                    resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+                  },
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("temporary rate limit");
+    expect(
+      screen.queryByRole("button", { name: "Resume when the limit resets" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+  });
+
   it("offers regenerate on a completed attempt and routes it through the server", async () => {
     const onRetryAttempt = vi.fn();
     const user = userEvent.setup();

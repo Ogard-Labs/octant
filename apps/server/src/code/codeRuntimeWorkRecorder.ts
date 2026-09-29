@@ -122,6 +122,40 @@ export class CodeRuntimeWorkRecorder {
     readonly state: CodeRuntimeWorkState;
   }): CodeRuntimeWorkRecordOutcome {
     if (!this.#open.has(input.id)) return { status: "not-owned" };
+    return this.#settle(input);
+  }
+
+  /**
+   * Settle a record a previous process opened. Restart reconciliation already
+   * rewrites such a unit's row, but a live answer can still need to close work
+   * the dead process left `waiting`: ownership is then established by the
+   * persisted aggregate rather than this recorder's map — the same rule
+   * `open` uses when it reopens a unit after the host restarts. A unit the
+   * journal never saw stays `not-owned`.
+   */
+  settleOrphaned(input: {
+    readonly id: CodeRuntimeWorkUnitId;
+    readonly threadId: CodeThreadId;
+    readonly kind: CodeRuntimeWorkKind;
+    readonly state: CodeRuntimeWorkState;
+  }): CodeRuntimeWorkRecordOutcome {
+    if (this.#open.has(input.id)) return this.#settle(input);
+    let version = 0;
+    try {
+      version = this.#readVersion(decodeCodeRuntimeWorkId(String(input.id)));
+    } catch {
+      version = 0;
+    }
+    if (version === 0) return { status: "not-owned" };
+    return this.#settle(input);
+  }
+
+  #settle(input: {
+    readonly id: CodeRuntimeWorkUnitId;
+    readonly threadId: CodeThreadId;
+    readonly kind: CodeRuntimeWorkKind;
+    readonly state: CodeRuntimeWorkState;
+  }): CodeRuntimeWorkRecordOutcome {
     const outcome = this.#record(input.id, input.threadId, input.kind, input.state);
     if (outcome.status === "recorded" && input.state !== "running" && input.state !== "waiting")
       this.#open.delete(input.id);

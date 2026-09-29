@@ -121,7 +121,7 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
 
       {props.handoff.ready ? null : (
         <p className="first-run__caveat" role="note">
-          Skip for now leaves these answers as they are. It does not mark the host ready or start a
+          Skip setup leaves these answers as they are. It does not mark the host ready or start a
           thread.
         </p>
       )}

@@ -8,7 +8,7 @@ import type {
   ToolActionCancellation,
 } from "@octant/contracts";
 import { existsSync } from "node:fs";
-import { link, mkdir, mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -945,7 +945,10 @@ describe("AppleToolchainService lifecycle", () => {
     );
     expect(screenshot).toBeDefined();
     expect(artifacts.get(screenshot!.reference)).toEqual(png);
-    const command = execute.mock.calls.at(-1)?.[0] as { readonly argv: ReadonlyArray<string> };
+    const command = execute.mock.calls.at(-1)?.[0] as {
+      readonly argv: ReadonlyArray<string>;
+      readonly additionalWriteRoots?: ReadonlyArray<string>;
+    };
     expect(command.argv.slice(0, 7)).toEqual([
       "xcrun",
       "simctl",
@@ -955,6 +958,9 @@ describe("AppleToolchainService lifecycle", () => {
       "--type",
       "png",
     ]);
+    // The launch that writes the capture is the only launch granted the
+    // directory it lands in.
+    expect(command.additionalWriteRoots).toEqual([captureDirectory]);
     const capturePath = command.argv[7]!;
     expect(dirname(capturePath)).toBe(captureDirectory);
     expect(capturePath).not.toBe("-");
@@ -975,6 +981,65 @@ describe("AppleToolchainService lifecycle", () => {
       kind: "unauthorized",
       message: "Apple screenshot evidence is not available for this thread.",
     });
+  });
+
+  it("creates a missing capture directory as a private one before the launch that writes it", async () => {
+    const execute = discoveryExecutor();
+    const root = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const captureDirectory = join(root, "captures", "nested");
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      await writeFile(
+        input.argv.at(-1)!,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      return processResult("");
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("succeeded");
+    expect((await stat(captureDirectory)).isDirectory()).toBe(true);
+    if (process.platform !== "win32") {
+      // Windows has no POSIX mode bits to assert.
+      expect((await stat(captureDirectory)).mode & 0o777).toBe(0o700);
+    }
+  });
+
+  it("reports a capture directory it cannot create instead of launching the screenshot", async () => {
+    const execute = discoveryExecutor();
+    const root = await mkdtemp(join(tmpdir(), "octant-apple-capture-test-"));
+    const blockingFile = join(root, "blocking");
+    await writeFile(blockingFile, new Uint8Array([1]));
+    const service = new AppleToolchainService({
+      execute,
+      captureDirectory: join(blockingFile, "captures"),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockClear();
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).not.toBe("succeeded");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("removes the captured file even when the screenshot artifact cannot be stored", async () => {

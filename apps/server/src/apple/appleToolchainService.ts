@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
+import { mkdir, open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -59,6 +59,12 @@ export interface AppleLaunchGrants {
   readonly allowPseudoTty?: boolean;
   readonly allowJobCreation?: boolean;
   readonly allowSignal?: boolean;
+  /**
+   * Directories this launch may read and write on top of the port-wide set.
+   * The screenshot is the only caller: its raw capture lands in a directory
+   * no other confined launch is granted (0160).
+   */
+  readonly additionalWriteRoots?: ReadonlyArray<string>;
 }
 
 /**
@@ -166,6 +172,8 @@ export interface AppleToolchainServiceOptions {
       readonly allowPseudoTty?: boolean;
       readonly allowJobCreation?: boolean;
       readonly allowSignal?: boolean;
+      readonly additionalWriteRoots?: ReadonlyArray<string>;
+      readonly isolatedRoots?: ReadonlyArray<string>;
     },
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
@@ -191,9 +199,11 @@ export interface AppleToolchainServiceOptions {
    * Where a screen capture lands before it becomes an artifact. Xcode 27's
    * `simctl io … screenshot -` no longer means stdout: it writes a file named
    * `-` into the working directory — the checkout — and reports nothing, so
-   * the capture names a file here instead. It must be a directory the confined
-   * command may write; by default that is the process port's own temporary
-   * directory.
+   * the capture names a file here instead. The capture launch is granted this
+   * directory as its only extra write root, so it may live outside the shared
+   * temporary root every confined command can read (0160); the service creates
+   * it as a private directory when it is missing. By default it is the process
+   * port's own temporary directory.
    */
   readonly captureDirectory?: string;
   /**
@@ -760,26 +770,38 @@ export class AppleToolchainService {
           this.#captureDirectory,
           `${this.#capturePrefix}${request.actionId}-${randomUUID()}.png`,
         );
+        // The capture lands in a host-private directory, created 0700, that no
+        // other confined launch can read; only this launch is granted it as a
+        // write root (0160).
+        let captureDirectoryReady = true;
+        try {
+          await mkdir(this.#captureDirectory, { recursive: true, mode: 0o700 });
+        } catch {
+          captureDirectoryReady = false;
+        }
         this.#capturesInProgress.add(capturePath);
         let exitedCleanly = false;
         // Whatever happens to the command, the read or the artifact write, the
         // raw screen must not stay behind in the temporary directory.
         try {
-          terminal = await this.#command(
-            [
-              "xcrun",
-              "simctl",
-              "io",
-              request.simulatorId,
-              "screenshot",
-              "--type",
-              "png",
-              capturePath,
-            ],
-            context,
-            request.timeoutMs,
-            signal,
-          );
+          terminal = captureDirectoryReady
+            ? await this.#command(
+                [
+                  "xcrun",
+                  "simctl",
+                  "io",
+                  request.simulatorId,
+                  "screenshot",
+                  "--type",
+                  "png",
+                  capturePath,
+                ],
+                context,
+                request.timeoutMs,
+                signal,
+                { additionalWriteRoots: [this.#captureDirectory] },
+              )
+            : unavailableInputResult("The screen-capture directory is unavailable on this host.");
           exitedCleanly = terminal.termination === "exited" && !terminal.cleanupUncertain;
           if (succeeded(terminal)) {
             const bytes = await readCapture(capturePath);
@@ -1044,6 +1066,11 @@ export class AppleToolchainService {
         cwd: context.checkoutRoot,
         environment: {},
         timeoutMs,
+        // Every launch denies the capture directory after its broad grants, so
+        // a checkout bound to an ancestor cannot read another thread's raw
+        // screen. The screenshot launch alone re-allows it by carrying the
+        // same directory as an additional write root (0160).
+        isolatedRoots: [this.#captureDirectory],
         ...(grants === undefined ? {} : grants),
       },
       signal,

@@ -204,6 +204,33 @@ export class AgentRunPersistenceService {
       return { kind: "run-updated", run: next };
     }
 
+    if (command.kind === "settle-agent-run-result-delivery") {
+      const delivery = next.resultDelivery;
+      if (delivery === undefined) {
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "AgentRun result delivery settle produced no delivery.",
+        };
+      }
+      try {
+        this.#store.appendResultDeliverySettled({
+          runId: next.id,
+          version: next.version,
+          expectedVersion: command.expectedVersion,
+          delivery,
+        });
+      } catch (error) {
+        return storeFailure(error);
+      }
+      this.#projection.applyResultDeliverySettled({
+        runId: next.id,
+        version: next.version,
+        delivery,
+      });
+      return { kind: "run-updated", run: next };
+    }
+
     const fromStatus = current?.lifecycleStatus;
     if (fromStatus === undefined) {
       return {

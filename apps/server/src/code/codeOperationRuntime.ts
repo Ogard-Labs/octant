@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import {
+  type AgentRun,
+  type AgentRunId,
   CodeApprovalId,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
@@ -226,6 +228,13 @@ export interface CodeOperationRuntimeOptions {
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
+  /**
+   * Read access to journaled subagent runs, for verifying the delivery mark a
+   * `start-provider-turn` claims. Absent means delivery claims are refused.
+   */
+  readonly agentRuns?: {
+    readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+  };
   readonly probeProvider?: (
     instanceId: CodeThread["providerInstanceId"],
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
@@ -297,6 +306,14 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /**
+   * The agent-run tool set for this thread: the model petitions the server's
+   * own run admission for a child run, scoped to this thread as the parent.
+   */
+  readonly agents?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
   /**
    * The native harness tool set for a direct-endpoint provider: reads, edits,
    * the sandboxed shell, and the harness's own reads, each authorized at the
@@ -627,6 +644,7 @@ export function createCodeOperationRuntime(
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
+    ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     onScopedOperation: ({ command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
@@ -1625,7 +1643,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined || !active.questions.has(input.requestId)) {
-      return turnState("failed");
+      return this.#settleDeadTurnRequest(input.thread, "input", String(input.requestId));
     }
     if (active.harnessQuestions.has(input.requestId)) {
       // A harness question is the host's own; the provider never saw it and
@@ -1754,10 +1772,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (input.decision === "approved") return turnState(active.state);
       return this.#countDeniedApproval(active);
     }
+    if (active === undefined || providerRequestId === undefined)
+      return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
     if (
-      active === undefined ||
       active.connection === undefined ||
-      providerRequestId === undefined ||
       turnPosture === "plan" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence
     )
@@ -1797,6 +1815,81 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           .pipe(Effect.catchAll(() => Effect.void)),
       );
     }
+    return turnState("interrupted");
+  }
+
+  /**
+   * A restart leaves a journaled approval or question parked: the provider
+   * session that would consume its answer died with the process, so the answer
+   * can never be delivered. The attempt settles interrupted — naming the
+   * outcome — instead of holding an undeliverable card forever, and the turn
+   * stays retryable. The live turn's own stream is excluded so an answer that
+   * misses the in-memory map cannot interrupt work that is actually running.
+   */
+  #settleDeadTurnRequest(
+    thread: CodeThread,
+    kind: "approval" | "input",
+    requestId: string,
+  ): { state: ActiveTurn["state"] } {
+    const history = this.#events.historyForThread(thread.id);
+    if (history.status !== "ok") return turnState("failed");
+    const liveOperationId = this.#active.get(String(thread.id))?.operationId;
+    let owner:
+      | {
+          readonly operationId: CodeOperationId;
+          cursor: number;
+          unsettled: boolean;
+        }
+      | undefined;
+    for (const frame of history.frames) {
+      const event = frame.event;
+      if (String(frame.operationId) === String(liveOperationId)) continue;
+      const ownsRequest =
+        (kind === "approval" &&
+          event.kind === "approval-requested" &&
+          String(event.approvalId) === requestId) ||
+        (kind === "input" &&
+          event.kind === "input-requested" &&
+          String(event.requestId) === requestId);
+      if (ownsRequest) {
+        owner = { operationId: frame.operationId, cursor: frame.cursor, unsettled: true };
+        continue;
+      }
+      if (owner === undefined || String(frame.operationId) !== String(owner.operationId)) continue;
+      owner.cursor = frame.cursor;
+      if (event.kind === "operation-state") {
+        owner.unsettled = event.state === "running" || event.state === "waiting";
+      } else if (event.kind === "operation-result" && event.result.kind === "provider-turn-state") {
+        owner.unsettled = event.result.state === "running" || event.result.state === "waiting";
+      }
+    }
+    if (owner === undefined || !owner.unsettled) return turnState("failed");
+    try {
+      this.#events.append({
+        threadId: thread.id,
+        operationId: owner.operationId,
+        expectedCursor: owner.cursor,
+        event: {
+          kind: "operation-state",
+          state: "interrupted",
+          failure: {
+            category: "failed",
+            message:
+              "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+          },
+        },
+      });
+    } catch {
+      return turnState("failed");
+    }
+    this.#observeRuntimeWorkOutcome(
+      this.#runtimeWork.settleOrphaned({
+        id: owner.operationId,
+        threadId: thread.id,
+        kind: "provider-turn",
+        state: "interrupted",
+      }),
+    );
     return turnState("interrupted");
   }
 
@@ -1914,6 +2007,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
         this.#options.agentMessages?.({ thread: active.thread }),
         this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.checkoutRoot,

@@ -337,14 +337,18 @@ async function processIdentities(): Promise<ReadonlyArray<ProcessIdentity>> {
 }
 
 /**
- * Discovery prefers the OpenCode 2 executable and the server routes on that
- * name: a smoke that resolves the bare `opencode` reaches the legacy driver,
- * which refuses the beta runtime before a session can start, so the packaged
- * provider path this smoke exists for would never be exercised.
+ * Released OpenCode 2 installs `opencode`; `opencode2` is the earlier beta
+ * name kept as a fallback. Resolve the released name first so the packaged
+ * provider path this smoke exists for matches discovery's preference.
  */
 async function resolveOpenCodeBinary(): Promise<string> {
-  for (const name of ["opencode2", "opencode"]) {
-    const output = (await runCommand("/usr/bin/which", [name], process.env)).trim();
+  for (const name of ["opencode", "opencode2"]) {
+    let output: string;
+    try {
+      output = (await runCommand("/usr/bin/which", [name], process.env)).trim();
+    } catch {
+      continue;
+    }
     if (!output.startsWith("/")) continue;
     try {
       await access(output, constants.X_OK);
