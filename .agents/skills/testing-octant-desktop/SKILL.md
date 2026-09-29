@@ -211,7 +211,7 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   notifications — `Schema.optional` accepted absent/undefined but not null, so healthy turns died
   in decode. #844 decodes null as absent for `turn.error`/`codexErrorInfo`. Verified: Chat turn
   with GPT-5.6-Luna completes in ~2s; journal shows `chat.turn-created → attempt-updated →
-  context.usage-reconciled` with no protocol-error payloads.
+context.usage-reconciled` with no protocol-error payloads.
 - If the signature returns on a future codex bump, suspect a new nullable field — reproduce via
   `codex app-server` stdio initialize + thread/turn calls and compare against `codexProtocol.ts`
   decoders.
