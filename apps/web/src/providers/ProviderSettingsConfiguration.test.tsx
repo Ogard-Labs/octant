@@ -104,8 +104,12 @@ describe("ProviderCreateForm presentation limits", () => {
 
     await user.click(screen.getByRole("button", { name: "Add image provider" }));
     await user.type(screen.getByLabelText("Provider name"), "OpenAI Images");
-    await user.type(screen.getByLabelText("Model allowlist"), "gpt-image-2, gpt-image-1");
-    await user.type(screen.getByLabelText("Default model"), "gpt-image-2");
+    const allowlistField = screen.getByLabelText("Model allowlist");
+    await user.clear(allowlistField);
+    await user.type(allowlistField, "gpt-image-2, gpt-image-1");
+    const defaultModelField = screen.getByLabelText("Default model");
+    await user.clear(defaultModelField);
+    await user.type(defaultModelField, "gpt-image-2");
     await user.type(screen.getByLabelText("API key"), "secret");
     await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
 
@@ -129,8 +133,12 @@ describe("ProviderCreateForm presentation limits", () => {
     await user.click(screen.getByRole("button", { name: "Add image provider" }));
     const name = screen.getByLabelText("Provider name");
     await user.type(name, "Unfinished image provider");
-    await user.type(screen.getByLabelText("Model allowlist"), "gpt-image-2");
-    await user.type(screen.getByLabelText("Default model"), "gpt-image-2");
+    const allowlistField = screen.getByLabelText("Model allowlist");
+    await user.clear(allowlistField);
+    await user.type(allowlistField, "gpt-image-2");
+    const defaultModelField = screen.getByLabelText("Default model");
+    await user.clear(defaultModelField);
+    await user.type(defaultModelField, "gpt-image-2");
     await user.type(screen.getByLabelText("API key"), "secret");
     await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
 

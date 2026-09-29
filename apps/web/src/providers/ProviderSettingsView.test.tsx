@@ -1325,7 +1325,9 @@ describe("ProviderSettingsView", () => {
     expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
     expect(within(create).getByText(/Organization Verification/i)).toBeVisible();
     await user.type(within(create).getByLabelText("Provider name"), "Studio images");
+    await user.clear(within(create).getByLabelText("Model allowlist"));
     await user.type(within(create).getByLabelText("Model allowlist"), "gpt-image-2, gpt-image-1");
+    await user.clear(within(create).getByLabelText("Default model"));
     await user.type(within(create).getByLabelText("Default model"), "gpt-image-2");
     await chooseSelectFieldOption(user, within(create).getByLabelText("Quality"), "high");
     await user.type(within(create).getByLabelText("API key"), "image-secret");
@@ -1345,6 +1347,48 @@ describe("ProviderSettingsView", () => {
     credential.clear();
     expect(within(create).getByLabelText("API key")).toHaveValue("");
     expect(document.body.textContent).not.toContain("image-secret");
+  });
+
+  it("creates an OpenAI image profile from the suggested models when the fields are left untouched", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: openAiImageProvider() });
+    renderImageProviderCreation(props);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "OpenAI Image");
+    const create = screen.getByRole("form", { name: "Add OpenAI image profile" });
+    expect(within(create).getByLabelText("Model allowlist")).toHaveValue(
+      "gpt-image-2, gpt-image-1.5, gpt-image-1, gpt-image-1-mini",
+    );
+    expect(within(create).getByLabelText("Default model")).toHaveValue("gpt-image-2");
+    await user.type(within(create).getByLabelText("Provider name"), "Studio images");
+    await user.type(within(create).getByLabelText("API key"), "image-secret");
+    await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
+
+    expect(props.onCreateOpenAiImage).toHaveBeenCalledOnce();
+    const [, configuration] = vi.mocked(props.onCreateOpenAiImage).mock.calls[0]!;
+    expect(configuration).toMatchObject({
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"],
+      defaultModel: "gpt-image-2",
+    });
+  });
+
+  it("refuses an image profile create whose required model fields were emptied", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: openAiImageProvider() });
+    renderImageProviderCreation(props);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "OpenAI Image");
+    const create = screen.getByRole("form", { name: "Add OpenAI image profile" });
+    await user.type(within(create).getByLabelText("Provider name"), "Studio images");
+    await user.clear(within(create).getByLabelText("Model allowlist"));
+    await user.clear(within(create).getByLabelText("Default model"));
+    await user.type(within(create).getByLabelText("API key"), "image-secret");
+    await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
+
+    expect(props.onCreateOpenAiImage).not.toHaveBeenCalled();
+    expect(within(create).getByRole("alert")).toHaveTextContent("Model allowlist is required.");
+    expect(within(create).getByLabelText("Model allowlist")).toHaveFocus();
   });
 
   it("shows stored Keychain status and omits a connection check for an OpenAI image profile", async () => {
@@ -1414,10 +1458,12 @@ describe("ProviderSettingsView", () => {
     const create = screen.getByRole("form", { name: "Add Gemini image profile" });
     expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
     await user.type(within(create).getByLabelText("Provider name"), "Nano Banana");
+    await user.clear(within(create).getByLabelText("Model allowlist"));
     await user.type(
       within(create).getByLabelText("Model allowlist"),
       "gemini-3.1-flash-image, gemini-2.5-flash-image",
     );
+    await user.clear(within(create).getByLabelText("Default model"));
     await user.type(within(create).getByLabelText("Default model"), "gemini-3.1-flash-image");
     await chooseSelectFieldOption(user, within(create).getByLabelText("Aspect ratio"), "16:9");
     await user.type(within(create).getByLabelText("API key"), "gemini-secret");
@@ -1455,7 +1501,9 @@ describe("ProviderSettingsView", () => {
     expect(within(create).queryByLabelText("Size")).not.toBeInTheDocument();
     expect(within(create).queryByLabelText("Aspect ratio")).not.toBeInTheDocument();
     await user.type(within(create).getByLabelText("Provider name"), "FLUX");
+    await user.clear(within(create).getByLabelText("Model allowlist"));
     await user.type(within(create).getByLabelText("Model allowlist"), "flux-pro-1.1, flux-dev");
+    await user.clear(within(create).getByLabelText("Default model"));
     await user.type(within(create).getByLabelText("Default model"), "flux-pro-1.1");
     await user.type(within(create).getByLabelText("API key"), "bfl-secret");
     await user.click(screen.getByRole("button", { name: "Add Black Forest Labs image profile" }));
@@ -1515,7 +1563,9 @@ describe("ProviderSettingsView", () => {
     expect(within(create).queryByLabelText("Size")).not.toBeInTheDocument();
     expect(within(create).queryByLabelText("Aspect ratio")).not.toBeInTheDocument();
     await user.type(within(create).getByLabelText("Provider name"), "Ideogram");
+    await user.clear(within(create).getByLabelText("Model allowlist"));
     await user.type(within(create).getByLabelText("Model allowlist"), "ideogram-v3, ideogram-v4");
+    await user.clear(within(create).getByLabelText("Default model"));
     await user.type(within(create).getByLabelText("Default model"), "ideogram-v3");
     await user.type(within(create).getByLabelText("API key"), "ideogram-secret");
     await user.click(screen.getByRole("button", { name: "Add Ideogram image profile" }));
