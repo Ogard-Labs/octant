@@ -24,6 +24,7 @@ export const SETTINGS_SECTION_IDS = [
   "voice",
   "image-generation",
   "computer-use",
+  "device-tools",
   "skills",
   "github",
   "linear",

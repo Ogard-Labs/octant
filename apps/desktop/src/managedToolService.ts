@@ -1,0 +1,247 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { ManagedToolStatus, ManagedToolsStatus } from "@octant/contracts/managed-tooling";
+import {
+  BUNDLED_MANAGED_TOOL_RELEASES,
+  MANAGED_TOOLS,
+  boundedRegistryDownload,
+  commitManagedTool,
+  latestManagedToolRelease,
+  readInstalledManagedTool,
+  stageManagedTool,
+  type ManagedFetch,
+  type ManagedToolDescriptor,
+  type StagedManagedTool,
+} from "./managedToolRelease";
+import { createManagedToolUpdates, type ManagedToolUpdateState } from "./managedToolUpdates";
+
+interface ManagedToolInstance {
+  readonly descriptor: ManagedToolDescriptor;
+  readonly bundled: StagedManagedTool;
+  readonly root: string;
+  readonly updates: ReturnType<typeof createManagedToolUpdates>;
+  readonly state: { active: StagedManagedTool; running: number };
+}
+
+/** Tool executions run under the desktop's own runtime, never a system node. */
+function toolEnvironment(): NodeJS.ProcessEnv {
+  return { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+}
+
+export function createManagedToolService(options: {
+  /** Directory holding the vendored per-tool package trees shipped in the app. */
+  readonly bundledToolsDirectory: string;
+  readonly dataDirectory: string;
+  /** The runtime the tools launch under (`process.execPath` — Electron-as-node). */
+  readonly execPath: string;
+  readonly isBusy?: () => boolean;
+  /** Registry fetch; injectable so tests can exercise updates without network. */
+  readonly fetchBytes?: ManagedFetch;
+  /** How long a staged tool must survive its smoke launch; injectable for tests. */
+  readonly smokeTimeoutMs?: number;
+}) {
+  const rootDirectory = join(options.dataDirectory, "managed-tools");
+  const settingsPath = join(rootDirectory, "settings.json");
+  const supported = process.platform === "darwin" || process.platform === "linux";
+  let settingsAutomaticUpdates = true;
+  let initializing: Promise<void> | undefined;
+  let closed = false;
+
+  const bundledReleaseFor = (packageName: string) =>
+    BUNDLED_MANAGED_TOOL_RELEASES.find((release) => release.packageName === packageName);
+
+  const bundledDescriptorFor = (descriptor: ManagedToolDescriptor): StagedManagedTool => {
+    const bundled = bundledReleaseFor(descriptor.packageName);
+    const path = join(options.bundledToolsDirectory, descriptor.tool);
+    return {
+      version: bundled?.version ?? "0.0.0",
+      path,
+      entrypoint: join(path, descriptor.entrypoint),
+    };
+  };
+
+  async function readSettings(): Promise<boolean> {
+    try {
+      const value: unknown = JSON.parse(await readFile(settingsPath, "utf8"));
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        "automaticUpdates" in value &&
+        typeof (value as { automaticUpdates: unknown }).automaticUpdates === "boolean"
+      )
+        return (value as { automaticUpdates: boolean }).automaticUpdates;
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
+  async function writeSettings(): Promise<void> {
+    await mkdir(rootDirectory, { recursive: true, mode: 0o700 });
+    const temporary = join(rootDirectory, `.settings-${randomUUID()}.json`);
+    await writeFile(temporary, JSON.stringify({ automaticUpdates: settingsAutomaticUpdates }), {
+      mode: 0o600,
+      flag: "wx",
+    });
+    await rename(temporary, settingsPath);
+  }
+
+  const registryBytes: ManagedFetch =
+    options.fetchBytes ??
+    ((url: string, signal: AbortSignal) => boundedRegistryDownload(url, 256 * 1024 * 1024, signal));
+
+  const instances: ManagedToolInstance[] = MANAGED_TOOLS.filter((descriptor) =>
+    descriptor.platforms.includes(process.platform),
+  ).map((descriptor) => {
+    const bundled = bundledDescriptorFor(descriptor);
+    const root = join(rootDirectory, descriptor.tool);
+    const state = { active: bundled, running: 0 };
+    const updates = createManagedToolUpdates({
+      currentVersion: bundled.version,
+      check: (signal) => latestManagedToolRelease(descriptor.packageName, registryBytes, signal),
+      stage: (release, signal) =>
+        stageManagedTool(descriptor, release, root, registryBytes, signal),
+      isBusy: () => state.running > 0 || (options.isBusy?.() ?? false),
+      activate: async (candidate) => {
+        if (closed || state.running > 0) return false;
+        // The staged tree launches under the desktop runtime before it replaces
+        // the installed release; a tree that cannot start keeps the old one.
+        if (!(await smokeManagedTool(candidate.entrypoint))) return false;
+        await commitManagedTool(root, candidate);
+        state.active = candidate;
+        return true;
+      },
+    });
+    return { descriptor, bundled, root, updates, state };
+  });
+
+  /** Runs the staged entrypoint briefly: surviving past startup counts as runnable. */
+  async function smokeManagedTool(entrypoint: string): Promise<boolean> {
+    if (closed) return false;
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const child = spawn(options.execPath, [entrypoint], {
+        env: toolEnvironment(),
+        stdio: "ignore",
+      });
+      child.once("error", () => finish(false));
+      child.once("exit", (code, signal) => {
+        // A clean exit (help text, argument refusal) means the tree loads; a
+        // crash with a non-zero code or a signal does not.
+        finish(code === 0 && signal === null);
+      });
+      const timer = setTimeout(() => {
+        child.kill("SIGTERM");
+        finish(true);
+      }, options.smokeTimeoutMs ?? 3_000);
+      timer.unref();
+      child.once("exit", () => clearTimeout(timer));
+    });
+  }
+
+  async function initialize(): Promise<void> {
+    initializing ??= (async () => {
+      settingsAutomaticUpdates = await readSettings();
+      for (const instance of instances) {
+        const installed = await readInstalledManagedTool(instance.descriptor, instance.root);
+        if (installed !== undefined) {
+          instance.state.active = installed;
+          instance.updates.restoreVerifiedVersion(installed.version);
+        }
+        instance.updates.configure({
+          enabled: supported && settingsAutomaticUpdates,
+          automaticUpdates: settingsAutomaticUpdates,
+        });
+      }
+    })();
+    await initializing;
+  }
+
+  function toolStatus(instance: ManagedToolInstance): ManagedToolStatus {
+    const state: ManagedToolUpdateState = instance.updates.state();
+    const available = existsSync(instance.state.active.entrypoint);
+    return {
+      tool: instance.descriptor.tool,
+      packageName: instance.descriptor.packageName,
+      channel: "npm",
+      available,
+      installed: instance.state.active.path !== instance.bundled.path,
+      version: instance.state.active.version,
+      update: state.status,
+      ...(state.availableVersion === undefined ? {} : { availableVersion: state.availableVersion }),
+      ...(state.message === undefined ? {} : { message: state.message }),
+    };
+  }
+
+  return {
+    /** Spawn arguments that run the tool's entrypoint under the desktop runtime. */
+    launchSpec: async (
+      tool: string,
+      args: ReadonlyArray<string>,
+    ): Promise<
+      { command: string; args: ReadonlyArray<string>; env: NodeJS.ProcessEnv } | undefined
+    > => {
+      await initialize();
+      const instance = instances.find((candidate) => candidate.descriptor.tool === tool);
+      if (instance === undefined || closed || !existsSync(instance.state.active.entrypoint))
+        return undefined;
+      return {
+        command: options.execPath,
+        args: [instance.state.active.entrypoint, ...args],
+        env: toolEnvironment(),
+      };
+    },
+    trackProcess: (tool: string, child: ChildProcess) => {
+      const instance = instances.find((candidate) => candidate.descriptor.tool === tool);
+      if (instance === undefined) return;
+      instance.state.running += 1;
+      child.once("exit", () => {
+        instance.state.running = Math.max(0, instance.state.running - 1);
+        void instance.updates.applyWhenIdle();
+      });
+    },
+    status: async (): Promise<ManagedToolsStatus> => {
+      await initialize();
+      return {
+        supported,
+        automaticUpdates: settingsAutomaticUpdates,
+        tools: instances.map(toolStatus),
+        ...(supported ? {} : { message: "Managed tools require the Octant desktop app." }),
+      };
+    },
+    configure: async (next: { readonly automaticUpdates: boolean }) => {
+      await initialize();
+      if (settingsAutomaticUpdates === next.automaticUpdates) return;
+      settingsAutomaticUpdates = next.automaticUpdates;
+      for (const instance of instances)
+        instance.updates.configure({
+          enabled: supported && settingsAutomaticUpdates,
+          automaticUpdates: settingsAutomaticUpdates,
+        });
+      await writeSettings();
+    },
+    checkUpdates: async (): Promise<ManagedToolsStatus> => {
+      await initialize();
+      for (const instance of instances) await instance.updates.check();
+      return {
+        supported,
+        automaticUpdates: settingsAutomaticUpdates,
+        tools: instances.map(toolStatus),
+        ...(supported ? {} : { message: "Managed tools require the Octant desktop app." }),
+      };
+    },
+    close: async () => {
+      closed = true;
+      for (const instance of instances) await instance.updates.close();
+    },
+  };
+}
+export type ManagedToolService = ReturnType<typeof createManagedToolService>;

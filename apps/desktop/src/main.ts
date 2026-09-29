@@ -7,6 +7,7 @@ import {
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
 import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -153,6 +154,7 @@ import {
   DESKTOP_PRELOAD_FILENAME,
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopNativeHelperPath,
+  resolveManagedToolsDirectory,
   type DesktopNativeHelperPathOptions,
 } from "./runtimePaths";
 import {
@@ -200,6 +202,9 @@ const IPC_CHANNELS = {
   computerUsePermissions: "octant:computer-use:permissions",
   computerUsePermissionSettings: "octant:computer-use:permission-settings",
   computerUseCheckUpdates: "octant:computer-use:check-updates",
+  managedToolsStatus: "octant:managed-tools:status",
+  managedToolsCheckUpdates: "octant:managed-tools:check-updates",
+  managedToolsConfigure: "octant:managed-tools:configure",
   appUpdateRing: "octant:app-update:ring",
   appUpdateWhatsNew: "octant:app-update:whats-new",
   appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
@@ -996,6 +1001,7 @@ let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let computerUseBroker: ComputerUseBroker | undefined;
 let simulatorDeviceBroker: SimulatorDeviceBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
+let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
@@ -1464,6 +1470,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   let startingBrowserBroker: BrowserRuntimeBroker | undefined;
   let startingComputerBroker: ComputerUseBroker | undefined;
   let startingDeviceBroker: SimulatorDeviceBroker | undefined;
+  let startingManagedToolService: ManagedToolService | undefined;
   try {
     const instanceId = randomUUID();
     browserSurfaceHost ??= createBrowserSurfaceHost({
@@ -1489,6 +1496,15 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     });
     const nextComputerBroker = await startComputerUseBroker(nextComputerService);
     startingComputerBroker = nextComputerBroker;
+    startingManagedToolService = createManagedToolService({
+      bundledToolsDirectory: resolveManagedToolsDirectory({
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      }),
+      dataDirectory: desktopDataDirectory,
+      execPath: process.execPath,
+    });
     const deviceHelperPath = resolveDesktopNativeHelperPath(
       {
         packaged: app.isPackaged,
@@ -1554,6 +1570,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     computerUseBroker = nextComputerBroker;
     computerUseService = nextComputerService;
     simulatorDeviceBroker = nextDeviceBroker;
+    managedToolService = startingManagedToolService;
     server = resources.server;
     serverInstanceId = instanceId;
     activeServerUrl = serverUrl;
@@ -1587,9 +1604,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       await nextBrowserRuntimeBroker.close();
       await nextComputerBroker.close();
       await nextDeviceBroker?.close();
+      await startingManagedToolService?.close();
       computerUseBroker = undefined;
       computerUseService = undefined;
       simulatorDeviceBroker = undefined;
+      managedToolService = undefined;
       desktopBridgeSecret = winningAttachment.bridgeSecret;
       serverInstanceId = attached.instanceId;
       activeServerUrl = attached.url;
@@ -1606,9 +1625,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
     const computerBroker = computerUseBroker ?? startingComputerBroker;
     const deviceBroker = simulatorDeviceBroker ?? startingDeviceBroker;
+    const managedTools = managedToolService ?? startingManagedToolService;
     computerUseBroker = undefined;
     computerUseService = undefined;
     simulatorDeviceBroker = undefined;
+    managedToolService = undefined;
     server = undefined;
     credentialBroker = undefined;
     browserRuntimeBroker = undefined;
@@ -1622,6 +1643,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     await browserBroker?.close().catch(() => undefined);
     await computerBroker?.close().catch(() => undefined);
     await deviceBroker?.close().catch(() => undefined);
+    await managedTools?.close().catch(() => undefined);
     throw error;
   }
 }
@@ -1638,9 +1660,11 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   const browserBroker = browserRuntimeBroker;
   const computerBroker = computerUseBroker;
   const deviceBroker = simulatorDeviceBroker;
+  const managedTools = managedToolService;
   computerUseBroker = undefined;
   computerUseService = undefined;
   simulatorDeviceBroker = undefined;
+  managedToolService = undefined;
   server = undefined;
   credentialBroker = undefined;
   browserRuntimeBroker = undefined;
@@ -1654,6 +1678,7 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   await browserBroker?.close();
   await computerBroker?.close();
   await deviceBroker?.close();
+  await managedTools?.close();
 }
 
 const hostLifecycle = createHostLifecycleController({
@@ -2849,6 +2874,38 @@ function installIpcHandlers(): void {
     if (computerUseService === undefined)
       throw new Error("Computer use is unavailable for this host.");
     return computerUseService.checkUpdates();
+  });
+  ipcMain.handle(IPC_CHANNELS.managedToolsStatus, async (event) => {
+    ownedTopLevelWindowContext(event);
+    if (managedToolService === undefined)
+      return {
+        supported: false,
+        automaticUpdates: false,
+        tools: [],
+        message: "Managed tools require a host owned by this Octant desktop app.",
+      };
+    return managedToolService.status();
+  });
+  ipcMain.handle(IPC_CHANNELS.managedToolsCheckUpdates, async (event) => {
+    ownedTopLevelWindowContext(event);
+    if (managedToolService === undefined)
+      throw new Error("Managed tools are unavailable for this host.");
+    return managedToolService.checkUpdates();
+  });
+  ipcMain.handle(IPC_CHANNELS.managedToolsConfigure, async (event, settings) => {
+    ownedTopLevelWindowContext(event);
+    if (managedToolService === undefined)
+      throw new Error("Managed tools are unavailable for this host.");
+    if (
+      typeof settings !== "object" ||
+      settings === null ||
+      typeof (settings as { automaticUpdates?: unknown }).automaticUpdates !== "boolean"
+    )
+      throw new TypeError("Invalid managed tools settings.");
+    await managedToolService.configure({
+      automaticUpdates: (settings as { automaticUpdates: boolean }).automaticUpdates,
+    });
+    return managedToolService.status();
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateState, (event) => {
     ownedTopLevelWindowContext(event);

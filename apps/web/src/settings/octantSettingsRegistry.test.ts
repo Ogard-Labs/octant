@@ -18,6 +18,7 @@ describe("octantSettingsRegistry", () => {
       "voice",
       "image-generation",
       "computer-use",
+      "device-tools",
       "skills",
       "github",
       "linear",
