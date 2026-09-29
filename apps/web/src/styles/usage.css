@@ -336,6 +336,7 @@
 
 .provider-limits__row > .surface-row__control {
   width: 100%;
+  justify-content: flex-start;
 }
 
 .provider-limits__identity {

@@ -205,6 +205,24 @@ describe("AppUpdateSettings", () => {
     await waitFor(() => expect(host.acknowledgeWhatsNew).toHaveBeenCalledOnce());
   });
 
+  it("reflows bundled notes wrapped at a fixed column into whole paragraphs", async () => {
+    view({
+      readBundledWhatsNew: vi.fn(async () => ({
+        kind: "notes" as const,
+        version: "0.1.0",
+        text: "Updates are signed,\nand verified.\n\n- First change\n- Second change",
+        showAfterApply: false as const,
+      })),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+
+    expect(await screen.findByText("Updates are signed, and verified.")).toBeTruthy();
+    expect(
+      screen.getByText((_, element) => element?.textContent === "- First change\n- Second change"),
+    ).toBeTruthy();
+  });
+
   it("shows an empty state when the bundled document is missing", async () => {
     view({
       readBundledWhatsNew: vi.fn(async () => ({

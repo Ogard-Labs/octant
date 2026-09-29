@@ -98,6 +98,17 @@
   max-width: min(12rem, calc(100% - 42px));
 }
 
+/* The shared tab recipe does not shrink, so a long label ("Android emulator")
+   beside the overflow count pushed its close button under the count. In the
+   dock the tab gives way and its label ellipsizes instead. */
+.dock-tool-strip > .dock-tool-strip__tab {
+  flex: 0 1 auto;
+}
+
+.dock-tool-strip > .dock-tool-strip__tab > .content-tab__select {
+  flex: 0 1 auto;
+}
+
 .dock-tool-strip__select > span {
   min-width: 0;
   overflow: hidden;
