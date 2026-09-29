@@ -64,6 +64,14 @@
   border-bottom: 1px solid var(--oct-border-soft);
 }
 
+/* The field row is the input's frame; a second border would nest a box in it. */
+.command-palette__field > input {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
 .command-palette__scope {
   display: flex;
   align-items: center;

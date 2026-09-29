@@ -22,6 +22,7 @@ export interface WindowChromeProps {
   readonly onExpandSidebar?: () => void;
   /** Keeps the primary creation action reachable while navigation is collapsed. */
   readonly onNewThread?: () => void;
+  readonly newThreadLabel?: string;
   readonly zenRecoveryNeeded?: boolean;
 }
 
@@ -92,7 +93,7 @@ export function WindowChrome(props: WindowChromeProps) {
             <IconButton
               className="window-chrome__button window-chrome__new-thread"
               icon={SquarePen}
-              label="New task"
+              label={props.newThreadLabel ?? "New task"}
               onClick={props.onNewThread}
             />
           )}

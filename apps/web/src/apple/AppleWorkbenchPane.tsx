@@ -328,7 +328,7 @@ function AppleWorkbenchState(
       <LiveFrame {...props} chrome={device ? "device" : "workbench"} />
       <h1>{title}</h1>
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>
-      {props.onRetry === undefined ? null : (
+      {props.onRetry === undefined || props.status === "loading" ? null : (
         <OctantButton onClick={props.onRetry} type="button" variant="outline">
           Retry
         </OctantButton>

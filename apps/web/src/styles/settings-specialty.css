@@ -96,13 +96,10 @@
 
 .settings-view .provider-settings__manual-body {
   display: grid;
+  justify-self: stretch;
   gap: 16px;
   padding: 16px 0 0;
   border-top: 1px solid var(--oct-hairline);
-}
-
-.settings-view .image-generation-settings__provider-form .provider-settings__manual-body {
-  width: 100%;
 }
 
 .settings-view .provider-settings__create-heading {

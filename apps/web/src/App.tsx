@@ -5564,6 +5564,7 @@ function LaunchedShell(
               : {})}
             {...(presentedSidebarCollapsed
               ? {
+                  newThreadLabel: activeMode === "chat" ? "New chat" : "New task",
                   onNewThread: () => {
                     if (activeMode === "chat") createChat();
                     else void openDraftInActiveProject(activeMode);
