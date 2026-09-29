@@ -5946,6 +5946,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   list-style: none;
 }
 
+.keybinding-settings__group {
+  margin-top: var(--oct-space-4);
+}
+
 .keybinding-settings__group + .keybinding-settings__group {
   margin-top: var(--oct-space-5);
 }

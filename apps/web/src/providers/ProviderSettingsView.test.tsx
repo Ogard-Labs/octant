@@ -835,6 +835,22 @@ describe("ProviderSettingsView", () => {
     ).toBeVisible();
   });
 
+  it("suggests Update CLI for an unavailable provider only when the action is offered", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: piProvider(),
+          observed: observation({ readiness: "unavailable" }),
+        })}
+        onUpdateProviderCli={vi.fn(async () => true)}
+      />,
+    );
+    expect(screen.queryByText(/Update CLI/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Verify the binary path and that .* can start, then check/),
+    ).toBeVisible();
+  });
+
   it("offers Check connection with failed-auth guidance without opening Details first", () => {
     renderProviderSettings(
       <ProviderSettingsView
