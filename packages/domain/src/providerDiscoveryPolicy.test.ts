@@ -118,12 +118,29 @@ describe("selectPreferredCandidate", () => {
     expect(preferred?.binaryPath).toBe("/opt/homebrew/bin/codex");
   });
 
-  it("prefers OpenCode 2 when both OpenCode runtimes are discovered", () => {
+  it("prefers the released OpenCode executable when both OpenCode names are discovered", () => {
     const preferred = selectPreferredCandidate([
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode 2 preview",
+        binaryPath: "/Users/test/.local/bin/opencode2" as DiscoveryCandidate["binaryPath"],
+      }),
       makeCandidate({
         driverKind: "opencode",
         displayName: "OpenCode CLI",
         binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+      }),
+    ]);
+
+    expect(preferred?.displayName).toBe("OpenCode CLI");
+    expect(preferred?.binaryPath).toBe("/usr/local/bin/opencode");
+  });
+
+  it("prefers the beta executable when only the beta name is discovered", () => {
+    const preferred = selectPreferredCandidate([
+      makeCandidate({
+        driverKind: "codex",
+        binaryPath: "/usr/local/bin/codex" as DiscoveryCandidate["binaryPath"],
       }),
       makeCandidate({
         driverKind: "opencode",
@@ -132,43 +149,42 @@ describe("selectPreferredCandidate", () => {
       }),
     ]);
 
-    expect(preferred?.displayName).toBe("OpenCode 2 preview");
     expect(preferred?.binaryPath).toBe("/Users/test/.local/bin/opencode2");
   });
 
-  it("identifies OpenCode 2 by its executable name even after the row is renamed", () => {
+  it("identifies the OpenCode 2 runtime by its executable name even after the row is renamed", () => {
     const preferred = selectPreferredCandidate([
       makeCandidate({
         driverKind: "opencode",
-        displayName: "Renamed legacy runtime",
-        binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+        // A person renamed the instance; the display name is not identity.
+        displayName: "My renamed runtime",
+        binaryPath: "C:\\tools\\OpenCode.exe" as DiscoveryCandidate["binaryPath"],
       }),
       makeCandidate({
         driverKind: "opencode",
-        // A person renamed the instance; the display name is not identity.
-        displayName: "My beta runtime",
-        binaryPath: "C:\\tools\\OpenCode2.exe" as DiscoveryCandidate["binaryPath"],
+        displayName: "OpenCode 2 preview",
+        binaryPath: "/usr/local/bin/opencode2" as DiscoveryCandidate["binaryPath"],
       }),
     ]);
 
-    expect(preferred?.displayName).toBe("My beta runtime");
+    expect(preferred?.displayName).toBe("My renamed runtime");
   });
 
-  it("does not treat a legacy executable as OpenCode 2 because its row is named preview", () => {
+  it("does not let a preview label on an unrelated path win over a real OpenCode executable", () => {
     const preferred = selectPreferredCandidate([
       makeCandidate({
         driverKind: "opencode",
         displayName: "OpenCode 2 preview",
-        binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+        binaryPath: "/opt/tools/not-opencode" as DiscoveryCandidate["binaryPath"],
       }),
       makeCandidate({
         driverKind: "opencode",
         displayName: "OpenCode CLI",
-        binaryPath: "/opt/homebrew/bin/opencode" as DiscoveryCandidate["binaryPath"],
+        binaryPath: "/opt/homebrew/bin/opencode2" as DiscoveryCandidate["binaryPath"],
       }),
     ]);
 
-    expect(preferred?.binaryPath).toBe("/usr/local/bin/opencode");
+    expect(preferred?.binaryPath).toBe("/opt/homebrew/bin/opencode2");
   });
 });
 

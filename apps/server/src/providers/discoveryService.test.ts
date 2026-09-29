@@ -313,7 +313,7 @@ describe("discoveryService", () => {
     );
   });
 
-  it("orders OpenCode 2 before the legacy runtime when both are installed", async () => {
+  it("orders the released OpenCode executable before the beta name when both are installed", async () => {
     const fs = makeFakeFs(
       new Map([
         ["/usr/local/bin/opencode2", { file: true }],
@@ -326,7 +326,7 @@ describe("discoveryService", () => {
           "/usr/local/bin/opencode2 --version",
           { stdout: "opencode2 v0.0.0-beta-19425\n", stderr: "" },
         ],
-        ["/usr/local/bin/opencode --version", { stdout: "1.18.21\n", stderr: "" }],
+        ["/usr/local/bin/opencode --version", { stdout: "opencode v2.1.0\n", stderr: "" }],
       ]),
     );
     const snapshot = await makeDiscoveryService({
@@ -341,8 +341,8 @@ describe("discoveryService", () => {
       (candidate) => candidate.driverKind === "opencode",
     );
     expect(openCodeCandidates.map((candidate) => candidate.displayName)).toEqual([
-      "OpenCode 2 preview",
       "OpenCode CLI",
+      "OpenCode 2 preview",
     ]);
   });
 

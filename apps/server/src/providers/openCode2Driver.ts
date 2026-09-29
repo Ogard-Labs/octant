@@ -26,7 +26,7 @@ export interface OpenCode2DriverOptions {
 
 /**
  * OpenCode 2 exposes two complementary local transports. Its HTTP server
- * remains the stable read-only provider catalog, while `opencode2 acp`
+ * remains the stable read-only provider catalog, while `opencode acp`
  * carries model turns and `session/request_permission`. Keep those transports
  * behind one provider driver so the model picker can discover models without
  * using a turn transport that would bypass Octant's approval bridge.
