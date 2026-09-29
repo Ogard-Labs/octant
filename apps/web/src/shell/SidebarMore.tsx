@@ -9,12 +9,14 @@ import {
   OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
+import type { SidebarNavigationDescriptorId } from "./navigationModel";
 import { secondaryIcons, type SidebarSecondaryAction } from "./SidebarProfile";
 
 export interface SidebarMoreProps {
   /** The destinations waiting under More, in the sidebar's destination order. */
   readonly items: ReadonlyArray<SidebarSecondaryAction>;
   readonly onCustomizeSidebar: () => void;
+  readonly activeDestination?: SidebarNavigationDescriptorId;
 }
 
 /**
@@ -23,9 +25,11 @@ export interface SidebarMoreProps {
  * menu they wait in when the More row is off.
  */
 export function SidebarMore(props: SidebarMoreProps) {
+  const holdsActive = props.items.some((item) => item.id === props.activeDestination);
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
+        aria-current={holdsActive ? "page" : undefined}
         aria-label="More destinations"
         className="sidebar-item window-no-drag justify-start"
       >
@@ -42,7 +46,11 @@ export function SidebarMore(props: SidebarMoreProps) {
               {props.items.map((item) => {
                 const Icon = secondaryIcons[item.id];
                 return (
-                  <OctantMenuItem key={item.id} onClick={item.onSelect}>
+                  <OctantMenuItem
+                    aria-current={item.id === props.activeDestination ? "page" : undefined}
+                    key={item.id}
+                    onClick={item.onSelect}
+                  >
                     <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
                     <span>{item.label}</span>
                   </OctantMenuItem>

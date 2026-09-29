@@ -701,6 +701,36 @@ describe("ShellSidebar", () => {
     expect(plugins).toHaveBeenCalledOnce();
   });
 
+  it("marks More and its menu item current while a destination it holds is open", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellSidebar
+        activeDestination="plugins"
+        codeNavigation={{
+          actions: { "new-code-thread": vi.fn(), automations: vi.fn(), plugins: vi.fn() },
+        }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    const more = screen.getByRole("button", { name: "More destinations" });
+    expect(more).toHaveAttribute("aria-current", "page");
+    await user.click(more);
+    expect(await screen.findByRole("menuitem", { name: "Plugins" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("menuitem", { name: "Automations" })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
   it("leaves a destination the rail already carries out of the More popup", async () => {
     const user = userEvent.setup();
     render(

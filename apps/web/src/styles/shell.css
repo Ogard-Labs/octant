@@ -3737,3 +3737,8 @@ form > .work-composer-adapter__attachments {
 .code-home__project-setup p {
   margin: 0;
 }
+
+[role="menuitem"][aria-current="page"] {
+  background: var(--oct-selection);
+  color: var(--oct-fg);
+}
