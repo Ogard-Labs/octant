@@ -708,6 +708,32 @@ describe("ProviderService", () => {
     expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
   });
 
+  it("clears a stale image-profile observation instead of invoking the runtime driver factory", () => {
+    const driver = vi.fn(() => {
+      throw new Error("provider driver kind is not a chat-model runtime");
+    });
+    const fixture = serviceFixture({
+      instances: [
+        provider({
+          displayName: "GPT Image",
+          driverKind: "openai-image",
+          configuration: {
+            kind: "openai-image-http",
+            modelAllowlist: ["gpt-image-2"],
+            defaultModel: "gpt-image-2",
+          },
+        }),
+      ],
+      driver,
+    });
+    fixture.runtime.setObservedState(observation({ instanceId, readiness: "incompatible" }));
+
+    fixture.service.reconcileConfiguredProviders();
+
+    expect(driver).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
+  });
+
   it("still journals an image profile when vendor-driver plugins are not effective", async () => {
     const fixture = serviceFixture({
       isDriverPluginEffective: () => false,
