@@ -207,6 +207,13 @@ export interface PickerGroup {
   readonly instance: ProviderInstance;
   readonly runtime: PickerRuntime;
   readonly readiness: ProviderReadiness;
+  /**
+   * The host's own sentence behind the readiness — the probe or configuration
+   * message the observation already carries. Surfaces render it on groups a
+   * person cannot use, so an "Incompatible" or "Degraded" badge states why
+   * instead of sitting as a dead end.
+   */
+  readonly readinessReason?: string | undefined;
   readonly driverLabel: string;
   readonly endpointHost: string | undefined;
   readonly executionHost: string;
@@ -384,6 +391,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       instance,
       runtime: isNativeHarnessDriverKind(instance.driverKind) ? "octant-harness" : "provider",
       readiness: observed.readiness,
+      ...(observed.message === undefined ? {} : { readinessReason: observed.message }),
       driverLabel: driverLabel(instance.driverKind),
       endpointHost: endpointHostOf(instance),
       executionHost: input.hostId ?? localExecutionHost,
@@ -537,6 +545,7 @@ function maybeAppendUnavailableCurrent(
     instance,
     runtime: isNativeHarnessDriverKind(instance.driverKind) ? "octant-harness" : "provider",
     readiness: observed?.readiness ?? "unavailable",
+    ...(observed?.message === undefined ? {} : { readinessReason: observed.message }),
     driverLabel: driverLabel(instance.driverKind),
     endpointHost: endpointHostOf(instance),
     executionHost: input.hostId ?? localExecutionHost,
