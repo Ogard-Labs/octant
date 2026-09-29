@@ -88,6 +88,7 @@
 }
 
 .dock-tool-strip {
+  position: relative;
   display: flex;
   flex: 0 1 auto;
   min-width: 0;
@@ -139,8 +140,10 @@
   background: var(--oct-fg-soft);
 }
 
+/* The count sits at the strip's right end, so a menu hung from it ran past
+   the dock's clipped left edge; the menu hangs from the strip instead and
+   opens under the first tab. */
 .dock-tool-strip__overflow {
-  position: relative;
   display: inline-flex;
   flex: none;
 }
@@ -155,8 +158,8 @@
 
 .dock-tool-strip__overflow-menu {
   top: calc(100% + 4px);
-  right: 0;
-  left: auto;
+  right: auto;
+  left: 0;
   min-width: 176px;
 }
 
