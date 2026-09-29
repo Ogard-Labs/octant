@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -179,5 +181,12 @@ describe("the dock tool strip", () => {
     await user.click(screen.getByRole("button", { name: "1 more open tab" }));
     await user.click(screen.getByRole("button", { name: "Canvas" }));
     expect(onSelect).toHaveBeenCalledWith("canvas");
+  });
+
+  it("opens the overflow menu from the strip's left edge so the dock never clips it", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
+    expect(styles).toMatch(/\.dock-tool-strip \{[^}]*position: relative;/);
+    expect(styles).not.toMatch(/\.dock-tool-strip__overflow \{[^}]*position: relative;/);
+    expect(styles).toMatch(/\.dock-tool-strip__overflow-menu \{[^}]*right: auto;\s*left: 0;/);
   });
 });

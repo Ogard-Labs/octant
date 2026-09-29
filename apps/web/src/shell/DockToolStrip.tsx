@@ -216,7 +216,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
             onClick={() => setOverflowOpen((open) => !open)}
             ref={overflowTrigger}
             size="sm"
-            title="Open tabs that don't fit"
+            {...(overflowOpen ? {} : { title: "Open tabs that don't fit" })}
             type="button"
             variant="ghost"
           >
