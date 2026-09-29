@@ -4545,8 +4545,13 @@ export function startOctantServer(
         ? {}
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
-      // Two hosts on one Mac share a temporary directory; each sweeps only the
-      // captures named for its own data directory.
+      // Raw captures land under this host's own data directory, created 0700 —
+      // a root no other confined launch is granted, so device pixels are never
+      // readable by an unrelated confined command (0160). Only the capture
+      // launch itself carries the directory as an extra write root.
+      captureDirectory: join(providerDataDirectory, "apple-runtime", "captures"),
+      // A host sweeps only the captures named for its own data directory, so
+      // two hosts pointed at one directory never clear each other's files.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
