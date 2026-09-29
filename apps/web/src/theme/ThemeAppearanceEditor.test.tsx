@@ -149,7 +149,7 @@ describe("ThemeAppearanceEditor", () => {
     await user.clear(picker);
     await user.type(picker, "Inter");
 
-    const option = await screen.findByRole("option", { name: /Inter/ });
+    const option = await screen.findByRole("option", { name: /^Inter(?! Variable)/ });
     expect(option).toHaveTextContent("Aa 01");
     await user.click(option);
     expect(applyPatch).toHaveBeenCalledWith({

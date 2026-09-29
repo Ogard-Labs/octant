@@ -73,9 +73,9 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text uses the bundled Inter variable face by default, with the
-platform stack behind it: `'Inter Variable', -apple-system, BlinkMacSystemFont,
-'Segoe UI', system-ui, sans-serif` (0149). The platform face remains an explicit
+Interface text uses the bundled Geist variable face by default, with the
+platform stack behind it: `'Geist Variable', -apple-system, BlinkMacSystemFont,
+'Segoe UI', system-ui, sans-serif` (0161). The platform face remains an explicit
 Appearance choice, System interface. Code, paths, branches,
 identifiers, and terminal text use the monospace stack. Antialiased,
 `text-rendering: optimizeLegibility`, no synthetic bold.
@@ -464,13 +464,13 @@ Typography has distinct jobs:
 
 | Job        | Default                                                                                                                   | Usage                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                  | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Interface  | `'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`                                  | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                                                        | Wordmark, section headings, selected navigation labels                             |
 | Transcript | inherits Interface                                                                                                        | Long-running conversation and composer; readable at 13–16px, 13px by default       |
 | Editor     | `'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
 | Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                                                         | Terminal output and prompt glyphs                                                  |
 
-The default interface is Inter at 13px and weight 400; transcript text defaults
+The default interface is Geist at 13px and weight 400; transcript text defaults
 to 13px. The editor defaults to 13px, line height 1.5, and enabled ligatures.
 The terminal defaults to 12px, line height 1.4, and disabled ligatures.
 
@@ -1281,7 +1281,7 @@ The following canonical map applies to the Usage flow and its Settings entry:
 
 ## Git history in Review
 
-History uses the existing Inter interface and monospace identifiers, semantic
+History uses the existing interface face and monospace identifiers, semantic
 text/status tokens, and shared `OctantInput`, `OctantSelectField`,
 `OctantToggleGroup`, and `OctantButton` controls. A semantic commit table owns
 its vertical scroller and virtualizes fixed-height rows. Author, date, and SHA

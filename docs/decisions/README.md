@@ -168,7 +168,7 @@ links from specifications remain useful for rationale and supporting detail.
 | [0146](0146-a-version-read-launches-confined.md) | A version read launches confined, with no root, no home, and no network | Accepted |
 | [0147](0147-internal-testflight-carries-the-existing-remote-client.md) | Internal TestFlight carries the existing remote client | Accepted |
 | [0148](0148-paired-code-access-is-request-scoped.md) | Paired Code access is request-scoped | Accepted |
-| [0149](0149-inter-is-the-default-interface-face.md) | Inter is the default interface face | Accepted |
+| [0149](0149-inter-is-the-default-interface-face.md) | Inter is the default interface face | Superseded by 0161 |
 | [0150](0150-a-thread-over-the-application-ground-wears-glass.md) | A thread over the application ground wears glass | Accepted |
 | [0151](0151-the-agent-opens-the-in-app-simulator-pane.md) | The agent opens the in-app Simulator pane | Accepted |
 | [0152](0152-allow-input-opens-a-device-to-clicks.md) | Allow input opens a device to clicks | Accepted |
@@ -182,6 +182,7 @@ links from specifications remain useful for rationale and supporting detail.
 | [0158](0158-first-task-entry-keeps-setup-optional.md) | First task entry keeps setup optional | Accepted |
 | [0159](0159-a-confined-apple-test-carries-its-measured-grants.md) | A confined Apple test carries its measured grants | Accepted |
 | [0160](0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md) | An Apple screen capture lands in a directory only its launch can write | Accepted |
+| [0161](0161-geist-is-the-default-interface-face.md) | Geist is the default interface face | Accepted |
 
 ## Recording architectural rationale
 

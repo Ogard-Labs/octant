@@ -48,7 +48,7 @@ const LEGACY_DEFAULT_UI_FAMILY =
 /**
  * The platform face, as Appearance's System interface choice saves it. It is
  * deliberately not the legacy stack above: that string means "the default",
- * so a person who picked System would otherwise be given Inter.
+ * so a person who picked System would otherwise be given Geist.
  */
 export const SYSTEM_UI_FAMILY =
   "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";

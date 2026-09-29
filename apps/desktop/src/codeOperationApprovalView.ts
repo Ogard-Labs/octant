@@ -641,7 +641,7 @@ export function approvalViewHtml(palette?: CodeOperationApprovalPalette): string
 ${approvalPaletteCss(palette)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:transparent}
-body{color:var(--approval-fg);font:13px/1.45 'Inter Variable',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{color:var(--approval-fg);font:13px/1.45 'Geist Variable',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 main{height:100%;display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--approval-border);border-radius:12px;background:var(--approval-bg)}
 .content{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto;flex:1}
 h1{margin:0;font-size:14px;line-height:1.35;font-weight:500}p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}

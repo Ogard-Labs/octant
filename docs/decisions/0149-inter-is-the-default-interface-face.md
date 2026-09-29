@@ -1,6 +1,6 @@
 # 0149. Inter is the default interface face
 
-**Status:** Accepted
+**Status:** Superseded by 0161
 
 ## Context
 
