@@ -373,6 +373,9 @@ export class ProviderService implements ProviderServiceApi {
     for (const instance of this.#persistence.readProviderInstances()) {
       if (!instance.enabled) continue;
       if (this.#runtime.hasRuntime(instance.id)) continue;
+      // Nothing to warm: an image profile is a generation endpoint, not a
+      // runtime the probe path can start.
+      if (isImageProfileDriverKind(instance.driverKind)) continue;
       if (this.#unusableConfigurationObservation(instance) !== undefined) continue;
       try {
         await this.#probeConfiguredInstance(instance.id);
@@ -1213,6 +1216,14 @@ export class ProviderService implements ProviderServiceApi {
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
         }
+        if (isImageProfileDriverKind(instance.driverKind)) {
+          // Image profiles are generation endpoints with a stored credential,
+          // not runtimes to probe — the chat-model driver cannot be built for
+          // them and would only ever report "incompatible".
+          this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw this.#unsupported("Image profiles have no runtime to probe.");
+        }
         // Do NOT clear the runtime observed state for a valid enabled probe:
         // the web client already clears its local snapshot for the "checking"
         // UI state, and clearing the server runtime state would race with
@@ -1370,6 +1381,13 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   #unusableConfigurationObservation(instance: ProviderInstance): ProviderObservedState | undefined {
+    // Image profiles are generation endpoints with a stored credential, not
+    // runtimes: the chat-model driver factory cannot be built for them, so an
+    // earlier recorded observation is stale rather than proof of trouble.
+    if (isImageProfileDriverKind(instance.driverKind)) {
+      this.#runtime.clearObservedState(instance.id);
+      return undefined;
+    }
     if (this.#driverProvider === undefined) return undefined;
     try {
       this.#driverProvider(instance);
