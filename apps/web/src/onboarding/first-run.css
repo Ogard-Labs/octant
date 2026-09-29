@@ -188,7 +188,11 @@
      more content. The edge fades, and the padding lets the last row scroll
      clear of the fade. */
   padding-block-end: var(--oct-space-6);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--oct-space-6)), transparent);
+  mask-image: linear-gradient(
+    to bottom,
+    var(--oct-fg) calc(100% - var(--oct-space-6)),
+    transparent
+  );
 }
 
 .first-run__step-header {
