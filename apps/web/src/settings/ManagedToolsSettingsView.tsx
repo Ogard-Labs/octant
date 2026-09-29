@@ -98,7 +98,11 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
   const supported = status?.supported === true;
   const tools = status?.tools ?? [];
   return (
-    <section aria-label="Device tools" id="settings-device-tools">
+    <section
+      aria-label="Device tools"
+      className="settings-section-stack"
+      id="settings-device-tools"
+    >
       <SettingsSection
         title="Bundled tools"
         description="Octant ships its own verified copy of each tool and can replace it when upstream publishes a newer release."
