@@ -1117,7 +1117,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           <UsageLimitNotice
             limit={props.controller.turnUsageLimit}
             provider={providerModelLabel(providerGroups, thread)}
-            resumable={providerTurnOperationId !== undefined}
+            // A stopped turn keeps the limit fact as its honest record, but a
+            // resume or snooze binds to a stop that is still waiting — offering
+            // either here could only be refused.
+            resumable={false}
             {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
             {...(scheduleUsageResume === undefined
               ? {}
