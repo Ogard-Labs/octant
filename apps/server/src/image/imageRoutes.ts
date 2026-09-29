@@ -249,7 +249,14 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
 }
 
 function parseThreadKind(value: string | null): ImageJobThreadKind | undefined {
-  if (value === "chat-thread" || value === "work-thread" || value === "code-thread") return value;
+  if (
+    value === "chat-thread" ||
+    value === "work-thread" ||
+    value === "code-thread" ||
+    value === "image-library"
+  ) {
+    return value;
+  }
   return undefined;
 }
 
