@@ -1387,6 +1387,8 @@ describe("ProviderSettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
 
     expect(props.onCreateOpenAiImage).not.toHaveBeenCalled();
+    expect(within(create).getByRole("alert")).toHaveTextContent("Model allowlist is required.");
+    expect(within(create).getByLabelText("Model allowlist")).toHaveFocus();
   });
 
   it("shows stored Keychain status and omits a connection check for an OpenAI image profile", async () => {
