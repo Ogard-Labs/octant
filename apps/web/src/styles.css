@@ -1,4 +1,5 @@
 @import "@fontsource-variable/inter/opsz.css";
+@import "@fontsource-variable/geist/index.css";
 @import "./styles/tailwind.css";
 /* Octant design system, then the adapter that repoints its colour and font
    tokens at the runtime theme. Import order is deliberate and load-bearing:

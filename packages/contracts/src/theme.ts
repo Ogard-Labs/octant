@@ -314,7 +314,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   typography: {
     ui: {
       family:
-        "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+        "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
       size: 13,
       weight: 400,
     },
