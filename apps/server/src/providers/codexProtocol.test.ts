@@ -23,6 +23,7 @@ const thread = {
 const turn = {
   id: "turn-1",
   status: "inProgress",
+  error: null,
   items: [],
   providerOnly: "strip-me",
 };
@@ -536,7 +537,7 @@ describe("Codex stable 0.144.4 protocol", () => {
           method: "turn/completed",
           params: {
             threadId: "thread-1",
-            turn: { id: "turn-1", status, providerOnly: "strip-me" },
+            turn: { id: "turn-1", status, error: null, providerOnly: "strip-me" },
           },
         }),
       ).toEqual({

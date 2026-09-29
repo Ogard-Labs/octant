@@ -96,7 +96,10 @@ const TurnError = Schema.Struct({
 const TurnReference = Schema.Struct({
   id: Schema.String,
   status: TurnStatus,
-  error: Schema.optional(TurnError),
+  // Measured against codex-cli 0.154.0: the wire reports an errored turn's
+  // reason here and writes the slot as `null` on every other turn, so a
+  // present null means no error rather than a malformed frame.
+  error: Schema.optionalWith(TurnError, { nullable: true }),
 });
 export type CodexTurnReference = typeof TurnReference.Type;
 
