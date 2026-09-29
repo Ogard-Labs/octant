@@ -11,7 +11,7 @@ import {
   ProviderInstanceId,
   ProviderModelId,
 } from "./providers";
-import { HostId } from "./shell";
+import { HostId } from "./host";
 import { ExecutionResolutionReceipt } from "./agentProfile";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -320,6 +320,40 @@ export const AgentRunResultAcknowledgement = Schema.Struct({
 }).annotations(strict);
 export type AgentRunResultAcknowledgement = typeof AgentRunResultAcknowledgement.Type;
 
+/**
+ * Marks a turn the host itself started to carry a finished subagent run's
+ * result into its parent thread. `kind` names what the turn is; `runId`
+ * names the run it delivers, so a delivery replayed after a crash can never
+ * mint a second turn for the same result.
+ */
+export const AgentRunResultDeliveryMark = Schema.Struct({
+  kind: Schema.Literal("agent-result"),
+  runId: AgentRunId,
+}).annotations(strict);
+export type AgentRunResultDeliveryMark = typeof AgentRunResultDeliveryMark.Type;
+
+/**
+ * How the host settled one finished run's result delivery. `delivered` means
+ * a journaled turn now carries the result into the parent thread; `consumed`
+ * means the parent's own managed tool already returned it; `invalidated`
+ * means the parent could no longer take a turn; `failed` means delivery was
+ * refused, with the reason kept in `detail`.
+ */
+export const AgentRunResultDeliveryOutcome = Schema.Literal(
+  "delivered",
+  "consumed",
+  "invalidated",
+  "failed",
+);
+export type AgentRunResultDeliveryOutcome = typeof AgentRunResultDeliveryOutcome.Type;
+
+export const AgentRunResultDelivery = Schema.Struct({
+  outcome: AgentRunResultDeliveryOutcome,
+  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  settledAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentRunResultDelivery = typeof AgentRunResultDelivery.Type;
+
 export const AgentRun = Schema.Struct({
   id: AgentRunId,
   requestId: AgentRunRequestId,
@@ -337,6 +371,12 @@ export const AgentRun = Schema.Struct({
   resultAcknowledgement: AgentRunResultAcknowledgement,
   /** Present only once the run completed with a persisted reply. */
   result: Schema.optional(AgentRunResult),
+  /**
+   * Present once the host settled how this run's result reached its parent —
+   * as a journaled turn, through the parent's own tool call, or honestly
+   * refused. Absent means a finished run's delivery is still owed.
+   */
+  resultDelivery: Schema.optional(AgentRunResultDelivery),
   /** Present only when a provider reported token usage for this run. */
   usage: Schema.optional(AgentRunTokenUsage),
   recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
@@ -419,6 +459,19 @@ export const AgentRunCommand = Schema.Union(
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
   }).annotations(strict),
+  /**
+   * Journals how a finished run's result reached its parent. Written once per
+   * run, only after the delivery actually happened — a turn carrying it, the
+   * parent's tool returning it, or a refused/invalidated outcome — so a
+   * restarted host can tell an owed delivery from a settled one.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("settle-agent-run-result-delivery"),
+    runId: AgentRunId,
+    expectedVersion: AggregateVersion,
+    outcome: AgentRunResultDeliveryOutcome,
+    detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("retry-agent-run"),
     runId: AgentRunId,
@@ -481,6 +534,13 @@ export const AgentRunResultAcknowledged = Schema.Struct({
   acknowledgedAt: UtcTimestamp,
 }).annotations(strict);
 export type AgentRunResultAcknowledged = typeof AgentRunResultAcknowledged.Type;
+
+export const AgentRunResultDeliverySettled = Schema.Struct({
+  runId: AgentRunId,
+  version: AggregateVersion,
+  delivery: AgentRunResultDelivery,
+}).annotations(strict);
+export type AgentRunResultDeliverySettled = typeof AgentRunResultDeliverySettled.Type;
 
 /** Maximum rows one Agents Center query may return in a single page. */
 export const MAX_AGENT_RUN_CENTER_QUERY_LIMIT = 100;
@@ -661,6 +721,9 @@ export const decodeAgentRunCommand = Schema.decodeUnknownSync(AgentRunCommand);
 export const decodeAgentRunCommandResult = Schema.decodeUnknownSync(AgentRunCommandResult);
 export const decodeAgentRunRequested = Schema.decodeUnknownSync(AgentRunRequested);
 export const decodeAgentRunStatusChanged = Schema.decodeUnknownSync(AgentRunStatusChanged);
+export const decodeAgentRunResultDeliverySettled = Schema.decodeUnknownSync(
+  AgentRunResultDeliverySettled,
+);
 export const decodeAgentRunResultAcknowledged = Schema.decodeUnknownSync(
   AgentRunResultAcknowledged,
 );

@@ -8,12 +8,14 @@ import {
   decodeAgentRun,
   decodeAgentRunId,
   decodeAgentRunResultAcknowledged,
+  decodeAgentRunResultDeliverySettled,
   decodeAgentRunStatusChanged,
   type AgentRun,
   type AgentRunAdmittedContext,
   type AgentRunId,
   type AgentRunLifecycleStatus,
   type AgentRunResult,
+  type AgentRunResultDelivery,
   type EventEnvelope,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -29,6 +31,7 @@ export const AGENT_RUN_AGGREGATE_TYPE = "agent-run";
 export const AGENT_RUN_REQUESTED = "agent.run-requested@1";
 export const AGENT_RUN_STATUS_CHANGED = "agent.run-status-changed@1";
 export const AGENT_RUN_RESULT_ACKNOWLEDGED = "agent.run-result-acknowledged@1";
+export const AGENT_RUN_RESULT_DELIVERY_SETTLED = "agent.run-result-delivery-settled@1";
 export const MAX_AGENT_RUN_REPLAY_LIMIT = 256;
 const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 const MAX_JOURNAL_SCAN_EVENTS = 100_000;
@@ -87,6 +90,13 @@ export interface AppendAgentRunResultAcknowledgedInput {
   readonly version: number;
   readonly expectedVersion: number;
   readonly acknowledgedAt: UtcTimestamp;
+}
+
+export interface AppendAgentRunResultDeliverySettledInput {
+  readonly runId: AgentRunId;
+  readonly version: number;
+  readonly expectedVersion: number;
+  readonly delivery: AgentRunResultDelivery;
 }
 
 export interface ReplayAgentRunInput {
@@ -360,6 +370,72 @@ export class AgentRunEventStore {
       payload.version,
       AGENT_RUN_RESULT_ACKNOWLEDGED,
       "AgentRun result acknowledgement",
+    );
+  }
+
+  appendResultDeliverySettled(
+    input: AppendAgentRunResultDeliverySettledInput,
+  ): EventEnvelope {
+    let runId: AgentRunId;
+    let aggregateId: typeof AggregateId.Type;
+    let expectedVersion: typeof AggregateVersion.Type;
+    let eventId: typeof EventId.Type;
+    let correlationId: typeof CorrelationId.Type;
+    let payload: ReturnType<typeof decodeAgentRunResultDeliverySettled>;
+    try {
+      runId = decodeAgentRunId(input.runId);
+      expectedVersion = decodeAggregateVersion(input.expectedVersion);
+      aggregateId = decodeAggregateId(runId);
+      eventId = decodeEventId(this.#uuid());
+      correlationId = decodeCorrelationId(this.#uuid());
+      payload = decodeAgentRunResultDeliverySettled({
+        runId,
+        version: input.version,
+        delivery: input.delivery,
+      });
+      if (payload.version !== expectedVersion + 1) {
+        throw new Error("delivery version must be one greater than expected head");
+      }
+    } catch {
+      throw new AgentRunEventStoreError(
+        "invalid",
+        "AgentRun result delivery settle append is invalid.",
+      );
+    }
+
+    let committed;
+    try {
+      committed = this.#journal.append({
+        aggregate: { aggregateType: AGENT_RUN_AGGREGATE_TYPE, aggregateId },
+        expectedVersion,
+        events: [
+          {
+            eventId,
+            eventName: AGENT_RUN_RESULT_DELIVERY_SETTLED,
+            eventVersion: 1,
+            correlationId,
+            actor: this.#actor,
+            occurredAt: input.delivery.settledAt,
+            payload,
+          },
+        ],
+      });
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) {
+        throw new AgentRunEventStoreError(
+          "invalid",
+          "AgentRun expected version does not match the current head.",
+        );
+      }
+      throw error;
+    }
+
+    return this.#assertCommitted(
+      committed.events[0],
+      aggregateId,
+      payload.version,
+      AGENT_RUN_RESULT_DELIVERY_SETTLED,
+      "AgentRun result delivery settle",
     );
   }
 

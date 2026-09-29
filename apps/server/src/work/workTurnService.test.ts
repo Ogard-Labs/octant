@@ -14,6 +14,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  decodeAgentRun,
   decodeWorkAttachmentId,
   decodeWorkTurnAccepted,
   decodeWorkThread,
@@ -23,6 +24,7 @@ import {
   decodeProjectId,
   decodeProviderInstance,
   decodeWindowId,
+  type AgentRun,
   type Project,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -1399,6 +1401,54 @@ describe("WorkTurnService", () => {
       ],
     });
   });
+
+  it("refuses a turn that claims to deliver a subagent result the journal does not back", async () => {
+    const delivery = { kind: "agent-result", runId: "d4a1b000-0000-4000-8000-000000000099" };
+    // No agentRuns dependency: an unbacked mark is refused.
+    const bare = serviceFixture();
+    await expect(
+      bare.service.startFirstTurn(ids.window, { ...startCommand(), delivery }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+
+    // A run that belongs to another thread or has not finished is refused too.
+    const stranger = workRunFor("d4a1b000-0000-4000-8000-0000000000aa");
+    const running = workRunFor(ids.thread, { lifecycleStatus: "running" });
+    const fixture = serviceFixture({
+      agentRuns: {
+        getById: (runId) => {
+          if (String(runId) === String(stranger.id)) return stranger;
+          if (String(runId) === String(running.id)) return running;
+          return undefined;
+        },
+      },
+    });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        delivery: { kind: "agent-result", runId: stranger.id },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        delivery: { kind: "agent-result", runId: running.id },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("admits a delivery turn the journaled run backs and carries its mark", async () => {
+    const run = workRunFor(ids.thread);
+    const fixture = serviceFixture({
+      agentRuns: { getById: (runId) => (String(runId) === String(run.id) ? run : undefined) },
+    });
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      delivery: { kind: "agent-result", runId: run.id },
+    });
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.turn.delivery).toEqual({ kind: "agent-result", runId: run.id });
+  });
 });
 
 function startCommand() {
@@ -1450,6 +1500,7 @@ function serviceFixture(
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
+    readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -1611,6 +1662,7 @@ function serviceFixture(
       ? {}
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
+    ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     uuid: (() => {
       let n = 0;
       return () => {
@@ -1689,6 +1741,73 @@ function workProject(): Extract<Project, { readonly type: "work" }> {
       },
     ],
   } as Extract<Project, { readonly type: "work" }>;
+}
+
+function workRunFor(parentThreadId: string, overrides: Record<string, unknown> = {}): AgentRun {
+  return decodeAgentRun({
+    id: "d4a1b000-0000-4000-8000-000000000001",
+    requestId: "d4a1b000-0000-4000-8000-000000000002",
+    parentThreadId,
+    depth: 0,
+    role: "research",
+    task: "Summarize the design.",
+    creationPosture: "automatic",
+    executionKind: "octant-managed",
+    lifecycleStatus: "completed",
+    authority: {
+      filesystem: true,
+      shell: false,
+      git: false,
+      network: true,
+      tools: true,
+      subagents: false,
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    },
+    routingReceipt: {
+      executionResolution: {
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+        effectivePermissions: {
+          filesystem: true,
+          shell: false,
+          git: false,
+          network: true,
+          tools: true,
+          subagents: false,
+        },
+        source: "project-default",
+        fallbackChain: ["project-default"],
+        downgradeReasons: [],
+      },
+      selectedExecutionKind: "octant-managed",
+      attemptedExecutionKind: "provider-native",
+      selectedProviderInstanceId: ids.provider,
+      selectedModelId: "model-a",
+      fallbackCandidates: [],
+      capabilityDegradations: [],
+      contextSnapshotId: "d4a1b000-0000-4000-8000-000000000004",
+      effectiveAuthorityDigest: "digest-1",
+      usageQuality: "provider-reported",
+      hostId: "local",
+      mode: "work",
+    },
+    workspaceReceipt: {
+      kind: "work-root",
+      mode: "work",
+      projectId: ids.project,
+      bindingRevisionId: ids.binding,
+      canonicalRoot: "/tmp/work-root",
+    },
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 4,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
 }
 
 function deferred<T>() {

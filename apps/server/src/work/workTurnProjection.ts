@@ -45,6 +45,7 @@ export class WorkTurnProjection {
           ? {}
           : { extensionSelections: accepted.extensionSelections }),
         capabilities: accepted.capabilities,
+        ...(accepted.delivery === undefined ? {} : { delivery: accepted.delivery }),
         version: 1,
         acceptedAt: accepted.acceptedAt,
         updatedAt: accepted.acceptedAt,

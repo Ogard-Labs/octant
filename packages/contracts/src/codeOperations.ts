@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { AppleActionRequest } from "./appleToolchain";
 import { AndroidEmulatorRequest } from "./androidToolchain";
@@ -638,6 +639,13 @@ const StartProviderTurn = Schema.Struct({
    * thread's own posture.
    */
   executionPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
+   * Set only by the host's own delivery of a finished subagent run's result:
+   * the turn carries the run's reply into this thread and the mark is
+   * verified against the journaled run before the turn is admitted, so a
+   * caller cannot claim a delivery the journal does not record.
+   */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
 }).annotations(strict);
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),
@@ -1132,6 +1140,12 @@ const ConversationTurnStartedEvent = Schema.Struct({
    * the host recorded it.
    */
   executionPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
+   * Set only on a turn the host started to deliver a finished subagent run's
+   * result; journaled with the turn's start so replay keeps the mark and a
+   * re-delivered result can never mint a second turn.
+   */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),

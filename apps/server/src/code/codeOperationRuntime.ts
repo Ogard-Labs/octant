@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import {
+  type AgentRun,
+  type AgentRunId,
   CodeApprovalId,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
@@ -226,6 +228,13 @@ export interface CodeOperationRuntimeOptions {
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
+  /**
+   * Read access to journaled subagent runs, for verifying the delivery mark a
+   * `start-provider-turn` claims. Absent means delivery claims are refused.
+   */
+  readonly agentRuns?: {
+    readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+  };
   readonly probeProvider?: (
     instanceId: CodeThread["providerInstanceId"],
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
@@ -635,6 +644,7 @@ export function createCodeOperationRuntime(
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
+    ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     onScopedOperation: ({ command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
