@@ -38,6 +38,7 @@ import {
   packagedLinuxBundlePath,
   pruneUnusedNativePayloads,
   resolveDesktopPackageTarget,
+  resolveLinuxNativeToolchain,
   resolveNodeExecutable,
   nativePayloadsToStrip,
   selectFinalBundlePaths,
@@ -628,6 +629,60 @@ describe("desktop packaging boundary", () => {
       force: true,
       onlyModules: ["better-sqlite3", "node-pty"],
     });
+  });
+
+  it("rebuilds Linux native modules with clang before GCC, honoring explicit CC/CXX", () => {
+    const clangAndOldGcc = (command: string) =>
+      command === "gcc" || command === "g++" || command.startsWith("clang")
+        ? `/usr/bin/${command}`
+        : null;
+    const majors = new Map([
+      ["clang++-15", 15],
+      ["clang++", 12],
+      ["g++", 12],
+    ]);
+    const major = (command: string) => majors.get(command);
+
+    expect(resolveLinuxNativeToolchain({}, clangAndOldGcc, major)).toEqual({
+      CC: "clang-15",
+      CXX: "clang++-15",
+    });
+    expect(
+      resolveLinuxNativeToolchain({ CC: "gcc-12", CXX: "g++-12" }, clangAndOldGcc, major),
+    ).toEqual({ CC: "gcc-12", CXX: "g++-12" });
+  });
+
+  it("falls back to GCC 13+ for Linux native rebuilds when clang is absent", () => {
+    const gccOnly = (command: string) =>
+      command === "gcc-13" || command === "g++-13" || command === "gcc" || command === "g++"
+        ? `/usr/bin/${command}`
+        : null;
+    const majors = new Map([
+      ["g++-13", 13],
+      ["g++", 11],
+    ]);
+    const major = (command: string) => majors.get(command);
+
+    expect(resolveLinuxNativeToolchain({}, gccOnly, major)).toEqual({
+      CC: "gcc-13",
+      CXX: "g++-13",
+    });
+  });
+
+  it("refuses to rebuild Linux native modules when no toolchain meets the V8 floor", () => {
+    const oldCompilersOnly = (command: string) =>
+      command === "gcc" || command === "g++" || command === "clang" || command === "clang++"
+        ? `/usr/bin/${command}`
+        : null;
+    const majors = new Map([
+      ["g++", 12],
+      ["clang++", 12],
+    ]);
+    const major = (command: string) => majors.get(command);
+
+    expect(() => resolveLinuxNativeToolchain({}, oldCompilersOnly, major)).toThrow(
+      /clang or GCC 13\+/,
+    );
   });
 
   it("pins node-pty only in the server runtime", async () => {
