@@ -173,6 +173,7 @@ const usageLimitLabels: Record<ProviderUsageLimit["kind"], string> = {
 
 function attemptFailureSentence(attempt: ChatAttempt): string {
   return (
+    attempt.failure?.message ??
     attempt.failure?.diagnostic?.stderrContext ??
     attemptFailureSentences[String(attempt.failure?.code ?? "")] ??
     "The turn failed."

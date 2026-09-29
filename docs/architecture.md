@@ -465,7 +465,10 @@ source's files as app-managed tools; see
 A Chat attempt that fails or is interrupted carries a bounded failure code,
 and the client-safe process diagnostic when the provider supplied one. The
 transcript states Octant's sentence for that code. The provider's own message
-stays off the attempt. App-managed tool and research calls use the turn's own
+stays off the attempt. A refusal Octant itself authored before the provider
+answered (for example an unsupported capability or an unready provider) also
+journals that host sentence, so replay after a restart shows the same refusal
+the live turn did; provider-originated text is never persisted there. App-managed tool and research calls use the turn's own
 deadline; a call that never returns ends the attempt instead of leaving it
 running, and a cancellation is not recorded as that call having failed.
 
