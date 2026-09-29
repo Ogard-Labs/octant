@@ -148,30 +148,52 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   ("This provider cannot carry Octant's Browser tool…"); Work dispatches then fails in-band with
   failure.category="unsupported". Plain turns work in both modes.
 
-## Settings → Providers — image-generation providers (post-#830 state on 39dffcf9)
+## Settings → Image generation — image providers (post-#840/#841 on 696647fb)
 
-- #830 fixed the old 503-on-create (`provider_instance_projection.driver_kind` CHECK missing image kinds):
-  `POST /api/providers/commands {"kind":"create-openai-image-provider",…}` now returns `provider-created`.
-- REMAINING DEFECTS on 39dffcf9: (a) the UI create still refuses CLIENT-SIDE for all four image kinds —
-  "Provider configuration could not be created" banner, zero network requests, zero journal instances
-  (refusal inside `client.execute` after `decodeProviderRegistryCommand` — identical payload decodes clean
-  in bun and POSTs fine via curl); (b) `/api/providers/<id>/probe` → 503 → cards render "Incompatible";
-  (c) generation jobs journal `image.job-queued → status-changed` but fail `unauthenticated`
-  ("provider credential is missing or unavailable") even when the Keychain entry exists in the prescribed
-  format — the credential-read path cannot resolve its own store. Together these mean image-generation
-  provider flows are server-create-only and generation-blocked on this build.
-- The UI fails SILENTLY: the credential field clears (`withTransientCredential` finally) and
-  `ImageGenerationSettingsView` does not render `controller.message` — a cleared field = the failure
-  signature, not a success. On 39dffcf9 the banner DOES render ("Provider configuration could not be
-  created"), so watch for both signatures.
+- Image-provider types do NOT appear in Providers & Models "Add provider manually" (list ends at
+  "Ollama native HTTP") — they live only under Settings → Image generation → "Add image provider".
+- Post-#840 the create form carries REAL preset values → UI create works end-to-end and writes the
+  credential through the real `setProviderCredential` path (Keychain entry appears at
+  `app.octant.provider-credentials`, acct `<lowercase-instanceId>:<storeScope>` — verify via
+  `security dump-keychain`, NOT the flaky bundled helper). IMPORTANT: manual
+  `security add-generic-password` seeding in the same format does NOT satisfy the app's credential
+  read path — a card will show "Not configured"; only entries written by the app's own create work.
+- Post-#841 image profiles are exempt from chat-runtime probing → honest badge is "Not checked"
+  (not "Incompatible"). The `GET /api/providers/<id>/probe` 503 plane is no longer exercised.
+- REAL GENERATION WORKS end-to-end on 696647fb: More → Image generator → "Create image…" → profile +
+  gpt-image-2 → Generate → `image.job-queued@1 → status-changed(running) → status-changed(completed)`
+  - `context.usage-reconciled`. Artifact bytes land at
+    `~/Library/Application Support/Octant/generated-images/<scopeId>/<attachmentId>/finalized.bin`
+    and serve via `GET /api/image/jobs/<jobId>/artifacts/<attachmentId>` + window capability header.
+- Keychain persistence verified: provider row + enabled state survive `pkill -9` + relaunch; a
+  post-restart generation completes WITHOUT re-entering the key.
 - Probe without UI: `POST /api/providers/commands` with header `x-octant-window-capability` (extract from
   the renderer process args: `ps axww -o command= | grep octant-project-capability`; argv only — `ps eww`
   misses the headless renderer and dumps every process's environment, provider secrets included) — CLI
-  creates return `{"kind":"provider-created"}`, image ones 503.
+  creates return `{"kind":"provider-created"}`.
 - In-process repro: real `Journal` + `createPhase1RuntimeRegistries` + `migrateStoreWithBackup` on a
   scratch `OCTANT_DATA_DIR`, then `journal.append` the `provider.instance-created@1` event — surfaces the
   true `CHECK constraint failed` error that the HTTP layer masks. Enumerating `projections.all()` and
   applying the envelope to each names the throwing projection.
+
+### Image-generator library list defect (696647fb — OPEN)
+
+- The Image generator library NEVER renders completed jobs: `GET /api/image/jobs?threadKind=image-library`
+  → 400 "Image job list requires a thread." because `parseThreadKind` in
+  `apps/server/src/image/imageRoutes.ts` (~line 251) accepts only
+  `chat-thread|work-thread|code-thread` and OMITS the `image-library` literal that
+  `ImageJobThreadKind` (contracts) defines as a valid fourth kind. The enqueue POST uses the full
+  schema (accepts image-library fine) and `GET /api/image/jobs/<jobId>` + artifact routes don't parse
+  threadKind — so jobs create, complete, and serve PNGs but the list 400s → `GeneratedImageList` shows
+  a blank surface (no cards, no empty state). Diagnosis recipe: compare the list endpoint (400
+  "requires a thread") against `GET /api/image/jobs/<jobId>` (200 with artifacts) — the contrast
+  isolates the parse-level miss rather than a store/refresh gap. Job listing uses in-memory
+  `ImageJobProjection` (`holdsStateInMemory`, journal-replayed — no sqlite table).
+- `ImageArtifactRef` wire shape is exactly `{attachmentId, hash, size, mime}` — the strict schema
+  REJECTS extra fields (e.g. the `evidence` block the job detail returns); a curl revise enqueue must
+  pass only those four keys or it 400s "Image generation request is invalid." A parent-linked revise
+  job completes with `parentArtifactRef` journaled and produces a new artifact (red→blue circle
+  verified visually).
 
 ## Form hazards and client-side failure signatures
 
