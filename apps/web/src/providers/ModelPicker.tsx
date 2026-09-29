@@ -20,6 +20,7 @@ export interface ModelPickerProps {
   readonly ariaLabel?: string;
   readonly disabled?: boolean;
   readonly narrow?: boolean;
+  readonly onOpenProviderSettings?: () => void;
 }
 
 interface FlatOption {
@@ -48,6 +49,10 @@ export function ModelPicker(props: ModelPickerProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (props.disabled) return;
     if (flatOptions.length === 0) return;
+    // The readiness reason's Provider settings button sits inside the listbox;
+    // its own Enter/Space must open settings, not pick the active model.
+    if (event.target instanceof Element && event.target.closest(".model-picker__group-reason"))
+      return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) => {
@@ -126,6 +131,9 @@ export function ModelPicker(props: ModelPickerProps) {
                     }
                     disabled={props.disabled === true}
                     onSelect={props.onSelect}
+                    {...(props.onOpenProviderSettings === undefined
+                      ? {}
+                      : { onOpenProviderSettings: props.onOpenProviderSettings })}
                   />
                 ))}
               </div>
@@ -145,6 +153,9 @@ export function ModelPicker(props: ModelPickerProps) {
                 }
                 disabled={props.disabled === true}
                 onSelect={props.onSelect}
+                {...(props.onOpenProviderSettings === undefined
+                  ? {}
+                  : { onOpenProviderSettings: props.onOpenProviderSettings })}
               />
             ),
           )}
@@ -188,6 +199,7 @@ function ProviderGroupView(props: {
   readonly activeModelId?: ProviderModelId | undefined;
   readonly disabled: boolean;
   readonly onSelect: (selection: ModelPickerSelection) => void;
+  readonly onOpenProviderSettings?: () => void;
 }) {
   const { group } = props;
   return (
@@ -207,6 +219,16 @@ function ProviderGroupView(props: {
           {readinessLabel(group.readiness)}
         </span>
       </div>
+      {group.readiness !== "ready" && group.readinessReason !== undefined ? (
+        <p className="model-picker__group-reason" role="status">
+          {group.readinessReason}{" "}
+          {props.onOpenProviderSettings === undefined ? null : (
+            <OctantButton onClick={props.onOpenProviderSettings} type="button" variant="link">
+              Provider settings
+            </OctantButton>
+          )}
+        </p>
+      ) : null}
       {group.unavailableCurrent !== undefined ? (
         <UnavailableCurrentView picker={group.unavailableCurrent} instanceId={group.instance.id} />
       ) : null}
