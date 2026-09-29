@@ -136,6 +136,26 @@ describe("ImageGenerationSettingsView", () => {
     );
   });
 
+  it("shows no readiness summary when every enabled row is an image profile", () => {
+    const full = providerSnapshot();
+    const snapshot = {
+      ...full,
+      instances: full.instances.filter((instance) => instance.driverKind === "openai-image"),
+    };
+    render(
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerController={providerController(snapshot)}
+        providerSnapshot={snapshot}
+        settings={{ customSources: [] }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("status", { name: "Provider readiness summary" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not claim a custom HTTP provider is required when a dedicated image provider is ready", () => {
     const snapshot = providerSnapshot();
     render(

@@ -288,7 +288,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             ? "Use the arrow controls to change the model-picker order."
             : (props.note ?? "The first ready provider is the default for new threads.")}
         </p>
-        {ordered.length === 0 ? null : (
+        {readinessSummary.ready + readinessSummary.needsSetup + readinessSummary.off ===
+        0 ? null : (
           <p
             aria-label="Provider readiness summary"
             className="oct-meta provider-settings__summary"
