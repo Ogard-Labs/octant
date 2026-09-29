@@ -206,6 +206,7 @@ import { CodeFileService } from "./code/codeFileService";
 import { CodeFileListingService } from "./code/codeFileListingService";
 import { CodeFileWatchService } from "./code/codeFileWatchService";
 import { CodeSearchService } from "./code/codeSearchService";
+import { resolveConnectedGitHubRepository } from "./code/connectedRepository";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
@@ -2860,18 +2861,23 @@ export function startOctantServer(
       files: workProjectStatusFiles,
       clock: () => new Date().toISOString(),
     });
+    const gitEnvironmentPort = options.gitEnvironmentPort ?? new GitEnvironmentPort();
+    const gitObservationPort = new GitObservationPort();
     const projectService = new ProjectService({
       persistence,
       bindingReceiptStore,
       projectRootPort,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      observeCodeProjectRepository: async (canonicalRoot) => {
+        const remotes = await gitObservationPort.observeRemotes(canonicalRoot);
+        if (remotes === undefined) return undefined;
+        return resolveConnectedGitHubRepository(remotes);
+      },
       seedWorkProjectFiles: async (canonicalRoot, name, today) => {
         await workProjectStatusFiles.seed(canonicalRoot, name, today);
       },
     });
-    const gitEnvironmentPort = options.gitEnvironmentPort ?? new GitEnvironmentPort();
-    const gitObservationPort = new GitObservationPort();
     const codeContent = new CodeContentStore();
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
