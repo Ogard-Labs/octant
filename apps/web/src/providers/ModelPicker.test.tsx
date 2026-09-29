@@ -318,6 +318,34 @@ describe("ModelPicker", () => {
     expect(onOpenProviderSettings).toHaveBeenCalledOnce();
   });
 
+  it("opens provider settings from the keyboard without selecting the active model", async () => {
+    const user = userEvent.setup();
+    const a = openAiInstance("10000000-0000-4000-8000-000000000001", "G");
+    const observedByInstance = new Map([
+      [
+        a.id,
+        {
+          ...observed(a.id, [model({ id: "m", displayName: "M" })], "degraded"),
+          message: "Streaming is degraded.",
+        },
+      ],
+    ]);
+    const onOpenProviderSettings = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <ModelPicker
+        groups={groups([a], observedByInstance, "chat")}
+        onOpenProviderSettings={onOpenProviderSettings}
+        onSelect={onSelect}
+      />,
+    );
+    screen.getByRole("button", { name: "Provider settings" }).focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
+    expect(onOpenProviderSettings).toHaveBeenCalledTimes(2);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("marks the selected option with aria-selected", () => {
     const a = openAiInstance("10000000-0000-4000-8000-000000000001", "G");
     const observedByInstance = new Map([

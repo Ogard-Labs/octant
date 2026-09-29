@@ -49,6 +49,10 @@ export function ModelPicker(props: ModelPickerProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (props.disabled) return;
     if (flatOptions.length === 0) return;
+    // The readiness reason's Provider settings button sits inside the listbox;
+    // its own Enter/Space must open settings, not pick the active model.
+    if (event.target instanceof Element && event.target.closest(".model-picker__group-reason"))
+      return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) => {
