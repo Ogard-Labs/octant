@@ -115,7 +115,8 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 
 - Service `app.octant.provider-credentials`, account `<lowercase-instanceId>:<storeScope/hostId>`.
 - Bundled helper `out/Octant.app/Contents/Resources/native/octant-keychain-helper` reads stdin JSON
-  `{version:1,storeScope,operation:"set"|"get",providerInstanceId,credential}`. It is FLAKY/strict:
+  `{version:1,storeScope,operation:"set"|"has"|"resolve"|"delete",providerInstanceId,credential}`
+  (`resolve` reads; there is no `get`). It is FLAKY/strict:
   a set can return ok:true once and later get/set on the same entry return `{"error":"failed"}` — do not
   trust it for read-back verification. Direct `security add-generic-password -s … -a … -w "$KEY" -U` +
   `security find-generic-password -w` works reliably and matches the app's own entry format.
@@ -171,10 +172,6 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   the renderer process args: `ps axww -o command= | grep octant-project-capability`; argv only — `ps eww`
   misses the headless renderer and dumps every process's environment, provider secrets included) — CLI
   creates return `{"kind":"provider-created"}`.
-- In-process repro: real `Journal` + `createPhase1RuntimeRegistries` + `migrateStoreWithBackup` on a
-  scratch `OCTANT_DATA_DIR`, then `journal.append` the `provider.instance-created@1` event — surfaces the
-  true `CHECK constraint failed` error that the HTTP layer masks. Enumerating `projections.all()` and
-  applying the envelope to each names the throwing projection.
 
 ### Image-generator library list defect (696647fb — OPEN)
 
@@ -194,6 +191,22 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
   pass only those four keys or it 400s "Image generation request is invalid." A parent-linked revise
   job completes with `parentArtifactRef` journaled and produces a new artifact (red→blue circle
   verified visually).
+
+## Usage-limit state injection (journal-level)
+
+- `ProviderUsageLimit` facts ride ON the journaled stop rows, not a dedicated event: a Chat attempt
+  persists `outcome:"waiting"` + `usageLimit:{kind,resetsAt?}`; Work turns and Code operations carry
+  the same field beside their outcome. UPDATE `event_journal.payload_json` directly — the journal has
+  no hash chain so payload edits are safe; restart after editing so in-memory projections re-read
+  (persisted projections need the same edit in their own table).
+- Code's snooze gate reads STANDALONE `provider-turn-state` frames — an `operation-result` frame
+  carrying the field nested is seen by the renderer but honestly refused by the server.
+- A waiting+limited Work turn cannot survive restart injection: `markInterruptedOnRestart` rewrites
+  all non-terminal work turns to `interrupted`. Prove Work through the Chat path (shared machinery)
+  and verify Work/Code at render level.
+- Offer vs gate: the client offers "Snooze until reset" on any usageLimit-bearing resumable stop, but
+  the server requires the latest stop to be `waiting` — a failed+limited stop shows a button that can
+  only refuse.
 
 ## Form hazards and client-side failure signatures
 
