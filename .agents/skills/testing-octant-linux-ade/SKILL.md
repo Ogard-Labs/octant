@@ -28,6 +28,12 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 
 - `bun run build && bun run package:desktop` emits `out/Octant-*-linux-x64.AppImage` (native rebuilds need clang — installed by the repo blueprint; GCC ≤ 12 cannot parse Electron's V8 headers). Launch for UI testing: `DISPLAY=:0 APPIMAGE_EXTRACT_AND_RUN=1 ./out/Octant-*-linux-x64.AppImage` — it spawns its own bundled server on :13773, so stop any dev server/ Electron instance first (single-instance lock quits silently). The packaged app has a native "Allow full access" approval dialog the web surface lacks on Linux.
 
+## Journal inspection
+
+- No `sqlite3` CLI on this host — use python3's sqlite3 module against `~/.local/share/octant/octant.sqlite3`, table `event_journal`, columns `global_sequence`, `event_name`, `payload_json` (the payload wraps entities, e.g. `attempt.outcome`, `turn.capabilities` — inspect shape before filtering).
+- Chat attempt verdicts: `chat.attempt-updated@1` → `attempt.outcome` = queued/streaming/completed/failed + `attempt.failure.code` (e.g. `"protocol"`).
+- Work-turn confinement posture: `work.turn-updated@1` → `capabilities` = `{shell:"denied", git:"denied", worktree:"denied", pullRequest:"denied", code:"denied", confinement:"project-root-confined"}` on Work turns.
+
 ## UI paths
 
 - Zen: sidebar account button ("Set your name" / Account menu) → "Zen mode" → Navigator bar → Add → Terminal → "This Project" (requires the window's Code project context — click a project row in Projects directory first).
