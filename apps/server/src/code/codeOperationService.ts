@@ -28,6 +28,8 @@ import {
   type CodeThread,
   type CodeThreadForkOrigin,
   type CodeThreadId,
+  type AgentRun,
+  type AgentRunId,
   type MentionableThreadId,
   type ScaffoldEntry,
   type ScaffoldRun,
@@ -795,6 +797,16 @@ export interface CodeOperationServiceOptions {
    * instructions and simply loads none of the named skills.
    */
   readonly resolveProfileSkills?: CodeProfileSkillResolver;
+  /**
+   * Read access to journaled subagent runs. A turn that claims to deliver a
+   * finished run's result is verified here — parent thread, terminal
+   * status, and a delivery not already settled — before its start event can
+   * journal, so a caller cannot mark a turn as a delivery the journal does
+   * not record. Absent means delivery claims are refused.
+   */
+  readonly agentRuns?: {
+    readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+  };
 }
 
 export class CodeOperationService {
@@ -976,7 +988,15 @@ export class CodeOperationService {
                     turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
                   )
                 : scope.thread;
-            if (command.kind === "start-provider-turn" && recordedStart === undefined) {
+            const deliveryRefusal =
+              command.kind === "start-provider-turn"
+                ? this.#refuseInvalidAgentRunDelivery(command)
+                : undefined;
+            if (
+              command.kind === "start-provider-turn" &&
+              recordedStart === undefined &&
+              deliveryRefusal === undefined
+            ) {
               const checkpoint = await this.#checkpoint(
                 turnThread,
                 scope.checkout.id,
@@ -997,6 +1017,7 @@ export class CodeOperationService {
                     ? {}
                     : { extensionSelections: command.extensionSelections }),
                   executionPolicy: turnThread.executionPolicy,
+                  ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
                   ...(starting.attachments.length === 0
                     ? {}
                     : { attachments: starting.attachments }),
@@ -1006,14 +1027,17 @@ export class CodeOperationService {
               resultCursor += 1;
             }
             try {
-              result = await this.#execute(
-                command,
-                windowId,
-                turnThread,
-                scope.checkout,
-                root,
-                starting.attachments,
-              );
+              result =
+                deliveryRefusal !== undefined
+                  ? deliveryRefusal
+                  : await this.#execute(
+                      command,
+                      windowId,
+                      turnThread,
+                      scope.checkout,
+                      root,
+                      starting.attachments,
+                    );
             } catch (error) {
               const category =
                 error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
@@ -2909,6 +2933,46 @@ export class CodeOperationService {
       failure: { category, message },
     });
   }
+
+  /**
+   * The delivery mark a start-provider-turn claims, checked against the
+   * journaled run before anything journals: the run must belong to this
+   * thread, have finished for good, and still owe its delivery — otherwise
+   * the mark is a caller's story the journal does not back.
+   */
+  #refuseInvalidAgentRunDelivery(
+    command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+  ): CodeOperationResult | undefined {
+    const mark = command.delivery;
+    if (mark === undefined) return undefined;
+    const run = this.#options.agentRuns?.getById(mark.runId);
+    if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "The named subagent run does not belong to this Code thread.",
+      );
+    }
+    if (
+      run.lifecycleStatus !== "completed" &&
+      run.lifecycleStatus !== "failed" &&
+      run.lifecycleStatus !== "cancelled"
+    ) {
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "The named subagent run has not finished.",
+      );
+    }
+    if (run.resultDelivery !== undefined) {
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "The named subagent run's result delivery already settled.",
+      );
+    }
+    return undefined;
+  }
 }
 
 function isGitHubRemote(url: string | undefined): boolean {
@@ -2982,7 +3046,8 @@ function sameConversationStart(
     event.prompt.digest === command.prompt.digest &&
     event.prompt.byteLength === command.prompt.byteLength &&
     JSON.stringify(event.extensionSelections ?? []) ===
-      JSON.stringify(command.extensionSelections ?? [])
+      JSON.stringify(command.extensionSelections ?? []) &&
+    JSON.stringify(event.delivery ?? null) === JSON.stringify(command.delivery ?? null)
   );
 }
 

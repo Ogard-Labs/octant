@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AgentRunId, AgentRunResultDeliveryMark } from "./agentRun";
 import { ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
@@ -315,6 +316,12 @@ export const ChatTurn = Schema.Struct({
    * in `@octant/domain` derives from this field.
    */
   supersedes: Schema.optional(ChatTurnId),
+  /**
+   * Set only on a turn the host itself started to carry a finished subagent
+   * run's result into this thread. The marker is what makes the delivery
+   * idempotent: the server refuses to begin a second turn for the same run.
+   */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
   createdAt: UtcTimestamp,
 })
   .annotations(strict)
@@ -661,6 +668,19 @@ export const DeleteChatThreadCommand = Schema.Struct({
   ...ChatThreadCommandFields,
 }).annotations(strict);
 
+/**
+ * Host-owned: wakes the thread with a turn that carries a finished subagent
+ * run's result into the conversation. The server composes the turn's input
+ * from the journaled run — the command names the run, never the text — and
+ * marks the turn so a delivery replayed after a crash cannot mint a second
+ * one for the same run.
+ */
+export const DeliverChatAgentResultCommand = Schema.Struct({
+  kind: Schema.Literal("deliver-chat-agent-result"),
+  ...ChatThreadCommandFields,
+  runId: AgentRunId,
+}).annotations(strict);
+
 export const UpdateChatSettingsCommand = Schema.Struct({
   kind: Schema.Literal("update-chat-settings"),
   expectedVersion: AggregateVersion,
@@ -788,6 +808,7 @@ export const ChatCommand = Schema.Union(
   ScheduleChatUsageResumeCommand,
   CancelChatUsageResumeCommand,
   AnswerChatTurnQuestionCommand,
+  DeliverChatAgentResultCommand,
   DeleteChatThreadCommand,
   UpdateChatSettingsCommand,
   ThreadWorkCommand,

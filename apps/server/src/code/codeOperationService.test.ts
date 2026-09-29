@@ -1,10 +1,12 @@
 import {
+  decodeAgentRun,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationId,
   decodeCodeThread,
   decodeCodeThreadId,
+  type AgentRun,
   type CodeTerminalId,
   type CodeThread,
   type CodeReviewFinding,
@@ -1931,6 +1933,46 @@ describe("CodeOperationService", () => {
     expect(started.prompt).toBe("does this still hold?");
   });
 
+  it("refuses a Code turn that claims to deliver a subagent result the journal does not back", async () => {
+    const fixture = providerTurnFixture();
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        delivery: { kind: "agent-result", runId: "d6a1b000-0000-4000-8000-000000000099" },
+      }),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "invalid" },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "conversation-turn-started" }),
+      }),
+    );
+  });
+
+  it("admits a delivery turn the journaled run backs and journals its mark", async () => {
+    const run = codeRunFor(ids.thread);
+    const fixture = providerTurnFixture({
+      agentRuns: { getById: (runId) => (String(runId) === String(run.id) ? run : undefined) },
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        delivery: { kind: "agent-result", runId: run.id },
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(fixture.events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "conversation-turn-started",
+          delivery: { kind: "agent-result", runId: run.id },
+        }),
+      }),
+    );
+  });
+
   it("leaves a Code turn without mentions untouched by the mention resolver", async () => {
     const resolveThreadMentionContext = vi.fn(async () => []);
     const fixture = providerTurnFixture({ resolveThreadMentionContext });
@@ -2093,6 +2135,72 @@ const startProviderTurn = {
   }),
 } as const;
 
+const codeRunFor = (parentThreadId: string): AgentRun =>
+  decodeAgentRun({
+    id: "d6a1b000-0000-4000-8000-000000000001",
+    requestId: "d6a1b000-0000-4000-8000-000000000002",
+    parentThreadId,
+    depth: 0,
+    role: "review",
+    task: "Review the diff.",
+    creationPosture: "automatic",
+    executionKind: "octant-managed",
+    lifecycleStatus: "completed",
+    authority: {
+      filesystem: true,
+      shell: true,
+      git: true,
+      network: true,
+      tools: true,
+      subagents: false,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    },
+    routingReceipt: {
+      executionResolution: {
+        providerInstanceId: "99999999-9999-4999-8999-999999999999",
+        modelId: "model-id",
+        hostId: "local",
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        effectivePermissions: {
+          filesystem: true,
+          shell: true,
+          git: true,
+          network: true,
+          tools: true,
+          subagents: false,
+        },
+        source: "project-default",
+        fallbackChain: ["project-default"],
+        downgradeReasons: [],
+      },
+      selectedExecutionKind: "octant-managed",
+      attemptedExecutionKind: "provider-native",
+      selectedProviderInstanceId: "99999999-9999-4999-8999-999999999999",
+      selectedModelId: "model-id",
+      fallbackCandidates: [],
+      capabilityDegradations: [],
+      contextSnapshotId: "d6a1b000-0000-4000-8000-000000000004",
+      effectiveAuthorityDigest: "digest-1",
+      usageQuality: "provider-reported",
+      hostId: "local",
+      mode: "code",
+    },
+    workspaceReceipt: {
+      kind: "code-worktree",
+      mode: "code",
+      projectId: "66666666-6666-4666-8666-666666666666",
+      checkoutRoot: "/private/exact-checkout",
+      worktreeRoot: "/private/exact-checkout/.worktrees/d6a1",
+      verified: true,
+    },
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 4,
+    createdAt: "2026-07-21T10:00:00.000Z",
+    updatedAt: "2026-07-21T10:00:00.000Z",
+  });
+
 /**
  * A full-access Code thread whose provider turns can be inspected: the fake
  * turn port records exactly what the host decided to send, so a test can say
@@ -2110,6 +2218,7 @@ function providerTurnFixture(
       | "supportsAttachments"
       | "git"
       | "isProviderModelAllowed"
+      | "agentRuns"
     >
   > & { readonly thread?: CodeThread } = {},
 ) {

@@ -74,7 +74,7 @@ import {
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
-import { ChatService } from "./chat/chatService";
+import { ChatService, ChatServiceError } from "./chat/chatService";
 import { UsageResumeService } from "./usage/usageResumeService";
 import { createUsageResumePorts } from "./usage/usageResumePorts";
 import { ResearchRouter } from "./chat/research/researchRouter";
@@ -140,7 +140,7 @@ import {
   hydrateWorkTurnProjectionFromJournal,
 } from "./work/workTurnProjection";
 import { WorkAttachmentStore } from "./work/workAttachmentStore";
-import { WorkTurnService } from "./work/workTurnService";
+import { WorkTurnService, WorkTurnServiceError } from "./work/workTurnService";
 import { withWorkflowLifecycle } from "./work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "./work/workflowEventStore";
 import { WorkflowProjection } from "./work/workflowProjection";
@@ -346,10 +346,13 @@ import {
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
+import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
+import { agentResultDeliveryPrompt } from "./agentRun/agentResultDeliveryPrompt";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
 import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunControlAdmission";
+import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
 import {
   createAgentRunChildWorktreePort,
   deriveAgentRunChildWorktreeThreadId,
@@ -733,7 +736,7 @@ import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
 import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
-import { combineAppManagedToolSets } from "./providers/appManagedToolSet";
+import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
 import {
   isPrivateListenerFailureCode,
@@ -2134,6 +2137,65 @@ export function startOctantServer(
       },
       uuid: randomUUID,
     };
+    // Every turn's `octant_agents` tool set binds to the calling thread: the
+    // delegation and the cancellation authority it petitions are the same ones
+    // the Agents dock uses, so a tool call and a click are the same request.
+    const agentsManagedToolsFor = (input: {
+      readonly windowId: string;
+      readonly parentThreadId: string;
+      readonly mode: OctantMode;
+      readonly projectId?: ProjectId;
+    }): AppManagedToolSet =>
+      createAgentsManagedTools({
+        admission: agentRunAdmission,
+        orchestration: agentRunOrchestration,
+        persistence: agentRunPersistence,
+        mode: input.mode,
+        windowId: input.windowId,
+        parentThreadId: input.parentThreadId,
+        listTargets: () => {
+          // A Code Project's provider policy binds delegate targets too: the
+          // same list the tool advertises is the one explicit targets are
+          // revalidated against, so filtering here guards both.
+          const project =
+            input.projectId === undefined ? undefined : persistence.readProject(input.projectId);
+          return persistence.readProviderInstances().flatMap((instance) => {
+            if (!instance.enabled) return [];
+            const observed = providerRuntimeRegistry.observedState(instance.id);
+            if (observed?.readiness !== "ready") return [];
+            const models =
+              project === undefined || project.type !== "code"
+                ? observed.models
+                : observed.models.filter((model) =>
+                    isCodeProviderModelAllowed({
+                      projectId: project.id,
+                      providerInstanceId: instance.id,
+                      modelId: model.id,
+                    }),
+                  );
+            if (models.length === 0) return [];
+            return [
+              {
+                providerInstanceId: String(instance.id),
+                displayName: instance.displayName,
+                driverKind: String(instance.driverKind),
+                modelIds: models.map((model) => String(model.id)),
+              },
+            ];
+          });
+        },
+        isTainted: () =>
+          readThreadExternalContentTaint(persistence.connection, input.parentThreadId)
+            .externalContentIngested,
+        authorizeCancel: (run) =>
+          authorizeAgentRunCancellation({
+            persistence,
+            workThreadProjection,
+            run,
+            windowId: input.windowId,
+          }),
+        uuid: randomUUID,
+      });
     const agentRunRouteDependencies: AgentRunRouteDependencies = {
       windowAuthorityStore,
       persistence: agentRunPersistence,
@@ -3987,6 +4049,7 @@ export function startOctantServer(
       });
       codeOperationRuntime = createCodeOperationRuntime({
         gitMutationPort,
+        agentRuns: agentRunPersistence,
         resolveSelectedSkillContext,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(
@@ -4082,6 +4145,13 @@ export function startOctantServer(
             return undefined;
           }
         },
+        agents: (input) =>
+          agentsManagedToolsFor({
+            windowId: String(input.windowId),
+            parentThreadId: String(input.thread.id),
+            mode: "code",
+            projectId: input.thread.projectId,
+          }),
         nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
@@ -5387,6 +5457,7 @@ export function startOctantServer(
     };
     let imageJobService!: ImageJobService;
     const chatService = new ChatService({
+      agentRuns: agentRunPersistence,
       resolveComputerUseTools: ({ windowId, thread, selection }) =>
         computerToolsFor(
           decodeComputerUseOwner({
@@ -5471,51 +5542,61 @@ export function startOctantServer(
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
       resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
-        taintAppManagedToolResults({
-          tools: combineAppManagedToolSets(
-            nativeHarnessComposition?.forChat({ thread, windowId }),
-            zenAssistantTools?.forThread(windowId, thread),
-            sideChatFileTools(windowId, thread.id),
-            threadDialogueService?.forThread({
-              windowId,
-              sourceThreadId: thread.id,
-              sourceTitle: thread.title,
-              targetThreadIds: threadMentionIds ?? [],
-              ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
-            }),
-            canvasAgentToolPort === undefined
-              ? undefined
-              : createCanvasAgentTools({
-                  windowId,
-                  thread,
-                  port: canvasAgentToolPort,
-                }),
-            createImageAgentTools({
-              threadKind: "chat-thread",
-              scopeId: decodeImageGenerationScopeId(String(thread.id)),
-              port: {
-                listInstances: () => persistence.readProviderInstances(),
-                readImageGenerationCustomSources: () =>
-                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                    .imageGeneration.customSources,
-                enqueue: (input) => imageJobService.enqueue(input),
-                listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-              },
-            }),
-            createSideTaskTools({
-              store: sideTasks,
-              threadId: String(thread.id),
-              mode: "chat",
-              projectId: thread.projectId,
-              suggestedBy: thread,
-              uuid: randomUUID,
-              clock: () => new Date().toISOString(),
-            }),
-          ),
-          threadId: thread.id,
-          recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-          uuid: randomUUID,
-        }),
+        combineAppManagedToolSets(
+          taintAppManagedToolResults({
+            tools: combineAppManagedToolSets(
+              nativeHarnessComposition?.forChat({ thread, windowId }),
+              zenAssistantTools?.forThread(windowId, thread),
+              sideChatFileTools(windowId, thread.id),
+              threadDialogueService?.forThread({
+                windowId,
+                sourceThreadId: thread.id,
+                sourceTitle: thread.title,
+                targetThreadIds: threadMentionIds ?? [],
+                ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+              }),
+              canvasAgentToolPort === undefined
+                ? undefined
+                : createCanvasAgentTools({
+                    windowId,
+                    thread,
+                    port: canvasAgentToolPort,
+                  }),
+              createImageAgentTools({
+                threadKind: "chat-thread",
+                scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                port: {
+                  listInstances: () => persistence.readProviderInstances(),
+                  readImageGenerationCustomSources: () =>
+                    (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                      .imageGeneration.customSources,
+                  enqueue: (input) => imageJobService.enqueue(input),
+                  listJobs: (scopeId) => imageJobService.listByScope(scopeId),
+                },
+              }),
+              createSideTaskTools({
+                store: sideTasks,
+                threadId: String(thread.id),
+                mode: "chat",
+                projectId: thread.projectId,
+                suggestedBy: thread,
+                uuid: randomUUID,
+                clock: () => new Date().toISOString(),
+              }),
+            ),
+            threadId: thread.id,
+            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+            uuid: randomUUID,
+          }),
+          // Host-internal: its results are Octant's own answers, not external
+          // content, and `delegate` itself refuses while the thread is tainted.
+          agentsManagedToolsFor({
+            windowId,
+            parentThreadId: String(thread.id),
+            mode: "chat",
+            ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+          }),
+        ),
       resolveExtensionSelectionContext: createExtensionChatResolver({
         snapshot: () => extensionApiService.snapshot(),
         resolveEffectiveState: (snapshot, query) =>
@@ -5853,6 +5934,7 @@ export function startOctantServer(
     let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
       usageStore: workTurnUsageStore,
+      agentRuns: agentRunPersistence,
       contextHarness,
       resolveSelectedSkillContext,
       spendCeiling,
@@ -5910,6 +5992,14 @@ export function startOctantServer(
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        const agentsTools = !browserSupported
+          ? undefined
+          : agentsManagedToolsFor({
+              windowId: input.windowId,
+              parentThreadId: String(input.thread.id),
+              mode: "work",
+              projectId: input.thread.projectId,
+            });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -5928,10 +6018,11 @@ export function startOctantServer(
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
+          agentsTools === undefined &&
           computer === undefined
         )
           return undefined;
-        return combineAppManagedToolSets(native, browser, computer, sideTaskTools);
+        return combineAppManagedToolSets(native, browser, computer, sideTaskTools, agentsTools);
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -6445,6 +6536,171 @@ export function startOctantServer(
       }),
     );
     usageResumeService.start();
+    // A finished subagent run owes its parent thread a journaled turn carrying
+    // its result. The service watches committed appends and dispatches through
+    // each mode's ordinary turn admission — the mark on that turn is what
+    // keeps a replayed delivery from minting a second one.
+    const agentResultDeliveryService = new AgentResultDeliveryService({
+      journal: persistence.journal,
+      agentRuns: agentRunPersistence,
+      clock: () => new Date(),
+      ports: {
+        chat: {
+          inspect: async (run) =>
+            persistence.readChatThread(decodeChatThreadId(String(run.parentThreadId))) === undefined
+              ? { kind: "invalid", detail: "The parent Chat thread is gone." }
+              : { kind: "ready" },
+          dispatch: async (run) => {
+            const thread = persistence.readChatThread(
+              decodeChatThreadId(String(run.parentThreadId)),
+            );
+            if (thread === undefined) {
+              return { kind: "refused", detail: "The parent Chat thread is gone." };
+            }
+            try {
+              await chatService.execute({
+                kind: "deliver-chat-agent-result",
+                threadId: thread.id,
+                expectedVersion: thread.version,
+                runId: run.id,
+              });
+              return { kind: "dispatched" };
+            } catch (error) {
+              if (error instanceof ChatServiceError && error.failure.category === "waiting") {
+                return { kind: "deferred", detail: "The parent Chat thread is mid-turn." };
+              }
+              return {
+                kind: "refused",
+                detail:
+                  error instanceof Error ? error.message : "The delivery could not be admitted.",
+              };
+            }
+          },
+        },
+        work: {
+          inspect: async (run) =>
+            workThreadProjection.read(decodeWorkThreadId(String(run.parentThreadId))) === undefined
+              ? { kind: "invalid", detail: "The parent Work thread is gone." }
+              : { kind: "ready" },
+          dispatch: async (run) => {
+            const windowId = firstRegisteredWindowId();
+            if (windowId === undefined) {
+              return { kind: "deferred", detail: "No local window is registered for this host." };
+            }
+            const thread = workThreadProjection.read(
+              decodeWorkThreadId(String(run.parentThreadId)),
+            );
+            if (thread === undefined || thread.bindingRevisionId === undefined) {
+              return { kind: "refused", detail: "The parent Work thread is gone." };
+            }
+            try {
+              const result = await workTurnService.startFirstTurn(windowId, {
+                kind: "start-work-thread-turn",
+                requestId: decodeWorkTurnRequestId(randomUUID()),
+                threadId: thread.id,
+                turnId: decodeWorkTurnId(randomUUID()),
+                prompt: agentResultDeliveryPrompt(run, agentRunPersistence.resultText(run.id)),
+                authority: {
+                  hostId: LOCAL_HOST_ID,
+                  projectId: thread.projectId,
+                  bindingRevisionId: thread.bindingRevisionId,
+                  workingDirectory: ".",
+                  confinementPosture: "project-root-confined",
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                },
+                delivery: { kind: "agent-result", runId: run.id },
+              });
+              return result.kind === "accepted"
+                ? { kind: "dispatched" }
+                : {
+                    kind: "refused",
+                    detail:
+                      "message" in result && typeof result.message === "string"
+                        ? result.message
+                        : "The delivery was not admitted.",
+                  };
+            } catch (error) {
+              if (error instanceof WorkTurnServiceError && error.failure.category === "stale") {
+                return { kind: "deferred", detail: "The parent Work thread is mid-turn." };
+              }
+              return {
+                kind: "refused",
+                detail:
+                  error instanceof Error ? error.message : "The delivery could not be admitted.",
+              };
+            }
+          },
+        },
+        code: {
+          inspect: async (run) =>
+            persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId))) === undefined
+              ? { kind: "invalid", detail: "The parent Code thread is gone." }
+              : { kind: "ready" },
+          dispatch: async (run) => {
+            const windowId = firstRegisteredWindowId();
+            if (windowId === undefined) {
+              return { kind: "deferred", detail: "No local window is registered for this host." };
+            }
+            const thread = persistence.readCodeThread(
+              decodeCodeThreadId(String(run.parentThreadId)),
+            );
+            if (
+              thread === undefined ||
+              routeCodeService.stageEvidence === undefined ||
+              routeCodeService.executeOperation === undefined
+            ) {
+              return { kind: "refused", detail: "The parent Code thread is gone." };
+            }
+            try {
+              const prompt = await routeCodeService.stageEvidence(
+                windowId,
+                thread.id,
+                agentResultDeliveryPrompt(run, agentRunPersistence.resultText(run.id)),
+              );
+              const result = await routeCodeService.executeOperation(windowId, {
+                kind: "start-provider-turn",
+                operationId: decodeCodeOperationId(randomUUID()),
+                threadId: thread.id,
+                checkoutId: thread.checkoutId,
+                sessionId: decodeProviderSessionId(randomUUID()),
+                prompt,
+                delivery: { kind: "agent-result", runId: run.id },
+              });
+              return result.kind === "provider-turn-state" &&
+                (result.state === "running" ||
+                  result.state === "waiting" ||
+                  result.state === "completed")
+                ? { kind: "dispatched" }
+                : {
+                    kind: "refused",
+                    detail:
+                      result.kind === "provider-turn-state" && result.failure !== undefined
+                        ? result.failure.message
+                        : "The delivery was not admitted.",
+                  };
+            } catch (error) {
+              return {
+                kind: "refused",
+                detail:
+                  error instanceof Error ? error.message : "The delivery could not be admitted.",
+              };
+            }
+          },
+        },
+      },
+      onError: (message, error) => console.error(`[agent-run-delivery] ${message}`, error),
+    });
+    const unsubscribeAgentResultDelivery = persistence.journal.subscribeCommitted((append) =>
+      agentResultDeliveryService.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeAgentResultDelivery();
+        agentResultDeliveryService.stop();
+      }),
+    );
+    agentResultDeliveryService.start();
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
       localHostDisplayName: localHostDisplayName(),

@@ -30,6 +30,8 @@ import {
   type WorkTurnLookupResult,
   type WorkTurnRequestId,
   type WorkTurnState,
+  type AgentRun,
+  type AgentRunId,
   type WorkTurnStreamFrame,
   type Project,
   type ProjectId,
@@ -285,6 +287,16 @@ export interface WorkTurnServiceDependencies {
    * waiting on the turn (the goal loop) reads its figures from here.
    */
   readonly usageStore?: WorkTurnUsageStore;
+  /**
+   * Read access to journaled subagent runs. A turn that claims to carry a
+   * finished run's result is verified here — parent thread, terminal
+   * status, and a delivery not already settled — so a caller cannot mark a
+   * turn as a delivery the journal does not record. Absent means delivery
+   * claims are refused.
+   */
+  readonly agentRuns?: {
+    readonly getById: (runId: AgentRunId) => AgentRun | undefined;
+  };
 }
 
 export class WorkTurnService {
@@ -331,6 +343,7 @@ export class WorkTurnService {
   readonly #safeInputBudgetTokens: number;
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #usageStore: WorkTurnUsageStore | undefined;
+  readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
@@ -374,6 +387,7 @@ export class WorkTurnService {
     this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
     this.#usageStore = dependencies.usageStore;
+    this.#agentRuns = dependencies.agentRuns;
   }
 
   async startFirstTurn(
@@ -671,6 +685,31 @@ export class WorkTurnService {
       throw this.#failure("invalid", planned.message);
     }
 
+    if (command.delivery !== undefined) {
+      // A turn that claims to deliver a finished subagent run's result is
+      // verified against the journaled run before it can journal anything:
+      // the run must belong to this thread, have finished for good, and
+      // still owe its delivery — otherwise the mark is a caller's story the
+      // journal does not back.
+      const run = this.#agentRuns?.getById(command.delivery.runId);
+      if (run === undefined || String(run.parentThreadId) !== String(command.threadId)) {
+        throw this.#failure(
+          "invalid",
+          "The named subagent run does not belong to this Work thread.",
+        );
+      }
+      if (
+        run.lifecycleStatus !== "completed" &&
+        run.lifecycleStatus !== "failed" &&
+        run.lifecycleStatus !== "cancelled"
+      ) {
+        throw this.#failure("invalid", "The named subagent run has not finished.");
+      }
+      if (run.resultDelivery !== undefined) {
+        throw this.#failure("invalid", "The named subagent run's result delivery already settled.");
+      }
+    }
+
     const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
     const spendAdmission = this.#spendCeiling?.admit({
       reservationId: spendReservationId,
@@ -702,6 +741,7 @@ export class WorkTurnService {
           ? {}
           : { extensionSelections: command.extensionSelections }),
         capabilities: WORK_TURN_CAPABILITIES,
+        ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
         acceptedAt,
       });
     } catch (error) {
