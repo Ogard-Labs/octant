@@ -75,7 +75,7 @@ but they do not own a second palette or visual language.
 
 Interface text uses the bundled Geist variable face by default, with the
 platform stack behind it: `'Geist Variable', -apple-system, BlinkMacSystemFont,
-'Segoe UI', system-ui, sans-serif` (0149). The platform face remains an explicit
+'Segoe UI', system-ui, sans-serif` (0161). The platform face remains an explicit
 Appearance choice, System interface. Code, paths, branches,
 identifiers, and terminal text use the monospace stack. Antialiased,
 `text-rendering: optimizeLegibility`, no synthetic bold.
