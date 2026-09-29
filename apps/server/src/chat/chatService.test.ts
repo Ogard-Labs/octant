@@ -2847,7 +2847,10 @@ describe("ChatService", () => {
     expect(fakeDriver.sentTurns).toHaveLength(0);
     const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
     expect(attempt?.outcome).toBe("failed");
-    expect(attempt?.failure).toEqual({ code: "unavailable" });
+    expect(attempt?.failure).toEqual({
+      code: "unavailable",
+      message: "Selected extension authority changed before provider handoff.",
+    });
     // A refusal thrown before provider acquisition is a host rejection, not a
     // provider incident: support exports must not attribute it to the provider.
     expect(
@@ -2898,7 +2901,10 @@ describe("ChatService", () => {
     expect(fakeDriver.acquireInputs).toHaveLength(0);
     const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
     expect(attempt?.outcome).toBe("interrupted");
-    expect(attempt?.failure).toEqual({ code: "waiting" });
+    expect(attempt?.failure).toEqual({
+      code: "waiting",
+      message: "Selected extension is still preparing.",
+    });
   });
 
   it("reattaches an interrupted provider session via ProviderConnection.resume with the exact persisted resume cursor and becomes Waiting without sending", async () => {

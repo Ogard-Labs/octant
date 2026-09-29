@@ -4887,6 +4887,10 @@ export class ChatService {
             updatedAt: decodeTimestamp(this.#clock()),
             failure: {
               code: decodeDiagnosticFailureCode(refusal?.category ?? "incomplete"),
+              // A service refusal's message is host-authored and safe to
+              // replay verbatim; provider failures deliberately never reach
+              // this branch, so nothing provider-quoted can land here.
+              ...(refusal === undefined ? {} : { message: refusal.message }),
             },
           }),
           refusal,
