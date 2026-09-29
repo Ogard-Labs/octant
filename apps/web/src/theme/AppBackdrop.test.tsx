@@ -65,8 +65,8 @@ describe("AppBackdrop", () => {
           ...dials,
           kind: "builtin",
           backgroundId: "perspective-dot-plane-animated",
-          backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
-          backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+          backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
+          backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
           backgroundAnimated: true,
           // Plain, so the animated preset stays a moving CSS image.
           effect: { kind: "none", cell: 3, levels: 8 },
@@ -76,7 +76,7 @@ describe("AppBackdrop", () => {
     const ground = container.querySelector("[data-octant-app-backdrop]");
     expect(ground).toHaveAttribute("data-octant-app-backdrop", "builtin");
     expect(container.querySelector(".app-backdrop__builtin")).toHaveStyle({
-      backgroundImage: 'url("/zen-backgrounds/perspective-dot-plane-dark.webp")',
+      backgroundImage: 'url("zen-backgrounds/perspective-dot-plane-dark.webp")',
     });
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -93,8 +93,8 @@ describe("AppBackdrop", () => {
             ...dials,
             kind: "builtin",
             backgroundId: "perspective-dot-plane-animated",
-            backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
-            backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+            backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
+            backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
             backgroundAnimated: true,
             effect: { kind: "pixelate", cell: 6, levels: 8 },
           }}
@@ -107,7 +107,7 @@ describe("AppBackdrop", () => {
       );
       expect(container.querySelector(".app-backdrop__pattern")).toBeNull();
       await waitFor(() =>
-        expect(fetched).toHaveBeenCalledWith("/zen-backgrounds/perspective-dot-plane.jpg"),
+        expect(fetched).toHaveBeenCalledWith("zen-backgrounds/perspective-dot-plane.jpg"),
       );
     } finally {
       vi.unstubAllGlobals();
