@@ -144,6 +144,10 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
+      } else if (isImageProfileDriverKind(instance.driverKind)) {
+        // Image profiles have no runtime to observe — probing one is refused —
+        // so an enabled one has no readiness this summary could state.
+        continue;
       } else if (
         !props.updatingIds?.has(instance.id) &&
         presentationObserved.get(instance.id)?.readiness === "ready"
