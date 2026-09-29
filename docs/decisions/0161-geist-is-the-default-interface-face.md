@@ -1,6 +1,6 @@
 # 0161. Geist is the default interface face
 
-**Status:** Accepted (supersedes 0149)
+**Status:** Accepted
 
 ## Context
 
