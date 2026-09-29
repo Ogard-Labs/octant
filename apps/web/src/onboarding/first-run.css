@@ -154,7 +154,7 @@
 
 /* Configured is also written into the marker (the check) and announced by the
    sr-only text; the accent is reinforcement. */
-.first-run__rail-step[data-configured="true"] .first-run__rail-marker {
+.first-run__rail-step[data-configured="true"]:not([aria-current="step"]) .first-run__rail-marker {
   border-color: var(--oct-accent-fg);
   color: var(--oct-accent-fg);
 }
