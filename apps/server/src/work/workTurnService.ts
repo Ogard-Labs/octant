@@ -706,10 +706,7 @@ export class WorkTurnService {
         throw this.#failure("invalid", "The named subagent run has not finished.");
       }
       if (run.resultDelivery !== undefined) {
-        throw this.#failure(
-          "invalid",
-          "The named subagent run's result delivery already settled.",
-        );
+        throw this.#failure("invalid", "The named subagent run's result delivery already settled.");
       }
     }
 

@@ -2332,7 +2332,11 @@ export class ChatService {
               },
               { actorKind: "system" },
             ),
-            this.#pending("chat.turn-created@1", { kind: "turn-created", turn }, { actorKind: "system" }),
+            this.#pending(
+              "chat.turn-created@1",
+              { kind: "turn-created", turn },
+              { actorKind: "system" },
+            ),
             ...(routing !== undefined && routing.decision.decision.kind === "selected"
               ? [
                   this.#pending(

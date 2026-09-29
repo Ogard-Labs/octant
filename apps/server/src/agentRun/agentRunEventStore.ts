@@ -373,9 +373,7 @@ export class AgentRunEventStore {
     );
   }
 
-  appendResultDeliverySettled(
-    input: AppendAgentRunResultDeliverySettledInput,
-  ): EventEnvelope {
+  appendResultDeliverySettled(input: AppendAgentRunResultDeliverySettledInput): EventEnvelope {
     let runId: AgentRunId;
     let aggregateId: typeof AggregateId.Type;
     let expectedVersion: typeof AggregateVersion.Type;

@@ -7,10 +7,7 @@ import type { AgentRun } from "@octant/contracts";
  * agents tool it already has, and the outcome line states honestly whether a
  * reply came back at all.
  */
-export function agentResultDeliveryPrompt(
-  run: AgentRun,
-  resultText: string | undefined,
-): string {
+export function agentResultDeliveryPrompt(run: AgentRun, resultText: string | undefined): string {
   const route = run.routingReceipt;
   const subagent = `${run.role} (${String(route.selectedProviderInstanceId)}/${String(
     route.selectedModelId,
