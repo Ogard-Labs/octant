@@ -453,15 +453,18 @@ describe("CodeOperationRuntime", () => {
       onProviderTurnRequested,
     });
 
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operationId(12),
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-      limitRecovery: true,
-    });
+    await fixture.runtime.execute(
+      windowId,
+      {
+        kind: "start-provider-turn",
+        operationId: operationId(12),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      },
+      { limitRecovery: true },
+    );
     expect(onProviderTurnRequested).not.toHaveBeenCalled();
     fixture.close();
   });

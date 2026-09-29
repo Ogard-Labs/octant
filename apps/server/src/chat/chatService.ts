@@ -458,9 +458,20 @@ interface PreparedChatTurn {
 }
 
 export interface ChatServiceExecutionContext {
-  readonly windowId: WindowId;
+  /**
+   * A renderer window the caller speaks for; absent for host-owned callers
+   * (usage-limit recovery) that have no window to attach.
+   */
+  readonly windowId?: WindowId;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
+  /**
+   * Set by the host's own usage-limit recovery when it dispatches the
+   * authorized retry: the send is not the person re-engaging, so the thread's
+   * rest fields are preserved rather than cleared the way a person's retry
+   * clears them. Host-only: the wire commands cannot carry it.
+   */
+  readonly limitRecovery?: boolean;
   /**
    * Called once a sent turn is journaled and before it runs, for a caller
    * that must answer as soon as the message is in rather than when the
@@ -2178,7 +2189,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2316,7 +2327,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -2591,7 +2602,8 @@ export class ChatService {
       // thread update the turn already journals. The host's own limit
       // recovery is not the person re-engaging, so it leaves the rest fields
       // as they were; the spent limit-owned snooze goes in the settle.
-      const restFields = command.limitRecovery === true ? thread : withoutThreadRest(thread);
+      const restFields =
+        executionContext?.limitRecovery === true ? thread : withoutThreadRest(thread);
       const updatedThread = {
         ...restFields,
         version: (command.expectedVersion + 1) as AggregateVersion,
@@ -2616,7 +2628,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -2951,7 +2963,7 @@ export class ChatService {
       prompt: accepted.prompt,
       prepared: accepted.prepared,
       mode: "resume",
-      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
@@ -3170,7 +3182,7 @@ export class ChatService {
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
     const appManagedTools =
-      executionContext !== undefined &&
+      executionContext?.windowId !== undefined &&
       this.#resolveAppManagedTools !== undefined &&
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported"
         ? this.#resolveAppManagedTools({
@@ -3402,7 +3414,9 @@ export class ChatService {
     try {
       source = await this.#resolveSideChatSourceContext({
         sidecarThreadId: thread.id,
-        ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        ...(executionContext?.windowId === undefined
+          ? {}
+          : { windowId: executionContext.windowId }),
         readToolNames,
       });
     } catch {
@@ -3490,7 +3504,9 @@ export class ChatService {
     try {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
-        ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        ...(executionContext?.windowId === undefined
+          ? {}
+          : { windowId: executionContext.windowId }),
         ...(dialogueEnabled ? { dialogueEnabled: true } : {}),
       });
     } catch {

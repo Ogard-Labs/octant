@@ -638,13 +638,6 @@ const StartProviderTurn = Schema.Struct({
    * thread's own posture.
    */
   executionPolicy: Schema.optional(ProviderExecutionPolicy),
-  /**
-   * Set by the host's own usage-limit recovery when it dispatches the
-   * authorized continuation: the send is not the person re-engaging, so the
-   * thread's rest fields are preserved rather than cleared the way a person's
-   * turn clears them.
-   */
-  limitRecovery: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),

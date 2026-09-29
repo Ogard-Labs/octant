@@ -604,13 +604,6 @@ export const RetryChatTurnCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-  /**
-   * Set by the host's own usage-limit recovery when it dispatches the
-   * authorized retry: the send is not the person re-engaging, so the thread's
-   * rest fields are preserved rather than cleared the way a person's retry
-   * clears them.
-   */
-  limitRecovery: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 
 export const ResumeChatTurnCommand = Schema.Struct({

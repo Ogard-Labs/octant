@@ -253,9 +253,9 @@ describe("usage-resume ports", () => {
 
     const result = await ports.chat.dispatch(record());
     expect(result).toEqual({ kind: "dispatched" });
-    expect(execute).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "retry-chat-turn", limitRecovery: true }),
-    );
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "retry-chat-turn" }), {
+      limitRecovery: true,
+    });
   });
 
   it("marks a Work limit recovery turn as the host's own dispatch", async () => {
@@ -279,8 +279,8 @@ describe("usage-resume ports", () => {
       expect.objectContaining({
         kind: "start-work-thread-turn",
         prompt: "Keep going.",
-        limitRecovery: true,
       }),
+      { limitRecovery: true },
     );
   });
 
@@ -322,7 +322,8 @@ describe("usage-resume ports", () => {
     expect(result).toEqual({ kind: "dispatched" });
     expect(executeOperation).toHaveBeenCalledWith(
       ids.window,
-      expect.objectContaining({ kind: "start-provider-turn", limitRecovery: true }),
+      expect.objectContaining({ kind: "start-provider-turn" }),
+      { limitRecovery: true },
     );
   });
 

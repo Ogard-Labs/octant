@@ -98,12 +98,15 @@ describe("WorkTurnService", () => {
     onTurnRequested.mockClear();
     await fixture.waitForIdle();
 
-    await fixture.service.startFirstTurn(ids.window, {
-      ...startCommand(),
-      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"),
-      turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"),
-      limitRecovery: true,
-    });
+    await fixture.service.startFirstTurn(
+      ids.window,
+      {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"),
+        turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"),
+      },
+      { limitRecovery: true },
+    );
     expect(onTurnRequested).not.toHaveBeenCalled();
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"));
   });

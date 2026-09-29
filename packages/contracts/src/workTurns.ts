@@ -244,13 +244,6 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
   fileMentionPaths: Schema.optional(
     Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
-  /**
-   * Set by the host's own usage-limit recovery when it dispatches the
-   * authorized continuation: the send is not the person re-engaging, so the
-   * thread's rest fields are preserved rather than cleared the way a person's
-   * turn clears them.
-   */
-  limitRecovery: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;
 

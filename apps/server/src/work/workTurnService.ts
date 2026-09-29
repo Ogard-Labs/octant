@@ -385,6 +385,13 @@ export class WorkTurnService {
        * whose own authority is narrower than the thread's (a goal loop round).
        */
       readonly holdAskFirst?: boolean;
+      /**
+       * Set by the host's own usage-limit recovery when it dispatches the
+       * authorized continuation: the send is not the person re-engaging, so it
+       * must not wake a snooze or reopen a completion. Host-only: the wire
+       * command cannot carry it.
+       */
+      readonly limitRecovery?: boolean;
     },
   ): Promise<WorkTurnLookupResult> {
     this.#assertReady();
@@ -452,7 +459,7 @@ export class WorkTurnService {
     // The host's own limit-recovery dispatch is not the person re-engaging,
     // so it must not wake a snooze or reopen a completion the way their turn
     // would; the spent limit-owned snooze goes in the settle instead.
-    if (thread !== undefined && command.limitRecovery !== true) this.#onTurnRequested?.(thread.id);
+    if (thread !== undefined && options?.limitRecovery !== true) this.#onTurnRequested?.(thread.id);
     const project = this.#persistence.readProject(command.authority.projectId);
     const decision = decideWorkTurnAuthority({
       authority: command.authority,

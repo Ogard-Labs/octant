@@ -103,8 +103,12 @@ export function UsageLimitNotice(props: {
   const resume = props.usageResume;
   // Snoozing shares the resume offer's premise — a current stop that
   // disclosed a real reset — but authorizes nothing: it only shelves the row.
+  // A reset already past means the host would refuse the snooze, so the offer
+  // hides once its clock runs out rather than inviting a rejected command.
   const snoozeOffer =
     canOfferResume(props.limit) &&
+    props.limit.resetsAt !== undefined &&
+    new Date(props.limit.resetsAt).getTime() > now &&
     props.resumable === true &&
     props.onSnoozeAtReset !== undefined &&
     // A dispatched recovery just consumed the reset it was waiting on —

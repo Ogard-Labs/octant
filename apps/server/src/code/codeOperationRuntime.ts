@@ -627,7 +627,7 @@ export function createCodeOperationRuntime(
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
-    onScopedOperation: ({ command }) => {
+    onScopedOperation: ({ command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
       // keeps inaccessible commands out of the durable runtime-work journal
@@ -638,7 +638,7 @@ export function createCodeOperationRuntime(
       // The host's own limit-recovery dispatch is not the person re-engaging,
       // so it must not wake a snooze or reopen a completion the way their
       // turn would; the spent limit-owned snooze goes in the settle instead.
-      if (command.kind === "start-provider-turn" && command.limitRecovery !== true)
+      if (command.kind === "start-provider-turn" && executeOptions?.limitRecovery !== true)
         options.onProviderTurnRequested?.(command.threadId);
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)

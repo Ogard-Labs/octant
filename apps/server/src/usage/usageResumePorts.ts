@@ -40,6 +40,8 @@ import {
   type WorkTurnState,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { ChatServiceExecutionContext } from "../chat/chatService";
+import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
 import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
@@ -85,12 +87,19 @@ export interface UsageResumePortDependencies {
   readonly chat: {
     readonly readThread: (threadId: ChatThread["id"]) => ChatThread | undefined;
     readonly readThreadView: (threadId: ChatThread["id"]) => ChatThreadView | undefined;
-    readonly execute: (input: unknown) => Promise<unknown>;
+    readonly execute: (
+      input: unknown,
+      executionContext?: ChatServiceExecutionContext,
+    ) => Promise<unknown>;
   };
   readonly work: {
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
-    readonly startFirstTurn: (windowId: WindowId, input: unknown) => Promise<WorkTurnLookupResult>;
+    readonly startFirstTurn: (
+      windowId: WindowId,
+      input: unknown,
+      options?: { readonly limitRecovery?: boolean },
+    ) => Promise<WorkTurnLookupResult>;
     /**
      * The live Work projection is kept in memory rather than rebuilt from a
      * journaled row, so a settle committed by the scheduler has to be folded
@@ -122,6 +131,7 @@ export interface UsageResumePortDependencies {
     readonly executeOperation?: (
       windowId: WindowId,
       command: CodeOperationCommand,
+      options?: CodeOperationExecuteOptions,
     ) => Promise<CodeOperationResult> | CodeOperationResult;
   };
 }
@@ -195,16 +205,18 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         // A limit retry must actually send: `resume-chat-turn` only reattaches
         // the provider session and persists another waiting attempt, while
         // `retry-chat-turn` is the admission path that runs a new attempt.
-        await deps.chat.execute({
-          kind: "retry-chat-turn",
-          threadId,
-          expectedVersion: decodeAggregateVersion(
-            readAggregateVersion(deps.connection, "chat-thread", String(threadId)),
-          ),
-          turnId: decodeChatTurnId(record.turnId),
-          attemptId: decodeChatAttemptId(attemptId),
-          limitRecovery: true,
-        });
+        await deps.chat.execute(
+          {
+            kind: "retry-chat-turn",
+            threadId,
+            expectedVersion: decodeAggregateVersion(
+              readAggregateVersion(deps.connection, "chat-thread", String(threadId)),
+            ),
+            turnId: decodeChatTurnId(record.turnId),
+            attemptId: decodeChatAttemptId(attemptId),
+          },
+          { limitRecovery: true },
+        );
         return { kind: "dispatched" };
       } catch (error) {
         return refused(refusalDetail(error));
@@ -279,26 +291,29 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         return refused("The thread's recorded stop is unavailable.");
       }
       try {
-        const result = await deps.work.startFirstTurn(windowId, {
-          kind: "start-work-thread-turn",
-          requestId: decodeWorkTurnRequestId(deps.uuid()),
-          threadId: thread.id,
-          turnId: decodeWorkTurnId(deps.uuid()),
-          prompt: turn.prompt,
-          ...(turn.extensionSelections === undefined
-            ? {}
-            : { extensionSelections: turn.extensionSelections }),
-          authority: {
-            hostId: LOCAL_HOST_ID,
-            projectId: thread.projectId,
-            bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: ".",
-            confinementPosture: "project-root-confined",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
+        const result = await deps.work.startFirstTurn(
+          windowId,
+          {
+            kind: "start-work-thread-turn",
+            requestId: decodeWorkTurnRequestId(deps.uuid()),
+            threadId: thread.id,
+            turnId: decodeWorkTurnId(deps.uuid()),
+            prompt: turn.prompt,
+            ...(turn.extensionSelections === undefined
+              ? {}
+              : { extensionSelections: turn.extensionSelections }),
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: ".",
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
           },
-          limitRecovery: true,
-        });
+          { limitRecovery: true },
+        );
         return result.kind === "accepted"
           ? { kind: "dispatched" }
           : refused("message" in result ? result.message : "The continuation was not admitted.");
@@ -454,15 +469,18 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
           return refused("The recorded stop's preserved prompt is unavailable.");
         }
         const prompt = await deps.code.stageEvidence(windowId, threadId, text);
-        const result = await deps.code.executeOperation(windowId, {
-          kind: "start-provider-turn",
-          operationId: decodeCodeOperationId(deps.uuid()),
-          threadId: thread.id,
-          checkoutId: thread.checkoutId,
-          sessionId: decodeProviderSessionId(deps.uuid()),
-          prompt,
-          limitRecovery: true,
-        });
+        const result = await deps.code.executeOperation(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(deps.uuid()),
+            threadId: thread.id,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(deps.uuid()),
+            prompt,
+          },
+          { limitRecovery: true },
+        );
         return result.kind === "provider-turn-state" &&
           (result.state === "running" || result.state === "waiting" || result.state === "completed")
           ? { kind: "dispatched" }
