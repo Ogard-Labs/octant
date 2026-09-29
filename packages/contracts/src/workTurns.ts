@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -201,6 +202,11 @@ export const WorkTurnState = Schema.Struct({
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   /** The provider's own task list for this turn, restated whole as it moves. */
   tasks: Schema.optional(ThreadTaskProgressList),
+  /**
+   * Set only on a turn the host started to deliver a finished subagent run's
+   * result; journaled with the turn's acceptance so replay keeps the mark.
+   */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
   capabilities: WorkTurnCapabilityFacts,
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
@@ -244,6 +250,13 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
   fileMentionPaths: Schema.optional(
     Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
+  /**
+   * Set only by the host's own delivery of a finished subagent run's result:
+   * the turn carries the run's reply into this thread and the mark is
+   * verified against the journaled run before the turn is admitted, so a
+   * caller cannot claim a delivery the journal does not record.
+   */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
 }).annotations(strict);
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;
 
@@ -344,6 +357,12 @@ export const WorkTurnAccepted = Schema.Struct({
   ),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   capabilities: WorkTurnCapabilityFacts,
+  /**
+   * Present only on a turn the host itself accepted to deliver a finished
+   * subagent run's result — journaled so the delivery's idempotency mark
+   * survives replay.
+   */
+  delivery: Schema.optional(AgentRunResultDeliveryMark),
   acceptedAt: UtcTimestamp,
 }).annotations(strict);
 export type WorkTurnAccepted = typeof WorkTurnAccepted.Type;

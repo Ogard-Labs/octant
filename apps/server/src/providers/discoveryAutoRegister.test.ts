@@ -238,7 +238,7 @@ describe("autoRegisterPreferredCandidates", () => {
     );
   });
 
-  it("auto-registers OpenCode 2 when both OpenCode runtimes are discovered", async () => {
+  it("auto-registers the released OpenCode executable when both OpenCode names are discovered", async () => {
     const { createFromDiscovery } = await autoRegister({
       candidates: [
         opencodeCandidate(),
@@ -255,8 +255,8 @@ describe("autoRegisterPreferredCandidates", () => {
     expect(createFromDiscovery).toHaveBeenCalledWith(
       expect.objectContaining({
         driverKind: "opencode",
-        displayName: "OpenCode 2 preview",
-        binaryPath: "/Users/test/.local/bin/opencode2",
+        displayName: "OpenCode CLI",
+        binaryPath: "/opt/homebrew/bin/opencode",
       }),
       { enabled: false },
     );

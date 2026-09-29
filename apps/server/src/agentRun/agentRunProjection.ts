@@ -5,6 +5,7 @@ import {
   decodeAgentRunRequestId,
   decodeAgentRunRequested,
   decodeAgentRunResultAcknowledged,
+  decodeAgentRunResultDeliverySettled,
   decodeAgentRunStatusChanged,
   type EventEnvelope,
   type AgentRun,
@@ -16,6 +17,7 @@ import {
   type AgentRunRequestId,
   type AgentRunResult,
   type AgentRunResultAcknowledgement,
+  type AgentRunResultDelivery,
   type OctantMode,
   type ProjectId,
   type ProviderInstanceId,
@@ -27,6 +29,7 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
   AGENT_RUN_STATUS_CHANGED,
 } from "./agentRunEventStore";
 
@@ -101,6 +104,12 @@ export interface AgentRunResultAckApplyInput {
   readonly runId: AgentRunId;
   readonly version: number;
   readonly acknowledgedAt: UtcTimestamp;
+}
+
+export interface AgentRunResultDeliveryApplyInput {
+  readonly runId: AgentRunId;
+  readonly version: number;
+  readonly delivery: AgentRunResultDelivery;
 }
 
 function summaryRoute(receipt: AgentRun["routingReceipt"]): AgentRunParentSummaryRoute {
@@ -179,6 +188,15 @@ export class AgentRunProjection implements Projection {
         version: payload.version,
         acknowledgedAt: payload.acknowledgedAt,
       });
+      return;
+    }
+    if (event.eventName === AGENT_RUN_RESULT_DELIVERY_SETTLED) {
+      const payload = decodeAgentRunResultDeliverySettled(event.payload);
+      this.applyResultDeliverySettled({
+        runId: payload.runId,
+        version: payload.version,
+        delivery: payload.delivery,
+      });
     }
   }
 
@@ -233,6 +251,20 @@ export class AgentRunProjection implements Projection {
         acknowledged: true,
         acknowledgedAt: input.acknowledgedAt,
       },
+    });
+    this.#index(next);
+  }
+
+  applyResultDeliverySettled(input: AgentRunResultDeliveryApplyInput): void {
+    const runId = decodeAgentRunId(input.runId);
+    const existing = this.#byId.get(runId);
+    if (existing === undefined) return;
+    if (existing.version >= input.version) return;
+    const next = decodeAgentRun({
+      ...existing,
+      version: input.version,
+      updatedAt: input.delivery.settledAt,
+      resultDelivery: input.delivery,
     });
     this.#index(next);
   }

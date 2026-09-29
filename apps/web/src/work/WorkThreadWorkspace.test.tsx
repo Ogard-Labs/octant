@@ -1235,6 +1235,59 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
   });
 
+  it("offers a limited stop's recovery only while that stop is still waiting", async () => {
+    const failure = {
+      category: "rate-limited",
+      message: "Rate limit reached.",
+      usageLimit: {
+        kind: "temporary",
+        resetsAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      },
+    };
+    const renderTurn = (status: "waiting" | "failed") => (
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={
+          {
+            bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+            execute: vi.fn(),
+          } as unknown as WorkThreadClient
+        }
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({
+              threadId,
+              turns: [
+                workTurn({
+                  status,
+                  failure,
+                  transcript: [
+                    { role: "user", text: "Summarize the brief" },
+                    { role: "assistant", text: "", status },
+                  ],
+                }),
+              ],
+            })),
+          } as never
+        }
+      />
+    );
+
+    const failed = render(renderTurn("failed"));
+    await screen.findByRole("alert");
+    expect(
+      screen.queryByRole("button", { name: "Resume when the limit resets" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Snooze until reset" })).not.toBeInTheDocument();
+    failed.unmount();
+
+    render(renderTurn("waiting"));
+    await screen.findByRole("button", { name: "Resume when the limit resets" });
+    expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+  });
+
   it("does not duplicate a turn that settles before the start response arrives", async () => {
     const user = userEvent.setup();
     const settledTurn = workTurn({

@@ -232,7 +232,7 @@ const opencodeProfile: AcpProviderProfile = {
   closesSessions: true,
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
-  unauthenticatedMessage: "OpenCode 2 is not authenticated. Run opencode2 auth login, then retry.",
+  unauthenticatedMessage: "OpenCode 2 is not authenticated. Run opencode auth login, then retry.",
   process: {
     agentName: "OpenCode",
     // 2.0.x declares both `opencode` and `opencode2` in its package and prints
@@ -268,7 +268,7 @@ const opencodeProfile: AcpProviderProfile = {
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".local/share/opencode"),
-      loginHint: "Run opencode2 auth login, then retry.",
+      loginHint: "Run opencode auth login, then retry.",
       environment: (path) => ({ OPENCODE_DATA_DIR: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },

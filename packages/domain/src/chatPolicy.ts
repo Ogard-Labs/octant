@@ -249,6 +249,12 @@ export interface BeginChatTurnInput {
    * turn is never mutated or removed, so the journal stays append-only.
    */
   readonly supersedes?: ChatTurnId;
+  /**
+   * Set only when the host itself begins this turn to carry a finished
+   * subagent run's result into the thread; the mark is journaled with the
+   * turn so a delivery replayed after a crash cannot mint a second one.
+   */
+  readonly delivery?: ChatTurn["delivery"];
   readonly sequence: ChatTurn["sequence"];
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
@@ -285,6 +291,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
       ? {}
       : { extensionSelections: input.extensionSelections }),
     ...(input.supersedes === undefined ? {} : { supersedes: input.supersedes }),
+    ...(input.delivery === undefined ? {} : { delivery: input.delivery }),
     attempts: [attempt],
     createdAt: input.createdAt,
   });

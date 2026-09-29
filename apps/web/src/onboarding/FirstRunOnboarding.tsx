@@ -5,7 +5,7 @@ import type { UserProfile } from "@octant/contracts/user-profile";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { enabledModes, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -135,6 +135,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const answerLost = useRef(false);
   const nameField = useRef<HTMLInputElement>(null);
   const providerAction = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const blocked = controller.blockedMessage !== undefined;
 
   // This surface mounts before the host's own settings have arrived, so the
@@ -185,6 +186,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       props.readiness.overall,
     ],
   );
+
+  // The panel is one scroller shared by every step, so a step opened after a
+  // long one started scrolled past its own header.
+  useEffect(() => {
+    panel.current?.scrollTo?.({ top: 0 });
+  }, [step, handoffOpen]);
 
   if (!controller.visible) return null;
 
@@ -387,7 +394,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           </ol>
         </nav>
 
-        <div className="first-run__panel">
+        <div className="first-run__panel" ref={panel}>
           {handoffOpen ? (
             // The readiness view follows "Step 5 of 5" and is not a sixth setup
             // step, so it carries a title and no count. Untitled, it read as a

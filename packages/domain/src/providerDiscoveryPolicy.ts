@@ -107,21 +107,38 @@ export function isConnectCommand(
   return command.kind === "connect";
 }
 
+function openCodeBinaryName(binaryPath: string): string {
+  return binaryPath.toLowerCase().split(/[\\/]/u).at(-1) ?? "";
+}
+
+function isReleasedOpenCodeBinaryPath(binaryPath: string): boolean {
+  const name = openCodeBinaryName(binaryPath);
+  return name === "opencode" || name === "opencode.exe";
+}
+
 export function selectPreferredCandidate(
   candidates: ReadonlyArray<DiscoveryCandidate>,
 ): DiscoveryCandidate | undefined {
-  // OpenCode 2 is the current provider runtime. Prefer it when discovery
-  // finds both names so an older `opencode` on PATH cannot shadow the beta
-  // runtime's ACP/catalog driver.
-  const openCode2 = candidates.find(
-    (candidate) =>
-      candidate.driverKind === "opencode" && isOpenCode2BinaryPath(candidate.binaryPath),
-  );
+  // OpenCode 2 is the current provider runtime and ships as `opencode`;
+  // `opencode2` is the earlier beta name. Both mark the OpenCode 2 runtime,
+  // so the released name wins when both are discovered and a beta-only
+  // install is still preferred over anything else in the family.
+  const openCode2 =
+    candidates.find(
+      (candidate) =>
+        candidate.driverKind === "opencode" && isReleasedOpenCodeBinaryPath(candidate.binaryPath),
+    ) ??
+    candidates.find(
+      (candidate) =>
+        candidate.driverKind === "opencode" && isOpenCode2BinaryPath(candidate.binaryPath),
+    );
   return openCode2 ?? candidates[0];
 }
 
 /**
- * The `opencode2` executable names the beta runtime wherever it is installed.
+ * The OpenCode 2 executables name the current runtime wherever it is
+ * installed: released builds ship `opencode`, and `opencode2` names the
+ * earlier beta kept as a fallback.
  *
  * Discovery's preference and the server's driver routing read this one rule,
  * so the candidate this policy prefers is the candidate the factory routes to
@@ -129,8 +146,13 @@ export function selectPreferredCandidate(
  * user-editable and would let a renamed row change which driver runs.
  */
 export function isOpenCode2BinaryPath(binaryPath: string): boolean {
-  const name = binaryPath.toLowerCase().split(/[\\/]/u).at(-1) ?? "";
-  return name === "opencode2" || name === "opencode2.exe";
+  const name = openCodeBinaryName(binaryPath);
+  return (
+    name === "opencode" ||
+    name === "opencode.exe" ||
+    name === "opencode2" ||
+    name === "opencode2.exe"
+  );
 }
 
 /**

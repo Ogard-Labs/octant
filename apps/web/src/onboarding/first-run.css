@@ -84,6 +84,8 @@
      grows with it rather than holding it to a height it does not have. */
   .first-run__panel {
     overflow-y: visible;
+    padding-block-end: 0;
+    mask-image: none;
   }
 }
 
@@ -133,9 +135,9 @@
 }
 
 .first-run__rail-step[aria-current="step"] .first-run__rail-marker {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-foreground);
+  border-color: var(--oct-fg);
+  background: var(--oct-fg);
+  color: var(--oct-bg);
 }
 
 .first-run__rail-marker {
@@ -152,7 +154,7 @@
 
 /* Configured is also written into the marker (the check) and announced by the
    sr-only text; the accent is reinforcement. */
-.first-run__rail-step[data-configured="true"] .first-run__rail-marker {
+.first-run__rail-step[data-configured="true"]:not([aria-current="step"]) .first-run__rail-marker {
   border-color: var(--oct-accent-fg);
   color: var(--oct-accent-fg);
 }
@@ -180,6 +182,17 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+
+  /* A long step (the model list, the readiness facts) ended in a row cut in
+     half against the footer rule, which read as broken layout rather than
+     more content. The edge fades, and the padding lets the last row scroll
+     clear of the fade. */
+  padding-block-end: var(--oct-space-6);
+  mask-image: linear-gradient(
+    to bottom,
+    var(--oct-fg) calc(100% - var(--oct-space-6)),
+    transparent
+  );
 }
 
 .first-run__step-header {

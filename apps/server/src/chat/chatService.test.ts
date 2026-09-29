@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  decodeAgentRun,
   decodeChatAttachmentId,
   decodeChatAttempt,
   decodeChatAttemptId,
@@ -37,6 +38,7 @@ import {
   type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderContextBlock,
+  type AgentRun,
   type MentionableThreadId,
   type WindowId,
   type ChatThread,
@@ -262,6 +264,12 @@ function openFixture(options?: {
       }) => Promise<{ readonly result: unknown; readonly isError?: boolean }>;
     };
   }>;
+  readonly agentRuns?: {
+    readonly getById: (
+      runId: import("@octant/contracts").AgentRunId,
+    ) => import("@octant/contracts").AgentRun | undefined;
+    readonly resultText: (runId: import("@octant/contracts").AgentRunId) => string | undefined;
+  };
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: import("@octant/contracts/multi-model-pool").MultiModelPool;
     readonly mode: import("@octant/contracts/modes").OctantMode;
@@ -612,6 +620,7 @@ function openFixture(options?: {
     ...(options?.gatherMultiModelRuntimeFacts === undefined
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
+    ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options?.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options?.linearIssueContext === undefined
       ? {}
@@ -8316,5 +8325,158 @@ describe("ChatService streamed delta bodies", () => {
     for await (const frame of service.subscribe(created.thread.id, 0)) plain.push(frame);
     expect(plain.length).toBe(asked.length);
     expect(plain.every((frame) => frame.contents === undefined)).toBe(true);
+  });
+});
+
+describe("agent result delivery", () => {
+  const deliveryRunFor = (
+    parentThreadId: string,
+    overrides: Record<string, unknown> = {},
+  ): AgentRun =>
+    decodeAgentRun({
+      id: "d1a1b000-0000-4000-8000-000000000001",
+      requestId: "d1a1b000-0000-4000-8000-000000000002",
+      parentThreadId,
+      depth: 0,
+      role: "research",
+      task: "Summarize the design.",
+      creationPosture: "automatic",
+      executionKind: "octant-managed",
+      lifecycleStatus: "completed",
+      authority: {
+        filesystem: false,
+        shell: false,
+        git: false,
+        network: true,
+        tools: true,
+        subagents: false,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+      },
+      routingReceipt: {
+        executionResolution: {
+          providerInstanceId: "d1a1b000-0000-4000-8000-000000000003",
+          modelId: "gpt-4o",
+          hostId: "local",
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+          effectivePermissions: {
+            filesystem: false,
+            shell: false,
+            git: false,
+            network: true,
+            tools: true,
+            subagents: false,
+          },
+          source: "project-default",
+          fallbackChain: ["project-default"],
+          downgradeReasons: [],
+        },
+        selectedExecutionKind: "octant-managed",
+        attemptedExecutionKind: "provider-native",
+        selectedProviderInstanceId: "d1a1b000-0000-4000-8000-000000000003",
+        selectedModelId: "gpt-4o",
+        fallbackCandidates: [],
+        capabilityDegradations: [],
+        contextSnapshotId: "d1a1b000-0000-4000-8000-000000000004",
+        effectiveAuthorityDigest: "digest-1",
+        usageQuality: "provider-reported",
+        hostId: "local",
+        mode: "chat",
+      },
+      workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      resultAcknowledgement: { required: false, acknowledged: false },
+      version: 4,
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    });
+
+  it("delivers a finished subagent run's result as a marked turn, once", async () => {
+    const runs = new Map<string, AgentRun>();
+    const withRuns = openFixture({
+      agentRuns: {
+        getById: (runId) => runs.get(String(runId)),
+        resultText: () => "the subagent's reply",
+      },
+    });
+    const createdOnRuns = await withRuns.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (createdOnRuns.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = createdOnRuns.thread;
+    const run = deliveryRunFor(thread.id);
+    runs.set(String(run.id), run);
+
+    const delivered = await withRuns.service.execute({
+      kind: "deliver-chat-agent-result",
+      threadId: thread.id,
+      expectedVersion: thread.version,
+      runId: run.id,
+    });
+    if (delivered.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    expect(delivered.turn.delivery).toEqual({ kind: "agent-result", runId: run.id });
+    const sent = withRuns.fakeDriver.sentTurns[0];
+    expect(sent?.prompt).toContain("A subagent you delegated has finished.");
+    expect(sent?.prompt).toContain("the subagent's reply");
+
+    const refreshed = withRuns.service.read(thread.id).thread;
+    const replayed = await withRuns.service.execute({
+      kind: "deliver-chat-agent-result",
+      threadId: thread.id,
+      expectedVersion: refreshed?.version ?? thread.version,
+      runId: run.id,
+    });
+    if (replayed.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    expect(replayed.turn.id).toEqual(delivered.turn.id);
+    expect(withRuns.service.read(thread.id).turns).toHaveLength(1);
+  });
+
+  it("refuses a delivery that names a run the thread never owned or an unfinished run", async () => {
+    const { service } = openFixture({
+      agentRuns: {
+        getById: () => undefined,
+        resultText: () => undefined,
+      },
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await expect(
+      service.execute({
+        kind: "deliver-chat-agent-result",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        runId: "d1a1b000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+
+    const unfinished = deliveryRunFor(created.thread.id, { lifecycleStatus: "running" });
+    const withRuns = openFixture({
+      agentRuns: {
+        getById: (runId) => (String(runId) === String(unfinished.id) ? unfinished : undefined),
+        resultText: () => "reply",
+      },
+    });
+    const second = await withRuns.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (second.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await expect(
+      withRuns.service.execute({
+        kind: "deliver-chat-agent-result",
+        threadId: second.thread.id,
+        expectedVersion: second.thread.version,
+        runId: unfinished.id,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(withRuns.service.read(second.thread.id).turns).toHaveLength(0);
   });
 });

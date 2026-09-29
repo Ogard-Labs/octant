@@ -3714,7 +3714,11 @@ form > .work-composer-adapter__attachments {
   font-family: var(--oct-font-body);
   font-size: calc(13 * var(--oct-text-step));
   line-height: 1.45;
-  white-space: pre-wrap;
+  white-space: pre-line;
+}
+
+.whats-new__body > p {
+  margin: 0 0 var(--oct-space-3);
 }
 
 .whats-new__empty {

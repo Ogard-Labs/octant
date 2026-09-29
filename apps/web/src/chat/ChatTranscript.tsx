@@ -712,7 +712,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             String(props.threadUsageResume.record.attemptId) !== String(props.attempt.id)
               ? {}
               : { usageResume: props.threadUsageResume })}
-            resumable={props.tailAttempt}
+            resumable={props.tailAttempt && props.attempt.outcome === "waiting"}
             {...(props.onScheduleUsageResume === undefined
               ? {}
               : {

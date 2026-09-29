@@ -3261,6 +3261,189 @@ it("refuses a fresh start while an interrupted prior turn still owns an unseen p
   }
 });
 
+it("settles an answer to an approval a host exit left waiting as interrupted", async () => {
+  const fixture = runtimeFixture({});
+  try {
+    // The record a host exit mid-approval leaves: the request is journaled and
+    // the turn reads waiting, but the provider session that would consume the
+    // answer died with the process, so the card can never be delivered.
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(94),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(94),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "approval-requested",
+        approvalId: "90000000-0000-4000-8000-000000000094",
+        action: "provider-tool",
+        summary: "command: Approval is required for this action.",
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(94),
+      expectedCursor: 2,
+      event: decodeCodeOperationEvent({ kind: "operation-state", state: "waiting" }),
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(95),
+        threadId,
+        checkoutId,
+        approvalId: "90000000-0000-4000-8000-000000000094",
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+
+    const replay = fixture.operationEvents.replay({
+      threadId,
+      operationId: operationId(94),
+      afterCursor: 0,
+      limit: 10,
+    });
+    expect(replay.status).toBe("ok");
+    if (replay.status !== "ok") return;
+    expect(replay.frames.at(-1)?.event).toMatchObject({
+      kind: "operation-state",
+      state: "interrupted",
+    });
+  } finally {
+    fixture.close();
+  }
+});
+
+it("settles an answer to a provider question a host exit left waiting as interrupted", async () => {
+  const fixture = runtimeFixture({});
+  try {
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(96),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(96),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "input-requested",
+        requestId: "provider-question-1",
+        prompt: "Which file?",
+        options: ["src/a.ts", "src/b.ts"],
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(96),
+      expectedCursor: 2,
+      event: decodeCodeOperationEvent({ kind: "operation-state", state: "waiting" }),
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-input",
+        operationId: operationId(97),
+        threadId,
+        checkoutId,
+        requestId: "provider-question-1",
+        response: fixture.response,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+
+    const replay = fixture.operationEvents.replay({
+      threadId,
+      operationId: operationId(96),
+      afterCursor: 0,
+      limit: 10,
+    });
+    expect(replay.status).toBe("ok");
+    if (replay.status !== "ok") return;
+    expect(replay.frames.at(-1)?.event).toMatchObject({
+      kind: "operation-state",
+      state: "interrupted",
+    });
+  } finally {
+    fixture.close();
+  }
+});
+
+it("refuses a repeated answer to a request whose turn already settled", async () => {
+  const fixture = runtimeFixture({});
+  try {
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(98),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(98),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "approval-requested",
+        approvalId: "90000000-0000-4000-8000-000000000098",
+        action: "provider-tool",
+        summary: "command: Approval is required for this action.",
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(98),
+      expectedCursor: 2,
+      event: decodeCodeOperationEvent({ kind: "operation-state", state: "interrupted" }),
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(99),
+        threadId,
+        checkoutId,
+        approvalId: "90000000-0000-4000-8000-000000000098",
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "failed" });
+
+    const replay = fixture.operationEvents.replay({
+      threadId,
+      operationId: operationId(98),
+      afterCursor: 0,
+      limit: 10,
+    });
+    expect(replay.status).toBe("ok");
+    if (replay.status !== "ok") return;
+    expect(replay.frames).toHaveLength(3);
+  } finally {
+    fixture.close();
+  }
+});
+
 it("passes only ACP client tools when native ACP capability support is enabled", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const starts: Array<ProviderSessionStart> = [];
