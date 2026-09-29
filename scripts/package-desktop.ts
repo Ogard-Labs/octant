@@ -840,11 +840,24 @@ function isNodeExecutablePath(path: string): boolean {
   return base === "node" || base === "node.exe";
 }
 
+export async function buildPackagedApps(
+  repositoryRoot: string,
+  run: (argv: ReadonlyArray<string>, options: { cwd: string }) => Promise<void> = (argv, options) =>
+    runCommand(argv, options),
+): Promise<void> {
+  // Packaging assembles whatever the apps' dist/ directories already hold, and
+  // stale output ships silently: a server bundle predating the checkout once
+  // made every provider turn in the packaged app fail. Build first so the
+  // artifact always matches the checkout it claims to be.
+  await run([process.execPath, "run", "build"], { cwd: repositoryRoot });
+}
+
 async function packageDesktop(repositoryRoot: string): Promise<{
   readonly target: DesktopPackageTarget;
   readonly artifactPath: string;
   readonly portableDirectoryPath?: string;
 }> {
+  await buildPackagedApps(repositoryRoot);
   const target = resolveDesktopPackageTarget(process.env);
   if (target.platform === "darwin") {
     const artifactPath = await packageDarwinDesktop(repositoryRoot, target);
@@ -1531,7 +1544,7 @@ if (import.meta.main) {
 
 async function runCommand(
   argv: ReadonlyArray<string>,
-  options: { readonly env?: NodeJS.ProcessEnv } = {},
+  options: { readonly env?: NodeJS.ProcessEnv; readonly cwd?: string } = {},
 ): Promise<void> {
   const [command, ...args] = argv;
   if (command === undefined) throw new Error("Empty command.");
@@ -1540,6 +1553,7 @@ async function runCommand(
     stdout: "inherit" as const,
     stderr: "inherit" as const,
     ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   };
   const child = Bun.spawn([command, ...args], spawnOptions);
   if ((await child.exited) !== 0) {
