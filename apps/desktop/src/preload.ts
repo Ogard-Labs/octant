@@ -27,6 +27,9 @@ export const IPC_CHANNELS = {
   computerUsePermissions: "octant:computer-use:permissions",
   computerUsePermissionSettings: "octant:computer-use:permission-settings",
   computerUseCheckUpdates: "octant:computer-use:check-updates",
+  managedToolsStatus: "octant:managed-tools:status",
+  managedToolsCheckUpdates: "octant:managed-tools:check-updates",
+  managedToolsConfigure: "octant:managed-tools:configure",
   appUpdateRing: "octant:app-update:ring",
   appUpdateWhatsNew: "octant:app-update:whats-new",
   appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
@@ -379,6 +382,9 @@ export interface OctantHostBridge {
   readonly requestComputerUsePermissions: () => Promise<unknown>;
   readonly openComputerUsePermissionSettings: () => Promise<void>;
   readonly checkComputerUseUpdates: () => Promise<unknown>;
+  readonly getManagedToolsStatus: () => Promise<unknown>;
+  readonly checkManagedToolUpdates: () => Promise<unknown>;
+  readonly setManagedToolAutomaticUpdates: (enabled: boolean) => Promise<unknown>;
   readonly notifyAttention: (request: AttentionNotificationBridgeRequest) => Promise<void>;
   readonly setAttentionBadge: (count: number) => Promise<void>;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
@@ -594,6 +600,18 @@ export function createHostBridge(
       await ipc.invoke(IPC_CHANNELS.computerUsePermissionSettings);
     },
     checkComputerUseUpdates: () => ipc.invoke(IPC_CHANNELS.computerUseCheckUpdates),
+    getManagedToolsStatus: async () =>
+      decodeManagedToolsStatus(await ipc.invoke(IPC_CHANNELS.managedToolsStatus)),
+    checkManagedToolUpdates: async () =>
+      decodeManagedToolsStatus(await ipc.invoke(IPC_CHANNELS.managedToolsCheckUpdates)),
+    setManagedToolAutomaticUpdates: async (enabled: boolean) => {
+      if (typeof enabled !== "boolean") {
+        return Promise.reject(new TypeError("Invalid update setting."));
+      }
+      return decodeManagedToolsStatus(
+        await ipc.invoke(IPC_CHANNELS.managedToolsConfigure, { automaticUpdates: enabled }),
+      );
+    },
     checkForAppUpdate: async () =>
       decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateCheck)),
     downloadAppUpdate: async () =>
@@ -1649,6 +1667,89 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     releasedAt: value.releasedAt,
     ...(value.notes === undefined ? {} : { notes: value.notes }),
   });
+}
+
+const MANAGED_TOOL_UPDATE_STATES = [
+  "idle",
+  "checking",
+  "downloading",
+  "staged",
+  "current",
+  "failed",
+];
+
+/**
+ * Validate managed-tool status by hand rather than importing the contract
+ * decoder — the preload is sandboxed and must not pull a runtime package in.
+ */
+function decodeManagedToolsStatus(value: unknown): ManagedToolsStatus {
+  if (
+    !isRecord(value) ||
+    typeof value.supported !== "boolean" ||
+    typeof value.automaticUpdates !== "boolean" ||
+    !Array.isArray(value.tools) ||
+    value.tools.length > 16 ||
+    (value.message !== undefined && typeof value.message !== "string")
+  ) {
+    throw new TypeError("Invalid managed tools status.");
+  }
+  return Object.freeze({
+    supported: value.supported,
+    automaticUpdates: value.automaticUpdates,
+    tools: Object.freeze(value.tools.map(decodeManagedToolStatus)),
+    ...(value.message === undefined ? {} : { message: value.message }),
+  });
+}
+
+function decodeManagedToolStatus(value: unknown): ManagedToolStatus {
+  if (
+    !isRecord(value) ||
+    typeof value.tool !== "string" ||
+    value.tool.length > 64 ||
+    typeof value.packageName !== "string" ||
+    value.packageName.length > 128 ||
+    value.channel !== "npm" ||
+    typeof value.available !== "boolean" ||
+    typeof value.installed !== "boolean" ||
+    typeof value.version !== "string" ||
+    value.version.length > 64 ||
+    typeof value.update !== "string" ||
+    !MANAGED_TOOL_UPDATE_STATES.includes(value.update) ||
+    (value.availableVersion !== undefined && typeof value.availableVersion !== "string") ||
+    (value.message !== undefined && typeof value.message !== "string")
+  ) {
+    throw new TypeError("Invalid managed tool status.");
+  }
+  return Object.freeze({
+    tool: value.tool,
+    packageName: value.packageName,
+    channel: "npm",
+    available: value.available,
+    installed: value.installed,
+    version: value.version,
+    update: value.update as ManagedToolStatus["update"],
+    ...(value.availableVersion === undefined ? {} : { availableVersion: value.availableVersion }),
+    ...(value.message === undefined ? {} : { message: value.message }),
+  });
+}
+
+interface ManagedToolStatus {
+  readonly tool: string;
+  readonly packageName: string;
+  readonly channel: "npm";
+  readonly available: boolean;
+  readonly installed: boolean;
+  readonly version: string;
+  readonly update: "idle" | "checking" | "downloading" | "staged" | "current" | "failed";
+  readonly availableVersion?: string;
+  readonly message?: string;
+}
+
+interface ManagedToolsStatus {
+  readonly supported: boolean;
+  readonly automaticUpdates: boolean;
+  readonly tools: ReadonlyArray<ManagedToolStatus>;
+  readonly message?: string;
 }
 
 function decodeBundledWhatsNew(value: unknown): BundledWhatsNew {

@@ -76,14 +76,16 @@ credential references, layouts — stays on the host machine.
 The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
-  Remote access is host-to-device over the user's own network. Two host-initiated
-  HTTPS calls exist in code: desktop update checks against a signed feed, and
-  server marketplace fetches when the person searches, inspects, previews, or
-  installs from the catalog. Both have a Settings off switch: marketplace
-  off means no catalog request; Updates off disables automatic update checks
-  (manual Check for updates may still contact the signed feed). An in-app
+  Remote access is host-to-device over the user's own network. Three host-initiated
+  HTTPS calls exist in code: desktop update checks against a signed feed, managed
+  device-tool update checks against the npm registry, and server marketplace
+  fetches when the person searches, inspects, previews, or installs from the
+  catalog. All have a Settings off switch: marketplace off means no catalog
+  request; Updates off disables automatic update checks (manual Check for
+  updates may still contact the signed feed); device tools' automatic updates
+  off means no registry request (a manual check may still contact it). An in-app
   changelog rides that update path and bundled notes rather than adding a
-  third call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
+  separate call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
   Opening Updates reads the desktop's current local update state so the installed
   version and saved preferences appear without requesting the signed feed.
 - **The server is the authority.** Every authority check (mode, Project,
@@ -991,6 +993,24 @@ checks upstream daily by default. Verified updates stage privately, activate
 only while idle, and retain the previous version if startup fails. The driver
 never uses a standalone CuaDriver installation. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
+
+**Managed device tools.** The iOS Simulator and Android emulator panes ride
+upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors like
+the Computer-use driver: each release is a pinned npm tarball the packager
+verifies against the registry's published `dist.integrity` (sha512) and lands
+in `Resources/managed-tools/<tool>` with its license. Electron main owns the
+per-tool instances; tools launch under the desktop runtime
+(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. The
+same updater state machine as the driver checks `registry.npmjs.org` daily by
+default; a newer release stages with its dependency closure resolved
+in-app (no npm or Bun is available inside the packaged app), each package
+integrity-verified, and activates only while idle and after its entrypoint
+survives a smoke launch. A staged tree that cannot start keeps the previous
+release. Settings shows each tool's channel, version, and update state.
+Verification is the registry's package-level integrity hash — npm publishes
+no per-package signature — so the design pins URL plus hash and reports
+honestly when they disagree. See
+[decisions/0160-managed-npm-device-tools-share-one-release-channel.md](decisions/0160-managed-npm-device-tools-share-one-release-channel.md).
 
 ### Plugin boundaries and remaining extraction
 

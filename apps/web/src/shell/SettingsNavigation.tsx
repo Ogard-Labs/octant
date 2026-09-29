@@ -69,6 +69,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   voice: { group: "Models", icon: Mic },
   "image-generation": { group: "Models", icon: ImageIcon },
   "computer-use": { group: "Agents", icon: Monitor },
+  "device-tools": { group: "Agents", icon: Monitor },
   skills: { group: "Agents", icon: Blocks },
   github: { group: "Integrations", icon: FolderGit2 },
   linear: { group: "Integrations", icon: ListTodo },

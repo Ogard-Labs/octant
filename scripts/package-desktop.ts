@@ -26,6 +26,7 @@ import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
+import { prepareManagedTools } from "./prepare-managed-tools";
 import {
   requireSigned,
   resolveSigningCredentials,
@@ -214,11 +215,22 @@ export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
 ] as const;
 
+/** Managed tools vendored under Resources; JavaScript trees plus their licenses. */
+export const REQUIRED_DARWIN_MANAGED_TOOL_FILES = [
+  "Octant.app/Contents/Resources/managed-tools/serve-sim/package.json",
+  "Octant.app/Contents/Resources/managed-tools/serve-sim/LICENSE",
+  "Octant.app/Contents/Resources/managed-tools/serve-sim/dist/serve-sim.js",
+  "Octant.app/Contents/Resources/managed-tools/serve-avd/package.json",
+  "Octant.app/Contents/Resources/managed-tools/serve-avd/LICENSE",
+  "Octant.app/Contents/Resources/managed-tools/serve-avd/dist/serve-avd.js",
+] as const;
+
 /** Full darwin-arm64 checklist (staged payload + PTY helper + Keychain/code-file helpers). */
 export const REQUIRED_PACKAGED_FILES = [
   ...REQUIRED_STAGED_PACKAGED_FILES,
   REQUIRED_DARWIN_PTY_HELPER_FILE,
   ...REQUIRED_DARWIN_HELPER_FILES,
+  ...REQUIRED_DARWIN_MANAGED_TOOL_FILES,
 ] as const;
 
 export const PACKAGED_EXECUTABLE_FILES = [
@@ -280,6 +292,8 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
   "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+  // The vendored serve-sim package's upstream adhoc-signed native module.
+  "Octant.app/Contents/Resources/managed-tools/serve-sim/dist/native/serve-sim-native.node",
 ]);
 
 const ALLOWED_LINUX_NATIVE_SUFFIXES = [
@@ -882,6 +896,11 @@ async function packageDarwinDesktop(
 
   const nativeResources = join(finalApp, "Contents/Resources/native");
   await prepareComputerUseDriver(repositoryRoot, join(nativeResources, "cua-driver"));
+  await prepareManagedTools(
+    repositoryRoot,
+    join(finalApp, "Contents/Resources/managed-tools"),
+    "darwin",
+  );
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
     resolve(repositoryRoot, "apps/desktop/native/keychain-helper/OctantKeychainHelper.swift"),
@@ -969,6 +988,7 @@ async function packageLinuxDesktop(
   await rm(packagerRoot, { recursive: true, force: true });
 
   const resourcesRoot = join(finalPackageDir, "resources");
+  await prepareManagedTools(repositoryRoot, join(resourcesRoot, "managed-tools"), "linux");
   for (const relativePath of PACKAGED_LINUX_NATIVE_FILES) {
     await validatePackagedElf(join(resourcesRoot, relativePath));
   }

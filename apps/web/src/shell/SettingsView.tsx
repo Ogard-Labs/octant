@@ -75,6 +75,7 @@ import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSe
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
@@ -193,6 +194,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   voice: "The providers that turn speech into text and text into speech.",
   "image-generation": "Choose connected providers and models for image generation.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
+  "device-tools": "Bundled simulator and emulator streaming tools and their updates.",
   providers: "Connect providers, manage authentication, and pick default models.",
   harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills:
@@ -725,6 +727,12 @@ function ActiveSectionContent({
         <ComputerUseSettingsView
           settings={props.settings.computerUse}
           onSettingsChange={props.onSettingsChange}
+          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        />
+      );
+    case "device-tools":
+      return (
+        <ManagedToolsSettingsView
           {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
         />
       );

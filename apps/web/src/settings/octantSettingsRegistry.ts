@@ -457,6 +457,27 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "device-tools",
+      label: "Device tools",
+      scope: "host",
+      keywords:
+        "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
+      settings: [
+        {
+          id: settingId("managed-tools-automatic-updates"),
+          label: "Automatic updates",
+          scope: "host",
+          keywords: "automatic updates upgrade device tools",
+        },
+        {
+          id: settingId("managed-tools-update-check"),
+          label: "Update check",
+          scope: "host",
+          keywords: "check updates device tools",
+        },
+      ],
+    },
+    {
       id: "skills",
       label: "Skills & Extensions",
       scope: "host",

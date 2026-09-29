@@ -3,6 +3,7 @@
 .agent-worktrees/
 .turbo/
 .computer-use-driver/
+.managed-tools/
 .scratch/
 coverage/
 dist/

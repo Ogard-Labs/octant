@@ -114,7 +114,8 @@
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
     "./canvas-board": "./src/canvasBoard.ts",
     "./computer-use-plugin": "./src/computerUsePlugin.ts",
-    "./simulator-device": "./src/simulatorDevice.ts"
+    "./simulator-device": "./src/simulatorDevice.ts",
+    "./managed-tooling": "./src/managedTooling.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

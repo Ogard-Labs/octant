@@ -26,3 +26,10 @@ export function resolveDesktopNativeHelperPath(
     ? resolve(options.resourcesPath, "native", filename)
     : resolve(dirname(fileURLToPath(options.moduleUrl)), "native", filename);
 }
+
+/** Directory holding every vendored managed-tool package tree for this host. */
+export function resolveManagedToolsDirectory(options: DesktopNativeHelperPathOptions): string {
+  return options.packaged
+    ? resolve(options.resourcesPath, "managed-tools")
+    : resolve(dirname(fileURLToPath(options.moduleUrl)), "managed-tools");
+}

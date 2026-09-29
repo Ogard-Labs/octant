@@ -181,6 +181,7 @@ links from specifications remain useful for rationale and supporting detail.
 
 | [0158](0158-first-task-entry-keeps-setup-optional.md) | First task entry keeps setup optional | Accepted |
 | [0159](0159-a-confined-apple-test-carries-its-measured-grants.md) | A confined Apple test carries its measured grants | Accepted |
+| [0160](0160-managed-npm-device-tools-share-one-release-channel.md) | Managed npm device tools share one release channel | Proposed |
 
 ## Recording architectural rationale
 
