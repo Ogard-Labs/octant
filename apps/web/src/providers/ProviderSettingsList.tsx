@@ -145,6 +145,10 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
+      } else if (isImageProfileDriverKind(instance.driverKind)) {
+        // Image profiles have no runtime to observe — probing one is refused —
+        // so an enabled one has no readiness this summary could state.
+        continue;
       } else if (
         !props.updatingIds?.has(instance.id) &&
         presentationObserved.get(instance.id)?.readiness === "ready"
@@ -285,7 +289,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             ? "Use the arrow controls to change the model-picker order."
             : (props.note ?? "The first ready provider is the default for new threads.")}
         </p>
-        {ordered.length === 0 ? null : (
+        {readinessSummary.ready + readinessSummary.needsSetup + readinessSummary.off ===
+        0 ? null : (
           <p
             aria-label="Provider readiness summary"
             className="oct-meta provider-settings__summary"

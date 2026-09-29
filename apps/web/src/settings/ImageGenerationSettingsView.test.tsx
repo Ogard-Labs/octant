@@ -11,13 +11,15 @@ const now = "2026-09-05T10:00:00.000Z";
 const compatibleId = "00000000-0000-4000-8000-00000000c001";
 const imageId = "00000000-0000-4000-8000-00000000c003";
 
-function providerController(): ProviderController {
+function providerController(snapshot?: ProviderRegistrySnapshot): ProviderController {
   return {
     status: "ready",
-    snapshot: undefined,
-    instances: [],
+    snapshot,
+    instances: snapshot?.instances ?? [],
+    observedByInstance: new Map(
+      (snapshot?.observedStates ?? []).map((state) => [state.instanceId, state]),
+    ),
     defaults: { permissionPersistence: "current-session", version: 0 as never },
-    observedByInstance: new Map(),
     busy: false,
     probingIds: new Set(),
     updatingIds: new Set(),
@@ -114,6 +116,44 @@ describe("ImageGenerationSettingsView", () => {
       screen.getByText(/Connect an OpenAI-compatible image API's provider and model/),
     ).toBeVisible();
     expect(screen.getByText(/Saved profiles in Image generator/)).toBeVisible();
+  });
+
+  it("does not count a configured image profile as needing setup", () => {
+    const snapshot = providerSnapshot();
+    render(
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerController={providerController(snapshot)}
+        providerSnapshot={snapshot}
+        settings={{ customSources: [] }}
+      />,
+    );
+
+    // The image profile has no runtime observation to grade (probing one is
+    // refused); the summary's one setup-needed row is the custom endpoint.
+    expect(screen.getByRole("status", { name: "Provider readiness summary" })).toHaveTextContent(
+      "0 ready · 1 needs setup · 0 off",
+    );
+  });
+
+  it("shows no readiness summary when every enabled row is an image profile", () => {
+    const full = providerSnapshot();
+    const snapshot = {
+      ...full,
+      instances: full.instances.filter((instance) => instance.driverKind === "openai-image"),
+    };
+    render(
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerController={providerController(snapshot)}
+        providerSnapshot={snapshot}
+        settings={{ customSources: [] }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("status", { name: "Provider readiness summary" }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not claim a custom HTTP provider is required when a dedicated image provider is ready", () => {
