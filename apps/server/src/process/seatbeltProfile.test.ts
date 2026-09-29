@@ -686,6 +686,62 @@ describe("shared Seatbelt profile builder", () => {
     expect(profile).toContain(seatbeltAllowRule("file-write*", providerHome));
   });
 
+  it("denies an isolated root to a launch bound to its ancestor while the launch carrying it stays allowed", () => {
+    const root = temporaryRoot();
+    const boundRoot = root;
+    const temporaryDirectory = join(root, "tmp");
+    const captures = join(root, "data", "apple-runtime", "captures");
+    mkdirSync(temporaryDirectory);
+    mkdirSync(captures, { recursive: true });
+    const shared = {
+      boundRoot,
+      temporaryDirectory,
+      networkEgress: "allow" as const,
+      allowFileReadStar: true,
+      readRoots: [boundRoot, temporaryDirectory],
+      isolatedRoots: [captures],
+      homeDirectory: root,
+      usersDirectory: root,
+    };
+
+    const withoutGrant = buildDenyDefaultSeatbeltProfile(shared).split("\n");
+    const rootAllowIndex = withoutGrant.findIndex(
+      (line) => line.includes("allow file-read*") && line.includes(boundRoot),
+    );
+    const denyReadIndex = withoutGrant.findIndex(
+      (line) => line.includes("deny file-read*") && line.includes(captures),
+    );
+    const denyWriteIndex = withoutGrant.findIndex(
+      (line) => line.includes("deny file-write*") && line.includes(captures),
+    );
+    expect(denyReadIndex).toBeGreaterThan(rootAllowIndex);
+    expect(denyWriteIndex).toBeGreaterThan(rootAllowIndex);
+    expect(
+      withoutGrant.some((line) => line.includes("allow file") && line.includes(captures)),
+    ).toBe(false);
+
+    const withGrant = buildDenyDefaultSeatbeltProfile({
+      ...shared,
+      additionalWriteRoots: [captures],
+    }).split("\n");
+    const lastDenyIndex = Math.max(
+      withGrant.findIndex((line) => line.includes("deny file-read*") && line.includes(captures)),
+      withGrant.findIndex((line) => line.includes("deny file-write*") && line.includes(captures)),
+    );
+    expect(
+      withGrant.findIndex(
+        (line, index) =>
+          index > lastDenyIndex && line.includes("allow file-read*") && line.includes(captures),
+      ),
+    ).toBeGreaterThan(-1);
+    expect(
+      withGrant.findIndex(
+        (line, index) =>
+          index > lastDenyIndex && line.includes("allow file-write*") && line.includes(captures),
+      ),
+    ).toBeGreaterThan(-1);
+  });
+
   it("can omit bound-root writes for plan/read-only profiles", () => {
     const root = temporaryRoot();
     const boundRoot = join(root, "project");

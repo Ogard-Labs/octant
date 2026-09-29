@@ -103,6 +103,17 @@ export interface SeatbeltProfileInput {
    * unreachable for writes as well as reads.
    */
   readonly additionalDenyWritePaths?: ReadonlyArray<string>;
+  /**
+   * Directories denied read and write AFTER every shared grant — the bound
+   * root, the launch's `cwd` read root, and the temporary directory.
+   *
+   * Use for a host-private directory a launch could otherwise reach through
+   * an ancestor: a project bound to the data directory's parent re-allows
+   * the whole subtree through its `cwd` read root, so a grant-level
+   * omission is not enough. Only a directory this launch carries as an
+   * `additionalWriteRoots` entry is re-allowed after the denial (0160).
+   */
+  readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
@@ -143,6 +154,8 @@ export interface SeatbeltConfinementPrepareInput {
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.additionalDenyWritePaths}. */
   readonly additionalDenyWritePaths?: ReadonlyArray<string>;
+  /** See {@link SeatbeltProfileInput.isolatedRoots}. */
+  readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   /**
@@ -531,6 +544,8 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     assertAbsolute(path, "additional deny read path");
   const additionalDenyWritePaths = input.additionalDenyWritePaths ?? [];
   for (const path of additionalDenyWritePaths) assertAbsolute(path, "additional deny write path");
+  const isolatedRoots = input.isolatedRoots ?? [];
+  for (const path of isolatedRoots) assertAbsolute(path, "isolated root");
   const privateAllowPaths = input.privateHomeAllowPaths ?? [
     input.boundRoot,
     input.temporaryDirectory,
@@ -655,6 +670,21 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...(input.allowSimulatorControl === true
       ? [seatbeltAllowRule("file-read*", "/private/var/run/com.apple.security.cryptexd/mnt")]
       : []),
+    // An isolated root is denied only here, after every broad grant above: a
+    // launch bound to an ancestor re-allowed the whole subtree through its
+    // `cwd` read root, so leaving it merely ungranted kept it reachable — a
+    // project bound to the data directory's parent could read another
+    // thread's raw screen capture for the capture's lifetime (0160). The one
+    // launch that carries the same directory in `additionalWriteRoots` is
+    // re-allowed just below and stays the only writer.
+    ...uniqueAbsolutePaths(isolatedRoots.flatMap((path) => resolvedRootForms(path))).flatMap(
+      (path) => [seatbeltDenyRule("file-read*", path), seatbeltDenyRule("file-write*", path)],
+    ),
+    ...(isolatedRoots.length === 0
+      ? []
+      : uniqueAbsolutePaths(additionalWriteRoots.flatMap((path) => resolvedRootForms(path))).map(
+          (path) => seatbeltAllowRule("file-read*", path),
+        )),
     ...additionalDenyWritePaths.map((path) => seatbeltDenyRule("file-write*", path)),
     ...uniqueAbsolutePaths(additionalWriteRoots.flatMap((path) => resolvedRootForms(path))).map(
       (path) => seatbeltAllowRule("file-write*", path),
@@ -796,6 +826,7 @@ function prepareDarwinSeatbelt(
     ...(input.additionalDenyWritePaths === undefined
       ? {}
       : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
+    ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
     privateHomeAllowPaths,
     ...(input.extraRules === undefined && input.terminal === undefined
       ? {}
