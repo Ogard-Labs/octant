@@ -308,13 +308,13 @@ describe("application background policy", () => {
       ...resolvedDefaults,
       kind: "builtin",
       backgroundId: "perspective-dot-plane-animated",
-      backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
-      backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+      backgroundUrl: "zen-backgrounds/perspective-dot-plane-dark.webp",
+      backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
       backgroundAnimated: true,
     });
     expect(resolveAppBackground({ ...settings, reducedMotion: true })).toMatchObject({
-      backgroundUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
-      backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+      backgroundUrl: "zen-backgrounds/perspective-dot-plane.jpg",
+      backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
       backgroundAnimated: false,
     });
   });

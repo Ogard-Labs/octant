@@ -513,8 +513,12 @@ export interface ZenBuiltinBackgroundPreset {
   readonly group: "landscape" | "forest" | "wood" | "abstract";
   readonly tone: "dark" | "light";
   readonly motion: "still" | "animated";
-  readonly src: `/zen-backgrounds/${string}`;
-  readonly stillSrc?: `/zen-backgrounds/${string}`;
+  /**
+   * Document-relative: the packaged renderer loads from a `file:` URL, where a
+   * root-absolute path resolves to the filesystem root and the picture never loads.
+   */
+  readonly src: `zen-backgrounds/${string}`;
+  readonly stillSrc?: `zen-backgrounds/${string}`;
 }
 
 export const ZEN_BUILTIN_BACKGROUNDS = [
@@ -524,7 +528,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "landscape",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/nordic-fjord-aurora.jpg",
+    src: "zen-backgrounds/nordic-fjord-aurora.jpg",
   },
   {
     id: "lofoten-night",
@@ -532,7 +536,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "landscape",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/lofoten-night.jpg",
+    src: "zen-backgrounds/lofoten-night.jpg",
   },
   {
     id: "aurora-crimson-ridge",
@@ -540,7 +544,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "landscape",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/aurora-crimson-ridge.jpg",
+    src: "zen-backgrounds/aurora-crimson-ridge.jpg",
   },
   {
     id: "rain-black-valley",
@@ -548,7 +552,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "forest",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/rain-black-valley.jpg",
+    src: "zen-backgrounds/rain-black-valley.jpg",
   },
   {
     id: "spruce-wall-dusk",
@@ -556,7 +560,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "forest",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/spruce-wall-dusk.jpg",
+    src: "zen-backgrounds/spruce-wall-dusk.jpg",
   },
   {
     id: "weathered-ash-planks",
@@ -564,7 +568,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "wood",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/weathered-ash-planks.jpg",
+    src: "zen-backgrounds/weathered-ash-planks.jpg",
   },
   {
     id: "near-black-oak-planks",
@@ -572,7 +576,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "wood",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/near-black-oak-planks.jpg",
+    src: "zen-backgrounds/near-black-oak-planks.jpg",
   },
   {
     id: "warm-walnut-planks",
@@ -580,7 +584,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "wood",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/warm-walnut-planks.jpg",
+    src: "zen-backgrounds/warm-walnut-planks.jpg",
   },
   {
     id: "perspective-dot-plane",
@@ -588,7 +592,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/perspective-dot-plane.jpg",
+    src: "zen-backgrounds/perspective-dot-plane.jpg",
   },
   {
     id: "perspective-dot-plane-light",
@@ -596,7 +600,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "light",
     motion: "still",
-    src: "/zen-backgrounds/perspective-dot-plane-light.jpg",
+    src: "zen-backgrounds/perspective-dot-plane-light.jpg",
   },
   {
     id: "waving-dot-field",
@@ -604,7 +608,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/waving-dot-field.jpg",
+    src: "zen-backgrounds/waving-dot-field.jpg",
   },
   {
     id: "waving-dot-field-light",
@@ -612,7 +616,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "light",
     motion: "still",
-    src: "/zen-backgrounds/waving-dot-field-light.jpg",
+    src: "zen-backgrounds/waving-dot-field-light.jpg",
   },
   {
     id: "curling-dash-wave",
@@ -620,7 +624,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "dark",
     motion: "still",
-    src: "/zen-backgrounds/curling-dash-wave.jpg",
+    src: "zen-backgrounds/curling-dash-wave.jpg",
   },
   {
     id: "curling-dash-wave-light",
@@ -628,7 +632,7 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "light",
     motion: "still",
-    src: "/zen-backgrounds/curling-dash-wave-light.jpg",
+    src: "zen-backgrounds/curling-dash-wave-light.jpg",
   },
   {
     id: "perspective-dot-plane-animated",
@@ -636,8 +640,8 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "dark",
     motion: "animated",
-    src: "/zen-backgrounds/perspective-dot-plane-dark.webp",
-    stillSrc: "/zen-backgrounds/perspective-dot-plane.jpg",
+    src: "zen-backgrounds/perspective-dot-plane-dark.webp",
+    stillSrc: "zen-backgrounds/perspective-dot-plane.jpg",
   },
   {
     id: "perspective-dot-plane-light-animated",
@@ -645,8 +649,8 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "light",
     motion: "animated",
-    src: "/zen-backgrounds/perspective-dot-plane-light.webp",
-    stillSrc: "/zen-backgrounds/perspective-dot-plane-light.jpg",
+    src: "zen-backgrounds/perspective-dot-plane-light.webp",
+    stillSrc: "zen-backgrounds/perspective-dot-plane-light.jpg",
   },
   {
     id: "waving-dot-field-animated",
@@ -654,8 +658,8 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "dark",
     motion: "animated",
-    src: "/zen-backgrounds/waving-dot-field-dark.webp",
-    stillSrc: "/zen-backgrounds/waving-dot-field.jpg",
+    src: "zen-backgrounds/waving-dot-field-dark.webp",
+    stillSrc: "zen-backgrounds/waving-dot-field.jpg",
   },
   {
     id: "waving-dot-field-light-animated",
@@ -663,8 +667,8 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "light",
     motion: "animated",
-    src: "/zen-backgrounds/waving-dot-field-light.webp",
-    stillSrc: "/zen-backgrounds/waving-dot-field-light.jpg",
+    src: "zen-backgrounds/waving-dot-field-light.webp",
+    stillSrc: "zen-backgrounds/waving-dot-field-light.jpg",
   },
   {
     id: "curling-dash-wave-animated",
@@ -672,8 +676,8 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "dark",
     motion: "animated",
-    src: "/zen-backgrounds/curling-dash-wave-dark.webp",
-    stillSrc: "/zen-backgrounds/curling-dash-wave.jpg",
+    src: "zen-backgrounds/curling-dash-wave-dark.webp",
+    stillSrc: "zen-backgrounds/curling-dash-wave.jpg",
   },
   {
     id: "curling-dash-wave-light-animated",
@@ -681,8 +685,8 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
     group: "abstract",
     tone: "light",
     motion: "animated",
-    src: "/zen-backgrounds/curling-dash-wave-light.webp",
-    stillSrc: "/zen-backgrounds/curling-dash-wave-light.jpg",
+    src: "zen-backgrounds/curling-dash-wave-light.webp",
+    stillSrc: "zen-backgrounds/curling-dash-wave-light.jpg",
   },
 ] as const satisfies ReadonlyArray<ZenBuiltinBackgroundPreset>;
 
