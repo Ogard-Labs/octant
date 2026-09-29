@@ -1435,7 +1435,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     onCancelResume={cancelUsageResume}
                     onScheduleResume={scheduleUsageResume}
                     providerGroups={props.providerGroups ?? []}
-                    resumable={String(row.head.turnId) === String(turns.at(-1)?.turnId)}
+                    resumable={
+                      String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
+                      row.head.status === "waiting"
+                    }
                     {...(thread?.snooze === undefined
                       ? { onSnoozeAtReset: snoozeAtUsageReset }
                       : {})}
@@ -1460,7 +1463,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   onRestorePrompt={composerDraft.setDraft}
                   onScheduleResume={scheduleUsageResume}
                   providerGroups={props.providerGroups ?? []}
-                  resumable={String(row.turn.turnId) === String(turns.at(-1)?.turnId)}
+                  resumable={
+                    String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
+                    row.turn.status === "waiting"
+                  }
                   {...(thread?.snooze === undefined ? { onSnoozeAtReset: snoozeAtUsageReset } : {})}
                   turn={row.turn}
                   {...(thread?.usageResume === undefined ||
