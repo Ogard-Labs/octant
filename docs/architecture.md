@@ -1017,7 +1017,7 @@ release. Settings shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
 honestly when they disagree. See
-[decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
+[decisions/0161-managed-npm-device-tools-share-one-release-channel.md](decisions/0161-managed-npm-device-tools-share-one-release-channel.md).
 
 ### Plugin boundaries and remaining extraction
 
