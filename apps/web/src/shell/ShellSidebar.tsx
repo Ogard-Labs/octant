@@ -254,6 +254,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
               : {
                   more: (
                     <SidebarMore
+                      {...(props.activeDestination === undefined
+                        ? {}
+                        : { activeDestination: props.activeDestination })}
                       items={moreActions}
                       onCustomizeSidebar={() =>
                         props.onOpenSettings({
