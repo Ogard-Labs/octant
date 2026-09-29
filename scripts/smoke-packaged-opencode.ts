@@ -343,7 +343,12 @@ async function processIdentities(): Promise<ReadonlyArray<ProcessIdentity>> {
  */
 async function resolveOpenCodeBinary(): Promise<string> {
   for (const name of ["opencode", "opencode2"]) {
-    const output = (await runCommand("/usr/bin/which", [name], process.env)).trim();
+    let output: string;
+    try {
+      output = (await runCommand("/usr/bin/which", [name], process.env)).trim();
+    } catch {
+      continue;
+    }
     if (!output.startsWith("/")) continue;
     try {
       await access(output, constants.X_OK);
