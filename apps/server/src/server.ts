@@ -2141,6 +2141,7 @@ export function startOctantServer(
       readonly windowId: string;
       readonly parentThreadId: string;
       readonly mode: OctantMode;
+      readonly projectId?: ProjectId;
     }): AppManagedToolSet =>
       createAgentsManagedTools({
         admission: agentRunAdmission,
@@ -2149,20 +2150,37 @@ export function startOctantServer(
         mode: input.mode,
         windowId: input.windowId,
         parentThreadId: input.parentThreadId,
-        listTargets: () =>
-          persistence.readProviderInstances().flatMap((instance) => {
+        listTargets: () => {
+          // A Code Project's provider policy binds delegate targets too: the
+          // same list the tool advertises is the one explicit targets are
+          // revalidated against, so filtering here guards both.
+          const project =
+            input.projectId === undefined ? undefined : persistence.readProject(input.projectId);
+          return persistence.readProviderInstances().flatMap((instance) => {
             if (!instance.enabled) return [];
             const observed = providerRuntimeRegistry.observedState(instance.id);
             if (observed?.readiness !== "ready") return [];
+            const models =
+              project === undefined || project.type !== "code"
+                ? observed.models
+                : observed.models.filter((model) =>
+                    isCodeProviderModelAllowed({
+                      projectId: project.id,
+                      providerInstanceId: instance.id,
+                      modelId: model.id,
+                    }),
+                  );
+            if (models.length === 0) return [];
             return [
               {
                 providerInstanceId: String(instance.id),
                 displayName: instance.displayName,
                 driverKind: String(instance.driverKind),
-                modelIds: observed.models.map((model) => String(model.id)),
+                modelIds: models.map((model) => String(model.id)),
               },
             ];
-          }),
+          });
+        },
         isTainted: () =>
           readThreadExternalContentTaint(persistence.connection, input.parentThreadId)
             .externalContentIngested,
@@ -4123,6 +4141,7 @@ export function startOctantServer(
             windowId: String(input.windowId),
             parentThreadId: String(input.thread.id),
             mode: "code",
+            projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
         nativeHarness: nativeHarnessHooks,
@@ -5513,56 +5532,61 @@ export function startOctantServer(
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
       resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
-        taintAppManagedToolResults({
-          tools: combineAppManagedToolSets(
-            nativeHarnessComposition?.forChat({ thread, windowId }),
-            zenAssistantTools?.forThread(windowId, thread),
-            sideChatFileTools(windowId, thread.id),
-            threadDialogueService?.forThread({
-              windowId,
-              sourceThreadId: thread.id,
-              sourceTitle: thread.title,
-              targetThreadIds: threadMentionIds ?? [],
-              ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
-            }),
-            canvasAgentToolPort === undefined
-              ? undefined
-              : createCanvasAgentTools({
-                  windowId,
-                  thread,
-                  port: canvasAgentToolPort,
-                }),
-            createImageAgentTools({
-              threadKind: "chat-thread",
-              scopeId: decodeImageGenerationScopeId(String(thread.id)),
-              port: {
-                listInstances: () => persistence.readProviderInstances(),
-                readImageGenerationCustomSources: () =>
-                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                    .imageGeneration.customSources,
-                enqueue: (input) => imageJobService.enqueue(input),
-                listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-              },
-            }),
-            createSideTaskTools({
-              store: sideTasks,
-              threadId: String(thread.id),
-              mode: "chat",
-              projectId: thread.projectId,
-              suggestedBy: thread,
-              uuid: randomUUID,
-              clock: () => new Date().toISOString(),
-            }),
-            agentsManagedToolsFor({
-              windowId,
-              parentThreadId: String(thread.id),
-              mode: "chat",
-            }),
-          ),
-          threadId: thread.id,
-          recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-          uuid: randomUUID,
-        }),
+        combineAppManagedToolSets(
+          taintAppManagedToolResults({
+            tools: combineAppManagedToolSets(
+              nativeHarnessComposition?.forChat({ thread, windowId }),
+              zenAssistantTools?.forThread(windowId, thread),
+              sideChatFileTools(windowId, thread.id),
+              threadDialogueService?.forThread({
+                windowId,
+                sourceThreadId: thread.id,
+                sourceTitle: thread.title,
+                targetThreadIds: threadMentionIds ?? [],
+                ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+              }),
+              canvasAgentToolPort === undefined
+                ? undefined
+                : createCanvasAgentTools({
+                    windowId,
+                    thread,
+                    port: canvasAgentToolPort,
+                  }),
+              createImageAgentTools({
+                threadKind: "chat-thread",
+                scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                port: {
+                  listInstances: () => persistence.readProviderInstances(),
+                  readImageGenerationCustomSources: () =>
+                    (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                      .imageGeneration.customSources,
+                  enqueue: (input) => imageJobService.enqueue(input),
+                  listJobs: (scopeId) => imageJobService.listByScope(scopeId),
+                },
+              }),
+              createSideTaskTools({
+                store: sideTasks,
+                threadId: String(thread.id),
+                mode: "chat",
+                projectId: thread.projectId,
+                suggestedBy: thread,
+                uuid: randomUUID,
+                clock: () => new Date().toISOString(),
+              }),
+            ),
+            threadId: thread.id,
+            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+            uuid: randomUUID,
+          }),
+          // Host-internal: its results are Octant's own answers, not external
+          // content, and `delegate` itself refuses while the thread is tainted.
+          agentsManagedToolsFor({
+            windowId,
+            parentThreadId: String(thread.id),
+            mode: "chat",
+            ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+          }),
+        ),
       resolveExtensionSelectionContext: createExtensionChatResolver({
         snapshot: () => extensionApiService.snapshot(),
         resolveEffectiveState: (snapshot, query) =>
@@ -5963,6 +5987,7 @@ export function startOctantServer(
               windowId: input.windowId,
               parentThreadId: String(input.thread.id),
               mode: "work",
+              projectId: input.thread.projectId,
             });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,

@@ -208,15 +208,16 @@ function isTerminal(status: AgentRunLifecycleStatus): boolean {
 
 async function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new Error("aborted"));
-      },
-      { once: true },
-    );
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("aborted"));
+    };
+    timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
