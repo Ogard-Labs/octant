@@ -1213,8 +1213,12 @@ describe("AppleToolchainService lifecycle", () => {
       let attempt = 0;
       let capturePath = "";
       let releaseRetry!: () => void;
+      let markRetryWritten!: () => void;
       const retryHeld = new Promise<void>((resolve) => {
         releaseRetry = resolve;
+      });
+      const retryWritten = new Promise<void>((resolve) => {
+        markRetryWritten = resolve;
       });
       execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
         attempt += 1;
@@ -1223,6 +1227,7 @@ describe("AppleToolchainService lifecycle", () => {
           return { ...processResult(""), termination: "timed-out" as const, exitCode: null };
         }
         await writeFile(capturePath, png);
+        markRetryWritten();
         await retryHeld;
         return processResult("");
       });
@@ -1232,6 +1237,10 @@ describe("AppleToolchainService lifecycle", () => {
       // The same action is asked for again and is still capturing a minute later.
       const retried = service.execute(request, context);
       await vi.waitFor(() => expect(attempt).toBe(2));
+      // The mock's counter lands before its write settles, so waiting on the
+      // attempt alone lets the return visit run ahead of the retried capture's
+      // file — on a busy host the file check below then sees nothing.
+      await retryWritten;
       await vi.advanceTimersByTimeAsync(61_000);
       // A removal runs off the event loop; give it real time to have happened.
       vi.useRealTimers();
