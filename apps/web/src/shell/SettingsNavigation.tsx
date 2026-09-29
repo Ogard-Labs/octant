@@ -23,6 +23,7 @@ import {
   UserRound,
   type LucideIcon,
 } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export type { SettingsSectionId } from "@octant/contracts";
@@ -87,9 +88,18 @@ const SETTINGS_NAVIGATION_META: Readonly<
  * styling can identify it.
  */
 export function SettingsNavigation({ sections, activeSection, onSelect }: SettingsNavigationProps) {
+  const navigation = useRef<HTMLElement>(null);
+  // A section at the end of the list (Usage, opened from the account menu)
+  // otherwise opens with its highlighted row below the fold, leaving the
+  // nearest visible row to read as the current page.
+  useEffect(() => {
+    navigation.current
+      ?.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [activeSection]);
   if (sections.length === 0) return null;
   return (
-    <nav aria-label="Settings sections" className="settings-navigation">
+    <nav aria-label="Settings sections" className="settings-navigation" ref={navigation}>
       {SETTINGS_GROUPS.map((group) => {
         const groupedSections = sections.filter(
           (section) => SETTINGS_NAVIGATION_META[section.id].group === group,

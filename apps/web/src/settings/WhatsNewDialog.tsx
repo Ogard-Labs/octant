@@ -32,7 +32,11 @@ export function WhatsNewDialog(props: WhatsNewDialogProps) {
       ) : (
         <>
           <p className="whats-new__version">Octant {props.document.version}</p>
-          <pre className="whats-new__body">{props.document.text}</pre>
+          <div className="whats-new__body">
+            {whatsNewParagraphs(props.document.text).map((paragraph, index) => (
+              <p key={index}>{paragraph}</p>
+            ))}
+          </div>
         </>
       )}
       <OctantButton onClick={props.onClose} type="button" variant="secondary">
@@ -40,4 +44,26 @@ export function WhatsNewDialog(props: WhatsNewDialogProps) {
       </OctantButton>
     </OctantDialog>
   );
+}
+
+/**
+ * The bundled notes are plain text wrapped at a fixed column, so rendering
+ * them preformatted broke sentences mid-line ("Updates are signed,\nand").
+ * Blank lines separate paragraphs; a line starting with a list marker keeps
+ * its own line.
+ */
+export function whatsNewParagraphs(text: string): ReadonlyArray<string> {
+  return text
+    .split(/\n\s*\n/)
+    .map((block) =>
+      block
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .reduce((joined, line) => {
+          if (joined.length === 0) return line;
+          return /^[-*•] /.test(line) ? `${joined}\n${line}` : `${joined} ${line}`;
+        }, ""),
+    )
+    .filter((paragraph) => paragraph.length > 0);
 }
