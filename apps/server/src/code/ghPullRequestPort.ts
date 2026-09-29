@@ -574,7 +574,7 @@ export class GhPullRequestPort {
           "--base",
           request.baseBranch,
           "--head",
-          request.head,
+          target.headBranch,
           "--state",
           "open",
           "--limit",
