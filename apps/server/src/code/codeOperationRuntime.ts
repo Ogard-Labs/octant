@@ -1625,7 +1625,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined || !active.questions.has(input.requestId)) {
-      return turnState("failed");
+      return this.#settleDeadTurnRequest(input.thread, "input", String(input.requestId));
     }
     if (active.harnessQuestions.has(input.requestId)) {
       // A harness question is the host's own; the provider never saw it and
@@ -1754,10 +1754,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (input.decision === "approved") return turnState(active.state);
       return this.#countDeniedApproval(active);
     }
+    if (active === undefined || providerRequestId === undefined)
+      return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
     if (
-      active === undefined ||
       active.connection === undefined ||
-      providerRequestId === undefined ||
       turnPosture === "plan" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence
     )
@@ -1797,6 +1797,81 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           .pipe(Effect.catchAll(() => Effect.void)),
       );
     }
+    return turnState("interrupted");
+  }
+
+  /**
+   * A restart leaves a journaled approval or question parked: the provider
+   * session that would consume its answer died with the process, so the answer
+   * can never be delivered. The attempt settles interrupted — naming the
+   * outcome — instead of holding an undeliverable card forever, and the turn
+   * stays retryable. The live turn's own stream is excluded so an answer that
+   * misses the in-memory map cannot interrupt work that is actually running.
+   */
+  #settleDeadTurnRequest(
+    thread: CodeThread,
+    kind: "approval" | "input",
+    requestId: string,
+  ): { state: ActiveTurn["state"] } {
+    const history = this.#events.historyForThread(thread.id);
+    if (history.status !== "ok") return turnState("failed");
+    const liveOperationId = this.#active.get(String(thread.id))?.operationId;
+    let owner:
+      | {
+          readonly operationId: CodeOperationId;
+          cursor: number;
+          unsettled: boolean;
+        }
+      | undefined;
+    for (const frame of history.frames) {
+      const event = frame.event;
+      if (String(frame.operationId) === String(liveOperationId)) continue;
+      const ownsRequest =
+        (kind === "approval" &&
+          event.kind === "approval-requested" &&
+          String(event.approvalId) === requestId) ||
+        (kind === "input" &&
+          event.kind === "input-requested" &&
+          String(event.requestId) === requestId);
+      if (ownsRequest) {
+        owner = { operationId: frame.operationId, cursor: frame.cursor, unsettled: true };
+        continue;
+      }
+      if (owner === undefined || String(frame.operationId) !== String(owner.operationId)) continue;
+      owner.cursor = frame.cursor;
+      if (event.kind === "operation-state") {
+        owner.unsettled = event.state === "running" || event.state === "waiting";
+      } else if (event.kind === "operation-result" && event.result.kind === "provider-turn-state") {
+        owner.unsettled = event.result.state === "running" || event.result.state === "waiting";
+      }
+    }
+    if (owner === undefined || !owner.unsettled) return turnState("failed");
+    try {
+      this.#events.append({
+        threadId: thread.id,
+        operationId: owner.operationId,
+        expectedCursor: owner.cursor,
+        event: {
+          kind: "operation-state",
+          state: "interrupted",
+          failure: {
+            category: "failed",
+            message:
+              "The provider session that asked ended when Octant stopped. Send a new message to continue.",
+          },
+        },
+      });
+    } catch {
+      return turnState("failed");
+    }
+    this.#observeRuntimeWorkOutcome(
+      this.#runtimeWork.settleOrphaned({
+        id: owner.operationId,
+        threadId: thread.id,
+        kind: "provider-turn",
+        state: "interrupted",
+      }),
+    );
     return turnState("interrupted");
   }
 
