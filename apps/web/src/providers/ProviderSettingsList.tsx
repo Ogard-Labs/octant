@@ -644,7 +644,12 @@ function ProviderRow(props: ProviderRowProps) {
     ((isClaude || isVibe || isGrok || isGlm || isGemini || isCline || isQwen) &&
       props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
-  const setupGuidance = guidance(props.instance, readiness, props.observed);
+  const setupGuidance = guidance(
+    props.instance,
+    readiness,
+    props.onUpdateProviderCli !== undefined && supportsProviderCliUpdate(props.instance.driverKind),
+    props.observed,
+  );
   const hasSetupGuidance =
     detectedButDisabled ||
     usesCredential ||
@@ -1742,6 +1747,7 @@ function authenticationGuidance(instance: ProviderInstance): string {
 function guidance(
   instance: ProviderInstance,
   readiness: ProviderObservedState["readiness"] | undefined,
+  canUpdateCli: boolean,
   observed?: ProviderObservedState,
 ) {
   const driverKind = instance.driverKind;
@@ -1828,7 +1834,9 @@ function guidance(
             ? "Verify the API base URL and endpoint availability, then retry."
             : driverKind === "ollama"
               ? "Start the user-managed Ollama service and verify the loopback API base URL, then retry."
-              : `Verify the binary path and that ${label} can start, or use Update CLI, then check the connection again.`}
+              : canUpdateCli
+                ? `Verify the binary path and that ${label} can start, or use Update CLI, then check the connection again.`
+                : `Verify the binary path and that ${label} can start, then check the connection again.`}
         </p>
       </>
     );
