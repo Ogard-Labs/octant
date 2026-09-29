@@ -76,6 +76,28 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("lays out image-provider create fields over two columns instead of squeezing them into the shared row", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+
+    for (const type of [
+      "openai-image",
+      "gemini-native-image",
+      "bfl-image",
+      "ideogram-image",
+    ] as const) {
+      expect(styles).toMatch(
+        new RegExp(
+          `\\.provider-settings__create--${type}[\\s,][^}]*grid-template-columns:\\s*repeat\\(2, minmax\\(180px, 1fr\\)\\);`,
+        ),
+      );
+      expect(styles).toMatch(
+        new RegExp(
+          `\\.provider-settings__create--${type} \\.settings-view__action[\\s,][^}]*grid-column:\\s*1 / -1;`,
+        ),
+      );
+    }
+  });
+
   it("adds no pane heading of its own and orders discovery, then providers, then defaults", () => {
     renderProviderSettings(
       <ProviderSettingsView {...fixture()} discovery={<section aria-label="Find providers" />} />,

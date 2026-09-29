@@ -2061,6 +2061,24 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   grid-template-columns: repeat(2, minmax(180px, 1fr));
 }
 
+/* Image profiles carry five-plus fields (allowlist, default model, quality,
+   size/ratio, key); the shared four-column row squeezed the key into a ~100px
+   sliver against them, so they take the two-column measure the other wide
+   forms use. */
+.provider-settings__create--openai-image,
+.provider-settings__create--gemini-native-image,
+.provider-settings__create--bfl-image,
+.provider-settings__create--ideogram-image {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.provider-settings__create--openai-image .settings-view__action,
+.provider-settings__create--gemini-native-image .settings-view__action,
+.provider-settings__create--bfl-image .settings-view__action,
+.provider-settings__create--ideogram-image .settings-view__action {
+  grid-column: 1 / -1;
+}
+
 .provider-settings__create--openai-compatible .settings-view__action,
 .provider-settings__create--claude .settings-view__action,
 .provider-settings__models-field,
@@ -3595,6 +3613,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
   .provider-settings__create--openai-compatible .settings-view__action,
   .provider-settings__create--claude .settings-view__action,
+  .provider-settings__create--openai-image .settings-view__action,
+  .provider-settings__create--gemini-native-image .settings-view__action,
+  .provider-settings__create--bfl-image .settings-view__action,
+  .provider-settings__create--ideogram-image .settings-view__action,
   .provider-settings__models-field,
   .provider-settings__field-guidance {
     grid-column: 1;
