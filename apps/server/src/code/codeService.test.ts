@@ -4484,6 +4484,107 @@ describe("scheduling a Code thread's usage-limit resume", () => {
     expect("usageResume" in emitted.thread).toBe(false);
   });
 
+  it("hides the thread until the provider's declared reset without a provider turn", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope({ resetsAt: "2099-01-02T09:00:00.000Z" })],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "snooze-code-thread-at-usage-reset",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: { snooze: { until: "2099-01-02T09:00:00.000Z", origin: "usage-limit" } },
+    });
+  });
+
+  it("keeps an armed resume when the thread hides until the reset", async () => {
+    const fixture = serviceFixture({
+      threads: [
+        thread({
+          usageResume: {
+            record: decodeUsageResumeRecord({
+              threadId: String(ids.thread),
+              turnId: operationId,
+              providerInstanceId: ids.provider,
+              usageLimit: { kind: "exhausted", resetsAt },
+              resetsAt,
+              scheduledAt: now,
+            }),
+            status: "scheduled",
+          },
+        }),
+      ],
+      events: [waitingLimitEnvelope({ resetsAt: "2099-01-02T09:00:00.000Z" })],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "snooze-code-thread-at-usage-reset",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        snooze: { origin: "usage-limit" },
+        usageResume: { status: "scheduled" },
+      },
+    });
+  });
+
+  it("refuses to hide a thread with no usage-limited stop", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue([]);
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-code-thread-at-usage-reset",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to hide a thread when the stopped turn discloses no reset", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope({ resetsAt: undefined })],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-code-thread-at-usage-reset",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to hide a thread whose declared reset has already passed", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      events: [waitingLimitEnvelope({ resetsAt: "2020-01-01T00:00:00.000Z" })],
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(waitingProviderWork());
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-code-thread-at-usage-reset",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("refuses to schedule a resume for a stopped turn that discloses no reset", async () => {
     const fixture = serviceFixture({
       threads: [thread()],

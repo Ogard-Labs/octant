@@ -40,13 +40,37 @@ import {
   type WorkTurnState,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { ChatServiceExecutionContext } from "../chat/chatService";
+import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
 import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
-import type { UsageResumeModePort, UsageResumePorts } from "./usageResumeService";
+import type {
+  UsageResumeModePort,
+  UsageResumePorts,
+  UsageResumeSettledOutcome,
+} from "./usageResumeService";
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+/**
+ * The settle update is the single place the host lifts the shelf mark it
+ * owns: a dispatched resume consumes the snooze that was set against the
+ * limit it just dispatched, and nothing else — a snooze the person set, or
+ * one already lifted, stays untouched.
+ */
+function settledThread<
+  T extends {
+    readonly snooze?: { readonly origin?: "user" | "usage-limit" | undefined } | undefined;
+  },
+>(thread: T, outcome: UsageResumeSettledOutcome): T {
+  if (outcome === "dispatched" && thread.snooze?.origin === "usage-limit") {
+    const { snooze: _spent, ...rest } = thread;
+    return rest as T;
+  }
+  return thread;
+}
 
 /**
  * What the ports need from the host. Every function is a narrow cut of the
@@ -63,12 +87,19 @@ export interface UsageResumePortDependencies {
   readonly chat: {
     readonly readThread: (threadId: ChatThread["id"]) => ChatThread | undefined;
     readonly readThreadView: (threadId: ChatThread["id"]) => ChatThreadView | undefined;
-    readonly execute: (input: unknown) => Promise<unknown>;
+    readonly execute: (
+      input: unknown,
+      executionContext?: ChatServiceExecutionContext,
+    ) => Promise<unknown>;
   };
   readonly work: {
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
-    readonly startFirstTurn: (windowId: WindowId, input: unknown) => Promise<WorkTurnLookupResult>;
+    readonly startFirstTurn: (
+      windowId: WindowId,
+      input: unknown,
+      options?: { readonly limitRecovery?: boolean },
+    ) => Promise<WorkTurnLookupResult>;
     /**
      * The live Work projection is kept in memory rather than rebuilt from a
      * journaled row, so a settle committed by the scheduler has to be folded
@@ -100,6 +131,7 @@ export interface UsageResumePortDependencies {
     readonly executeOperation?: (
       windowId: WindowId,
       command: CodeOperationCommand,
+      options?: CodeOperationExecuteOptions,
     ) => Promise<CodeOperationResult> | CodeOperationResult;
   };
 }
@@ -173,15 +205,18 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         // A limit retry must actually send: `resume-chat-turn` only reattaches
         // the provider session and persists another waiting attempt, while
         // `retry-chat-turn` is the admission path that runs a new attempt.
-        await deps.chat.execute({
-          kind: "retry-chat-turn",
-          threadId,
-          expectedVersion: decodeAggregateVersion(
-            readAggregateVersion(deps.connection, "chat-thread", String(threadId)),
-          ),
-          turnId: decodeChatTurnId(record.turnId),
-          attemptId: decodeChatAttemptId(attemptId),
-        });
+        await deps.chat.execute(
+          {
+            kind: "retry-chat-turn",
+            threadId,
+            expectedVersion: decodeAggregateVersion(
+              readAggregateVersion(deps.connection, "chat-thread", String(threadId)),
+            ),
+            turnId: decodeChatTurnId(record.turnId),
+            attemptId: decodeChatAttemptId(attemptId),
+          },
+          { limitRecovery: true },
+        );
         return { kind: "dispatched" };
       } catch (error) {
         return refused(refusalDetail(error));
@@ -190,12 +225,13 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
     settleUpdate: (record, outcome, detail, nextVersion) => {
       const thread = deps.chat.readThread(decodeChatThreadId(record.threadId));
       if (thread === undefined) return undefined;
+      const next = settledThread(thread, outcome);
       return {
         eventName: "chat.thread-updated@1",
         payload: {
           kind: "thread-updated",
           thread: decodeChatThread({
-            ...thread,
+            ...next,
             usageResume: {
               record,
               status: outcome,
@@ -255,25 +291,29 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         return refused("The thread's recorded stop is unavailable.");
       }
       try {
-        const result = await deps.work.startFirstTurn(windowId, {
-          kind: "start-work-thread-turn",
-          requestId: decodeWorkTurnRequestId(deps.uuid()),
-          threadId: thread.id,
-          turnId: decodeWorkTurnId(deps.uuid()),
-          prompt: turn.prompt,
-          ...(turn.extensionSelections === undefined
-            ? {}
-            : { extensionSelections: turn.extensionSelections }),
-          authority: {
-            hostId: LOCAL_HOST_ID,
-            projectId: thread.projectId,
-            bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: ".",
-            confinementPosture: "project-root-confined",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
+        const result = await deps.work.startFirstTurn(
+          windowId,
+          {
+            kind: "start-work-thread-turn",
+            requestId: decodeWorkTurnRequestId(deps.uuid()),
+            threadId: thread.id,
+            turnId: decodeWorkTurnId(deps.uuid()),
+            prompt: turn.prompt,
+            ...(turn.extensionSelections === undefined
+              ? {}
+              : { extensionSelections: turn.extensionSelections }),
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: ".",
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
           },
-        });
+          { limitRecovery: true },
+        );
         return result.kind === "accepted"
           ? { kind: "dispatched" }
           : refused("message" in result ? result.message : "The continuation was not admitted.");
@@ -284,12 +324,13 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
     settleUpdate: (record, outcome, detail, nextVersion) => {
       const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
       if (thread === undefined) return undefined;
+      const next = settledThread(thread, outcome);
       return {
         eventName: "work.thread-updated@1",
         payload: {
           kind: "thread-updated",
           thread: decodeWorkThread({
-            ...thread,
+            ...next,
             usageResume: {
               record,
               status: outcome,
@@ -428,14 +469,18 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
           return refused("The recorded stop's preserved prompt is unavailable.");
         }
         const prompt = await deps.code.stageEvidence(windowId, threadId, text);
-        const result = await deps.code.executeOperation(windowId, {
-          kind: "start-provider-turn",
-          operationId: decodeCodeOperationId(deps.uuid()),
-          threadId: thread.id,
-          checkoutId: thread.checkoutId,
-          sessionId: decodeProviderSessionId(deps.uuid()),
-          prompt,
-        });
+        const result = await deps.code.executeOperation(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(deps.uuid()),
+            threadId: thread.id,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(deps.uuid()),
+            prompt,
+          },
+          { limitRecovery: true },
+        );
         return result.kind === "provider-turn-state" &&
           (result.state === "running" || result.state === "waiting" || result.state === "completed")
           ? { kind: "dispatched" }
@@ -451,12 +496,13 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
     settleUpdate: (record, outcome, detail, nextVersion) => {
       const thread = deps.code.readThread(decodeCodeThreadId(record.threadId));
       if (thread === undefined) return undefined;
+      const next = settledThread(thread, outcome);
       return {
         eventName: "code.thread-updated@1",
         payload: {
           kind: "thread-updated",
           thread: decodeCodeThread({
-            ...thread,
+            ...next,
             usageResume: {
               record,
               status: outcome,
