@@ -1169,6 +1169,11 @@ mechanisms are:
   the session's stale-app teardown — recorded with each measurement in
   [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
   No other Apple launch receives any of them.
+  Apple builds prepare a private derived-data directory per action and grant
+  writes to that directory only for its `xcodebuild` phases. Run installation
+  reads its product from the same directory without write access; XCTest
+  results also land inside it. Simulator captures remain isolated in their own
+  private directory and are writable only by the capture launch.
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use

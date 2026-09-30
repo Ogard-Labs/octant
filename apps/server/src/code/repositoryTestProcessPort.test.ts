@@ -236,6 +236,39 @@ describe("RepositoryTestProcessPort", () => {
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });
 
+  it("reads an action-owned build directory without writing it or opening sibling artifacts", async () => {
+    const child = fakeChild(97);
+    const spawn = vi.fn(() => child);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const artifactRoot = join(fake.root, "artifacts");
+    const derivedRoot = join(artifactRoot, "derived-action");
+    mkdirSync(derivedRoot, { recursive: true });
+    const port = new RepositoryTestProcessPort({
+      platform: "darwin",
+      sandboxPath: fake.sandboxPath,
+      temporaryDirectory: fake.temporaryDirectory,
+      seatbeltHomeDirectory: fake.root,
+      seatbeltUsersDirectory: fake.root,
+      spawn,
+      networkEgress: "none",
+    });
+    const execution = port.execute({
+      argv: ["/usr/bin/true"],
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+      additionalReadRoots: [derivedRoot],
+    });
+    const firstCall = spawn.mock.calls[0] as unknown as [string, string[], unknown?];
+    const profile = String(firstCall[1][1]);
+    expect(profile).toContain(`(allow file-read* (subpath "${derivedRoot}"))`);
+    expect(profile).not.toContain(`(allow file-read* (subpath "${artifactRoot}"))`);
+    expect(profile).not.toContain(`(allow file-write* (subpath "${derivedRoot}"))`);
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
   it("lets a confined child read and write a store directory beneath the denied private home", async () => {
     const child = fakeChild(96);
     const spawn = vi.fn(() => child);

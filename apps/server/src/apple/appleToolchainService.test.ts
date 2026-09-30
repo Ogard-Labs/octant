@@ -7,11 +7,14 @@ import type {
   ToolActionAuthority,
   ToolActionCancellation,
 } from "@octant/contracts";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const artifactFixture = mkdtempSync(join(tmpdir(), "octant-apple-build-"));
+afterAll(() => rmSync(artifactFixture, { recursive: true, force: true }));
 
 type ServiceConstructor = new (options: Record<string, unknown>) => {
   discover(request: AppleDiscoveryRequest, context: ExecutionContext): Promise<any>;
@@ -93,7 +96,7 @@ const context: ExecutionContext = {
   threadId: ids.thread,
   checkoutId: ids.checkout,
   checkoutRoot: "/private/octant-fixture",
-  artifactRoot: "/private/octant-artifacts",
+  artifactRoot: join(artifactFixture, "artifacts"),
   sourceRevision: "a".repeat(40),
   executionPolicy: "full-access",
   approvalValid: true,
@@ -168,6 +171,8 @@ function discoveryExecutor() {
       readonly allowPseudoTty?: boolean;
       readonly allowJobCreation?: boolean;
       readonly allowSignal?: boolean;
+      readonly additionalReadRoots?: ReadonlyArray<string>;
+      readonly additionalWriteRoots?: ReadonlyArray<string>;
     }) => {
       const command = input.argv.join(" ");
       if (command === "xcode-select -p") {
@@ -380,8 +385,11 @@ describe("AppleToolchainService lifecycle", () => {
           JSON.stringify([
             {
               buildSettings: {
-                TARGET_BUILD_DIR:
-                  "/private/octant-artifacts/DerivedData/Build/Products/Debug-iphonesimulator",
+                TARGET_BUILD_DIR: join(
+                  context.artifactRoot,
+                  `derived-${ids.action}`,
+                  "Build/Products/Debug-iphonesimulator",
+                ),
                 WRAPPER_NAME: "Fixture.app",
                 PRODUCT_BUNDLE_IDENTIFIER: "app.octant.fixture",
               },
@@ -426,6 +434,20 @@ describe("AppleToolchainService lifecycle", () => {
     expect(execute.mock.calls.map(([input]) => input.argv.join(" ")).join("\n")).toContain(
       `xcrun simctl launch --terminate-running-process ${ids.simulator} app.octant.fixture`,
     );
+    const derivedRoot = join(context.artifactRoot, `derived-${ids.action}`);
+    expect(existsSync(derivedRoot)).toBe(true);
+    const buildLaunches = execute.mock.calls.filter(([input]) =>
+      input.argv.includes("-derivedDataPath"),
+    );
+    expect(buildLaunches).toHaveLength(2);
+    for (const [input] of buildLaunches) {
+      expect(input.additionalWriteRoots).toEqual([derivedRoot]);
+    }
+    const installLaunch = execute.mock.calls.find(([input]) =>
+      input.argv.join(" ").startsWith("xcrun simctl install "),
+    )?.[0];
+    expect(installLaunch?.additionalReadRoots).toEqual([derivedRoot]);
+    expect(installLaunch?.additionalWriteRoots).toBeUndefined();
     expect(service.snapshot(context).recentEvidence).toContainEqual(evidence);
     expect(service.snapshot(context).active).toEqual([]);
     expect(writeArtifact).toHaveBeenCalled();
@@ -499,7 +521,16 @@ describe("AppleToolchainService lifecycle", () => {
     expect(testLaunch?.allowPseudoTty).toBe(true);
     expect(testLaunch?.allowJobCreation).toBe(true);
     expect(testLaunch?.allowSignal).toBe(true);
+    expect(testLaunch?.additionalWriteRoots).toEqual([
+      join(context.artifactRoot, `derived-${ids.action}`),
+    ]);
+    expect(testLaunch?.argv).toContain(
+      join(context.artifactRoot, `derived-${ids.action}`, "results.xcresult"),
+    );
     for (const ungranted of [launchFor("build-for-testing"), launchFor("build")]) {
+      expect(ungranted?.additionalWriteRoots).toEqual([
+        join(context.artifactRoot, `derived-${ids.action}`),
+      ]);
       expect(ungranted?.literalReadPaths).toBeUndefined();
       expect(ungranted?.literalMetadataPaths).toBeUndefined();
       expect(ungranted?.regexReadWritePaths).toBeUndefined();
