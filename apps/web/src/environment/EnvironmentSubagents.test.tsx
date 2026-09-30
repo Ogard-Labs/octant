@@ -25,6 +25,7 @@ function environmentClient(
     steer: unusedClientMethod,
     retry: unusedClientMethod,
     resume: unusedClientMethod,
+    usageResume: unusedClientMethod,
     snapshotCanvas: unusedClientMethod,
   };
 }

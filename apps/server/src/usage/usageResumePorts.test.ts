@@ -13,6 +13,7 @@ import {
   decodeWindowId,
   decodeWorkThread,
   decodeWorkTurnState,
+  type AgentRun,
   type EventEnvelope,
   type UsageResumeRecord,
   type UtcTimestamp,
@@ -37,6 +38,7 @@ const ids = {
   provider: "83000000-0000-4000-8000-00000000000a",
   request: "83000000-0000-4000-8000-00000000000b",
   correlation: "83000000-0000-4000-8000-00000000000c",
+  run: "83000000-0000-4000-8000-000000000010",
 };
 
 let directories: Array<string> = [];
@@ -214,6 +216,7 @@ function dependencies(
     readonly chat?: UsageResumePortDependencies["chat"];
     readonly work?: UsageResumePortDependencies["work"];
     readonly code?: UsageResumePortDependencies["code"];
+    readonly agentRun?: UsageResumePortDependencies["agentRun"];
   } = {},
 ): UsageResumePortDependencies {
   return {
@@ -238,6 +241,11 @@ function dependencies(
     code: overrides.code ?? {
       readThread: () => undefined,
       readRuntimeWorks: () => [],
+    },
+    agentRun: overrides.agentRun ?? {
+      readRun: () => undefined,
+      liveAuthority: () => undefined,
+      resume: () => ({ kind: "run-command-failed", reason: "invalid", message: "invalid" }),
     },
   };
 }
@@ -379,5 +387,119 @@ describe("usage-resume ports", () => {
     if (update === undefined) throw new Error("Expected the settle update.");
     const thread = (update.payload as { thread: { snooze?: unknown } }).thread;
     expect(thread.snooze).toMatchObject({ origin: "usage-limit" });
+  });
+
+  function runRecord(): UsageResumeRecord {
+    const { attemptId: _attempt, ...rest } = record();
+    return { ...rest, threadId: ids.run, turnId: ids.run };
+  }
+
+  function run(overrides: Record<string, unknown> = {}): AgentRun {
+    return {
+      id: ids.run,
+      parentThreadId: ids.thread,
+      lifecycleStatus: "waiting",
+      usageLimit: { kind: "exhausted", resetsAt: RESET },
+      usageResume: { record: runRecord(), status: "scheduled" },
+      routingReceipt: {
+        selectedProviderInstanceId: ids.provider,
+        selectedModelId: "gpt-4o",
+      },
+      version: 5,
+      ...overrides,
+    } as AgentRun;
+  }
+
+  it("reports a limited child run ready only while every journaled premise holds", async () => {
+    const ports = createUsageResumePorts(
+      dependencies({
+        agentRun: {
+          readRun: () => run(),
+          liveAuthority: () => ({}) as never,
+          resume: () => ({ kind: "run-updated", run: run() }) as never,
+        },
+      }),
+    );
+
+    expect(await ports.agentRun.inspect(runRecord())).toEqual({ kind: "ready" });
+    const premises: ReadonlyArray<Record<string, unknown>> = [
+      { lifecycleStatus: "cancelled" },
+      { usageLimit: undefined },
+      { usageLimit: { kind: "exhausted", resetsAt: "2026-07-19T14:00:00.000Z" } },
+      {
+        routingReceipt: {
+          selectedProviderInstanceId: "83000000-0000-4000-8000-00000000000d",
+          selectedModelId: "gpt-4o",
+        },
+      },
+      { usageResume: undefined },
+    ];
+    for (const premise of premises) {
+      const narrow = createUsageResumePorts(
+        dependencies({
+          agentRun: {
+            readRun: () => run(premise),
+            liveAuthority: () => ({}) as never,
+            resume: () => ({ kind: "run-updated", run: run() }) as never,
+          },
+        }),
+      );
+      expect((await narrow.agentRun.inspect(runRecord())).kind).toBe("invalid");
+    }
+  });
+
+  it("resumes a limited child through the ordinary start path with the live grant", async () => {
+    const authority = { executionPolicy: "plan" } as never;
+    const resume = vi.fn(() => ({ kind: "run-updated", run: run() }) as never);
+    const ports = createUsageResumePorts(
+      dependencies({
+        agentRun: {
+          readRun: () => run(),
+          liveAuthority: () => authority,
+          resume,
+        },
+      }),
+    );
+
+    const result = await ports.agentRun.dispatch(runRecord());
+    expect(result).toEqual({ kind: "dispatched" });
+    expect(resume).toHaveBeenCalledWith(ids.run, 5, authority);
+  });
+
+  it("refuses to resume a child whose parent grant no longer exists", async () => {
+    const ports = createUsageResumePorts(
+      dependencies({
+        agentRun: {
+          readRun: () => run(),
+          liveAuthority: () => undefined,
+          resume: () => ({ kind: "run-updated", run: run() }) as never,
+        },
+      }),
+    );
+
+    const result = await ports.agentRun.dispatch(runRecord());
+    expect(result.kind).toBe("refused");
+    if (result.kind === "refused") {
+      expect(result.detail).toMatch(/parent thread grant/);
+    }
+  });
+
+  it("folds a journaled settle back into the run projection", () => {
+    const applySettled = vi.fn();
+    const ports = createUsageResumePorts(
+      dependencies({
+        agentRun: {
+          readRun: () => run(),
+          liveAuthority: () => undefined,
+          resume: () =>
+            ({ kind: "run-command-failed", reason: "invalid", message: "invalid" }) as never,
+          applySettled,
+        },
+      }),
+    );
+
+    const settled = { resume: runRecord(), outcome: "dispatched" as const };
+    ports.agentRun.settleApplied?.(settled, undefined);
+    expect(applySettled).toHaveBeenCalledWith(settled);
   });
 });

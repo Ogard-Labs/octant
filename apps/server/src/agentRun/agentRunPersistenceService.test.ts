@@ -12,6 +12,12 @@ import {
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  USAGE_RESUME_SETTLED,
+  UsageResumeCancelled,
+  UsageResumeScheduled,
+  UsageResumeSettled,
   type AgentRunAuthority,
   type AgentRunCommand,
   type AgentRunRoutingReceipt,
@@ -226,7 +232,10 @@ function createHarness(connection = openConnection()) {
   const registry = new EventRegistry()
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
-    .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged);
+    .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
+    .register(USAGE_RESUME_SCHEDULED, 1, UsageResumeScheduled)
+    .register(USAGE_RESUME_CANCELLED, 1, UsageResumeCancelled)
+    .register(USAGE_RESUME_SETTLED, 1, UsageResumeSettled);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({
     connection,
@@ -865,5 +874,309 @@ describe("AgentRunPersistenceService", () => {
         ? preserved.routingReceipt.poolRoute.decision.message
         : undefined,
     ).toBe(poolWaitingMessage);
+  });
+
+  it("carries a journaled usage limit on the waiting run, its summary row, and replay", () => {
+    const harness = createHarness();
+    const accepted = harness.service.requestRun({
+      command: requestCommand(),
+      parentAuthority,
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    harness.service.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version as never,
+    });
+    const running = harness.service.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    expect(running.kind).toBe("run-updated");
+    if (running.kind !== "run-updated") return;
+
+    const usageLimit = {
+      kind: "exhausted" as const,
+      resetsAt: "2026-08-01T11:00:00.000Z" as never,
+    };
+    const waited = harness.service.applyCommand({
+      kind: "wait-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: running.run.version as never,
+      recoveryReason: "provider-usage-limit",
+      usageLimit,
+    });
+    expect(waited.kind).toBe("run-updated");
+    if (waited.kind !== "run-updated") return;
+    expect(waited.run.lifecycleStatus).toBe("waiting");
+    expect(waited.run.usageLimit).toEqual(usageLimit);
+
+    const entry = harness.service
+      .parentSummary(ids.thread)
+      .find((candidate) => candidate.runId === accepted.run.id);
+    expect(entry?.usageLimit).toEqual(usageLimit);
+
+    const rebuiltProjection = new AgentRunProjection();
+    const rebuilt = new AgentRunPersistenceService({
+      store: harness.store,
+      projection: rebuiltProjection,
+      uuid: () => "abababab-abab-4bab-8bab-abababababab",
+      clock: () => later,
+      connection: harness.connection,
+    });
+    rebuilt.rebuildFromJournal();
+    const replayed = rebuiltProjection.getById(accepted.run.id);
+    expect(replayed?.usageLimit).toEqual(usageLimit);
+    expect(replayed?.lifecycleStatus).toBe("waiting");
+  });
+
+  it("preserves a usage-limit wait across restart instead of interrupting it", () => {
+    const harness = createHarness();
+    const accepted = harness.service.requestRun({
+      command: requestCommand(),
+      parentAuthority,
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    harness.service.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version as never,
+    });
+    harness.service.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const waited = harness.service.applyCommand({
+      kind: "wait-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      recoveryReason: "provider-usage-limit",
+      usageLimit: { kind: "exhausted", resetsAt: "2026-08-01T11:00:00.000Z" as never },
+    });
+    expect(waited.kind).toBe("run-updated");
+
+    const restartedProjection = new AgentRunProjection();
+    const restarted = new AgentRunPersistenceService({
+      store: harness.store,
+      projection: restartedProjection,
+      uuid: () => "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+      clock: () => later,
+      connection: harness.connection,
+    });
+    restarted.rebuildFromJournal();
+    const reconciled = restarted.reconcileAfterRestart();
+
+    // A bounded wait on the provider's declared reset holds no live execution:
+    // restarting must not rewrite it into an interruption.
+    expect(reconciled).toHaveLength(0);
+    const preserved = restartedProjection.getById(accepted.run.id);
+    expect(preserved?.lifecycleStatus).toBe("waiting");
+    expect(preserved?.usageLimit?.resetsAt).toBe("2026-08-01T11:00:00.000Z");
+  });
+
+  function usageLimitedRun(harness: ReturnType<typeof createHarness>) {
+    const accepted = harness.service.requestRun({
+      command: requestCommand(),
+      parentAuthority,
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("run was not accepted");
+    harness.service.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version as never,
+    });
+    harness.service.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const waited = harness.service.applyCommand({
+      kind: "wait-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      recoveryReason: "provider-usage-limit",
+      usageLimit: { kind: "exhausted", resetsAt: "2026-08-01T11:00:00.000Z" as never },
+    });
+    if (waited.kind !== "run-updated") throw new Error("run did not wait");
+    return waited.run;
+  }
+
+  it("arms the person's resume opt-in on the journaled limit facts alone", () => {
+    const harness = createHarness();
+    const run = usageLimitedRun(harness);
+
+    const scheduled = harness.service.applyCommand({
+      kind: "schedule-agent-run-usage-resume",
+      runId: run.id,
+      expectedVersion: run.version as never,
+    });
+    expect(scheduled.kind).toBe("run-updated");
+    if (scheduled.kind !== "run-updated") return;
+    expect(scheduled.run.usageResume?.status).toBe("scheduled");
+    expect(scheduled.run.usageResume?.record).toMatchObject({
+      threadId: String(run.id),
+      providerInstanceId: ids.provider,
+      resetsAt: "2026-08-01T11:00:00.000Z",
+    });
+    // The opt-in append is an event on the run's own aggregate, so the run's
+    // version moved with it — a command against the pre-schedule version must
+    // now stale-conflict rather than write over the armed opt-in.
+    expect(scheduled.run.version).toBe(run.version + 1);
+    expect(
+      harness.service.applyCommand({
+        kind: "cancel-agent-run",
+        runId: run.id,
+        expectedVersion: run.version as never,
+        scope: "self",
+      }),
+    ).toMatchObject({ kind: "run-command-failed", reason: "stale-version" });
+    const summary = harness.service
+      .parentSummary(ids.thread)
+      .find((entry) => entry.runId === run.id);
+    expect(summary?.usageResume?.status).toBe("scheduled");
+  });
+
+  it("refuses to arm a resume the run's journaled facts do not support", () => {
+    const harness = createHarness();
+    const run = usageLimitedRun(harness);
+
+    // Not waiting: a queued run has no limit to recover from.
+    const accepted = harness.service.requestRun({
+      command: {
+        ...requestCommand(),
+        requestId: decodeAgentRunRequestId("22222222-2222-4222-8222-222222222229"),
+      },
+      parentAuthority,
+      confirmed: true,
+    });
+    if (accepted.kind !== "run-accepted") throw new Error("second run was not accepted");
+    expect(
+      harness.service.applyCommand({
+        kind: "schedule-agent-run-usage-resume",
+        runId: accepted.run.id,
+        expectedVersion: accepted.run.version as never,
+      }),
+    ).toMatchObject({ kind: "run-command-failed", reason: "unsupported-transition" });
+
+    // Double-schedule is refused: the opt-in is already armed.
+    harness.service.applyCommand({
+      kind: "schedule-agent-run-usage-resume",
+      runId: run.id,
+      expectedVersion: run.version as never,
+    });
+    const armed = harness.service.getById(run.id);
+    expect(armed?.usageResume?.status).toBe("scheduled");
+    if (armed === undefined) throw new Error("expected the armed run");
+    expect(
+      harness.service.applyCommand({
+        kind: "schedule-agent-run-usage-resume",
+        runId: run.id,
+        expectedVersion: armed.version as never,
+      }),
+    ).toMatchObject({ kind: "run-command-failed", reason: "unsupported-transition" });
+  });
+
+  it("withdraws the opt-in when the person cancels it, leaving no armed state", () => {
+    const harness = createHarness();
+    const run = usageLimitedRun(harness);
+    const scheduled = harness.service.applyCommand({
+      kind: "schedule-agent-run-usage-resume",
+      runId: run.id,
+      expectedVersion: run.version as never,
+    });
+    expect(scheduled.kind).toBe("run-updated");
+    if (scheduled.kind !== "run-updated") return;
+
+    const cancelled = harness.service.applyCommand({
+      kind: "cancel-agent-run-usage-resume",
+      runId: run.id,
+      expectedVersion: scheduled.run.version as never,
+    });
+    expect(cancelled.kind).toBe("run-updated");
+    if (cancelled.kind !== "run-updated") return;
+    expect(cancelled.run.usageResume).toBeUndefined();
+
+    // A second cancel has no opt-in to withdraw.
+    expect(
+      harness.service.applyCommand({
+        kind: "cancel-agent-run-usage-resume",
+        runId: run.id,
+        expectedVersion: cancelled.run.version as never,
+      }),
+    ).toMatchObject({ kind: "run-command-failed", reason: "unsupported-transition" });
+
+    // Replay: withdrawing is journaled, so a rebuilt run reports nothing armed.
+    const rebuiltProjection = new AgentRunProjection();
+    const rebuilt = new AgentRunPersistenceService({
+      store: harness.store,
+      projection: rebuiltProjection,
+      uuid: () => "dededede-dede-4ded-8ded-dedededede01",
+      clock: () => later,
+      connection: harness.connection,
+    });
+    rebuilt.rebuildFromJournal();
+    expect(rebuiltProjection.getById(run.id)?.usageResume).toBeUndefined();
+  });
+
+  it("replays an armed opt-in and folds a journaled settle back into the run", () => {
+    const harness = createHarness();
+    const run = usageLimitedRun(harness);
+    const scheduled = harness.service.applyCommand({
+      kind: "schedule-agent-run-usage-resume",
+      runId: run.id,
+      expectedVersion: run.version as never,
+    });
+    expect(scheduled.kind).toBe("run-updated");
+    if (scheduled.kind !== "run-updated") return;
+
+    // A restart rebuilds the armed opt-in from the run's own aggregate events.
+    const restartedProjection = new AgentRunProjection();
+    const restarted = new AgentRunPersistenceService({
+      store: harness.store,
+      projection: restartedProjection,
+      uuid: () => "efefefef-efef-4fef-8fef-efefefefef01",
+      clock: () => later,
+      connection: harness.connection,
+    });
+    restarted.rebuildFromJournal();
+    const replayed = restartedProjection.getById(run.id);
+    expect(replayed?.usageResume?.status).toBe("scheduled");
+    expect(replayed?.usageResume?.record.resetsAt).toBe("2026-08-01T11:00:00.000Z");
+    expect(replayed?.version).toBe(scheduled.run.version);
+
+    // The scheduler settles straight to the journal; the fold lands the
+    // outcome on the run rather than leaving it reporting `scheduled`.
+    const record = replayed?.usageResume?.record;
+    if (record === undefined) throw new Error("expected the armed record");
+    harness.journal.append({
+      aggregate: { aggregateType: "agent-run", aggregateId: String(run.id) },
+      expectedVersion: scheduled.run.version,
+      events: [
+        {
+          eventId: "12121212-1212-4212-8212-121212121212",
+          eventName: USAGE_RESUME_SETTLED,
+          eventVersion: 1,
+          correlationId: "34343434-3434-4344-8434-343434343434",
+          actor,
+          occurredAt: later,
+          payload: { resume: record, outcome: "dispatched" },
+        },
+      ],
+    });
+    restarted.applyUsageResumeSettled({
+      resume: record,
+      outcome: "dispatched",
+    });
+    const settled = restartedProjection.getById(run.id);
+    expect(settled?.usageResume?.status).toBe("dispatched");
+    // The settle was the aggregate head the fold read back.
+    expect(settled?.version).toBe(scheduled.run.version + 1);
   });
 });

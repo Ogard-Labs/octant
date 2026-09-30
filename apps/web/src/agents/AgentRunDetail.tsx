@@ -37,6 +37,12 @@ export function AgentRunDetail(props: {
   readonly onSteer?: (input: { runId: string; version: number; message: string }) => void;
   readonly onRetry?: RunCommand;
   readonly onResume?: RunCommand;
+  /** Arms or withdraws the opt-in to resume a usage-limited run at reset. */
+  readonly onUsageResume?: (input: {
+    runId: string;
+    version: number;
+    action: "schedule" | "cancel";
+  }) => void;
 }) {
   const row = props.row;
   const status = row.lifecycleStatus;
@@ -46,6 +52,9 @@ export function AgentRunDetail(props: {
   const canResume =
     status === "waiting" ||
     (status === "interrupted" && row.recoveryReason !== "restart-without-resumable-execution");
+  const usageResumeScheduled = row.usageResume?.status === "scheduled";
+  const canArmUsageResume =
+    status === "waiting" && row.usageLimit?.resetsAt !== undefined && !usageResumeScheduled;
   const active = row.bucket === "active";
   const facts = [subagentRoleWord(row.role), row.model, relativeTimeLabel(row.updatedAt)].filter(
     (part): part is string => part !== undefined,
@@ -81,6 +90,12 @@ export function AgentRunDetail(props: {
         )}
         {row.recoveryReason === undefined ? null : (
           <p className="agent-run-detail__fact">{row.recoveryReason}</p>
+        )}
+        {status === "waiting" && row.usageLimit !== undefined ? (
+          <p className="agent-run-detail__fact">{usageLimitFact(row)}</p>
+        ) : null}
+        {row.usageResume === undefined || row.usageResume.status === "scheduled" ? null : (
+          <p className="agent-run-detail__fact">{usageResumeFact(row.usageResume)}</p>
         )}
         {row.nativeReadOnly ? (
           <p className="agent-run-detail__fact">
@@ -136,6 +151,27 @@ export function AgentRunDetail(props: {
             variant="secondary"
           >
             Resume
+          </OctantButton>
+        ) : null}
+        {usageResumeScheduled ? (
+          <OctantButton
+            aria-label="Stop the scheduled resume"
+            onClick={() => props.onUsageResume?.({ ...command, action: "cancel" })}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Stop scheduled resume
+          </OctantButton>
+        ) : canArmUsageResume ? (
+          <OctantButton
+            aria-label="Resume this subagent when the provider limit resets"
+            onClick={() => props.onUsageResume?.({ ...command, action: "schedule" })}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Resume at reset
           </OctantButton>
         ) : null}
         {active ? (
@@ -241,6 +277,40 @@ function AgentRunReply(props: {
       <ReplyNotes notes={notes} />
     </>
   );
+}
+
+/**
+ * Words the limit the provider disclosed: a reset it named, or the honest
+ * kind when it disclosed none. The run waits either way — the fact is what
+ * the person acts on.
+ */
+function usageLimitFact(row: AgentHierarchyRow): string {
+  const resetsAt = row.usageLimit?.resetsAt;
+  const kind = row.usageLimit?.kind;
+  const resetPhrase = resetsAt === undefined ? undefined : `resets ${relativeTimeLabel(resetsAt)}`;
+  if (kind === "billing") {
+    return resetPhrase === undefined
+      ? "Provider reports the account's plan is exhausted; it can run again after the plan recovers."
+      : `Provider reports the account's plan is exhausted; it ${resetPhrase}.`;
+  }
+  if (kind === "exhausted") {
+    return resetPhrase === undefined
+      ? "Provider usage limit is exhausted; the run can try again once quota recovers."
+      : `Provider usage limit is exhausted; it ${resetPhrase}.`;
+  }
+  return resetPhrase === undefined
+    ? "Provider hit a temporary usage limit; the run can try again once it clears."
+    : `Provider hit a temporary usage limit; it ${resetPhrase}.`;
+}
+
+function usageResumeFact(usageResume: NonNullable<AgentHierarchyRow["usageResume"]>): string {
+  if (usageResume.status === "dispatched") {
+    return "Resumed when the limit reset.";
+  }
+  if (usageResume.status === "invalidated") {
+    return `Scheduled resume did not run: ${usageResume.detail ?? "the run's stop changed."}`;
+  }
+  return `Scheduled resume failed: ${usageResume.detail ?? "the host could not restart the run."}`;
 }
 
 function ReplyNotes(props: { readonly notes: ReadonlyArray<string> }) {

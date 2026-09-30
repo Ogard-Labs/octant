@@ -10,8 +10,10 @@ import {
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderUsageLimit,
 } from "./providers";
 import { HostId } from "./host";
+import { UsageResumeThreadState } from "./usageResume";
 import { ExecutionResolutionReceipt } from "./agentProfile";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -380,6 +382,18 @@ export const AgentRun = Schema.Struct({
   /** Present only when a provider reported token usage for this run. */
   usage: Schema.optional(AgentRunTokenUsage),
   recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  /**
+   * The provider's own limit signal, journaled verbatim when the run's
+   * session stopped on a usage limit. Present only while that limit-bound
+   * wait describes the run — a transition out of it drops the fact the way it
+   * drops the recovery reason.
+   */
+  usageLimit: Schema.optional(ProviderUsageLimit),
+  /**
+   * The latest reset recovery a person opted this run into, as its
+   * `usage-resume.*@1` events last settled it on this aggregate.
+   */
+  usageResume: Schema.optional(UsageResumeThreadState),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -426,6 +440,8 @@ export const AgentRunCommand = Schema.Union(
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
     recoveryReason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
+    /** The provider's own limit signal when this wait is a usage-limit stop. */
+    usageLimit: Schema.optional(ProviderUsageLimit),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("complete-agent-run"),
@@ -482,6 +498,22 @@ export const AgentRunCommand = Schema.Union(
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
   }).annotations(strict),
+  /**
+   * The person's own opt-in to resume this limited run at the provider's
+   * declared reset. The record it journals derives from the run's stored
+   * limit fact, never from client-supplied fields, so the command carries
+   * only the run it binds to.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("schedule-agent-run-usage-resume"),
+    runId: AgentRunId,
+    expectedVersion: AggregateVersion,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("cancel-agent-run-usage-resume"),
+    runId: AgentRunId,
+    expectedVersion: AggregateVersion,
+  }).annotations(strict),
 );
 export type AgentRunCommand = typeof AgentRunCommand.Type;
 
@@ -516,6 +548,8 @@ export const AgentRunStatusChanged = Schema.Struct({
   toStatus: AgentRunLifecycleStatus,
   version: AggregateVersion,
   recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  /** The provider's own limit signal; present only on a usage-limit wait. */
+  usageLimit: Schema.optional(ProviderUsageLimit),
   /**
    * The identity of the reply a completion carries. It travels in the same
    * append as the status change, so a journal that records Completed always
@@ -590,6 +624,8 @@ export const AgentRunCenterSummary = Schema.Struct({
   recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   normalizedReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   usage: Schema.optional(AgentRunTokenUsage),
+  usageLimit: Schema.optional(ProviderUsageLimit),
+  usageResume: Schema.optional(UsageResumeThreadState),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,

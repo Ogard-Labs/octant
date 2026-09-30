@@ -525,6 +525,31 @@ rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
 
+A child AgentRun stopped by the same provider usage-limit signal parks as
+`waiting` with the normalized `usageLimit` fact on the run — never `failed`,
+which would report a bounded wait as a dead run and offer Retry where the
+honest action is waiting out the reset. The fact rides the run's own
+aggregate on `agent.run-status-changed@1`, so the run's row, the parent's
+delegated-task read, and the managed `status`/`wait` tools all report the
+limit and any armed recovery rather than a pending result or a perpetual
+Working child. A run still parked on a journaled limit survives a host
+restart as `waiting`, the same as a run waiting on its immutable pool
+decision. The same explicit opt-in exists on the run: a person arms or
+withdraws it through the same `usage-resume.*@1` journaled contract — the
+record binds the run's id, its execution provider, and the disclosed reset —
+and the provider or parent agent cannot arm it silently. Dispatch goes
+through the ordinary `start` path with the parent thread's live grant
+re-derived at dispatch time (a Code parent contributes its execution policy
+only while still active), so capacity gating, authority clamps, workspace
+checks, and approval freshness apply unchanged; a run whose parent grant is
+gone settles `failed` instead of being orphaned awake. The run leaving its
+waiting state for anything but the resume's own dispatch — cancellation,
+subtree withdrawal, a different disclosed reset — settles the opt-in
+`invalidated`; a wait re-entered on the same declared reset leaves it armed.
+The settle journals `usage-resume.settled@1` on the run's aggregate and folds
+the outcome back into the run, so the opt-in's version stays the aggregate
+head and a stale `expectedVersion` cannot overwrite it.
+
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
