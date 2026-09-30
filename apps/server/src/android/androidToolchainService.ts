@@ -640,14 +640,16 @@ export class AndroidToolchainService {
     context: AndroidExecutionContext,
   ): Promise<string | undefined> {
     for (const serial of serials) {
-      const named = await this.#command([adb, "-s", serial, "emu", "avd", "name"], context, 5_000);
-      const lines = text(named.stdout).trim().split(/\r?\n/);
-      if (
-        succeeded(named) &&
-        lines[0] === avd &&
-        (lines.length === 1 || (lines.length === 2 && lines[1] === "OK"))
-      )
-        return serial;
+      // `adb emu avd name` talks to the emulator console, which authenticates
+      // against ~/.emulator_console_auth_token — a file confined launches do
+      // not mount. `getprop` travels over adbd, whose keys live under the
+      // already-mounted ~/.android, so this match works inside confinement.
+      const named = await this.#command(
+        [adb, "-s", serial, "shell", "getprop", "ro.boot.qemu.avd_name"],
+        context,
+        5_000,
+      );
+      if (succeeded(named) && text(named.stdout).trim() === avd) return serial;
     }
     return undefined;
   }
