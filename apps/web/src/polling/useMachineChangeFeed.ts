@@ -10,6 +10,7 @@ export interface MachineChangeRevisions {
   readonly codeNavigation: number;
   readonly projects: number;
   readonly extensions: number;
+  readonly workspace: number;
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
@@ -19,6 +20,7 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   codeNavigation: 0,
   projects: 0,
   extensions: 0,
+  workspace: 0,
 };
 
 /** One Machine stream replaces per-feature navigation timers in the renderer. */
@@ -57,6 +59,7 @@ async function consumeMachineChanges(
                 "code-navigation",
                 "extensions",
                 "computer-use",
+                "workspace",
               ]
             : frame.topics,
         );
@@ -82,5 +85,6 @@ function advanceRevisions(
     codeNavigation: current.codeNavigation + Number(changed.has("code-navigation")),
     projects: current.projects + Number(changed.has("projects")),
     extensions: current.extensions + Number(changed.has("extensions")),
+    workspace: current.workspace + Number(changed.has("workspace")),
   };
 }

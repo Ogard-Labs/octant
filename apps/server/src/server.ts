@@ -1905,7 +1905,41 @@ export function startOctantServer(
       port: createAgentRunSessionRuntime({
         capacityScheduler,
         spendCeiling,
-        appManagedTools: (input) => nativeHarnessComposition?.forAgentRun(input),
+        // The managed child's Canvas belongs to its parent thread's scope on
+        // any transport that takes app-managed tools — codex children get no
+        // harness set, but their session still carries dynamic tools.
+        appManagedTools: (input) => {
+          const harness = nativeHarnessComposition?.forAgentRun(input);
+          const target = input.run.routingReceipt.selectedFallback ?? {
+            providerInstanceId: input.run.routingReceipt.selectedProviderInstanceId,
+            modelId: input.run.routingReceipt.selectedModelId,
+          };
+          const observed = providerRuntimeRegistry.observedState(target.providerInstanceId);
+          const transportAllows =
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (candidate) => String(candidate) === String(target.modelId),
+            ) === true;
+          const mode = input.run.routingReceipt.mode;
+          const canvas =
+            !transportAllows || canvasAgentToolPort === undefined
+              ? undefined
+              : createCanvasAgentTools({
+                  windowId: undefined,
+                  mode,
+                  threadId:
+                    mode === "chat"
+                      ? decodeChatThreadId(String(input.run.parentThreadId))
+                      : mode === "work"
+                        ? decodeWorkThreadId(String(input.run.parentThreadId))
+                        : decodeCodeThreadId(String(input.run.parentThreadId)),
+                  providerInstanceId: target.providerInstanceId,
+                  modelId: target.modelId,
+                  allowOpen: false,
+                  port: canvasAgentToolPort,
+                });
+          return combineAppManagedToolSets(harness, canvas);
+        },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId) => {
@@ -5299,25 +5333,6 @@ export function startOctantServer(
         return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
       },
       plans: planService,
-      // A delegated child's Canvas belongs to its parent thread's scope; a run
-      // owns no window, so it can author but cannot open a surface.
-      canvas: ({ mode, parentThreadId, providerInstanceId, modelId }) =>
-        canvasAgentToolPort === undefined
-          ? undefined
-          : createCanvasAgentTools({
-              windowId: undefined,
-              mode,
-              threadId:
-                mode === "chat"
-                  ? decodeChatThreadId(parentThreadId)
-                  : mode === "work"
-                    ? decodeWorkThreadId(parentThreadId)
-                    : decodeCodeThreadId(parentThreadId),
-              providerInstanceId,
-              modelId,
-              allowOpen: false,
-              port: canvasAgentToolPort,
-            }),
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
         scriptDirectory: harnessWorkDirectory,

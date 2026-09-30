@@ -161,6 +161,10 @@ function topicsForEvent(event: {
   }
   if (aggregateType.startsWith("code-")) return ["code-navigation"];
   if (aggregateType.startsWith("extension-")) return ["extensions"];
+  // A journaled workspace op can come from the host itself — an agent's
+  // open-surface, a linked-thread placement — not only from the window that
+  // will repaint on it, so it needs its own signal rather than a mode's.
+  if (aggregateType === "window-workspace") return ["workspace"];
   return [];
 }
 

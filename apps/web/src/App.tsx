@@ -1284,6 +1284,13 @@ function LaunchedShell(
     workTurnClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
+  // A workspace op the host journaled without this window asking — an agent's
+  // open-surface, a linked-thread landing in a pane — only reaches the layout
+  // by re-reading; ops the renderer issued already repainted.
+  const workspaceChangeRevision = machineChanges.workspace;
+  useEffect(() => {
+    if (workspaceChangeRevision > 0) controller.refresh();
+  }, [controller, workspaceChangeRevision]);
   // One Navigator reader for the whole window: the dock panel and Zen's
   // assistant are two fronts on it, so a turn sent from either is immediately
   // on screen in both.

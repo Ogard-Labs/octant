@@ -9,6 +9,7 @@ export const MachineChangeTopic = Schema.Literal(
   "projects",
   "extensions",
   "computer-use",
+  "workspace",
 );
 export type MachineChangeTopic = typeof MachineChangeTopic.Type;
 
@@ -16,7 +17,7 @@ export const MachineChangeFrame = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("changed"),
     sequence: Schema.Int.pipe(Schema.positive()),
-    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(6)),
+    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(7)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),

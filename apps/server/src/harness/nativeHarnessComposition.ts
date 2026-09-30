@@ -10,12 +10,10 @@ import {
   type OctantMode,
   type ProjectId,
   type ProviderInstanceId,
-  type ProviderModelId,
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
-import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type {
   ExternalContentIngestionResult,
@@ -69,18 +67,6 @@ export interface NativeHarnessCompositionOptions {
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
-  /**
-   * Canvas authoring a delegated child may use, bound to its parent thread's
-   * scoped workspace by the server composition. A run owns no window, so the
-   * set it is given can create, revise, list, and read but cannot open a
-   * surface.
-   */
-  readonly canvas?: (input: {
-    readonly mode: OctantMode;
-    readonly parentThreadId: string;
-    readonly providerInstanceId: ProviderInstanceId;
-    readonly modelId: ProviderModelId;
-  }) => AppManagedToolSet | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -362,14 +348,8 @@ export function createNativeHarnessComposition(
         },
         uuid: options.uuid,
       });
-      const canvas = options.canvas?.({
-        mode,
-        parentThreadId: String(run.parentThreadId),
-        providerInstanceId: target.providerInstanceId,
-        modelId: run.routingReceipt.selectedFallback?.modelId ?? run.routingReceipt.selectedModelId,
-      });
       return taintAppManagedToolResults({
-        tools: combineAppManagedToolSets(tools, canvas),
+        tools,
         threadId: runId,
         recordExternalContentIngestion: options.recordExternalContentIngestion,
         uuid: options.uuid,

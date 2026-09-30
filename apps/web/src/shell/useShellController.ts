@@ -1130,6 +1130,11 @@ export function useShellController(options: ShellControllerOptions) {
     replacePaneSurface,
     resetActiveLayout,
     resetNativeBounds,
+    // A journaled op the host wrote without this window asking — an agent's
+    // open-surface, a linked-thread landing — needs a re-read, not a retry;
+    // this reconciles quietly over the committed shell the way the person's
+    // own ops leave it.
+    refresh: () => load("refresh"),
     retry: () => load("retry"),
     setMode,
     setSettingsSearch,
