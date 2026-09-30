@@ -174,8 +174,9 @@ Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
-Projects. The same cached read backs the right dock's Pull requests tool,
-scoped to the active Code thread's Project. The list is a cached read of a
+Projects. The same cached read backs the right dock's Pull requests tool and
+each Code thread's Environment group, scoped to the active Code thread's
+Project. The list is a cached read of a
 private host-local snapshot: opening it, navigating, and ordinary board
 queries do not call GitHub. GitHub is reached
 only by an explicit Refresh all or per-Project refresh, or — for Projects that
