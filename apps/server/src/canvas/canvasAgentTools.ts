@@ -2,10 +2,14 @@ import {
   CanvasBlock,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
-  type ChatThread,
+  type CanvasOriginThreadId,
+  type CanvasWorkspaceScope,
   type HostId,
+  type OctantMode,
   type PermissionPersistence,
   type ProviderExecutionPolicy,
+  type ProviderInstanceId,
+  type ProviderModelId,
   type WindowId,
 } from "@octant/contracts";
 import { JSONSchema, Schema } from "effect";
@@ -23,12 +27,14 @@ export const CANVAS_TOOL_NAME = "octant_canvas";
 const MAX_AUTHORED_BLOCKS = 128;
 const MAX_TITLE_CHARS = 120;
 const MAX_DESCRIBED_BLOCK_KINDS = 3;
+const MAX_LISTED_CANVASES = 64;
 const blockKinds = CanvasBlock.members.map((block) => block.fields.kind.literals[0]);
+const operations = ["describe", "list", "read", "create", "revise", "open"] as const;
 
 const canvasDefinitionSchema = {
   type: "object",
   properties: {
-    operation: { type: "string", enum: ["describe", "create", "revise"] },
+    operation: { type: "string", enum: operations },
     blockKinds: {
       type: "array",
       items: { type: "string", enum: blockKinds },
@@ -38,12 +44,12 @@ const canvasDefinitionSchema = {
         "For describe: request the schemas of up to three block kinds. Omit to list kinds and see a create example.",
     },
     title: { type: "string", maxLength: MAX_TITLE_CHARS, description: "Title of a new Canvas." },
-    canvasId: { type: "string", description: "For revise: the id returned by create." },
+    canvasId: { type: "string", description: "For read, revise, and open: the Canvas id." },
     expectedSequence: {
       type: "integer",
       minimum: 1,
       description:
-        "For revise: the last observed sequence. Creation starts at 1; use the sequence returned by each revision.",
+        "For revise: the last observed sequence. Creation starts at 1; use the sequence returned by each revision or the sequence listed by list and read.",
     },
     prompt: {
       type: "string",
@@ -73,18 +79,60 @@ const canvasDefinitionSchema = {
  * not take.
  */
 export interface CanvasAgentToolPort {
-  readonly activeContext: (
-    windowId: WindowId,
-  ) =>
-    | { readonly mode: string; readonly projectId: string | null }
-    | undefined
-    | Promise<{ readonly mode: string; readonly projectId: string | null } | undefined>;
+  /**
+   * The bounded scope a Canvas authored by this thread must stay inside —
+   * the same scope the person's create path resolves for the same thread.
+   * Chat scopes are virtual memory; Work scopes the confined root; Code
+   * scopes the thread's checkout worktree.
+   */
+  readonly workspace: (
+    mode: OctantMode,
+    threadId: string,
+  ) => CanvasWorkspaceScope | undefined | Promise<CanvasWorkspaceScope | undefined>;
+  /**
+   * The Project a Canvas would belong to. `windowId` is absent when the
+   * author is a delegated run rather than a windowed thread turn.
+   */
   readonly project: (
-    windowId: WindowId,
+    windowId: WindowId | undefined,
     projectId: string,
   ) => Promise<
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
+  /** Canvases belonging to one Project, newest last. */
+  readonly listCanvases: (
+    mode: OctantMode,
+    projectId: string,
+  ) => ReadonlyArray<{
+    readonly canvasId: string;
+    readonly title: string;
+    readonly sequence: number;
+  }>;
+  /** One Canvas's current document and provenance, for reading before a revise. */
+  readonly readCanvas: (canvasId: string) =>
+    | {
+        readonly title: string;
+        readonly sequence: number;
+        readonly blocks: ReadonlyArray<CanvasBlock>;
+        readonly mode: OctantMode;
+        readonly projectId: string;
+      }
+    | undefined;
+  /**
+   * Surface an existing Canvas in the window's sidebar through the journaled
+   * workspace operation a person triggers with Open Canvas. Absent for
+   * delegated runs, which have no window to surface to.
+   */
+  readonly openSurface?: (input: {
+    readonly windowId: WindowId;
+    readonly mode: OctantMode;
+    readonly title: string;
+    readonly canvasId: string;
+    readonly projectId: string;
+  }) =>
+    | { readonly kind: "opened" }
+    | { readonly kind: "refused"; readonly message: string }
+    | Promise<{ readonly kind: "opened" } | { readonly kind: "refused"; readonly message: string }>;
   readonly canvas: Pick<CanvasService, "create" | "revise">;
   readonly uuid: () => string;
   readonly hostId: HostId;
@@ -101,17 +149,17 @@ interface CanvasAuthoringInput {
 
 type CanvasToolInput =
   | CanvasAuthoringInput
-  | {
-      readonly operation: "describe";
-      readonly blockKinds?: ReadonlyArray<string>;
-    };
+  | { readonly operation: "describe"; readonly blockKinds?: ReadonlyArray<string> }
+  | { readonly operation: "list" }
+  | { readonly operation: "read"; readonly canvasId: string }
+  | { readonly operation: "open"; readonly canvasId: string };
 
 /**
  * The authority a Canvas an agent wrote carries: none.
  *
  * A drawing is a document. It reads nothing and runs nothing, so it asks for
- * no filesystem, shell, Git, network, tool, or subagent authority, and the
- * chat-virtual clamp would refuse it if it did.
+ * no filesystem, shell, Git, network, tool, or subagent authority, the way the
+ * person's own Canvas asks for none.
  */
 function documentAuthority(): {
   readonly filesystem: false;
@@ -162,8 +210,18 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
       };
     return { operation, blockKinds: requested };
   }
+  if (operation === "list") return { operation };
+  if (operation === "read" || operation === "open") {
+    const canvasId = record["canvasId"];
+    if (typeof canvasId !== "string" || canvasId.trim() === "") {
+      return { error: "The operation needs the Canvas id." };
+    }
+    return { operation, canvasId };
+  }
   if (operation !== "create" && operation !== "revise") {
-    return { error: "Canvas tool operation must be describe, create, or revise." };
+    return {
+      error: "Canvas tool operation must be describe, list, read, create, revise, or open.",
+    };
   }
   const blocks = record["blocks"];
   if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -198,26 +256,37 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   };
 }
 
+const MODE_LABEL: Record<OctantMode, string> = {
+  chat: "Chat Project",
+  work: "Work Project",
+  code: "Code Project",
+};
+
 /**
- * Lend one Chat thread's agent the ability to author a Canvas.
+ * Lend one thread's agent the ability to author a Canvas.
  *
- * Chat only for now: a Chat Canvas is bounded by virtual memory alone, so the
- * workspace it belongs to is fully determined by the thread. Work and Code
- * canvases are bounded by a confined root and a worktree, which the tool would
- * have to resolve rather than assume, and assuming one is how a document ends
- * up outside the scope it was supposed to stay in.
+ * The bounded workspace is resolved from the thread itself — the confined
+ * root a Work thread is bound to, the checkout worktree a Code thread runs
+ * in, the virtual memory a Chat thread shares — so a steered or queued turn
+ * cannot write a document into whatever the window happens to be looking at.
+ * A delegated child run binds to its parent thread's scope and gets no way
+ * to open a surface, since it owns no window.
  */
 export function createCanvasAgentTools(options: {
-  readonly windowId: WindowId;
-  readonly thread: ChatThread;
+  readonly windowId: WindowId | undefined;
+  readonly mode: OctantMode;
+  readonly threadId: CanvasOriginThreadId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly modelId: ProviderModelId;
+  readonly allowOpen: boolean;
   readonly port: CanvasAgentToolPort;
 }): AppManagedToolSet {
+  const modeLabel = MODE_LABEL[options.mode];
   return {
     definitions: [
       {
         name: CANVAS_TOOL_NAME,
-        description:
-          "Create or revise an Octant Canvas for a report, diagram, table, or dashboard in this Chat Project. Start with describe to see the available block kinds and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Creation adds a card to this Chat; the user can select Open Canvas to view it. Do not claim a pane opened or invent a download URL. Revise the returned canvasId with the last observed expectedSequence and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
+        description: `Create, revise, list, read, or open an Octant Canvas in this ${modeLabel}: the preferred surface for a substantial plan, review, audit, report, diagram, table, or dashboard — leave brief answers in the conversation. Start with describe to see the operations, block kinds, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Creation adds a card to this thread; call open with the canvasId to surface the Canvas in the sidebar for the user. list shows the Canvases already in this Project with their sequences; read returns a Canvas's current blocks and sequence for a revise. Revise the returned canvasId with the last observed expectedSequence and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references, and do not claim a pane opened without a successful open call.`,
         inputSchema: canvasDefinitionSchema,
       },
     ],
@@ -230,6 +299,7 @@ export function createCanvasAgentTools(options: {
         if (input.blockKinds === undefined) {
           return {
             result: {
+              operations,
               blockKinds,
               example: {
                 operation: "create",
@@ -252,22 +322,93 @@ export function createCanvasAgentTools(options: {
         return { result: { blockSchema: JSONSchema.make(Schema.Union(...selected)) } };
       }
 
-      const active = await options.port.activeContext(options.windowId);
-      if (active === undefined || active.projectId === null || active.mode !== "chat") {
+      const workspace = await options.port.workspace(options.mode, String(options.threadId));
+      if (workspace === undefined) {
         return {
-          result: { error: "This window has no Chat Project a Canvas could belong to." },
+          result: {
+            error: `This ${modeLabel} thread has no bounded workspace a Canvas could belong to.`,
+          },
           isError: true,
         };
       }
-      const project = await options.port.project(options.windowId, active.projectId);
-      if (project === undefined || project.lifecycle !== "active" || project.type !== "chat") {
+      const context = {
+        mode: options.mode,
+        projectId: workspace.projectId === null ? null : String(workspace.projectId),
+      };
+      if (input.operation === "list") {
+        const entries = options.port
+          .listCanvases(options.mode, String(workspace.projectId ?? ""))
+          .slice(0, MAX_LISTED_CANVASES);
+        return {
+          result: {
+            canvases: entries,
+            ...(entries.length === 0
+              ? { note: "No Canvases in this Project yet. create starts one." }
+              : {}),
+          },
+        };
+      }
+      if (input.operation === "read" || input.operation === "open") {
+        const canvas = options.port.readCanvas(input.canvasId);
+        if (
+          canvas === undefined ||
+          canvas.mode !== options.mode ||
+          String(canvas.projectId) !== String(workspace.projectId ?? "")
+        ) {
+          return {
+            result: { error: "That Canvas is not part of this thread's workspace." },
+            isError: true,
+          };
+        }
+        if (input.operation === "read") {
+          return {
+            result: {
+              canvasId: input.canvasId,
+              title: canvas.title,
+              sequence: canvas.sequence,
+              blocks: canvas.blocks,
+            },
+          };
+        }
+        if (
+          !options.allowOpen ||
+          options.windowId === undefined ||
+          options.port.openSurface === undefined
+        ) {
+          return {
+            result: {
+              error: "A delegated run cannot open surfaces. Name the Canvas for the user instead.",
+            },
+            isError: true,
+          };
+        }
+        const opened = await options.port.openSurface({
+          windowId: options.windowId,
+          mode: options.mode,
+          title: canvas.title,
+          canvasId: input.canvasId,
+          projectId: String(canvas.projectId),
+        });
+        if (opened.kind !== "opened") {
+          return { result: { error: opened.message }, isError: true };
+        }
+        return { result: { canvasId: input.canvasId, opened: true } };
+      }
+
+      const project = await options.port.project(
+        options.windowId,
+        String(workspace.projectId ?? ""),
+      );
+      if (
+        project === undefined ||
+        project.lifecycle !== "active" ||
+        project.type !== options.mode
+      ) {
         return { result: { error: "The Canvas Project is unavailable." }, isError: true };
       }
-      // Narrowed above: only an active Chat Project reaches here.
-      const context = { mode: "chat" as const, projectId: active.projectId };
       const canvasProject = {
         id: project.id,
-        type: "chat" as const,
+        type: options.mode,
         lifecycle: "active" as const,
       };
 
@@ -279,9 +420,9 @@ export function createCanvasAgentTools(options: {
             requestId: options.port.uuid(),
             intent: input.prompt === undefined ? "blank" : "prompt",
             hostId: options.port.hostId,
-            mode: "chat",
-            workspace: { kind: "chat-virtual", projectId: active.projectId },
-            originThreadId: options.thread.id,
+            mode: options.mode,
+            workspace,
+            originThreadId: options.threadId,
             title: input.title ?? "Canvas",
             ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
             sourceManifest: [],
@@ -299,13 +440,28 @@ export function createCanvasAgentTools(options: {
             canvasId: result.card.canvasId,
             versionId: result.card.versionId,
             blocks: input.blocks.length,
+            hint: "Call open with the canvasId to show this Canvas in the sidebar.",
           },
         };
       }
 
       if (input.canvasId === undefined || input.expectedSequence === undefined) {
         return {
-          result: { error: "Revising a Canvas needs its id and the version being revised." },
+          result: {
+            error:
+              "Revising a Canvas needs its id and the version being revised; read or list returns the current sequence.",
+          },
+          isError: true,
+        };
+      }
+      const existing = options.port.readCanvas(input.canvasId);
+      if (
+        existing === undefined ||
+        existing.mode !== options.mode ||
+        String(existing.projectId) !== String(workspace.projectId ?? "")
+      ) {
+        return {
+          result: { error: "That Canvas is not part of this thread's workspace." },
           isError: true,
         };
       }
@@ -317,13 +473,13 @@ export function createCanvasAgentTools(options: {
           canvasId: input.canvasId,
           expectedSequence: input.expectedSequence,
           hostId: options.port.hostId,
-          mode: "chat",
-          workspace: { kind: "chat-virtual", projectId: active.projectId },
-          originThreadId: options.thread.id,
+          mode: options.mode,
+          workspace,
+          originThreadId: options.threadId,
           prompt: input.prompt ?? "Authored revision",
           actor: { kind: "agent", actorId: options.port.uuid() },
-          providerInstanceId: options.thread.providerInstanceId,
-          modelId: options.thread.modelId,
+          providerInstanceId: options.providerInstanceId,
+          modelId: options.modelId,
           requestedAuthority: documentAuthority(),
         },
         context,

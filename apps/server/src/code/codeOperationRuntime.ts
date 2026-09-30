@@ -194,6 +194,15 @@ export interface CodeOperationRuntimeOptions {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
   }) => AppManagedToolSet | undefined;
+  /**
+   * Canvas authoring bound to the thread's checkout worktree. Provided by the
+   * server composition, which owns the Canvas service and the workspace
+   * resolver the person's create path uses.
+   */
+  readonly canvasTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
@@ -2013,6 +2022,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           windowId: active.windowId,
         }),
+        this.#options.canvasTools?.({ windowId: active.windowId, thread: active.thread }),
       );
     }
     if (supportsAcpClientCapabilities) {

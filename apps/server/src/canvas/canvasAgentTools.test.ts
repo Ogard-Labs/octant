@@ -8,12 +8,9 @@ import { CANVAS_TOOL_NAME, createCanvasAgentTools } from "./canvasAgentTools";
 const windowId = "11111111-1111-4111-8111-111111111111" as never;
 const projectId = "22222222-2222-4222-8222-222222222222";
 const threadId = "33333333-3333-4333-8333-333333333333";
-const thread = {
-  id: threadId,
-  projectId,
-  providerInstanceId: "44444444-4444-4444-8444-444444444444",
-  modelId: "octant-test-model",
-} as never;
+const providerInstanceId = "44444444-4444-4444-8444-444444444444" as never;
+const modelId = "octant-test-model" as never;
+const canvasId = "77777777-7777-4777-8777-777777777777";
 
 const diagram = {
   blockId: "authored-diagram",
@@ -27,7 +24,27 @@ const diagram = {
   groups: [{ groupId: "host", label: "Host", nodeIds: ["server"] }],
 };
 
-function tools(overrides: Record<string, unknown> = {}) {
+const readCanvasStub = {
+  title: "Report",
+  sequence: 2,
+  blocks: [
+    {
+      blockId: "summary",
+      schemaVersion: 1,
+      kind: "rich-text",
+      text: "The report goes here.",
+    },
+  ],
+  mode: "chat",
+  projectId,
+};
+
+function tools(
+  overrides: {
+    readonly port?: Record<string, unknown>;
+    readonly options?: Record<string, unknown>;
+  } = {},
+) {
   const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
     kind: "accepted" as const,
     card: { canvasId: "canvas-1", versionId: "version-1" },
@@ -36,15 +53,29 @@ function tools(overrides: Record<string, unknown> = {}) {
     kind: "accepted" as const,
     receipt: { versionId: "version-2", sequence: 2 },
   }));
+  const openSurface = vi.fn(() => ({ kind: "opened" as const }));
   const port = {
-    activeContext: vi.fn(() => ({ mode: "chat", projectId })),
+    workspace: vi.fn(() => ({ kind: "chat-virtual", projectId })),
     project: vi.fn(async () => ({ id: projectId, type: "chat", lifecycle: "active" })),
+    listCanvases: vi.fn(() => [{ canvasId, title: "Report", sequence: 2 }]),
+    readCanvas: vi.fn(() => readCanvasStub),
+    openSurface,
     canvas: { create, revise },
     uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
     hostId: "66666666-6666-4666-8666-666666666666",
-    ...overrides,
+    ...overrides.port,
   } as never;
-  return { create, revise, port, set: createCanvasAgentTools({ windowId, thread, port }) };
+  const set = createCanvasAgentTools({
+    windowId,
+    mode: "chat",
+    threadId: threadId as never,
+    providerInstanceId,
+    modelId,
+    allowOpen: true,
+    port,
+    ...overrides.options,
+  });
+  return { create, revise, openSurface, port, set };
 }
 
 describe("createCanvasAgentTools", () => {
@@ -97,10 +128,12 @@ describe("createCanvasAgentTools", () => {
     }
   });
 
-  it("explains how to create and present a Canvas without reading a Project or creating a document", async () => {
+  it("explains the operations a Canvas supports, including plans and reviews", async () => {
     const { create, revise, set } = tools({
-      activeContext: () => {
-        throw new Error("Schema discovery must not read window state.");
+      port: {
+        workspace: () => {
+          throw new Error("Schema discovery must not read thread state.");
+        },
       },
     });
 
@@ -111,13 +144,17 @@ describe("createCanvasAgentTools", () => {
 
     expect(outcome.isError).not.toBe(true);
     expect(outcome.result).toMatchObject({
+      operations: ["describe", "list", "read", "create", "revise", "open"],
       blockKinds: expect.arrayContaining(["rich-text", "diagram", "table", "chart"]),
       example: {
         operation: "create",
         blocks: [{ blockId: "summary", kind: "rich-text", text: "The report goes here." }],
       },
     });
-    expect(set.definitions[0]?.description).toContain("Open Canvas");
+    const description = set.definitions[0]?.description ?? "";
+    expect(description).toContain("plan");
+    expect(description).toContain("review");
+    expect(description).toContain("open");
     expect(create).not.toHaveBeenCalled();
     expect(revise).not.toHaveBeenCalled();
   });
@@ -200,25 +237,52 @@ describe("createCanvasAgentTools", () => {
     expect(call?.[3]).toHaveLength(1);
   });
 
-  it("refuses a block the closed catalog does not contain, naming which one", async () => {
-    const { create, set } = tools();
+  it.each([
+    {
+      mode: "work" as const,
+      workspace: {
+        kind: "work-root" as const,
+        projectId,
+        rootId: "88888888-8888-4888-8888-888888888888",
+      },
+    },
+    {
+      mode: "code" as const,
+      workspace: {
+        kind: "code-worktree" as const,
+        projectId,
+        repositoryId: "repo_123",
+        bindingRevisionId: "88888888-8888-4888-8888-888888888888",
+        checkoutId: "99999999-9999-4999-9999-999999999999",
+        verified: true,
+      },
+    },
+  ])("binds a $mode thread's Canvas to its own scoped workspace", async ({ mode, workspace }) => {
+    const { create, set } = tools({
+      options: { mode },
+      port: {
+        workspace: vi.fn(() => workspace),
+        project: vi.fn(async () => ({ id: projectId, type: mode, lifecycle: "active" })),
+      },
+    });
 
     const outcome = await set.execute({
       name: CANVAS_TOOL_NAME,
-      inputJson: JSON.stringify({
-        operation: "create",
-        blocks: [diagram, { blockId: "x", schemaVersion: 1, kind: "raw-html", html: "<script>" }],
-      }),
+      inputJson: JSON.stringify({ operation: "create", title: "Plan", blocks: [diagram] }),
     });
 
-    expect(outcome).toMatchObject({ isError: true });
-    expect(JSON.stringify(outcome.result)).toContain("Block 2");
-    expect(create).not.toHaveBeenCalled();
+    expect(outcome.isError).toBeUndefined();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      kind: "canvas-create",
+      mode,
+      workspace,
+      originThreadId: threadId,
+    });
   });
 
-  it("refuses to author into a window with no Chat Project to hold the Canvas", async () => {
+  it("refuses to author when the thread has no bounded workspace", async () => {
     const { create, set } = tools({
-      activeContext: vi.fn(() => ({ mode: "chat", projectId: null })),
+      port: { workspace: vi.fn(() => undefined) },
     });
 
     const outcome = await set.execute({
@@ -230,9 +294,11 @@ describe("createCanvasAgentTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("refuses to author into a Project that is not this window's own mode", async () => {
+  it("refuses to author into a Project that is not this thread's own mode", async () => {
     const { create, set } = tools({
-      project: vi.fn(async () => ({ id: projectId, type: "code", lifecycle: "active" })),
+      port: {
+        project: vi.fn(async () => ({ id: projectId, type: "code", lifecycle: "active" })),
+      },
     });
 
     const outcome = await set.execute({
@@ -242,6 +308,88 @@ describe("createCanvasAgentTools", () => {
 
     expect(outcome).toMatchObject({ isError: true });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("lists the Canvases already inside the thread's Project with their sequences", async () => {
+    const { set } = tools();
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "list" }),
+    });
+
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.result).toMatchObject({
+      canvases: [{ canvasId, title: "Report", sequence: 2 }],
+    });
+  });
+
+  it("reads a Canvas's current blocks and sequence before revising it", async () => {
+    const { set } = tools();
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.result).toMatchObject({ canvasId, title: "Report", sequence: 2 });
+  });
+
+  it("refuses to read a Canvas outside the thread's workspace", async () => {
+    const { set } = tools({
+      port: { readCanvas: vi.fn(() => ({ ...readCanvasStub, projectId: "other-project" })) },
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+
+    expect(outcome).toMatchObject({ isError: true });
+  });
+
+  it("opens an in-scope Canvas through the window's surface operation", async () => {
+    const { openSurface, set } = tools();
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "open", canvasId }),
+    });
+
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.result).toMatchObject({ canvasId, opened: true });
+    expect(openSurface).toHaveBeenCalledWith(
+      expect.objectContaining({ windowId, mode: "chat", canvasId, projectId }),
+    );
+  });
+
+  it("refuses to open a Canvas that belongs to another workspace", async () => {
+    const { openSurface, set } = tools({
+      port: { readCanvas: vi.fn(() => ({ ...readCanvasStub, mode: "work" })) },
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "open", canvasId }),
+    });
+
+    expect(outcome).toMatchObject({ isError: true });
+    expect(openSurface).not.toHaveBeenCalled();
+  });
+
+  it("a delegated run cannot open a surface it does not own", async () => {
+    const { openSurface, set } = tools({
+      options: { windowId: undefined, allowOpen: false },
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "open", canvasId }),
+    });
+
+    expect(outcome).toMatchObject({ isError: true });
+    expect(openSurface).not.toHaveBeenCalled();
   });
 
   it("revises the version the author says it read, not whatever is current", async () => {
@@ -251,7 +399,7 @@ describe("createCanvasAgentTools", () => {
       name: CANVAS_TOOL_NAME,
       inputJson: JSON.stringify({
         operation: "revise",
-        canvasId: "77777777-7777-4777-8777-777777777777",
+        canvasId,
         expectedSequence: 1,
         blocks: [diagram],
       }),
@@ -270,7 +418,26 @@ describe("createCanvasAgentTools", () => {
       name: CANVAS_TOOL_NAME,
       inputJson: JSON.stringify({
         operation: "revise",
-        canvasId: "77777777-7777-4777-8777-777777777777",
+        canvasId,
+        blocks: [diagram],
+      }),
+    });
+
+    expect(outcome).toMatchObject({ isError: true });
+    expect(revise).not.toHaveBeenCalled();
+  });
+
+  it("refuses to revise a Canvas outside the thread's workspace", async () => {
+    const { revise, set } = tools({
+      port: { readCanvas: vi.fn(() => ({ ...readCanvasStub, mode: "code" })) },
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId,
+        expectedSequence: 1,
         blocks: [diagram],
       }),
     });
@@ -281,13 +448,15 @@ describe("createCanvasAgentTools", () => {
 
   it("reports a refusal from the Canvas service rather than a silent success", async () => {
     const { set } = tools({
-      canvas: {
-        create: vi.fn(() => ({
-          kind: "denied" as const,
-          denialCode: "unauthorized",
-          message: "Canvas create is not authorized in this workspace.",
-        })),
-        revise: vi.fn(),
+      port: {
+        canvas: {
+          create: vi.fn(() => ({
+            kind: "denied" as const,
+            denialCode: "unauthorized",
+            message: "Canvas create is not authorized in this workspace.",
+          })),
+          revise: vi.fn(),
+        },
       },
     });
 

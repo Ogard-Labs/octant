@@ -706,6 +706,7 @@ import {
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   decodeCanvasDefinition,
+  decodeCanvasId,
   decodeProjectId,
   type ProjectId,
   type UtcTimestamp,
@@ -4075,6 +4076,18 @@ export function startOctantServer(
               executionPolicy: thread.executionPolicy,
             }),
           ),
+        canvasTools: ({ windowId, thread }) =>
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                mode: "code",
+                threadId: thread.id,
+                providerInstanceId: thread.providerInstanceId,
+                modelId: thread.modelId,
+                allowOpen: true,
+                port: canvasAgentToolPort,
+              }),
         spendCeiling,
         terminalProcessPort,
         repositoryTestProcessPort,
@@ -5286,6 +5299,25 @@ export function startOctantServer(
         return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
       },
       plans: planService,
+      // A delegated child's Canvas belongs to its parent thread's scope; a run
+      // owns no window, so it can author but cannot open a surface.
+      canvas: ({ mode, parentThreadId, providerInstanceId, modelId }) =>
+        canvasAgentToolPort === undefined
+          ? undefined
+          : createCanvasAgentTools({
+              windowId: undefined,
+              mode,
+              threadId:
+                mode === "chat"
+                  ? decodeChatThreadId(parentThreadId)
+                  : mode === "work"
+                    ? decodeWorkThreadId(parentThreadId)
+                    : decodeCodeThreadId(parentThreadId),
+              providerInstanceId,
+              modelId,
+              allowOpen: false,
+              port: canvasAgentToolPort,
+            }),
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
         scriptDirectory: harnessWorkDirectory,
@@ -5565,7 +5597,11 @@ export function startOctantServer(
                 ? undefined
                 : createCanvasAgentTools({
                     windowId,
-                    thread,
+                    mode: "chat",
+                    threadId: thread.id,
+                    providerInstanceId: thread.providerInstanceId,
+                    modelId: thread.modelId,
+                    allowOpen: true,
                     port: canvasAgentToolPort,
                   }),
               createImageAgentTools({
@@ -6006,6 +6042,18 @@ export function startOctantServer(
               mode: "work",
               projectId: input.thread.projectId,
             });
+        const canvas =
+          !browserSupported || canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId: input.windowId,
+                mode: "work",
+                threadId: input.thread.id,
+                providerInstanceId: input.thread.providerInstanceId,
+                modelId: input.thread.modelId,
+                allowOpen: true,
+                port: canvasAgentToolPort,
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -6025,10 +6073,18 @@ export function startOctantServer(
           browser === undefined &&
           sideTaskTools === undefined &&
           agentsTools === undefined &&
-          computer === undefined
+          computer === undefined &&
+          canvas === undefined
         )
           return undefined;
-        return combineAppManagedToolSets(native, browser, computer, sideTaskTools, agentsTools);
+        return combineAppManagedToolSets(
+          native,
+          browser,
+          computer,
+          sideTaskTools,
+          agentsTools,
+          canvas,
+        );
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -7793,16 +7849,127 @@ export function startOctantServer(
     );
     // What a Chat thread's agent may do with a Canvas: write blocks into one,
     // through the same service and the same Project the person clicking New
-    // Canvas reaches. The Project and workspace are resolved from the window
-    // here, never taken from the agent.
+    // Canvas reaches. The Project and workspace are resolved from the thread
+    // here, never taken from the agent or from whatever the window happens
+    // to be looking at — the resolver the person's create path uses.
     canvasAgentToolPort = {
-      activeContext: (windowId) => resolveCanvasActiveContext(shellService.bootstrap(windowId)),
+      workspace: (mode, threadId) => {
+        if (mode === "chat") {
+          const thread = persistence.readChatThread(threadId as never);
+          if (
+            thread === undefined ||
+            thread.lifecycle !== "active" ||
+            thread.projectId === undefined
+          )
+            return undefined;
+          return { kind: "chat-virtual", projectId: thread.projectId };
+        }
+        return resolveCanvasWorkspace({ mode, threadId });
+      },
       project: async (windowId, projectId) => {
+        if (windowId === undefined) {
+          const project = persistence.readProject(decodeProjectId(projectId));
+          return project === undefined
+            ? undefined
+            : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+        }
         const bootstrap = await projectService.bootstrap(windowId);
         const project = bootstrap.active.find((candidate) => String(candidate.id) === projectId);
         return project === undefined
           ? undefined
           : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+      },
+      listCanvases: (mode, projectId) => {
+        let entries;
+        try {
+          entries = persistence.canvasProjection.byProject(decodeProjectId(projectId));
+        } catch {
+          return [];
+        }
+        return entries
+          .filter((entry) => entry.currentVersion.definition.provenance.mode === mode)
+          .map((entry) => ({
+            canvasId: String(entry.currentVersion.canvasId),
+            title: entry.currentVersion.definition.title,
+            sequence: entry.currentVersion.sequence,
+          }));
+      },
+      readCanvas: (canvasId) => {
+        try {
+          const entry = persistence.canvasProjection.getById(decodeCanvasId(canvasId));
+          if (entry === undefined) return undefined;
+          const version = entry.currentVersion;
+          return {
+            title: version.definition.title,
+            sequence: version.sequence,
+            blocks: version.definition.blocks,
+            mode: version.definition.provenance.mode,
+            projectId: String(version.definition.provenance.projectId),
+          };
+        } catch {
+          return undefined;
+        }
+      },
+      openSurface: ({ windowId, mode, title, canvasId, projectId }) => {
+        const bootstrap = shellService.bootstrap(windowId);
+        const layout = bootstrap.workspace.layouts[mode];
+        const findPane = (
+          node: import("@octant/contracts").WorkspaceLayoutNode,
+        ): import("@octant/contracts").WorkspacePane | undefined => {
+          if (node.kind === "pane") {
+            return node.surface.kind === "canvas" && String(node.surface.canvasId) === canvasId
+              ? node
+              : undefined;
+          }
+          return findPane(node.first) ?? findPane(node.second);
+        };
+        const firstPane = (
+          node: import("@octant/contracts").WorkspaceLayoutNode,
+        ): import("@octant/contracts").WorkspacePane =>
+          node.kind === "pane" ? node : firstPane(node.first);
+        const paneById = (
+          node: import("@octant/contracts").WorkspaceLayoutNode,
+          paneId: import("@octant/contracts").PaneId,
+        ): import("@octant/contracts").WorkspacePane | undefined => {
+          if (node.kind === "pane") {
+            return String(node.paneId) === String(paneId) ? node : undefined;
+          }
+          return paneById(node.first, paneId) ?? paneById(node.second, paneId);
+        };
+        const workspace = bootstrap.workspace;
+        const pane =
+          findPane(layout) ??
+          (workspace.focusedPaneId === undefined
+            ? undefined
+            : paneById(layout, workspace.focusedPaneId)) ??
+          paneById(layout, workspace.activePaneIds[mode]) ??
+          firstPane(layout);
+        try {
+          shellService.execute({
+            kind: "apply-workspace-operation",
+            windowId,
+            expectedVersion: bootstrap.workspaceVersion,
+            operation: {
+              kind: "open-surface",
+              mode,
+              paneId: pane.paneId,
+              surface: {
+                kind: "canvas",
+                id: decodeWorkspaceTabId(randomUUID()),
+                mode,
+                title,
+                canvasId: decodeCanvasId(canvasId),
+                projectId: decodeProjectId(projectId),
+              },
+            },
+          });
+          return { kind: "opened" as const };
+        } catch (error) {
+          return {
+            kind: "refused" as const,
+            message: error instanceof Error ? error.message : "The Canvas could not be opened.",
+          };
+        }
       },
       canvas: canvasService,
       uuid: randomUUID,
