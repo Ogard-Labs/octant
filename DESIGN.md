@@ -1077,8 +1077,10 @@ Ordinary usage reset/retention and Git discard confirmations use the shared
 `OctantConfirmDialog` over `OctantDialog`. The safe action receives initial focus;
 Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
 focus to the opener. Git confirmations consistently offer **Keep changes** and
-**Discard changes**. Their existing host approvals, receipts, and observed-state
-checks remain separate and mandatory.
+**Discard changes**. Destructive actions opt into the danger treatment explicitly;
+ordinary confirmations use the standard action treatment. Long paths in the
+description wrap within the shared dialog. Their existing host approvals,
+receipts, and observed-state checks remain separate and mandatory.
 
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
