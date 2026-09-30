@@ -47,7 +47,7 @@ export function OctantConfirmDialog(props: {
           onClick={props.onConfirm}
           size="sm"
           type="button"
-          variant={props.destructive === false ? "default" : "destructive"}
+          variant={props.destructive ? "destructive" : "default"}
         >
           {props.confirmLabel}
         </OctantButton>
