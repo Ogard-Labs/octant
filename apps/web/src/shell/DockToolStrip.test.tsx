@@ -183,6 +183,26 @@ describe("the dock tool strip", () => {
     expect(onSelect).toHaveBeenCalledWith("canvas");
   });
 
+  it("closes the overflow menu with Escape while focus is still on its count", async () => {
+    const user = userEvent.setup();
+    render(
+      <DockToolStrip
+        active="browser"
+        capacity={4}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        tabs={[browser, files, terminal, tests, canvas]}
+      />,
+    );
+
+    const count = screen.getByRole("button", { name: "1 more open tab" });
+    await user.click(count);
+    expect(screen.getByRole("button", { name: "Canvas" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Canvas" })).not.toBeInTheDocument();
+    expect(count).toHaveFocus();
+  });
+
   it("opens the overflow menu from the strip's left edge so the dock never clips it", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
     expect(styles).toMatch(/\.dock-tool-strip \{[^}]*position: relative;/);
