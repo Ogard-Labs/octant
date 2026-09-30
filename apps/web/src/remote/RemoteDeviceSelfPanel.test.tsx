@@ -86,12 +86,23 @@ describe("RemoteDeviceSelfPanel key rotation", () => {
     // Naming the button is not enough: nothing may leave the browser until the
     // second, explicit confirmation.
     expect(rotate).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("group", { name: "Confirm device key rotation" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Confirm device key rotation" })).toBeInTheDocument();
     expect(server.devicePublicKey()).toBe(originalPem);
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Keep current key" })).toHaveFocus(),
+    );
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("dialog", { name: "Confirm device key rotation" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(rotate).toHaveFocus());
+    expect(server.devicePublicKey()).toBe(originalPem);
+
+    await user.click(rotate);
     await user.click(screen.getByRole("button", { name: "Keep current key" }));
     expect(
-      screen.queryByRole("group", { name: "Confirm device key rotation" }),
+      screen.queryByRole("dialog", { name: "Confirm device key rotation" }),
     ).not.toBeInTheDocument();
     expect(server.devicePublicKey()).toBe(originalPem);
     expect(bridge.getState().kind).toBe("ready");

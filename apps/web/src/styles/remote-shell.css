@@ -203,22 +203,6 @@
   gap: var(--oct-space-2);
 }
 
-.remote-shell__device-confirm {
-  display: grid;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-3);
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-body);
-  background: var(--oct-bg);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-}
-
-.remote-shell__device-confirm p {
-  margin: 0;
-}
-
 @media (max-width: 680px) {
   .remote-shell {
     width: 100%;
