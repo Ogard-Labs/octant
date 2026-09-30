@@ -49,7 +49,7 @@ export const APPLE_TOOLCHAIN_HOST_READ_PATHS = [
 
 /**
  * Host capabilities a confined launch names for itself, on top of the port's
- * defaults. macOS only; other platforms ignore both fields.
+ * defaults.
  */
 export interface AppleLaunchGrants {
   readonly literalReadPaths?: ReadonlyArray<string>;
@@ -59,10 +59,11 @@ export interface AppleLaunchGrants {
   readonly allowPseudoTty?: boolean;
   readonly allowJobCreation?: boolean;
   readonly allowSignal?: boolean;
+  readonly additionalReadRoots?: ReadonlyArray<string>;
   /**
    * Directories this launch may read and write on top of the port-wide set.
-   * The screenshot is the only caller: its raw capture lands in a directory
-   * no other confined launch is granted (0160).
+   * A screenshot writes to the private capture directory; a build writes to
+   * its action-owned derived-data directory.
    */
   readonly additionalWriteRoots?: ReadonlyArray<string>;
 }
@@ -173,6 +174,7 @@ export interface AppleToolchainServiceOptions {
       readonly allowJobCreation?: boolean;
       readonly allowSignal?: boolean;
       readonly additionalWriteRoots?: ReadonlyArray<string>;
+      readonly additionalReadRoots?: ReadonlyArray<string>;
       readonly isolatedRoots?: ReadonlyArray<string>;
     },
     signal?: AbortSignal,
@@ -917,7 +919,10 @@ export class AppleToolchainService {
           this.#options.realpath,
         );
         this.#advance(active, request.kind === "test" ? "testing" : "building");
-        const resultBundle = resolve(context.artifactRoot, `apple-${request.actionId}.xcresult`);
+        const derivedRoot = resolve(context.artifactRoot, `derived-${request.actionId}`);
+        await mkdir(derivedRoot, { recursive: true, mode: 0o700 });
+        const resultBundle = resolve(derivedRoot, "results.xcresult");
+        const buildGrants = { additionalWriteRoots: [derivedRoot] };
         let readiness: AppleProcessResult | undefined;
         if (request.kind === "run" && request.simulatorId !== undefined) {
           this.#advance(active, "preparing-destination");
@@ -931,15 +936,16 @@ export class AppleToolchainService {
         if (request.kind === "test") {
           // `xcodebuild test` builds and tests in one launch, which would run
           // the project's Run Script phases under the test session's widened
-          // profile. Splitting the phases confines the granted launch to the
-          // session that measured the need; the build phase needs none of it,
-          // exactly like the `build` action that already runs ungranted.
-          const sharedArguments = xcodebuildArguments(request, projectPath, context.artifactRoot);
+          // profile. Splitting the phases confines the session-specific
+          // grants to the launch that measured the need; both phases still
+          // write to the action's derived-data directory.
+          const sharedArguments = xcodebuildArguments(request, projectPath, derivedRoot);
           const buildPhase = await this.#command(
             [...sharedArguments, "build-for-testing"],
             context,
             request.timeoutMs,
             signal,
+            buildGrants,
           );
           terminal = succeeded(buildPhase)
             ? await this.#command(
@@ -947,7 +953,7 @@ export class AppleToolchainService {
                 context,
                 request.timeoutMs,
                 signal,
-                appleToolchainTestGrants(homedir()),
+                { ...buildGrants, ...appleToolchainTestGrants(homedir()) },
               )
             : buildPhase;
           artifacts = [{ kind: "xcresult", reference: `apple-xcresult-${request.actionId}` }];
@@ -957,30 +963,33 @@ export class AppleToolchainService {
               ? readiness
               : await this.#command(
                   [
-                    ...xcodebuildArguments(request, projectPath, context.artifactRoot),
+                    ...xcodebuildArguments(request, projectPath, derivedRoot),
                     request.kind === "clean" ? "clean" : "build",
                   ],
                   context,
                   request.timeoutMs,
                   signal,
+                  buildGrants,
                 );
         }
         if (request.kind === "run" && succeeded(terminal)) {
           const settings = await this.#command(
-            xcodebuildSettingsCommand(request, projectPath, context.artifactRoot),
+            xcodebuildSettingsCommand(request, projectPath, derivedRoot),
             context,
             request.timeoutMs,
             signal,
+            buildGrants,
           );
           terminal = settings;
           if (succeeded(settings)) {
-            const product = parseBuildProduct(text(settings.stdout), context.artifactRoot);
+            const product = parseBuildProduct(text(settings.stdout), derivedRoot);
             this.#advance(active, "installing");
             terminal = await this.#command(
               ["xcrun", "simctl", "install", request.simulatorId!, product.applicationPath],
               context,
               request.timeoutMs,
               signal,
+              { additionalReadRoots: [derivedRoot] },
             );
             if (succeeded(terminal)) {
               this.#advance(active, "launching");
@@ -1513,7 +1522,7 @@ function boundedStrings(value: unknown, maximum: number): ReadonlyArray<string> 
 function xcodebuildArguments(
   request: AppleBuildRequest,
   projectPath: string,
-  artifactRoot: string,
+  derivedRoot: string,
 ): ReadonlyArray<string> {
   return [
     "xcodebuild",
@@ -1523,7 +1532,7 @@ function xcodebuildArguments(
     "-configuration",
     request.configuration === "release" ? "Release" : "Debug",
     "-derivedDataPath",
-    resolve(artifactRoot, `derived-${request.actionId}`),
+    derivedRoot,
     ...destinationArguments(request),
     "CODE_SIGNING_ALLOWED=NO",
   ];
@@ -1532,7 +1541,7 @@ function xcodebuildArguments(
 function xcodebuildSettingsCommand(
   request: AppleBuildRequest,
   projectPath: string,
-  artifactRoot: string,
+  derivedRoot: string,
 ): ReadonlyArray<string> {
   return [
     "xcodebuild",
@@ -1542,7 +1551,7 @@ function xcodebuildSettingsCommand(
     "-configuration",
     request.configuration === "release" ? "Release" : "Debug",
     "-derivedDataPath",
-    resolve(artifactRoot, `derived-${request.actionId}`),
+    derivedRoot,
     ...destinationArguments(request),
     "CODE_SIGNING_ALLOWED=NO",
     "-showBuildSettings",
