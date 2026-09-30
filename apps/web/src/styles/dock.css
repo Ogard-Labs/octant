@@ -272,8 +272,6 @@
   padding: var(--oct-space-2) var(--oct-space-3);
   border-bottom: 1px solid var(--oct-border);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .dock-document-tool__body {

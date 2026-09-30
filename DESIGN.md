@@ -562,7 +562,7 @@ width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing and may collapse
 completely while leaving Show sidebar and New thread in the native title rail.
-The right dock defaults to 320px when open. A fresh window starts with it
+The right dock defaults to 420px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
