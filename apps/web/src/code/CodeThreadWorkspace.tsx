@@ -77,7 +77,12 @@ import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
+import {
+  TurnHeader,
+  TurnTime,
+  turnWorkedFor,
+  type TurnHeaderOutcome,
+} from "../transcript/TurnHeader";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
@@ -1223,6 +1228,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   threadId={message.sourceThreadId ?? props.threadId}
                 />
               );
+            const workedFor =
+              message.role === "assistant" &&
+              message.status === "completed" &&
+              message.startedAt !== undefined &&
+              message.at !== undefined
+                ? turnWorkedFor("completed", message.startedAt, message.at)
+                : undefined;
             return (
               <div className="code-thread-workspace__row">
                 {handoff ? (
@@ -1311,6 +1323,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           }
                           forkDisabled={forking}
                           outcome={turnHeaderOutcome(message.status)}
+                          {...(workedFor === undefined ? {} : { workedFor })}
                           provider={
                             message.providerInstanceId === undefined ||
                             message.modelId === undefined
