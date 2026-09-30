@@ -29,6 +29,10 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
 import { RecentThreadList } from "../shell/RecentThreadList";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 
 export interface ChatWelcomeProps {
   /** The threads this mode already has, shown under the starter ideas. */
@@ -81,6 +85,9 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const presentation = draftThreadModePresentation("chat");
   const [prompt, setPrompt] = useState("");
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
+  // This composer has no suggestion list, so a capability token typed here can
+  // only ever leave as unattached prose; the refusal says where one attaches.
+  const [sendNotice, setSendNotice] = useState<string>();
   const slash = useComposerSlashCommands({
     draft: prompt,
     onDraftChange: setPrompt,
@@ -103,10 +110,16 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         : props.status === "disconnected"
           ? "Chat is disconnected."
           : undefined);
-  const visibleStatusMessage = statusMessage ?? attachmentNotice;
+  const visibleStatusMessage = statusMessage ?? sendNotice ?? attachmentNotice;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, []);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions, false));
+      return;
+    }
+    setSendNotice(undefined);
     if (Object.keys(modelOptionValues).length === 0) props.onCreateChat(trimmed);
     else props.onCreateChat(trimmed, modelOptionValues);
   }, [canSubmit, props, trimmed, modelOptionValues]);

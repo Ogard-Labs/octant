@@ -34,4 +34,24 @@ describe("OctantToast", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("The export failed.");
     expect(screen.getByRole("button", { name: "Dismiss notification" })).toBeVisible();
   });
+
+  it("offers a keyboard-accessible follow-up action without dismissing the notice", async () => {
+    const onAction = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <OctantToast
+        action={{ label: "Read more", onSelect: onAction }}
+        detail="Restart Octant to install it."
+        onDismiss={onDismiss}
+        title="Update downloaded"
+        tone="success"
+      />,
+    );
+
+    screen.getByRole("button", { name: "Read more" }).focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("Update downloaded");
+  });
 });

@@ -991,12 +991,13 @@ and Tooltip. Composition rules:
   transient acknowledgements. Do not add another toast package or recreate
   these with styled spans or animated divs.
 - Product notices use `OctantToast`: a semantic icon, short title, supporting
-  detail, and an explicit Dismiss button. Success and waiting announcements use
-  `status`; errors that need attention use `alert`. The shared recipe owns the
-  opaque floating material, compact spacing, shadow, and wrapping of long
-  filenames or messages in both themes. A feature may choose placement and
-  content, not paint another notice. A field error stays by its field, and a
-  warning that the user must review stays inline.
+  detail, and an explicit Dismiss button. An optional inline action can open the
+  relevant destination without implicitly dismissing the notice. Success and
+  waiting announcements use `status`; errors that need attention use `alert`.
+  The shared recipe owns the opaque floating material, compact spacing, shadow,
+  and wrapping of long filenames or messages in both themes. A feature may
+  choose placement and content, not paint another notice. A field error stays
+  by its field, and a warning that the user must review stays inline.
 - Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
@@ -1080,14 +1081,17 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ### Confirmation and dialog behavior
 
-Ordinary usage reset/retention, Git discard, and Settings connection removal
-confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The safe
-action receives initial focus; Escape, Cancel, and backdrop dismissal do not
-mutate data, and closing restores focus to the opener. Git confirmations
-consistently offer **Keep changes** and **Discard changes**. Settings removal
-keeps the existing host command and GitHub's explicit local-logout confirmation.
-Existing host approvals, receipts, and observed-state checks remain separate
-and mandatory.
+Ordinary usage reset/retention and Git discard confirmations use the shared
+`OctantConfirmDialog` over `OctantDialog`. The safe action receives initial focus;
+Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
+focus to the opener. Git confirmations consistently offer **Keep changes** and
+**Discard changes**. Destructive actions opt into the danger treatment explicitly;
+ordinary confirmations use the standard action treatment. Long paths in the
+description wrap within the shared dialog. Their existing host approvals,
+receipts, and observed-state checks remain separate and mandatory.
+
+Settings connection removal uses the same confirmation while retaining its
+host command and GitHub's explicit local-logout confirmation.
 
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
@@ -1107,6 +1111,10 @@ by a later operation, rather than expiring while work is still running. The
 compact notice has a keyboard-accessible Dismiss action. Export files remain in
 downloads and hand-off documents remain in the dock; this single latest-result
 surface is not a notification history or queue.
+
+When a verified app update finishes downloading, its notice offers a direct
+link to the Updates control; applying the update still requires an explicit
+request from the person.
 
 ## Accessibility and reliability
 

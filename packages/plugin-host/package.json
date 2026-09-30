@@ -14,6 +14,7 @@
     "./model": "./src/model.ts",
     "./skills": "./src/skills.ts",
     "./bundled-skills": "./src/bundledSkills.ts",
+    "./capability-mentions": "./src/capabilityMentions.ts",
     "./computer-use": "./src/computerUsePlugin.ts",
     "./browser-use": "./src/browserUsePlugin.ts"
   },

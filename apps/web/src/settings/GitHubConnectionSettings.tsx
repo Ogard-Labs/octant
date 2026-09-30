@@ -285,6 +285,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                 ? "Confirm credential removal"
                 : "Confirm local logout"
             }
+            destructive
             onCancel={() => setLogoutArmed(false)}
             onConfirm={() => {
               setLogoutArmed(false);

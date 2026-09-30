@@ -70,6 +70,10 @@ import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -1063,6 +1067,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         );
       const promptText = (message?.prompt ?? composerDraft.text).trim();
       if (promptText.length === 0) return false;
+      const unattachedMentions = unattachedCapabilityMentions(promptText, [
+        ...extensionSelections,
+        ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+      ]);
+      if (unattachedMentions.length > 0) {
+        setErrorMessage(unattachedCapabilityMentionCopy(unattachedMentions));
+        return false;
+      }
       const sendingThreadId = String(thread.id);
       const draftRevision = composerDraft.revisionFor(String(props.threadId));
       const attachmentIds: WorkAttachmentId[] = [];
@@ -1195,11 +1207,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       if (!canSubmit) return;
       const threadMentionChips = [...threadMentions.chips];
       const extensionReceipts = [...extensionDraft.receipts];
+      const extensionSelections = extensionReceipts.flatMap((receipt) =>
+        receipt.selection === undefined ? [] : [receipt.selection],
+      );
+      const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+        ...extensionSelections,
+        ...(computer.selection === undefined ? [] : [computer.selection]),
+      ]);
+      if (unattachedMentions.length > 0) {
+        setErrorMessage(unattachedCapabilityMentionCopy(unattachedMentions));
+        return;
+      }
       const steeredMessage: WorkSteeredMessage = {
         ...(computer.selection === undefined ? {} : { computerUseSelection: computer.selection }),
-        extensionSelections: extensionReceipts.flatMap((receipt) =>
-          receipt.selection === undefined ? [] : [receipt.selection],
-        ),
+        extensionSelections,
         extensionReceipts,
         id: globalThis.crypto.randomUUID(),
         originRestore: restoreWorkMessage,

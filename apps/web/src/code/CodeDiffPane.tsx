@@ -348,6 +348,7 @@ function AvailableDiff(
                 title="Discard changes?"
                 confirmLabel="Discard changes"
                 cancelLabel="Keep changes"
+                destructive
                 pending={discarding}
                 onCancel={() => setConfirmingDiscard(undefined)}
                 onConfirm={() => void discard(trackedPath)}

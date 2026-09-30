@@ -188,6 +188,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
         {connected && disconnectArmed ? (
           <OctantConfirmDialog
             confirmLabel="Confirm disconnect"
+            destructive
             onCancel={() => setDisconnectArmed(false)}
             onConfirm={() => {
               setDisconnectArmed(false);

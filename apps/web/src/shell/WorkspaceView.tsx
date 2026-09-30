@@ -16,7 +16,11 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
-import type { CodeOperationId, ThreadBoardPullRequestIdentity } from "@octant/contracts";
+import type {
+  CodeOperationId,
+  CodeProjectPullRequestRow,
+  ThreadBoardPullRequestIdentity,
+} from "@octant/contracts";
 import type {
   ProjectAvailability,
   ProjectId,
@@ -246,6 +250,8 @@ export interface WorkspaceViewProps {
   readonly onOpenReview?: (threadId: CodeThreadId) => void;
   /** Selects a pull request named on a pane tab for the dock's Review pane. */
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  /** Opens the rail's complete Pull requests overview across Projects. */
+  readonly onOpenPullRequests?: () => void;
   readonly onOpenCodeSurface: (
     kind: CodeOverviewSurfaceKind,
     threadId: CodeThreadId,
@@ -922,13 +928,6 @@ function renderCodeTab(
             .harnessAutoReview === "supported"
         ? true
         : undefined;
-  const pullRequestRepository =
-    codeController.activeView !== undefined &&
-    String(codeController.activeView.thread.id) === String(tab.threadId)
-      ? codeController.activeView.thread.deliveryTarget.proposedBaseRepository
-      : codeController.bootstrap?.threads.find(
-          (thread) => String(thread.id) === String(tab.threadId),
-        )?.deliveryTarget.proposedBaseRepository;
   const content = (
     <Suspense
       fallback={
@@ -1072,7 +1071,21 @@ function renderCodeTab(
               ? {}
               : { localServerClient: props.localServerClient })}
             {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-            {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
+            pullRequestClient={codeController.client}
+            {...(props.onOpenPullRequests === undefined
+              ? {}
+              : { onOpenPullRequests: props.onOpenPullRequests })}
+            {...(props.onSelectPullRequest === undefined
+              ? {}
+              : {
+                  onSelectPullRequest: (row: CodeProjectPullRequestRow) =>
+                    props.onSelectPullRequest?.({
+                      projectId: row.projectId,
+                      repositoryOwner: row.repositoryOwner,
+                      repositoryName: row.repositoryName,
+                      number: row.number,
+                    }),
+                })}
             {...(browserAutomationClient === undefined || onOpenSurface === undefined
               ? {}
               : {

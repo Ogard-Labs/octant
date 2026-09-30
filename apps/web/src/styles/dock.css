@@ -607,6 +607,7 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .octant-dialog__popup > .right-utility-dock__surface {
