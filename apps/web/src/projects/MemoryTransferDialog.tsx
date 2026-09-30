@@ -34,7 +34,9 @@ export function MemoryTransferDialog(props: MemoryTransferDialogProps) {
   return (
     <OctantDialog
       className="project-dialog memory-transfer-dialog"
+      describedBy={descriptionId}
       label="Transfer Project memory"
+      labelledBy={titleId}
       onClose={requestClose}
       open
       popupId="memory-transfer-dialog"

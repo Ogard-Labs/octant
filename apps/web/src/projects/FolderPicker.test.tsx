@@ -47,7 +47,9 @@ describe("FolderPicker", () => {
       />,
     );
 
-    expect(await screen.findByRole("dialog", { name: "Add folder" })).toBeVisible();
+    expect(
+      await screen.findByRole("dialog", { name: "Add Code folder" }),
+    ).toHaveAccessibleDescription("Navigate into a folder, then Select the directory to bind.");
     expect(
       screen.getByText("Navigate into a folder, then Select the directory to bind."),
     ).toBeVisible();
@@ -242,7 +244,7 @@ describe("FolderPicker", () => {
       />,
     );
 
-    expect(await screen.findByRole("dialog", { name: "Add folder" })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "Add Code folder" })).toBeVisible();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(onCancel).toHaveBeenCalled());
   });

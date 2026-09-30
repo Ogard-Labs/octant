@@ -1,4 +1,4 @@
-import { useId, useRef, type ReactNode } from "react";
+import { useId, useRef, type ReactNode, type RefObject } from "react";
 import { OctantButton } from "./OctantButton";
 import { OctantDialog } from "./OctantDialog";
 
@@ -6,10 +6,12 @@ import { OctantDialog } from "./OctantDialog";
 export function OctantConfirmDialog(props: {
   readonly title: string;
   readonly children: ReactNode;
+  readonly details?: ReactNode;
   readonly confirmLabel: string;
   readonly cancelLabel?: string;
   readonly destructive?: boolean;
   readonly pending?: boolean;
+  readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }) {
@@ -24,7 +26,13 @@ export function OctantConfirmDialog(props: {
       labelledBy={titleId}
       describedBy={descriptionId}
       initialFocus={cancel}
-      onClose={props.onCancel}
+      {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
+      onClose={() => {
+        if (!props.pending) {
+          props.onCancel();
+          queueMicrotask(() => props.restoreFocus?.current?.focus());
+        }
+      }}
     >
       <h2 className="octant-confirmation__title" id={titleId}>
         {props.title}
@@ -32,9 +40,13 @@ export function OctantConfirmDialog(props: {
       <p className="octant-confirmation__description" id={descriptionId}>
         {props.children}
       </p>
+      {props.details === undefined ? null : (
+        <div className="octant-confirmation__details">{props.details}</div>
+      )}
       <div className="flex flex-wrap justify-end gap-2">
         <OctantButton
           ref={cancel}
+          disabled={props.pending}
           onClick={props.onCancel}
           size="sm"
           type="button"
@@ -47,7 +59,7 @@ export function OctantConfirmDialog(props: {
           onClick={props.onConfirm}
           size="sm"
           type="button"
-          variant={props.destructive === false ? "default" : "destructive"}
+          variant={props.destructive ? "destructive" : "default"}
         >
           {props.confirmLabel}
         </OctantButton>

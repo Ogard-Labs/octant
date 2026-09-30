@@ -50,7 +50,7 @@ describe("ProjectCreateDialog web folder parity", () => {
     );
 
     expect(screen.queryByLabelText("Project name")).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Add folder" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Add Work folder" })).toBeVisible();
     await screen.findByText("knowledge");
     await user.click(screen.getByRole("button", { name: "Select" }));
 
