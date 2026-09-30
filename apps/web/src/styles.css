@@ -2816,15 +2816,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   height: auto;
   min-width: 0;
   padding: var(--oct-space-2) 0;
-  color: inherit;
   text-align: left;
   text-decoration: none;
-  border-radius: 0;
-}
-
-.environment-pull-requests__row:hover,
-.environment-pull-requests__row:focus-visible {
-  color: var(--oct-fg);
 }
 
 .environment-pull-requests__title {
@@ -2885,7 +2878,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .environment-pull-requests__all {
   gap: var(--oct-space-1);
-  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
 
