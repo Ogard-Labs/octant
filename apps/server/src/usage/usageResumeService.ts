@@ -12,6 +12,7 @@ import { Schema } from "effect";
 import {
   ActorId,
   CorrelationId,
+  decodeAgentRunStatusChanged,
   decodeChatAttemptUpdated,
   decodeChatThreadUpdated,
   decodeChatTurnCreated,
@@ -48,7 +49,7 @@ const decodeWorkThreadUpdated = Schema.decodeUnknownSync(WorkThreadUpdated);
 
 export type UsageResumeSettledOutcome = "dispatched" | "invalidated" | "failed";
 
-export type UsageResumeAggregateType = "chat-thread" | "work-thread" | "code-thread";
+export type UsageResumeAggregateType = "chat-thread" | "work-thread" | "code-thread" | "agent-run";
 
 /**
  * What the scheduler asks the mode at reset time. `inspect` re-reads the
@@ -94,6 +95,7 @@ export interface UsageResumePorts {
   readonly chat: UsageResumeModePort;
   readonly work: UsageResumeModePort;
   readonly code: UsageResumeModePort;
+  readonly agentRun: UsageResumeModePort;
 }
 
 export type UsageResumeTimerHandle = unknown;
@@ -135,7 +137,8 @@ const pendingKey = (aggregateType: string, aggregateId: string) =>
 const asUsageResumeAggregateType = (aggregateType: string): UsageResumeAggregateType | undefined =>
   aggregateType === "chat-thread" ||
   aggregateType === "work-thread" ||
-  aggregateType === "code-thread"
+  aggregateType === "code-thread" ||
+  aggregateType === "agent-run"
     ? aggregateType
     : undefined;
 
@@ -289,6 +292,27 @@ export class UsageResumeService {
             String(thread.providerInstanceId) !== String(pending.record.providerInstanceId)
           ) {
             void this.#invalidate(pending, "The thread's provider changed.");
+          }
+          break;
+        }
+        case "agent.run-status-changed@1": {
+          const pending = this.#pending.get(pendingKey("agent-run", event.aggregateId));
+          if (pending === undefined) break;
+          const payload = decodeAgentRunStatusChanged(event.payload);
+          // The resume's own dispatch transitions the run out of waiting
+          // while `dispatching` is still held, so only a transition that
+          // arrives with the opt-in idle — a steer, a cancel, a settle, a
+          // manual retry — supersedes it.
+          if (payload.toStatus !== "waiting") {
+            void this.#invalidate(pending, "The run left its waiting usage-limit stop.");
+          } else if (
+            payload.usageLimit === undefined ||
+            payload.usageLimit.resetsAt !== pending.record.resetsAt
+          ) {
+            void this.#invalidate(
+              pending,
+              "The recorded stop is no longer the waiting usage-limit wait.",
+            );
           }
           break;
         }
@@ -520,6 +544,8 @@ export class UsageResumeService {
         return this.#options.ports.work;
       case "code-thread":
         return this.#options.ports.code;
+      case "agent-run":
+        return this.#options.ports.agentRun;
     }
   }
 }

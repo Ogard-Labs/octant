@@ -1,4 +1,7 @@
 import {
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
+  USAGE_RESUME_SETTLED,
   decodeAgentRun,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
@@ -7,6 +10,9 @@ import {
   decodeAgentRunResultAcknowledged,
   decodeAgentRunResultDeliverySettled,
   decodeAgentRunStatusChanged,
+  decodeUsageResumeCancelled,
+  decodeUsageResumeScheduled,
+  decodeUsageResumeSettled,
   type EventEnvelope,
   type AgentRun,
   type AgentRunCenterStatusFilter,
@@ -22,6 +28,7 @@ import {
   type ProjectId,
   type ProviderInstanceId,
   type UtcTimestamp,
+  type UsageResumeThreadState,
 } from "@octant/contracts";
 import { effectiveAgentRunExecutionTarget, isAgentRunActiveStatus } from "@octant/domain";
 import type { Projection } from "../persistence/projection";
@@ -70,6 +77,8 @@ export interface AgentRunParentSummaryEntry {
    */
   readonly resultText?: string;
   readonly recoveryReason?: string;
+  readonly usageLimit?: AgentRun["usageLimit"];
+  readonly usageResume?: AgentRun["usageResume"];
   readonly version: AgentRun["version"];
   readonly updatedAt: UtcTimestamp;
 }
@@ -98,6 +107,7 @@ export interface AgentRunStatusApplyInput {
   readonly result?: AgentRunResult;
   readonly resultAcknowledgement?: AgentRunResultAcknowledgement;
   readonly usage?: AgentRun["usage"];
+  readonly usageLimit?: AgentRun["usageLimit"];
 }
 
 export interface AgentRunResultAckApplyInput {
@@ -178,7 +188,16 @@ export class AgentRunProjection implements Projection {
         ...(payload.result === undefined ? {} : { result: payload.result }),
         ...(resultAcknowledgement === undefined ? {} : { resultAcknowledgement }),
         ...(payload.usage === undefined ? {} : { usage: payload.usage }),
+        ...(payload.usageLimit === undefined ? {} : { usageLimit: payload.usageLimit }),
       });
+      return;
+    }
+    if (
+      event.eventName === USAGE_RESUME_SCHEDULED ||
+      event.eventName === USAGE_RESUME_CANCELLED ||
+      event.eventName === USAGE_RESUME_SETTLED
+    ) {
+      this.applyUsageResume(event);
       return;
     }
     if (event.eventName === AGENT_RUN_RESULT_ACKNOWLEDGED) {
@@ -220,6 +239,7 @@ export class AgentRunProjection implements Projection {
     const {
       recoveryReason: _previousRecoveryReason,
       usage: _previousUsage,
+      usageLimit: _previousUsageLimit,
       ...runWithoutRecoveryReason
     } = existing;
     const next = decodeAgentRun({
@@ -232,7 +252,71 @@ export class AgentRunProjection implements Projection {
       // must not erase the reply the run already recorded.
       ...(input.result === undefined ? {} : { result: input.result }),
       ...(input.usage === undefined ? {} : { usage: input.usage }),
+      ...(input.usageLimit === undefined ? {} : { usageLimit: input.usageLimit }),
       resultAcknowledgement: input.resultAcknowledgement ?? existing.resultAcknowledgement,
+    });
+    this.#index(next);
+  }
+
+  /**
+   * A usage-resume event is journaled on the run's own aggregate, so it bumps
+   * the aggregate head without producing a status change. Folding it here —
+   * with `version` taken from the event — keeps `run.version` equal to the
+   * head, which every later command's expected-version CAS depends on.
+   */
+  applyUsageResume(event: EventEnvelope): void {
+    const runId = decodeAgentRunId(event.aggregateId);
+    const existing = this.#byId.get(runId);
+    if (existing === undefined) return;
+    if (existing.version >= event.aggregateVersion) return;
+    let usageResume: UsageResumeThreadState | undefined;
+    if (event.eventName === USAGE_RESUME_SETTLED) {
+      const payload = decodeUsageResumeSettled(event.payload);
+      usageResume = {
+        record: payload.resume,
+        status: payload.outcome,
+        ...(payload.detail === undefined ? {} : { detail: payload.detail }),
+      };
+    } else if (event.eventName === USAGE_RESUME_SCHEDULED) {
+      usageResume = {
+        record: decodeUsageResumeScheduled(event.payload).resume,
+        status: "scheduled",
+      };
+    } else {
+      // A withdrawn opt-in leaves no state: the cancelled event supersedes
+      // rather than settles, so the run reports nothing armed or resolved.
+      decodeUsageResumeCancelled(event.payload);
+      usageResume = undefined;
+    }
+    this.applyUsageResumeState({
+      runId,
+      version: event.aggregateVersion,
+      updatedAt: event.occurredAt as UtcTimestamp,
+      usageResume,
+    });
+  }
+
+  /**
+   * Folds the latest usage-resume state — or its absence once an opt-in is
+   * withdrawn — into the run, keeping `version` equal to the aggregate head
+   * the journaled event established.
+   */
+  applyUsageResumeState(input: {
+    readonly runId: AgentRunId;
+    readonly version: number;
+    readonly updatedAt: UtcTimestamp;
+    readonly usageResume: UsageResumeThreadState | undefined;
+  }): void {
+    const runId = decodeAgentRunId(input.runId);
+    const existing = this.#byId.get(runId);
+    if (existing === undefined) return;
+    if (existing.version >= input.version) return;
+    const { usageResume: _dropped, ...rest } = existing;
+    const next = decodeAgentRun({
+      ...rest,
+      ...(input.usageResume === undefined ? {} : { usageResume: input.usageResume }),
+      version: input.version,
+      updatedAt: input.updatedAt,
     });
     this.#index(next);
   }
@@ -300,6 +384,8 @@ export class AgentRunProjection implements Projection {
         resultAcknowledgement: run.resultAcknowledgement,
         ...(run.result === undefined ? {} : { result: run.result }),
         ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+        ...(run.usageLimit === undefined ? {} : { usageLimit: run.usageLimit }),
+        ...(run.usageResume === undefined ? {} : { usageResume: run.usageResume }),
         version: run.version,
         updatedAt: run.updatedAt,
       });

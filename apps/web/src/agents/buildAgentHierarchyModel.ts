@@ -23,6 +23,17 @@ export interface AgentHierarchyInputEntry {
   };
   readonly route?: AgentHierarchyInputRoute;
   readonly recoveryReason?: string;
+  /** The normalized limit fact the host journaled when the run last waited. */
+  readonly usageLimit?: {
+    readonly kind: "temporary" | "exhausted" | "billing";
+    readonly resetsAt?: string | undefined;
+  };
+  /** An armed or settled usage-resume opt-in, when one exists. */
+  readonly usageResume?: {
+    readonly status: "scheduled" | "dispatched" | "invalidated" | "failed";
+    readonly record: { readonly resetsAt: string };
+    readonly detail?: string | undefined;
+  };
   readonly result?: {
     readonly reference: string;
     readonly text?: string;
@@ -45,6 +56,8 @@ export interface AgentHierarchyRow {
   readonly needsAcknowledgement: boolean;
   readonly followUpReason?: string;
   readonly recoveryReason?: string;
+  readonly usageLimit?: AgentHierarchyInputEntry["usageLimit"];
+  readonly usageResume?: AgentHierarchyInputEntry["usageResume"];
   /** The model the host ran, for a row's one-line facts. */
   readonly model?: string;
   readonly routeLabel?: string;
@@ -125,6 +138,8 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
       ? {}
       : { followUpReason: entry.resultAcknowledgement.followUpReason }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
+    ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
+    ...(entry.usageResume === undefined ? {} : { usageResume: entry.usageResume }),
     ...(entry.result === undefined ? {} : { result: entry.result }),
     ...(entry.route === undefined
       ? {}

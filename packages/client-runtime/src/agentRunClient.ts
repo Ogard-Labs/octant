@@ -21,6 +21,8 @@ import {
   type AgentRunResumeRequest,
   type AgentRunRetryRequest,
   type AgentRunSteerRequest,
+  type ProviderUsageLimit,
+  type UsageResumeThreadState,
 } from "@octant/contracts";
 
 /**
@@ -96,6 +98,10 @@ export interface AgentRunParentSummaryClientEntry {
     readonly truncated: boolean;
   };
   readonly recoveryReason?: string;
+  /** The normalized limit fact the host journaled when the run last waited. */
+  readonly usageLimit?: ProviderUsageLimit;
+  /** An armed or settled usage-resume opt-in, when one exists. */
+  readonly usageResume?: UsageResumeThreadState;
   readonly version: number;
   readonly updatedAt: string;
 }
@@ -140,6 +146,12 @@ export interface AgentRunClient {
   steer(input: AgentRunSteerRequest): Promise<AgentRunClientCommandResult>;
   retry(input: AgentRunRetryRequest): Promise<AgentRunClientCommandResult>;
   resume(input: AgentRunResumeRequest): Promise<AgentRunClientCommandResult>;
+  /** Arms or withdraws the opt-in to resume a usage-limited run at reset. */
+  usageResume(input: {
+    readonly runId: AgentRunId;
+    readonly expectedVersion: number;
+    readonly action: "schedule" | "cancel";
+  }): Promise<AgentRunClientCommandResult>;
 }
 
 export class AgentRunClientFailure extends Error {
@@ -300,6 +312,13 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       return postRunCommand(options, headers, "/api/agent-runs/resume", () =>
         decodeAgentRunResumeRequest(input),
       );
+    },
+    async usageResume(input) {
+      return postRunCommand(options, headers, "/api/agent-runs/usage-resume", () => ({
+        runId: input.runId,
+        expectedVersion: input.expectedVersion,
+        action: input.action,
+      }));
     },
   };
 }
