@@ -1859,6 +1859,8 @@ function CodeProjectViewEditorDialog(props: {
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly view?: CodeProjectView;
 }) {
+  const titleId = useId();
+  const descriptionId = useId();
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(props.view?.name ?? "");
   const [icon, setIcon] = useState<CodeProjectViewIcon>(
@@ -1898,7 +1900,9 @@ function CodeProjectViewEditorDialog(props: {
     <OctantDialog
       className="project-dialog"
       initialFocus={nameInputRef}
+      describedBy={descriptionId}
       label={title}
+      labelledBy={titleId}
       onClose={props.onClose}
       open
       popupId="code-project-view-dialog"
@@ -1906,7 +1910,7 @@ function CodeProjectViewEditorDialog(props: {
       <div className="project-dialog__header">
         <div>
           <span>Code</span>
-          <h1>{title}</h1>
+          <h1 id={titleId}>{title}</h1>
         </div>
         <OctantButton
           aria-label="Close project view"
@@ -1918,7 +1922,7 @@ function CodeProjectViewEditorDialog(props: {
           <X aria-hidden="true" size={16} strokeWidth={1.8} />
         </OctantButton>
       </div>
-      <p>
+      <p id={descriptionId}>
         Choose which saved Code Projects appear in this sidebar view. Authority stays on each
         Project.
       </p>
