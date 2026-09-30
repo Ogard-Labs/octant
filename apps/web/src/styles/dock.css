@@ -610,6 +610,10 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   overflow-wrap: anywhere;
 }
 
+.octant-confirmation__details {
+  margin-bottom: var(--oct-space-3);
+}
+
 .octant-dialog__popup > .right-utility-dock__surface {
   width: 100%;
   height: 100%;
