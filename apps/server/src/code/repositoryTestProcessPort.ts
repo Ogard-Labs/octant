@@ -258,6 +258,7 @@ export class RepositoryTestProcessPort {
         : await resolveTestExecutable(validated.executable);
       if (executable === undefined) return unavailable(false);
       const binaryDirectory = dirname(executable);
+      const binaryParentDirectory = dirname(binaryDirectory);
       const launchReadRules =
         this.#platform === "darwin"
           ? [...this.#literalReadPaths, ...(input.literalReadPaths ?? [])].map(
@@ -300,7 +301,14 @@ export class RepositoryTestProcessPort {
         networkEgress: this.#networkEgress,
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
-        readRoots: [input.cwd, this.#temporaryDirectory, binaryDirectory, dirname(binaryDirectory)],
+        readRoots: [
+          input.cwd,
+          this.#temporaryDirectory,
+          binaryDirectory,
+          ...(dirname(binaryParentDirectory) === binaryParentDirectory
+            ? []
+            : [binaryParentDirectory]),
+        ],
         ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
         ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
         ...(this.#platform === "darwin" && launchReadRules.length > 0
