@@ -2119,43 +2119,60 @@ input.switch:checked::after {
 /* ─── toast ─────────────────────────────────────────────────────────── */
 .toast-stack {
   position: fixed;
-  right: var(--oct-space-6);
-  bottom: var(--oct-space-6);
+  right: var(--oct-space-4);
+  bottom: var(--oct-space-4);
   display: grid;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-2);
   z-index: var(--oct-z-toast);
+  width: min(380px, calc(100vw - 32px));
 }
 .toast {
   display: flex;
   align-items: flex-start;
-  gap: var(--oct-space-3);
-  min-width: 280px;
-  max-width: 380px;
-  padding: var(--oct-space-3) var(--oct-space-4);
-  border: 1px solid var(--oct-border);
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--octant-border-soft);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
-  font-size: var(--oct-text-sm);
-  color: var(--oct-fg-2);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-overlay);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+  color: var(--oct-muted);
 }
-.toast-ok {
-  border-color: var(--oct-success-fg);
+.toast__icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--octant-text-secondary);
 }
-.toast-warn {
-  border-color: var(--oct-warn-fg);
+.toast[data-tone="success"] .toast__icon {
+  color: var(--oct-success-fg);
 }
-.toast-danger {
-  border-left-color: var(--oct-danger-fg);
+.toast[data-tone="warning"] .toast__icon {
+  color: var(--oct-warn-fg);
+}
+.toast[data-tone="danger"] .toast__icon {
+  color: var(--oct-danger-fg);
+}
+.toast__content {
+  flex: 1;
+  min-width: 0;
+}
+.toast__dismiss {
+  flex: none;
+  margin: -6px -6px 0 0;
 }
 .toast .toast-title {
   display: block;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
 }
 .toast p {
   margin: 2px 0 0;
-  color: var(--oct-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 /* ─── breadcrumb ────────────────────────────────────────────────────── */
@@ -2545,6 +2562,7 @@ input.switch:checked::after {
 .approval-row__text {
   flex: 1 1 240px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .approval-row__detail {
   display: block;
@@ -2554,12 +2572,11 @@ input.switch:checked::after {
 .approval-row__code {
   flex: 1 1 100%;
   min-width: 0;
-  overflow: hidden;
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-detail);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .approval-row__actions {
   display: inline-flex;

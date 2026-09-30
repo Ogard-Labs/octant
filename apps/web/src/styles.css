@@ -6398,13 +6398,3 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     opacity: 1;
   }
 }
-
-.thread-operation-notice {
-  min-width: 0;
-  max-width: min(380px, calc(100vw - 48px));
-}
-
-.thread-operation-notice > p {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}

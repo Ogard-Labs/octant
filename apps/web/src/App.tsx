@@ -267,6 +267,7 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { ProjectsDirectory } from "./projects/ProjectsDirectory";
 import { OctantButton } from "./ui/base/OctantButton";
+import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
@@ -6832,18 +6833,11 @@ function LaunchedShell(
       </ShellFrame>
       {threadExportNotice === undefined ? null : (
         <div className="toast-stack">
-          <div className="toast thread-operation-notice">
-            <p role="status">{threadExportNotice}</p>
-            <OctantButton
-              aria-label="Dismiss notification"
-              onClick={() => setThreadExportNotice(undefined)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Dismiss
-            </OctantButton>
-          </div>
+          <OctantToast
+            detail={threadExportNotice}
+            onDismiss={() => setThreadExportNotice(undefined)}
+            title="Workspace activity"
+          />
         </div>
       )}
       <ComputerUseActivitySurface
