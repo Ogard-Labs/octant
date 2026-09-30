@@ -120,6 +120,7 @@ describe("the right sidebar surface", () => {
     expect(within(workspace).getByRole("button", { name: "Browser" })).toBeVisible();
     expect(within(workspace).getByRole("button", { name: "Terminal" })).toBeVisible();
     expect(within(devices).getByRole("button", { name: "Android emulator" })).toBeVisible();
+    expect(screen.getAllByText(/^(This thread|Workspace|Devices)$/)).toHaveLength(3);
   });
 
   it("selects and hides open tools without stopping their strip", async () => {

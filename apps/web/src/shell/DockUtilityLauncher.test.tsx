@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DockUtilityLauncher } from "./DockUtilityLauncher";
 
@@ -100,5 +100,36 @@ describe("right sidebar tool launcher", () => {
     fireEvent.click(screen.getByRole("button", { name: "iOS Simulator" }));
     expect(onOpen).toHaveBeenCalledWith("ios-simulator");
     expect(trigger).toHaveFocus();
+  });
+
+  it("groups available tools by thread, workspace, and device in the open menu", () => {
+    render(
+      <DockUtilityLauncher
+        onOpen={vi.fn()}
+        surfaces={[
+          { id: "android-emulator", label: "Android emulator" },
+          { id: "browser", label: "Browser" },
+          { id: "environment", label: "Environment" },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    expect(
+      within(screen.getByRole("group", { name: "This thread" })).getByRole("button", {
+        name: "Environment",
+      }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("group", { name: "Workspace" })).getByRole("button", {
+        name: "Browser",
+      }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("group", { name: "Devices" })).getByRole("button", {
+        name: "Android emulator",
+      }),
+    ).toBeVisible();
+    expect(screen.getAllByText(/^(This thread|Workspace|Devices)$/)).toHaveLength(3);
   });
 });

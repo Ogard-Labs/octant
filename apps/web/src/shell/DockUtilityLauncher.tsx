@@ -2,6 +2,7 @@ import { GitPullRequest, Plus } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
 import { useDismissOnOutsidePointer } from "../lib/useDismissOnOutsidePointer";
 import { DockToolIcon } from "./dockToolIcons";
+import { groupDockTools } from "./dockToolGroups";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
@@ -122,20 +123,33 @@ export function DockToolLaunchList(props: {
   readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
   readonly surfaces: ReadonlyArray<DockUtilityLauncherSurface>;
 }) {
+  const groups = groupDockTools(props.surfaces);
   return (
     <>
-      {props.surfaces.map((surface, index) => (
-        <OctantButton
-          className="workspace-disclosure__action window-no-drag"
-          key={surface.id}
-          onClick={() => props.onOpen(surface.id)}
-          ref={index === 0 ? props.firstAction : undefined}
-          type="button"
-          variant="ghost"
+      {groups.map((group, groupIndex) => (
+        <span
+          aria-label={groups.length > 1 ? group.label : undefined}
+          className="dock-utility-launcher__group"
+          key={group.label}
+          role={groups.length > 1 ? "group" : undefined}
         >
-          <DockToolIcon surface={surface.id} />
-          <span>{surface.label}</span>
-        </OctantButton>
+          {groups.length > 1 ? (
+            <span className="dock-utility-launcher__group-title">{group.label}</span>
+          ) : null}
+          {group.surfaces.map((surface, index) => (
+            <OctantButton
+              className="workspace-disclosure__action window-no-drag"
+              key={surface.id}
+              onClick={() => props.onOpen(surface.id)}
+              ref={groupIndex === 0 && index === 0 ? props.firstAction : undefined}
+              type="button"
+              variant="ghost"
+            >
+              <DockToolIcon surface={surface.id} />
+              <span>{surface.label}</span>
+            </OctantButton>
+          ))}
+        </span>
       ))}
     </>
   );
