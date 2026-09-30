@@ -1080,8 +1080,11 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ### Confirmation and dialog behavior
 
-Ordinary usage reset/retention and Git discard confirmations use the shared
-`OctantConfirmDialog` over `OctantDialog`. The safe action receives initial focus;
+Ordinary usage reset/retention, Git discard, and remote administration
+confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
+remote listener confirmation shows the address, origin, network reach, and
+certificate state without disclosing key material; revoking every device
+requires a destructive confirmation. The safe action receives initial focus;
 Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
 focus to the opener. Git confirmations consistently offer **Keep changes** and
 **Discard changes**. Their existing host approvals, receipts, and observed-state
