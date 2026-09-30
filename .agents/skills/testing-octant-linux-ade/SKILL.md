@@ -82,3 +82,10 @@ To catch dropped/reordered keystrokes, type a brisk battery (`echo HEAD HEAD HEA
 - **Dev server does not log gh spawns** — for "did it hit GitHub" evidence use the journal diff + hosts block, not `grep gh` on the log.
 - **Group expander hitbox is finicky**: clicks at the text's visual y sometimes miss; click ~10-15px lower (the row's real center), or focus it and press Enter — same issue as the rail refresh icons.
 - Snapshot is deliberately OUTSIDE the journal — `refresh-project`/`refresh-all` produce NO `code.operation-event-recorded` events. Per-project scope evidence lives in `pull-request-snapshot.json` `projectFreshness[<projectId>:<owner>/<repo>].lastSuccessfulRefreshAt`.
+
+## Vite dev-server staleness after a mid-run branch switch
+
+- `web --dev` caches dependency/package resolution in `node_modules/.vite/deps` (repo-root node_modules, plus the browser's loaded module graph). If the checkout switches branches while vite runs, NEW package-exports entries (e.g. a fresh `"./x": "./src/x.ts"` in a `@octant/*` package.json) silently fail to resolve: HMR keeps serving the old modules and the app looks "fine" while actually running pre-change code. Symptom: behavior under test is simply absent with no error.
+- A page reload then shows a vite overlay like `"./x" is not exported under the conditions [...]` — misleading because the export IS on disk (workspace is a symlink); the cache is stale.
+- Fix: kill the `web --dev` process, `rm -rf node_modules/.vite/deps`, restart `web --dev --no-open`, reload the page. Then re-test — any evidence captured on the stale bundle is invalid.
+- Composer mention gate (OCT-285): every composer refuses an unattached `@computer`/`@browser` token — the thread composers check in `submitTurn`/their submit path, the first-message composers (ChatWelcome, WorkComposerAdapter, CodeComposerAdapter) check in their own submit. Both refusal wordings name the token; on ChatWelcome there is no suggestion list, so it says "start the thread and pick … there" instead.
