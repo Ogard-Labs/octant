@@ -113,6 +113,20 @@ export type CodexThreadResult = typeof ThreadResult.Type;
 export const decodeThreadStartResult = decode(ThreadResult);
 export const decodeThreadResumeResult = decode(ThreadResult);
 
+/**
+ * Of the effective config only the configured MCP server names are read: a
+ * Chat thread switches each one off by name.
+ */
+const ConfigReadResult = Schema.Struct({
+  config: Schema.Struct({
+    mcp_servers: Schema.optionalWith(Schema.Record({ key: Schema.String, value: Schema.Unknown }), {
+      nullable: true,
+    }),
+  }),
+});
+export type CodexConfigReadResult = typeof ConfigReadResult.Type;
+export const decodeConfigReadResult = decode(ConfigReadResult);
+
 const TurnStartResult = Schema.Struct({ turn: TurnReference });
 export type CodexTurnResult = typeof TurnStartResult.Type;
 export const decodeTurnStartResult = decode(TurnStartResult);
