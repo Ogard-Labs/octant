@@ -6305,6 +6305,7 @@ function LaunchedShell(
                     }
                     onOpenReview={(threadId) => openReviewForThread(String(threadId))}
                     onSelectPullRequest={selectProjectPullRequestIdentity}
+                    onOpenPullRequests={() => setCodePullRequestsOpen(true)}
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"

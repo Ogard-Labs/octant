@@ -1,7 +1,6 @@
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import type { GithubClient } from "@octant/client-runtime/github-client";
 import {
-  decodeGithubCatalogueReadResponse,
+  decodeCodeProjectPullRequestView,
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProjectId,
@@ -242,38 +241,56 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.queryByRole("button", { name: /^Agents/ })).not.toBeInTheDocument();
   });
 
-  it("lists open pull requests beneath the environment facts", async () => {
-    const githubClient = {
-      readCatalogue: vi.fn(async () =>
-        decodeGithubCatalogueReadResponse({
-          kind: "pull-requests",
-          page: {
-            rows: [
-              {
-                number: 42,
-                title: "Keep the environment useful",
-                state: "open",
-                author: "henrikogaard",
-                updatedAt: "2026-08-21T12:00:00Z",
-                url: "https://github.com/acme/repo/pull/42",
-                baseBranch: "main",
-                headBranch: "feature/environment",
-              },
-            ],
-            sort: "updated-desc",
-            hasNextPage: false,
-            freshness: { status: "fresh" },
+  it("lists the connected Project's journaled pull requests beneath the environment facts", async () => {
+    const queryProjectPullRequests = vi.fn(async () =>
+      decodeCodeProjectPullRequestView({
+        version: 1,
+        query: { version: 1 },
+        projects: [
+          {
+            kind: "connected",
+            projectId: String(codeProjectId),
+            projectName: "Octant",
+            repositoryOwner: "acme",
+            repositoryName: "repo",
           },
-        }),
-      ),
-    } as unknown as GithubClient;
+        ],
+        rows: [
+          {
+            projectId: String(codeProjectId),
+            projectName: "Octant",
+            repositoryOwner: "acme",
+            repositoryName: "repo",
+            number: 42,
+            title: "Keep the environment useful",
+            draft: false,
+            state: "open",
+            mergeability: "mergeable",
+            author: "henrikogaard",
+            baseBranch: "main",
+            headBranch: "feature/environment",
+            updatedAt: "2026-08-21T12:00:00.000Z",
+            checks: "passing",
+            review: "approved",
+            linkedThreads: [],
+          },
+        ],
+        repositoriesTruncated: false,
+        pullRequestsTruncated: false,
+        freshness: { status: "fresh" },
+        generatedAt: "2026-08-21T12:05:00.000Z",
+      }),
+    );
+    const pullRequestClient = {
+      queryProjectPullRequests,
+      refreshProjectPullRequests: vi.fn(),
+    };
     render(
       <CodeThreadEnvironment
         environmentOpen
-        githubClient={githubClient}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
-        pullRequestRepository="acme/repo"
+        pullRequestClient={pullRequestClient}
         tab={codeTab()}
       >
         <div />
@@ -281,15 +298,11 @@ describe("CodeThreadEnvironment", () => {
     );
 
     await openEnvironment();
-    fireEvent.click(screen.getByRole("button", { name: "Pull requests" }));
-    expect(await screen.findByText("#42 Keep the environment useful")).toBeVisible();
-    expect(githubClient.readCatalogue).toHaveBeenCalledWith({
-      kind: "pull-requests",
-      owner: "acme",
-      name: "repo",
-      pageSize: 20,
-      state: "open",
-    });
+    fireEvent.click(screen.getByRole("button", { name: /Pull requests/ }));
+    expect(await screen.findByText(/#42 Keep the environment useful/)).toBeVisible();
+    // The Environment reads the journaled snapshot only — never the live
+    // repository catalogue the old group used.
+    expect(queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
   });
 
   it("opens Review from View changes without leaving the thread surface", async () => {

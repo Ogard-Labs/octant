@@ -70,6 +70,7 @@ import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/pr
 import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
+  scheduledAgentRunLiveAuthority,
 } from "./agentRun/authorizeAgentRunCreation";
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
@@ -6525,6 +6526,13 @@ export function startOctantServer(
           ...(routeCodeService.executeOperation === undefined
             ? {}
             : { executeOperation: routeCodeService.executeOperation }),
+        },
+        agentRun: {
+          readRun: (runId) => agentRunPersistence.getById(runId),
+          liveAuthority: (run) => scheduledAgentRunLiveAuthority({ persistence, run }),
+          resume: (runId, expectedVersion, liveAuthority) =>
+            agentRunOrchestration.resume(runId, expectedVersion, liveAuthority),
+          applySettled: (settled) => agentRunPersistence.applyUsageResumeSettled(settled),
         },
       }),
       onError: (message, error) => console.error(`[usage-resume] ${message}`, error),

@@ -282,6 +282,52 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       return json({ results }, status, origin);
     }
 
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/usage-resume") {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return failure("AgentRun usage-resume body is invalid.", 400, origin);
+      }
+      if (!isRecord(body)) return failure("AgentRun usage-resume body is invalid.", 400, origin);
+      const action = body.action;
+      if (action !== "schedule" && action !== "cancel") {
+        return failure("AgentRun usage-resume action is invalid.", 400, origin);
+      }
+      let runId: AgentRunId;
+      let expectedVersion: number;
+      try {
+        runId = decodeAgentRunId(body.runId);
+        expectedVersion = Number(body.expectedVersion);
+        if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+          throw new Error("bad version");
+        }
+      } catch {
+        return failure("AgentRun usage-resume fields are invalid.", 400, origin);
+      }
+      // The opt-in derives only from facts the run journaled; the body names
+      // the run and the intended action, never the reset or provider claims.
+      const run = dependencies.persistence.getById(runId);
+      if (
+        run === undefined ||
+        !(await dependencies.authorizeParentThread({
+          parentThreadId: run.parentThreadId,
+          windowId: authenticatedWindowId,
+        }))
+      ) {
+        return failure("AgentRun usage-resume is not authorized for this run.", 403, origin);
+      }
+      const result = dependencies.persistence.applyCommand({
+        kind:
+          action === "schedule"
+            ? "schedule-agent-run-usage-resume"
+            : "cancel-agent-run-usage-resume",
+        runId,
+        expectedVersion: expectedVersion as never,
+      });
+      return json(result, result.kind === "run-updated" ? 200 : 409, origin);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/agent-runs/steer") {
       return mutateLiveRun(request, origin, authenticatedWindowId, dependencies, "steer");
     }
@@ -766,6 +812,8 @@ function serializeCenterSummary(
       ? {}
       : { normalizedReasoning: run.routingReceipt.normalizedReasoning }),
     ...(run.usage === undefined ? {} : { usage: run.usage }),
+    ...(run.usageLimit === undefined ? {} : { usageLimit: run.usageLimit }),
+    ...(run.usageResume === undefined ? {} : { usageResume: run.usageResume }),
     version: run.version,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
@@ -893,6 +941,8 @@ function serializeEntries(entries: ReadonlyArray<AgentRunParentSummaryEntry>) {
           },
         }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
+    ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
+    ...(entry.usageResume === undefined ? {} : { usageResume: entry.usageResume }),
     version: entry.version,
     updatedAt: entry.updatedAt,
   }));

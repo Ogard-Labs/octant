@@ -219,6 +219,34 @@ export function AgentRunHierarchy(props: {
     [props.client, refresh],
   );
 
+  const usageResume = useCallback(
+    async (input: {
+      readonly runId: string;
+      readonly version: number;
+      readonly action: "schedule" | "cancel";
+    }) => {
+      try {
+        const result = await props.client.usageResume({
+          runId: decodeAgentRunId(input.runId),
+          expectedVersion: input.version,
+          action: input.action,
+        });
+        if (result.kind === "run-command-failed") {
+          setErrorMessage(result.message);
+          return;
+        }
+        await refresh();
+      } catch (error) {
+        setErrorMessage(
+          error instanceof AgentRunClientFailure
+            ? error.message
+            : "AgentRun usage-resume command failed. Retry against authoritative state.",
+        );
+      }
+    },
+    [props.client, refresh],
+  );
+
   const model = useMemo(() => buildAgentHierarchyModel({ entries }), [entries]);
 
   if (status === "loading") {
@@ -261,6 +289,7 @@ export function AgentRunHierarchy(props: {
           onSteer={(input) => void command("steer", input)}
           onRetry={(input) => void command("retry", input)}
           onResume={(input) => void command("resume", input)}
+          onUsageResume={(input) => void usageResume(input)}
           {...(conversationState.conversation === undefined
             ? {}
             : { conversation: conversationState.conversation })}

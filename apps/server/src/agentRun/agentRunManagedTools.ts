@@ -279,6 +279,12 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
             lifecycleStatus: entry.lifecycleStatus,
             resultAvailable: entry.result !== undefined,
             ...(entry.resultText === undefined ? {} : { resultText: entry.resultText }),
+            // A child parked on a provider limit is a blocked dependency the
+            // parent must plan around, not a pending result to keep polling.
+            ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
+            ...(entry.usageResume === undefined
+              ? {}
+              : { usageResume: { status: entry.usageResume.status } }),
           })),
         });
       }
@@ -408,6 +414,21 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
             return answer({
               status: run.lifecycleStatus,
               runId: String(run.id),
+            });
+          }
+          // A run parked on a disclosed provider limit cannot progress before
+          // the reset the opt-in targets, so blocking to the deadline would
+          // only stall the parent. Answer with the fact and whether the person
+          // armed recovery instead of inventing progress.
+          if (run.lifecycleStatus === "waiting" && run.usageLimit !== undefined) {
+            return answer({
+              status: "waiting",
+              lifecycleStatus: run.lifecycleStatus,
+              runId: String(run.id),
+              usageLimit: run.usageLimit,
+              ...(run.usageResume === undefined
+                ? {}
+                : { usageResume: { status: run.usageResume.status } }),
             });
           }
           const remaining = deadline - Date.now();

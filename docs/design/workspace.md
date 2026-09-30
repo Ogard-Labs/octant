@@ -154,7 +154,11 @@ the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page
 says so. Mark reviewed, Steer, Retry, Resume, and Cancel sit in one bar pinned
-under the transcript. A thread with none says subagents appear when the agent
+under the transcript. A run parked on a provider usage limit that disclosed
+its reset additionally shows the limit and offers Resume at reset — the same
+journaled per-record opt-in a thread's own limit stop takes — and Stop
+scheduled resume while it is armed; the row never presents that wait as a
+finished or failed run. A thread with none says subagents appear when the agent
 hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes; on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
@@ -170,8 +174,9 @@ Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
-Projects. The same cached read backs the right dock's Pull requests tool,
-scoped to the active Code thread's Project. The list is a cached read of a
+Projects. The same cached read backs the right dock's Pull requests tool and
+each Code thread's Environment group, scoped to the active Code thread's
+Project. The list is a cached read of a
 private host-local snapshot: opening it, navigating, and ordinary board
 queries do not call GitHub. GitHub is reached
 only by an explicit Refresh all or per-Project refresh, or — for Projects that

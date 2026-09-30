@@ -469,6 +469,22 @@ export class AgentRunOrchestrationService {
           scope: "self",
         });
       case "failed":
+        if (outcome.failure.usageLimit !== undefined) {
+          // The provider's own protocol signal says this stop is a usage
+          // limit, so the run parks as Waiting with the limit fact journaled —
+          // never Failed, which would report a bounded wait as a dead run and
+          // would offer Retry where the honest action is waiting out the
+          // reset. Every other failure keeps the honest terminal state.
+          return this.#persistence.applyCommand({
+            kind: "wait-agent-run",
+            runId: current.id,
+            expectedVersion,
+            recoveryReason: boundedRecoveryReason(
+              `${outcome.failure.category}: ${outcome.failure.message}`,
+            ),
+            usageLimit: outcome.failure.usageLimit,
+          });
+        }
         return this.#persistence.applyCommand({
           kind: "fail-agent-run",
           runId: current.id,

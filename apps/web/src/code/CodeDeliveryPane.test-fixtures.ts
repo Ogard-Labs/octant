@@ -1,6 +1,7 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
+import { decodeCodeProjectPullRequestView } from "@octant/contracts";
 import { vi } from "vitest";
 
 export const ids = {
@@ -22,8 +23,8 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     bootstrap: vi.fn(),
     navigation: vi.fn(),
     queryBoard: vi.fn(),
-    queryProjectPullRequests: vi.fn(),
-    refreshProjectPullRequests: vi.fn(),
+    queryProjectPullRequests: vi.fn(async () => emptyPullRequestView()),
+    refreshProjectPullRequests: vi.fn(async () => emptyPullRequestView()),
     queryProjectPullRequestDetail: vi.fn(),
     refreshProjectPullRequestDetail: vi.fn(),
     conversation: vi.fn(async (threadId) => ({
@@ -158,4 +159,17 @@ export function evidence(truncated: boolean) {
     byteLength: 128,
     ...(truncated ? { truncated: true } : {}),
   } as const;
+}
+
+function emptyPullRequestView() {
+  return decodeCodeProjectPullRequestView({
+    version: 1,
+    query: { version: 1 },
+    projects: [],
+    rows: [],
+    repositoriesTruncated: false,
+    pullRequestsTruncated: false,
+    freshness: { status: "empty" },
+    generatedAt: "2026-08-21T12:00:00.000Z",
+  });
 }

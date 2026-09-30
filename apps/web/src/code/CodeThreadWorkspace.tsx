@@ -104,6 +104,10 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -413,6 +417,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const setRestoreUndo = props.controller.noteRestoreUndo;
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no turn exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -656,6 +663,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       receipt.selection === undefined ? [] : [receipt.selection],
     );
     const extensionReceipts = [...extensionDraft.receipts];
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+      ...extensionSelections,
+      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+    ]);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return;
+    }
+    setSendNotice(undefined);
     const originThreadKey = String(props.threadId);
     // The one-shot override is consumed when the message is sent, not when the
     // turn later finishes: a long running turn must not leave Plan selected for
@@ -765,6 +781,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
   sendSteeredRef.current = async (message) => {
     try {
+      const unattached = unattachedCapabilityMentions(message.prompt, message.extensionSelections);
+      if (unattached.length > 0) {
+        setSendNotice(unattachedCapabilityMentionCopy(unattached));
+        return false;
+      }
       attachments.markDetachedInFlight(message.detachedAttachments);
       const sent = await props.controller.sendFollowUp(
         message.prompt,
@@ -1859,6 +1880,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {forkMessage === undefined ? null : (
               <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
                 {forkMessage}
+              </span>
+            )}
+            {sendNotice === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
+                {sendNotice}
               </span>
             )}
           </div>
