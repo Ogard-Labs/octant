@@ -6,8 +6,8 @@ import {
   remoteRotateDeviceKey,
   remoteSignOut,
 } from "@octant/client-runtime";
-import { AlertTriangle, CircleCheck } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useRemoteSession } from "./useRemoteSession";
 
@@ -212,20 +212,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
         </div>
       ) : null}
       {status === "" ? null : (
-        <p
-          aria-live={statusAssertive ? "assertive" : "polite"}
-          className="remote-shell__status"
-          {...(statusAssertive ? { role: "alert" } : { role: "status" })}
-        >
-          {/* Status is carried by the words; the icon only speeds recognition,
-              so colour is never the sole signal. */}
-          {statusAssertive ? (
-            <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
-          ) : (
-            <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />
-          )}
-          <span>{status}</span>
-        </p>
+        <OctantAlert tone={statusAssertive ? "warning" : "success"}>{status}</OctantAlert>
       )}
     </section>
   );

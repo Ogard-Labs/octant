@@ -120,6 +120,7 @@ describe("AppUpdateSettings", () => {
     const { host } = view();
 
     const relaunch = await screen.findByRole("button", { name: "Relaunch to update" });
+    expect(screen.getByRole("status")).toHaveAttribute("data-tone", "neutral");
     expect(host.installAppUpdate).not.toHaveBeenCalled();
 
     fireEvent.click(relaunch);
@@ -138,9 +139,9 @@ describe("AppUpdateSettings", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Relaunch to update" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /2 agents are still working and a thread is waiting on you/,
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("data-tone", "warning");
+    expect(alert).toHaveTextContent(/2 agents are still working and a thread is waiting on you/);
     expect(host.installAppUpdate).toHaveBeenCalledOnce();
   });
 
@@ -155,7 +156,9 @@ describe("AppUpdateSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/must be an https URL/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("data-tone", "danger");
+    expect(alert).toHaveTextContent(/must be an https URL/);
     expect(screen.getByRole("button", { name: "Check for updates" }).hasAttribute("disabled")).toBe(
       false,
     );
