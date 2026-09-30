@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ImageGenerationProfileView, ImageJob } from "@octant/contracts";
+import type { ImageArtifactRef, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ImageGenerationSheet } from "./ImageGenerationSheet";
 
@@ -63,6 +63,30 @@ function runningJob(): ImageJob {
 }
 
 describe("ImageGenerationSheet", () => {
+  it("names a revision dialog from its visible heading", () => {
+    const parentArtifactRef: ImageArtifactRef = {
+      attachmentId: "a3000000-0000-4000-8000-000000000008" as ImageArtifactRef["attachmentId"],
+      hash: "a".repeat(64) as ImageArtifactRef["hash"],
+      size: 1 as ImageArtifactRef["size"],
+      mime: "image/png",
+    };
+    render(
+      <ImageGenerationSheet
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        open
+        parentArtifactRef={parentArtifactRef}
+        profiles={[openAiProfile()]}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Revise image" });
+    expect(dialog).toHaveAttribute(
+      "aria-labelledby",
+      screen.getByRole("heading", { name: "Revise image" }).id,
+    );
+  });
+
   it("shows OpenAI quality and size, not Gemini aspect ratio", () => {
     render(
       <ImageGenerationSheet

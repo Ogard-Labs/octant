@@ -28,6 +28,37 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("CodeThreadWorkspace", () => {
+  it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "completed",
+              role: "assistant",
+              text: "The fix is ready.",
+              status: "completed",
+              startedAt: "2026-09-30T08:00:00.000Z",
+              at: "2026-09-30T08:01:12.000Z",
+            },
+            {
+              id: "waiting",
+              role: "assistant",
+              text: "Waiting for approval.",
+              status: "waiting",
+              startedAt: "2026-09-30T08:02:00.000Z",
+              at: "2026-09-30T08:03:00.000Z",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("Worked for 1m 12s")).toBeVisible();
+    expect(screen.getAllByText(/Worked for/)).toHaveLength(1);
+  });
+
   it("keeps the starting profile in the access menu, and stays quiet when it has none", async () => {
     const user = userEvent.setup();
     const profileId = "60000000-0000-4000-8000-000000000001";

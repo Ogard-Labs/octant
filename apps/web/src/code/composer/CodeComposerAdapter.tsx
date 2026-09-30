@@ -9,6 +9,10 @@ import {
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelections";
 import {
@@ -437,6 +441,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
   const [submitting, setSubmitting] = useState(false);
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no thread exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
   const canSubmit =
     trimmed.length > 0 &&
     !props.creating &&
@@ -520,12 +527,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    setSubmitting(true);
-    const staged = images.filesForSend();
     const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+      ...extensionSelections,
+      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+    ]);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return;
+    }
+    setSendNotice(undefined);
+    setSubmitting(true);
+    const staged = images.filesForSend();
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
@@ -929,6 +945,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         {props.errorMessage !== undefined ? (
           <p className="code-composer-adapter__error" role="alert">
             {props.errorMessage}
+          </p>
+        ) : sendNotice !== undefined ? (
+          <p className="code-composer-adapter__error" role="alert">
+            {sendNotice}
           </p>
         ) : null}
         {props.creating ? (
