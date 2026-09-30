@@ -41,6 +41,10 @@ import {
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -206,6 +210,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const [branchPending, setBranchPending] = useState(false);
   const pendingCanvasSelections = props.pendingCanvasSelections ?? localCanvasSelections;
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus>({ kind: "idle" });
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no turn exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
   // Every upload still in flight, so the composer's busy state describes the
   // whole batch a multi-image paste starts. Releasing Send when the first one
   // lands would let a later arrival join the pending list after the turn was
@@ -814,6 +821,22 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     steeredMessage?: ChatSteeredMessage,
   ): Promise<boolean> => {
     const deferred = steeredMessage !== undefined;
+    const extensionReceiptsForSend = deferred
+      ? steeredMessage.extensionReceipts
+      : pendingExtensionRef.current;
+    // Refusing before anything is claimed keeps the staged attachments and
+    // context with the draft the user fixes.
+    const unattachedMentions = unattachedCapabilityMentions(
+      draft,
+      extensionReceiptsForSend.flatMap((receipt) =>
+        receipt.selection === undefined ? [] : [receipt.selection],
+      ),
+    );
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return false;
+    }
+    setSendNotice(undefined);
     const claimedAttachments = deferred ? [] : pendingAttachmentsRef.current;
     if (!deferred) pendingAttachmentsRef.current = [];
     const quotesForSend = deferred ? steeredMessage.quotes : pendingQuotesRef.current;
@@ -823,9 +846,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const canvasSelectionsForSend = deferred
       ? steeredMessage.canvasSelections
       : pendingCanvasSelections;
-    const extensionReceiptsForSend = deferred
-      ? steeredMessage.extensionReceipts
-      : pendingExtensionRef.current;
     const threadMentionChipsForSend = deferred
       ? steeredMessage.threadMentionChips
       : [...threadMentions.chips];
@@ -1552,10 +1572,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ? { sendDisabledReason: uploadingMessage }
             : attachmentStatus.kind === "removing"
               ? { sendDisabledReason: `Removing ${attachmentStatus.fileName}.` }
-              : attachmentStatus.kind === "failed"
+              : attachmentStatus.kind === "failed" || sendNotice !== undefined
                 ? {
                     statusMessage: composeComposerNotice(
-                      attachmentStatus.message,
+                      attachmentStatus.kind === "failed" ? attachmentStatus.message : sendNotice,
                       props.controller.draftStagedDropped,
                       props.controller.draftPersistError,
                     ),
