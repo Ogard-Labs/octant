@@ -1080,12 +1080,14 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ### Confirmation and dialog behavior
 
-Ordinary usage reset/retention and Git discard confirmations use the shared
-`OctantConfirmDialog` over `OctantDialog`. The safe action receives initial focus;
-Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
-focus to the opener. Git confirmations consistently offer **Keep changes** and
-**Discard changes**. Their existing host approvals, receipts, and observed-state
-checks remain separate and mandatory.
+Ordinary usage reset/retention, Git discard, and Settings connection removal
+confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The safe
+action receives initial focus; Escape, Cancel, and backdrop dismissal do not
+mutate data, and closing restores focus to the opener. Git confirmations
+consistently offer **Keep changes** and **Discard changes**. Settings removal
+keeps the existing host command and GitHub's explicit local-logout confirmation.
+Existing host approvals, receipts, and observed-state checks remain separate
+and mandatory.
 
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning

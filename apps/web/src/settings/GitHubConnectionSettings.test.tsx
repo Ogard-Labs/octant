@@ -132,14 +132,24 @@ describe("GitHubConnectionSettings", () => {
   });
 
   it("requires a second explicit confirmation before the local logout command", async () => {
+    const user = userEvent.setup();
     const executeAuthenticationCommand = vi.fn(async () => unauthorizedSnapshot);
     render(<GitHubConnectionSettings client={makeClient({ executeAuthenticationCommand })} />);
 
     await screen.findByText("octocat");
-    fireEvent.click(screen.getByRole("button", { name: "Log out on this host" }));
+    const opener = screen.getByRole("button", { name: "Log out on this host" });
+    await user.click(opener);
+    expect(screen.getByRole("dialog", { name: "Log out of GitHub?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(executeAuthenticationCommand).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm local logout" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(executeAuthenticationCommand).not.toHaveBeenCalled();
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Confirm local logout" }));
     await waitFor(() =>
       expect(executeAuthenticationCommand).toHaveBeenCalledWith({
         kind: "logout",
