@@ -510,6 +510,8 @@ bound all hold unchanged. The dispatch settles by appending
 `usage-resume.settled@1` plus the mode's `thread-updated` in one commit; the
 outcome it records (`dispatched`, `invalidated`, or `failed` with the refusal
 detail) stays on the thread until a newer thread event replaces it.
+The old stop's notice describes a dispatched recovery as started, rather than
+implying that the resumed turn is still running after it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as

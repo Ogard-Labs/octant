@@ -44,14 +44,10 @@ export function usageLimitResetLine(limit: ProviderUsageLimit, now: number): str
 const canOfferResume = (limit: ProviderUsageLimit): boolean =>
   limit.resetsAt !== undefined && limit.kind !== "billing";
 
-/**
- * The settled outcome's honest line. `dispatched` reads as in-flight, the
- * other two name the outcome and carry the detail the host journaled.
- */
 function settledResumeLine(resume: UsageResumeThreadState): string {
   switch (resume.status) {
     case "dispatched":
-      return "Resuming…";
+      return "Resume started.";
     case "invalidated":
       return resume.detail === undefined
         ? "The scheduled resume was invalidated."
