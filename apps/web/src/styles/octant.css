@@ -2178,19 +2178,14 @@ input.switch:checked::after {
   display: inline-flex;
   min-height: 24px;
   height: auto;
-  gap: 3px;
-  padding: 0 2px;
-  margin-inline-start: 2px;
-  color: var(--oct-fg);
+  gap: var(--oct-space-1);
+  padding: 0;
+  margin-inline-start: var(--oct-space-1);
   font: inherit;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
   white-space: normal;
   vertical-align: baseline;
-}
-.toast .toast__action:hover,
-.toast .toast__action:focus-visible {
-  color: var(--oct-accent-fg);
 }
 
 /* ─── breadcrumb ────────────────────────────────────────────────────── */

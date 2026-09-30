@@ -39,7 +39,7 @@ export function OctantToast({
                 className="toast__action"
                 onClick={action.onSelect}
                 type="button"
-                variant="ghost"
+                variant="link"
               >
                 {action.label}
                 <span aria-hidden="true">↗</span>
