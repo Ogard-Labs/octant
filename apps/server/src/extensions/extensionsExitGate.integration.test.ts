@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { chmod, mkdtemp, readdir, rm, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
@@ -1583,6 +1583,9 @@ describe("extensions marketplace integrated exit gate", () => {
   it("proves core Apple build/run/test succeed with no Build iOS Apps extension installed", async () => {
     // No extension is installed — the core Apple capability must work
     // independently.
+    const artifactDirectory = await mkdtemp(join(tmpdir(), "octant-phase10-apple-"));
+    directories.push(artifactDirectory);
+    const artifactRoot = join(artifactDirectory, "artifacts");
     const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
       const command = input.argv.join(" ");
       if (command === "xcode-select -p") {
@@ -1654,7 +1657,7 @@ describe("extensions marketplace integrated exit gate", () => {
       threadId: "42000000-0000-4000-8000-000000000008" as never,
       checkoutId: "42000000-0000-4000-8000-000000000009" as never,
       checkoutRoot: "/private/octant-phase10-fixture",
-      artifactRoot: "/private/octant-phase10-artifacts",
+      artifactRoot,
       sourceRevision: "a".repeat(40),
       executionPolicy: "full-access" as const,
       approvalValid: true,
@@ -1685,6 +1688,8 @@ describe("extensions marketplace integrated exit gate", () => {
     };
     const build = await service.execute(buildRequest, executionContext);
     expect(build.outcome).toBe("succeeded");
+    const derivedRoot = join(artifactRoot, `derived-${buildRequest.actionId}`);
+    expect((await stat(derivedRoot)).mode & 0o777).toBe(0o700);
 
     // Core test succeeds with no extension installed.
     const testRequest: AppleBuildRequest = {
