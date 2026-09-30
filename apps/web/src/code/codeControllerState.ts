@@ -52,6 +52,7 @@ export interface CodeConversationMessage {
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
+  readonly startedAt?: string;
   /**
    * When this message happened, as the journal recorded its turn: the turn's
    * start for the prompt, its last update for the reply. Absent on a message
@@ -471,6 +472,7 @@ async function projectConversationTurns(
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,
+      startedAt: String(turn.startedAt),
       at: String(turn.updatedAt),
       ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
     });

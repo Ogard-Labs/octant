@@ -9,6 +9,10 @@ import {
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import {
+  unattachedCapabilityMentionCopy,
+  unattachedCapabilityMentions,
+} from "@octant/plugin-host/capability-mentions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -184,6 +188,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
   });
   const [submitting, setSubmitting] = useState(false);
+  // A send refused before the host saw it explains itself beside the composer,
+  // since no thread exists to carry a reason.
+  const [sendNotice, setSendNotice] = useState<string>();
   const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
 
   useEffect(() => {
@@ -199,12 +206,21 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       setProjectRequired(true);
       return;
     }
-    setSubmitting(true);
-    const staged = images.filesForSend();
     const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
+    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
+      ...extensionSelections,
+      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
+    ]);
+    if (unattachedMentions.length > 0) {
+      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
+      return;
+    }
+    setSendNotice(undefined);
+    setSubmitting(true);
+    const staged = images.filesForSend();
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
@@ -507,6 +523,10 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         {props.errorMessage !== undefined ? (
           <p className="work-composer-adapter__error" role="alert">
             {props.errorMessage}
+          </p>
+        ) : sendNotice !== undefined ? (
+          <p className="work-composer-adapter__error" role="alert">
+            {sendNotice}
           </p>
         ) : projectRequired && !hasFolder ? (
           <p className="work-composer-adapter__error" role="alert">

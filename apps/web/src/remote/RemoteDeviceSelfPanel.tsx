@@ -179,6 +179,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
         <OctantConfirmDialog
           cancelLabel="Keep current key"
           confirmLabel="Rotate key"
+          destructive
           onCancel={() => setConfirmingRotate(false)}
           onConfirm={() => {
             setConfirmingRotate(false);

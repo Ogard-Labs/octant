@@ -53,6 +53,24 @@ describe("createPhase1RuntimeRegistries", () => {
     expect(registry.events.decode("agent-run-settings.updated@1", 1, payload)).toEqual(payload);
   });
 
+  it("registers agent.run-result-delivery-settled@1 so a finished run's delivery can settle", () => {
+    const registry = createPhase1RuntimeRegistries();
+    const payload = {
+      runId: "a1000000-0000-4000-8000-000000000005",
+      version: 4,
+      delivery: {
+        outcome: "delivered",
+        settledAt: "2026-08-10T00:00:00.000Z",
+      },
+    };
+    // AgentRunEventStore appends this name through the real journal; a missing
+    // registration throws UnknownEventName inside the settle path, which left
+    // every finished run redelivering its result forever.
+    expect(registry.events.decode("agent.run-result-delivery-settled@1", 1, payload)).toEqual(
+      payload,
+    );
+  });
+
   it("registers automation notification preference and delivery receipt events", () => {
     const registry = createPhase1RuntimeRegistries();
     const preferences = {

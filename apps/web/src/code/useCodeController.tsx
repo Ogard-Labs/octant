@@ -2122,19 +2122,20 @@ export function useCodeController(options: CodeControllerOptions) {
             if (event.kind === "conversation-turn-started") {
               const checkpoint = event.checkpoint;
               const ranUnder = event.executionPolicy;
-              if (checkpoint !== undefined || ranUnder !== undefined) {
-                setConversation((current) =>
-                  current.map((entry) =>
-                    entry.id === userMessage.id
-                      ? {
-                          ...entry,
-                          ...(checkpoint === undefined ? {} : { checkpoint }),
-                          ...(ranUnder === undefined ? {} : { executionPolicy: ranUnder }),
-                        }
+              setConversation((current) =>
+                current.map((entry) =>
+                  entry.id === userMessage.id
+                    ? {
+                        ...entry,
+                        at: frame.occurredAt,
+                        ...(checkpoint === undefined ? {} : { checkpoint }),
+                        ...(ranUnder === undefined ? {} : { executionPolicy: ranUnder }),
+                      }
+                    : entry.id === assistantId
+                      ? { ...entry, startedAt: frame.occurredAt }
                       : entry,
-                  ),
-                );
-              }
+                ),
+              );
             }
             // The host journals the change list just before the turn settles,
             // so the reply gains its files here rather than on the next reopen.

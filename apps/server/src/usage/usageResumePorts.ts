@@ -8,6 +8,7 @@
 import { Schema } from "effect";
 import {
   decodeAggregateVersion,
+  decodeAgentRunId,
   decodeChatAttemptId,
   decodeChatThread,
   decodeChatThreadId,
@@ -22,6 +23,10 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   UtcTimestamp,
+  type AgentRun,
+  type AgentRunAuthority,
+  type AgentRunCommandResult,
+  type AgentRunId,
   type ChatThread,
   type ChatThreadView,
   type CodeEvidenceBatchResponse,
@@ -33,12 +38,14 @@ import {
   type CodeThread,
   type CodeThreadId,
   type UsageResumeRecord,
+  type UsageResumeSettled,
   type WindowId,
   type WorkThread,
   type WorkThreadId,
   type WorkTurnLookupResult,
   type WorkTurnState,
 } from "@octant/contracts";
+import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
@@ -109,6 +116,25 @@ export interface UsageResumePortDependencies {
       usageResumePayload: unknown,
       threadUpdate: { readonly kind: "thread-updated"; readonly thread: WorkThread } | undefined,
     ) => void;
+  };
+  readonly agentRun: {
+    readonly readRun: (runId: AgentRunId) => AgentRun | undefined;
+    /**
+     * The window-free live grant for a scheduled resume; undefined when the
+     * parent thread's durable posture can no longer be read.
+     */
+    readonly liveAuthority: (run: AgentRun) => AgentRunAuthority | undefined;
+    /** The ordinary run resume path — capacity, authority, workspace checks. */
+    readonly resume: (
+      runId: AgentRunId,
+      expectedVersion: number,
+      liveAuthority: AgentRunAuthority,
+    ) => AgentRunCommandResult | Promise<AgentRunCommandResult>;
+    /**
+     * Folds a scheduler-committed settle into the in-memory run projection,
+     * which the journal does not drive.
+     */
+    readonly applySettled?: (settled: UsageResumeSettled) => void;
   };
   readonly code: {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
@@ -517,6 +543,74 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
   };
 }
 
+/**
+ * A child run's resume is the ordinary resume path — the same start a
+ * person-driven Resume takes — so capacity gating, live-authority clamps,
+ * workspace checks, and the approvals freshness check all apply unchanged.
+ * The opt-in's premise is the run's own journaled wait: still `waiting` on
+ * the same disclosed reset, on the same execution provider the route
+ * recorded, with the opt-in still current.
+ */
+function agentRunPort(deps: UsageResumePortDependencies): UsageResumeModePort {
+  return {
+    inspect: async (record) => {
+      const run = deps.agentRun.readRun(decodeAgentRunId(record.threadId));
+      if (run === undefined) {
+        return invalid("The run no longer exists.");
+      }
+      if (run.lifecycleStatus !== "waiting") {
+        return invalid("The run left its waiting stop.");
+      }
+      if (run.usageLimit === undefined) {
+        return invalid("The run is no longer waiting on a usage limit.");
+      }
+      if (run.usageLimit.resetsAt !== record.resetsAt) {
+        return invalid("The provider moved the reset the opt-in was made against.");
+      }
+      if (
+        String(effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId) !==
+        String(record.providerInstanceId)
+      ) {
+        return invalid("The run's execution provider changed.");
+      }
+      if (!scheduledFor(run.usageResume, record)) {
+        return invalid("The scheduled resume is no longer current.");
+      }
+      return { kind: "ready" };
+    },
+    dispatch: async (record) => {
+      const run = deps.agentRun.readRun(decodeAgentRunId(record.threadId));
+      if (run === undefined) {
+        return refused("The run no longer exists.");
+      }
+      const liveAuthority = deps.agentRun.liveAuthority(run);
+      if (liveAuthority === undefined) {
+        return refused("The run's parent thread grant is unavailable.");
+      }
+      try {
+        const result = await deps.agentRun.resume(run.id, run.version, liveAuthority);
+        return result.kind === "run-updated"
+          ? { kind: "dispatched" }
+          : refused(
+              result.kind === "run-command-failed"
+                ? result.message
+                : "The resume did not start the run.",
+            );
+      } catch (error) {
+        return refused(refusalDetail(error));
+      }
+    },
+    settleApplied: (usageResumePayload) => {
+      deps.agentRun.applySettled?.(usageResumePayload as UsageResumeSettled);
+    },
+  };
+}
+
 export function createUsageResumePorts(deps: UsageResumePortDependencies): UsageResumePorts {
-  return { chat: chatPort(deps), work: workPort(deps), code: codePort(deps) };
+  return {
+    chat: chatPort(deps),
+    work: workPort(deps),
+    code: codePort(deps),
+    agentRun: agentRunPort(deps),
+  };
 }

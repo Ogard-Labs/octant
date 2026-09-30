@@ -5,11 +5,15 @@ import {
   EventActor,
   EventId,
   ReplayCursor,
+  USAGE_RESUME_CANCELLED,
+  USAGE_RESUME_SCHEDULED,
   decodeAgentRun,
   decodeAgentRunId,
   decodeAgentRunResultAcknowledged,
   decodeAgentRunResultDeliverySettled,
   decodeAgentRunStatusChanged,
+  decodeUsageResumeCancelled,
+  decodeUsageResumeScheduled,
   type AgentRun,
   type AgentRunAdmittedContext,
   type AgentRunId,
@@ -17,6 +21,7 @@ import {
   type AgentRunResult,
   type AgentRunResultDelivery,
   type EventEnvelope,
+  type UsageResumeRecord,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -83,6 +88,16 @@ export interface AppendAgentRunStatusChangedInput {
   readonly run?: AgentRun;
   /** Provider-reported token counts; journaled with completion. */
   readonly usage?: AgentRun["usage"];
+  /** The provider's own limit signal; journaled with a usage-limit wait. */
+  readonly usageLimit?: AgentRun["usageLimit"];
+}
+
+export interface AppendAgentRunUsageResumeInput {
+  readonly runId: AgentRunId;
+  readonly expectedVersion: number;
+  readonly occurredAt: UtcTimestamp;
+  readonly eventName: typeof USAGE_RESUME_SCHEDULED | typeof USAGE_RESUME_CANCELLED;
+  readonly resume: UsageResumeRecord;
 }
 
 export interface AppendAgentRunResultAcknowledgedInput {
@@ -238,6 +253,7 @@ export class AgentRunEventStore {
         ...(input.recoveryReason === undefined ? {} : { recoveryReason: input.recoveryReason }),
         ...(input.result === undefined ? {} : { result: input.result }),
         ...(input.usage === undefined ? {} : { usage: input.usage }),
+        ...(input.usageLimit === undefined ? {} : { usageLimit: input.usageLimit }),
       });
       if (payload.version !== expectedVersion + 1) {
         throw new Error("status version must be one greater than expected head");
@@ -434,6 +450,70 @@ export class AgentRunEventStore {
       payload.version,
       AGENT_RUN_RESULT_DELIVERY_SETTLED,
       "AgentRun result delivery settle",
+    );
+  }
+
+  /**
+   * Journals a person's usage-resume opt-in on the run's own aggregate — the
+   * same durable record a thread carries, but on `agent-run` so the bounded
+   * wait and its recovery arm share one history. The append bumps the
+   * aggregate head; the projection folds the event into `run.usageResume` and
+   * keeps `run.version` equal to the head, so subsequent commands CAS cleanly.
+   */
+  appendUsageResume(input: AppendAgentRunUsageResumeInput): EventEnvelope {
+    let runId: AgentRunId;
+    let aggregateId: typeof AggregateId.Type;
+    let expectedVersion: typeof AggregateVersion.Type;
+    let eventId: typeof EventId.Type;
+    let correlationId: typeof CorrelationId.Type;
+    let payload: ReturnType<typeof decodeUsageResumeScheduled | typeof decodeUsageResumeCancelled>;
+    try {
+      runId = decodeAgentRunId(input.runId);
+      expectedVersion = decodeAggregateVersion(input.expectedVersion);
+      aggregateId = decodeAggregateId(runId);
+      eventId = decodeEventId(this.#uuid());
+      correlationId = decodeCorrelationId(this.#uuid());
+      payload =
+        input.eventName === USAGE_RESUME_SCHEDULED
+          ? decodeUsageResumeScheduled({ resume: input.resume })
+          : decodeUsageResumeCancelled({ resume: input.resume });
+    } catch {
+      throw new AgentRunEventStoreError("invalid", "AgentRun usage-resume append is invalid.");
+    }
+
+    let committed;
+    try {
+      committed = this.#journal.append({
+        aggregate: { aggregateType: AGENT_RUN_AGGREGATE_TYPE, aggregateId },
+        expectedVersion,
+        events: [
+          {
+            eventId,
+            eventName: input.eventName,
+            eventVersion: 1,
+            correlationId,
+            actor: this.#actor,
+            occurredAt: input.occurredAt,
+            payload,
+          },
+        ],
+      });
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) {
+        throw new AgentRunEventStoreError(
+          "invalid",
+          "AgentRun expected version does not match the current head.",
+        );
+      }
+      throw error;
+    }
+
+    return this.#assertCommitted(
+      committed.events[0],
+      aggregateId,
+      expectedVersion + 1,
+      input.eventName,
+      "AgentRun usage-resume",
     );
   }
 
