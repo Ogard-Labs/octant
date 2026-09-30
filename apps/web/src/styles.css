@@ -4704,8 +4704,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   line-height: 1.45;
 }
 
-.model-picker__unavailable-current {
+.model-picker__unavailable-current,
+.model-picker__selected-hidden {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "name"
+    "reason";
   gap: 2px;
   margin: 0;
   padding: 10px 0;

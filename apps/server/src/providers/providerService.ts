@@ -1426,9 +1426,14 @@ export class ProviderService implements ProviderServiceApi {
         : { detectedVersion: diagnostic.detectedVersion }),
       models: [],
       capabilities: unavailableCapabilities,
-      // Free-form driver messages can quote provider output. Only the typed
-      // refusal reason and its contract-validated diagnostic cross to clients.
-      message: diagnostic?.stderrContext ?? probeFailureMessage(readiness, failure?.reason),
+      message:
+        failure?.reason === "runtime-incompatible" &&
+        diagnostic?.stage === "version-check" &&
+        diagnostic.kind === "version-mismatch" &&
+        diagnostic.supportedVersion !== undefined &&
+        /^\d+\.\d+\.\d+$/.test(diagnostic.supportedVersion)
+          ? `Provider runtime ${diagnostic.supportedVersion} or later is required.`
+          : (diagnostic?.stderrContext ?? probeFailureMessage(readiness, failure?.reason)),
       ...(failure?.reason === undefined ? {} : { reason: failure.reason }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
       observedAt: decodeTimestamp(this.#clock()),

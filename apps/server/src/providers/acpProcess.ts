@@ -706,6 +706,12 @@ function probeNpmPackageVersion(
     return Effect.fail(
       failure("incompatible", `${name} ${minimum} or later is required.`, {
         reason: "runtime-incompatible",
+        diagnostic: {
+          stage: "version-check",
+          kind: "version-mismatch",
+          detectedVersion: parsed.version,
+          supportedVersion: minimum,
+        },
       }),
     );
   }
@@ -857,6 +863,12 @@ export function probeAcpBinary(
             Effect.fail(
               failure("incompatible", `${name} ${minimum} or later is required.`, {
                 reason: "runtime-incompatible",
+                diagnostic: {
+                  stage: "version-check",
+                  kind: "version-mismatch",
+                  detectedVersion: parsed.version,
+                  supportedVersion: minimum,
+                },
               }),
             ),
           );
