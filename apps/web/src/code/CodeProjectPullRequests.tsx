@@ -637,7 +637,9 @@ export function truncationCopy(view: CodeProjectPullRequestView, dock: boolean):
 
 export function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
   if (freshness.status === "empty") {
-    return "No GitHub snapshot yet. Refresh a connected Project to load active pull requests.";
+    return freshness.lastSuccessfulRefreshAt === undefined
+      ? "No GitHub snapshot yet. Refresh a connected Project to load active pull requests."
+      : `Last successful refresh ${relativeTimeLabel(freshness.lastSuccessfulRefreshAt)}.`;
   }
   if (freshness.status === "fresh") {
     return freshness.lastSuccessfulRefreshAt === undefined
@@ -674,7 +676,9 @@ export function pullRequestCountCopy(
   freshness: CodeProjectPullRequestFreshness,
   count: number,
 ): string {
-  if (freshness.status === "empty") return "Refresh to load pull requests";
+  if (freshness.status === "empty" && freshness.lastSuccessfulRefreshAt === undefined) {
+    return "Refresh to load pull requests";
+  }
   if (freshness.status === "stale") {
     if (count === 0) return "No cached pull requests";
     return count === 1 ? "1 cached pull request" : `${String(count)} cached pull requests`;

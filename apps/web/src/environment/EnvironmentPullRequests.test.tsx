@@ -154,6 +154,21 @@ describe("EnvironmentPullRequests", () => {
     expect(await screen.findByText(/No open or draft pull requests/)).toBeVisible();
   });
 
+  it("reports a successful refresh that found no pull requests, not a missing snapshot", async () => {
+    renderGroup({
+      load: vi.fn(async () =>
+        view({
+          freshness: { status: "empty", lastSuccessfulRefreshAt: generatedAt },
+          rows: [],
+        }),
+      ),
+    });
+    expect(await screen.findByText(/0 pull requests in this Project/)).toBeVisible();
+    expect(screen.getByText(/Last successful refresh/)).toBeVisible();
+    expect(screen.queryByText(/No GitHub snapshot yet/)).not.toBeInTheDocument();
+    expect(screen.getByText(/No open or draft pull requests/)).toBeVisible();
+  });
+
   it("labels a stale snapshot rather than presenting it as current", async () => {
     renderGroup({
       load: vi.fn(async () =>
