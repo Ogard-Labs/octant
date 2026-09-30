@@ -8,7 +8,6 @@ import { resolveCodeNewThreadWorkspace, type PickerGroup } from "@octant/domain"
 import type { WorktreeRemoteFacts } from "@octant/domain/code-worktree-source-policy";
 import {
   ArrowUpRight,
-  CircleAlert,
   GitBranch,
   GitCompare,
   GitPullRequest,
@@ -22,6 +21,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
 import { OctantBadge } from "../ui/base/OctantBadge";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ThreadRenameField } from "../projects/ThreadRenameField";
@@ -472,16 +472,18 @@ function CodeProjectSessions(props: {
           Loading threads…
         </p>
       ) : props.boardState.kind === "unavailable" ? (
-        <div className="callout callout-warn code-project-overview__state" role="alert">
-          <CircleAlert aria-hidden="true" size={16} />
-          <div>
-            <p className="callout-title">Code projections unavailable</p>
-            <p>{props.boardState.message}</p>
-          </div>
-          <OctantButton onClick={props.onRetry} type="button" variant="secondary">
-            <RefreshCw aria-hidden="true" size={14} /> Retry projections
-          </OctantButton>
-        </div>
+        <OctantAlert
+          action={
+            <OctantButton onClick={props.onRetry} type="button" variant="secondary">
+              <RefreshCw aria-hidden="true" size={14} /> Retry projections
+            </OctantButton>
+          }
+          className="code-project-overview__state"
+          title="Code projections unavailable"
+          tone="warning"
+        >
+          <p>{props.boardState.message}</p>
+        </OctantAlert>
       ) : rows.length === 0 ? (
         <p className="code-project-overview__note" role="status">
           {props.showQuickStart === false ? "No threads yet." : "No threads yet. Start one below."}

@@ -329,32 +329,13 @@ button.first-run__fact-action {
   color: var(--oct-muted);
 }
 
-/* `.callout` carries the card; these place it in the wizard grid, stack its
-   children (one holds a paragraph and a button), and map the markup's
-   data-tone onto the callout's tinted ground. */
 .first-run__notice {
   grid-area: notice;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--oct-space-2);
-  /* Two of these notices are paragraphs; the callout recipe styles a box,
-     not a p, so the default block margin is dropped here. */
   margin: 0;
 }
 
-.first-run__notice[data-tone="attention"] {
-  /* Attention is the wizard's actionable warning: the system's warning
-     language is a tinted ground with a tinted hairline, not an edge. */
-  background: var(--oct-warn-soft);
-  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
-}
-
-/* `.callout` carries the box; this only stacks the sentence over the action
-   it offers, because the recipe lays its children out in a row. */
 .first-run__empty {
   align-items: flex-start;
-  flex-direction: column;
-  gap: var(--oct-space-3);
 }
 
 .first-run__actions {

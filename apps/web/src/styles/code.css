@@ -1726,11 +1726,6 @@
   align-items: flex-start;
 }
 
-.code-project-overview__state > div {
-  flex: 1;
-  min-width: 0;
-}
-
 .code-project-overview__state svg {
   flex: none;
   margin-top: 2px;
@@ -1931,14 +1926,6 @@
   flex: 0 0 auto;
   align-items: center;
   margin: 12px auto 0;
-  /* The workspace notices are warnings: the recipe is tone-neutral, so the
-     warning's tinted ground and hairline live here with the placement. */
-  background: var(--oct-warn-soft);
-  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
-}
-
-.code-thread-workspace__callout > p {
-  flex: 1 1 auto;
 }
 
 /* A provider's question takes the approval row with its answer field. */

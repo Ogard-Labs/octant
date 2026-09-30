@@ -9,6 +9,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import {
   resolveFirstRunHandoff,
@@ -518,9 +519,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         </div>
 
         {controller.blockedMessage === undefined ? null : (
-          <p className="first-run__notice callout" data-tone="attention" role="alert">
+          <OctantAlert className="first-run__notice" tone="warning">
             {controller.blockedMessage}
-          </p>
+          </OctantAlert>
         )}
 
         <footer className="first-run__actions">

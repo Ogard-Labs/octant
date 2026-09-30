@@ -2,6 +2,7 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { ModelPicker } from "../providers/ModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface FirstRunModelStepProps {
   readonly ariaLabel: string;
@@ -50,16 +51,20 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
           it in the callout the wizard's other notices use rather than as loose
           text on the panel ground. */}
       {empty ? (
-        <div className="first-run__empty callout" role="status">
+        <OctantAlert
+          action={
+            <OctantButton onClick={props.onOpenProviderSettings} type="button" variant="outline">
+              Open provider settings
+            </OctantButton>
+          }
+          className="first-run__empty"
+        >
           <p className="first-run__intro">
             {listed
               ? "No provider on this Mac offered a model, so there is nothing to choose from yet."
               : "No provider on this Mac is ready, so there is nothing to choose from yet."}
           </p>
-          <OctantButton onClick={props.onOpenProviderSettings} type="button" variant="outline">
-            Open provider settings
-          </OctantButton>
-        </div>
+        </OctantAlert>
       ) : (
         <ModelPicker
           ariaLabel={props.ariaLabel}
