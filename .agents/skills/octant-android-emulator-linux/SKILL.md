@@ -6,6 +6,7 @@ description: Testing the Octant Android emulator pane on the Linux ADE — provi
 # Testing the Android emulator pane on the Octant Linux ADE
 
 ## Host provisioning (one-time, not covered by the repo blueprint)
+
 - Android SDK must live at `~/Android/Sdk` (Octant's `defaultSdkHome()` on Linux — used only when
   `ANDROID_HOME`/`ANDROID_SDK_ROOT` are unset; the running dev server's env has neither).
   Needed dirs: `platform-tools/adb`, `emulator/emulator`, `platforms/android-34`,
@@ -17,11 +18,13 @@ description: Testing the Octant Android emulator pane on the Linux ADE — provi
   (`requireLinuxConfinement`).
 
 ## The pane
+
 - `AndroidEmulatorModule` mounts only when `subject.mode === "code"` (right utility dock → tool list →
   "Android emulator", group "Devices"). It is NOT Gradle-gated — any code thread shows it.
 - Pane requests carry `requestedBy: local-user`; agent ops via `octant_android` carry the agent actor.
 
 ## Posture matrix (verified on web)
+
 - full-access thread → pane actions run immediately (server sets approvalValid=true).
 - plan thread → server denies: pane shows "Android boot unauthorized." (read-only-policy).
 - approval-gated / auto-accept-edits on the WEB renderer → fail closed: "This window cannot confirm
@@ -30,11 +33,13 @@ description: Testing the Octant Android emulator pane on the Linux ADE — provi
   `bun run dev` spawns its own server+vite — conflicts with an already-running dev stack on :13773/:5173).
 
 ## Confinement + emulator-console auth: the recurring defect class (verified 2026-09-30/10-01)
+
 All adb calls run inside bwrap (`RepositoryTestProcessPort`) where `/home/<user>` is NOT mounted —
 only the checkout, the SDK dirs, tmpdirs and `~/.android` are bound. Any adb subcommand that talks to
 the **emulator console** (`adb emu ...`) needs `~/.emulator_console_auth_token`, which is NOT bound.
 Commands that go through **adbd** (`adb -s <serial> shell/exec-out ...`) authenticate with the bound
 `~/.android/adbkey` and work fine. That asymmetry is the whole story:
+
 - `emu avd name` (serial binding) — FIXED in PR #902 (4bc29b23): now uses
   `adb -s <serial> shell getprop ro.boot.qemu.avd_name`. Pane Boot reaches `booted` + a live painted
   frame in ~8s (was 181s "Android boot timed out.").
@@ -50,6 +55,7 @@ Commands that go through **adbd** (`adb -s <serial> shell/exec-out ...`) authent
   path a directory crashes qemu at startup (std::bad_alloc).
 
 ## What works on the Linux web pane post-fix (verified 2026-10-01)
+
 - Discovery lists the AVD; Boot → `booted` + figcaption "Live · octant_test" + a PAINTED live frame.
 - The frame IS a live stream on the web renderer — it repaints when the device state changes
   (launcher → Settings driven via adb) and the clock ticks. Earlier claim that live frames are
@@ -66,10 +72,11 @@ Commands that go through **adbd** (`adb -s <serial> shell/exec-out ...`) authent
   artifacts/DOM busy state to confirm whether the action actually fired.
 
 ## Evidence locations
+
 - Action artifacts: `~/.local/share/octant/android-runtime/artifacts/<threadId>/<checkoutId>/android-log-<actionId>`
   (boot writes "emulator booted" or "emulator did not become ready") and `android-screenshot-*`.
 - `event_journal` (octant.sqlite3) contains ZERO android events — evidence is in-memory `recentEvidence`
-  + artifacts only.
+  - artifacts only.
 - Server log line worth grepping: `POST /api/android/toolchain` request durations — 181s = boot timeout.
 - `octant_android` agent tool (full-access only) ops: discover/status/open/boot/shutdown/screenshot/
   tap/swipe/type-text/key-press/install/launch — discover/status work without serial binding.
