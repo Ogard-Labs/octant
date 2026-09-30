@@ -79,13 +79,13 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
     setStatus("");
     try {
       const result = await action();
-      if (!alive.current) return;
       const warning = warningFrom(result);
+      onComplete(warning);
+      if (!alive.current) return;
       // A warning means the host action committed but local cleanup did not.
       // Reporting it as plain success would misstate this browser's state.
       setStatusAssertive(warning !== undefined);
       setStatus(warning ?? successMessage ?? `${label} completed.`);
-      onComplete(warning);
     } catch (error) {
       if (!alive.current) return;
       setStatusAssertive(true);

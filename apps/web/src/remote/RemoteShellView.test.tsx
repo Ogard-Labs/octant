@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { useSyncExternalStore } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
@@ -288,6 +289,33 @@ async function readyBridge(seen: ProductRequest[] = []) {
 }
 
 describe("RemoteShellView", () => {
+  it("passes a local credential cleanup warning after revocation unmounts the shell", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge();
+    const onReset = vi.fn();
+    vi.spyOn(bridge, "forgetDeviceKey").mockRejectedValueOnce(
+      new Error("Local credential cleanup failed."),
+    );
+    function PairedShell() {
+      const state = useSyncExternalStore(bridge.subscribe, bridge.getState);
+      return state.kind === "ready" ? (
+        <RemoteShellView bridge={bridge} onReset={onReset} />
+      ) : (
+        <div>Pairing entry</div>
+      );
+    }
+    render(<PairedShell />);
+
+    await user.click(await screen.findByRole("button", { name: "Revoke this device" }));
+    expect(await screen.findByText("Pairing entry")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(onReset).toHaveBeenCalledWith(
+        "Remote device was revoked, but this browser could not remove its local credential.",
+      ),
+    );
+  });
+
   it("opens a Chat thread from the paired host and sends a real turn over the remote session", async () => {
     const user = userEvent.setup();
     const seen: ProductRequest[] = [];
