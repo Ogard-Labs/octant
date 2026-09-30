@@ -1080,6 +1080,13 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ### Confirmation and dialog behavior
 
+Inline provider, extension, and Browser permission requests use
+`OctantApprovalCard` in the thread column. It owns the neutral card material,
+pending icon, readable summary and detail, wrapping action row, and inline
+failure announcement. The requesting feature supplies the scope, choices, and
+callbacks; the existing host or server still decides whether an action may
+proceed. Native Code approvals keep their isolated host-owned document.
+
 Ordinary usage reset/retention and Git discard confirmations use the shared
 `OctantConfirmDialog` over `OctantDialog`. The safe action receives initial focus;
 Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores

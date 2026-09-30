@@ -23,7 +23,6 @@ import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/co
 import { decodeProviderModelId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
-import { CirclePause } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
@@ -69,6 +68,7 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ShellState } from "../shell/ShellState";
 import { samePollingData } from "../polling/samePollingData";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -1210,76 +1210,67 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         />
       )}
       {pendingToolApproval === undefined ? null : (
-        <section
-          aria-label="Extension tool approval"
-          className="approval-row approval-row--request chat-workspace__tool-approval thread-column"
-          role="group"
+        <OctantApprovalCard
+          actions={
+            <>
+              <OctantButton
+                disabled={toolApprovalBusy}
+                onClick={() => void decideToolApproval("approved")}
+                size="sm"
+                type="button"
+              >
+                Approve once
+              </OctantButton>
+              <OctantButton
+                disabled={toolApprovalBusy}
+                onClick={() => void decideToolApproval("denied")}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Deny
+              </OctantButton>
+            </>
+          }
+          className="chat-workspace__tool-approval thread-column"
+          detail="One-time extension tool request"
+          label="Extension tool approval"
+          summary={`Allow ${pendingToolApproval.mcpToolName}?`}
         >
-          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span className="approval-row__text">
-            Allow {pendingToolApproval.mcpToolName}?
-            <span className="approval-row__detail">One-time extension tool request</span>
-          </span>
-          <div className="approval-row__actions">
-            <OctantButton
-              disabled={toolApprovalBusy}
-              onClick={() => void decideToolApproval("approved")}
-              size="sm"
-              type="button"
-            >
-              Approve once
-            </OctantButton>
-            <OctantButton
-              disabled={toolApprovalBusy}
-              onClick={() => void decideToolApproval("denied")}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Deny
-            </OctantButton>
-          </div>
           <code className="approval-row__code">
             {pendingToolApproval.inputJson === "" ? "(empty input)" : pendingToolApproval.inputJson}
           </code>
-        </section>
+        </OctantApprovalCard>
       )}
       {pendingBrowserApproval === undefined ? null : (
-        <section
-          aria-label="Browser origin approval"
-          className="approval-row approval-row--request chat-workspace__tool-approval thread-column"
-          role="group"
-        >
-          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span className="approval-row__text">
-            Allow Browser to open {pendingBrowserApproval.origin}?
-            <span className="approval-row__detail">Shell and file access stay unchanged</span>
-          </span>
-          <div className="approval-row__actions">
-            <OctantButton
-              disabled={toolApprovalBusy}
-              onClick={() => void decideBrowserApproval("approved")}
-              size="sm"
-              type="button"
-            >
-              Approve once
-            </OctantButton>
-            <OctantButton
-              disabled={toolApprovalBusy}
-              onClick={() => void decideBrowserApproval("denied")}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Deny
-            </OctantButton>
-          </div>
-          {browserApprovalMessage === undefined ? null : (
-            <p className="approval-row__detail" role="alert">
-              {browserApprovalMessage}
-            </p>
-          )}
-        </section>
+        <OctantApprovalCard
+          actions={
+            <>
+              <OctantButton
+                disabled={toolApprovalBusy}
+                onClick={() => void decideBrowserApproval("approved")}
+                size="sm"
+                type="button"
+              >
+                Approve once
+              </OctantButton>
+              <OctantButton
+                disabled={toolApprovalBusy}
+                onClick={() => void decideBrowserApproval("denied")}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Deny
+              </OctantButton>
+            </>
+          }
+          className="chat-workspace__tool-approval thread-column"
+          detail="Shell and file access stay unchanged"
+          error={browserApprovalMessage}
+          label="Browser origin approval"
+          summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+        />
       )}
       <ChatComposer
         key={String(thread.id)}
