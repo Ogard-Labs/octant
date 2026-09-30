@@ -955,12 +955,25 @@ describe("useCodeController", () => {
           },
         },
       };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: {
+          kind: "conversation-turn-started",
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          sessionId: "80000000-0000-4000-8000-000000000030",
+          prompt: { contentId, digest: "a".repeat(64), byteLength: 11 },
+        },
+      };
     }
     async function* completionFrames() {
       yield {
         threadId: ids.thread,
         operationId,
-        cursor: 2,
+        cursor: 3,
         occurredAt: now,
         event: {
           kind: "provider-content",
@@ -972,7 +985,7 @@ describe("useCodeController", () => {
       yield {
         threadId: ids.thread,
         operationId,
-        cursor: 3,
+        cursor: 4,
         occurredAt: now,
         event: { kind: "operation-state", state: "completed" },
       };
@@ -1022,11 +1035,13 @@ describe("useCodeController", () => {
     expect(result.current.conversation).toEqual([
       expect.objectContaining({
         role: "user",
+        at: now,
         providerInstanceId: ids.provider,
         modelId: "model-a",
       }),
       expect.objectContaining({
         role: "assistant",
+        startedAt: now,
         at: now,
         providerInstanceId: ids.provider,
         modelId: "model-a",
@@ -2337,6 +2352,7 @@ describe("useCodeController", () => {
     );
     expect(result.current.conversation[1]).toMatchObject({
       operationId,
+      startedAt: now,
       providerInstanceId: ids.provider,
       modelId: "model-before-rebind",
       status: "failed",
