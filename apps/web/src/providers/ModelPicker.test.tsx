@@ -297,7 +297,7 @@ describe("ModelPicker", () => {
         a.id,
         {
           ...observed(a.id, [model({ id: "m", displayName: "M" })], "incompatible"),
-          message: "Provider configuration is incompatible.",
+          message: "Provider runtime 2.24.1 or later is required.",
         },
       ],
     ]);
@@ -313,7 +313,11 @@ describe("ModelPicker", () => {
       />,
     );
     expect(screen.getByText("Incompatible")).toBeVisible();
-    expect(screen.getByText(/Provider configuration is incompatible\./)).toBeVisible();
+    expect(screen.getByText(/Provider runtime 2\.24\.1 or later is required\./)).toBeVisible();
+    expect(screen.getByText("M")).toBeVisible();
+    expect(
+      screen.getByText(/This selection is not available from the provider right now/),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Provider settings" }));
     expect(onOpenProviderSettings).toHaveBeenCalledOnce();
   });

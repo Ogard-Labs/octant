@@ -62,6 +62,27 @@ describe("the usage-limit notice", () => {
     expect(screen.queryByRole("button", { name: "Snooze until reset" })).toBeNull();
   });
 
+  it("describes a dispatched recovery as a past event after the resumed turn settles", () => {
+    const { rerender } = render(
+      <UsageLimitNotice
+        limit={LIMIT}
+        provider="Codex"
+        resumable={true}
+        usageResume={armedResume("dispatched")}
+      />,
+    );
+    rerender(
+      <UsageLimitNotice
+        limit={LIMIT}
+        provider="Codex"
+        resumable={false}
+        usageResume={armedResume("dispatched")}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Resume started.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Resuming…");
+  });
+
   it("offers nothing when the stop discloses no reset to wait on", () => {
     render(
       <UsageLimitNotice

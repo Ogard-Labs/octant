@@ -990,6 +990,13 @@ and Tooltip. Composition rules:
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
   these with styled spans or animated divs.
+- Product notices use `OctantToast`: a semantic icon, short title, supporting
+  detail, and an explicit Dismiss button. Success and waiting announcements use
+  `status`; errors that need attention use `alert`. The shared recipe owns the
+  opaque floating material, compact spacing, shadow, and wrapping of long
+  filenames or messages in both themes. A feature may choose placement and
+  content, not paint another notice. A field error stays by its field, and a
+  warning that the user must review stays inline.
 - Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
@@ -1309,6 +1316,12 @@ scrollable action and scope description, collapsible authority details, and a
 fixed Cancel/Allow row. Duration remains in the host description; the button
 does not imply a one-shot grant when the action grants access for the session.
 Keyboard focus has a visible outline. Enter never implicitly grants access.
+The isolated host document draws the same compact notice anatomy (semantic
+marker, heading, readable detail, quiet border, and dismissive safe action)
+using the owning window's resolved palette. It retains its own host-owned
+markup and IPC; shared renderer components never grant Code authority. Long
+paths and scope details wrap within the scrollable region rather than being
+silently clipped.
 
 The Pull requests dock packs its search, freshness, repository heading, and rows
 at the top of its scroll area. In the dock, status badges sit beneath each title

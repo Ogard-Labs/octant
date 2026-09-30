@@ -510,6 +510,8 @@ bound all hold unchanged. The dispatch settles by appending
 `usage-resume.settled@1` plus the mode's `thread-updated` in one commit; the
 outcome it records (`dispatched`, `invalidated`, or `failed` with the refusal
 detail) stays on the thread until a newer thread event replaces it.
+The old stop's notice describes a dispatched recovery as started, rather than
+implying that the resumed turn is still running after it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as
@@ -703,7 +705,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   for a workspace), and tool verification. OpenCode and ACP probe refusals
   carry a closed Octant-authored `reason` plus bounded process diagnostics;
   free-form driver or provider text does not cross to clients, and Settings
-  maps the reason to copy and next-step guidance. A connection offers `subscribe` — a
+  maps the reason to copy and next-step guidance. A version check may show
+  its structured minimum version in provider readiness; free-form probe text
+  remains redacted. A connection offers `subscribe` — a
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
@@ -1169,6 +1173,11 @@ mechanisms are:
   the session's stale-app teardown — recorded with each measurement in
   [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
   No other Apple launch receives any of them.
+  Apple builds prepare a private derived-data directory per action and grant
+  writes to that directory only for its `xcodebuild` phases. Run installation
+  reads its product from the same directory without write access; XCTest
+  results also land inside it. Simulator captures remain isolated in their own
+  private directory and are writable only by the capture launch.
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use
