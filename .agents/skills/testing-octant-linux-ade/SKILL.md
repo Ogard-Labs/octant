@@ -84,10 +84,19 @@ To catch dropped/reordered keystrokes, type a brisk battery (`echo HEAD HEAD HEA
 - Snapshot is deliberately OUTSIDE the journal — `refresh-project`/`refresh-all` produce NO `code.operation-event-recorded` events. Per-project scope evidence lives in `pull-request-snapshot.json` `projectFreshness[<projectId>:<owner>/<repo>].lastSuccessfulRefreshAt`.
 - `pgrep -f` / `pkill -f` inside an exec call self-matches the wrapper shell's own command line and can kill your shell mid-command (kill survives, chained `&&` steps silently don't run). Prefer killing by exact pid from `ps aux | grep`, or `pkill -f "node .*vite --host"`-style patterns that can't match the wrapper.
 
+## Canvas agent tool (octant_canvas) — how it actually reaches the model
+
+- The tool is invoked as `tools.octant_canvas({operation:"create"|"revise"|"list"|"read"|"open"|"describe", ...})` inside Codex's `exec` JS bridge — NOT as a standalone tool call. In `~/.codex/sessions/<date>/rollout-*.jsonl` it appears inside `custom_tool_call`/`custom_tool_call_output` payloads for `name:"exec"`.
+- A model that searches the exec VM's `ALL_TOOLS` catalog may report the tool "isn't available" — `ALL_TOOLS` only lists builtin tools (apply_patch, exec_command, etc.). Have the child call `tools.octant_canvas` directly instead of trusting a catalog listing. The same false-negative applies to `octant_shell`/`octant_agents`.
+- Child AgentRun inner sessions land in the same `~/.codex/sessions/` dir; find the child's file by its `cwd` (the managed worktree path `~/.octant-worktrees/repo_<hash>/<childThreadId>`) and start timestamp.
+
+## Delegation refusals
+
+- `octant_agents` delegate returning `{"status":"refused","reason":"unavailable"}` maps to `agentRunChildWorktreePort` (worktree `planCreation`/`create`/`loadReceipt` refusal) for code-mode children. Observed: once a managed child completed with `agent.run-result-delivery-settled` "failed: The delivery was not admitted", every later delegate on that thread refused `unavailable` even after the run showed "Done"; the Agents-dock "Mark reviewed" click did not journal `agent.run-result-acknowledged`. If you need repeat delegations for a test, use a fresh thread or check whether an unacked/failed run is wedging the parent's delegation.
+
 ## Vite dev-server staleness after a mid-run branch switch
 
 - `web --dev` caches dependency/package resolution in `node_modules/.vite/deps` (repo-root node_modules, plus the browser's loaded module graph). If the checkout switches branches while vite runs, NEW package-exports entries (e.g. a fresh `"./x": "./src/x.ts"` in a `@octant/*` package.json) silently fail to resolve: HMR keeps serving the old modules and the app looks "fine" while actually running pre-change code. Symptom: behavior under test is simply absent with no error.
 - A page reload then shows a vite overlay like `"./x" is not exported under the conditions [...]` — misleading because the export IS on disk (workspace is a symlink); the cache is stale.
 - Fix: kill the `web --dev` process, `rm -rf node_modules/.vite/deps`, restart `web --dev --no-open`, reload the page. Then re-test — any evidence captured on the stale bundle is invalid.
 - Composer mention gate (OCT-285): every composer refuses an unattached `@computer`/`@browser` token — the thread composers check in `submitTurn`/their submit path, the first-message composers (ChatWelcome, WorkComposerAdapter, CodeComposerAdapter) check in their own submit. Both refusal wordings name the token; on ChatWelcome there is no suggestion list, so it says "start the thread and pick … there" instead.
->>>>>>> origin/main
