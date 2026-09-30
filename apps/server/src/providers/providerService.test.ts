@@ -3001,6 +3001,44 @@ describe("ProviderService", () => {
     );
   });
 
+  it("shows the minimum runtime version from a typed version check without exposing driver text", async () => {
+    const fixture = serviceFixture({ instances: [mistralVibeProvider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: () => ({
+        kind: "mistral-vibe",
+        probe: () =>
+          Effect.fail({
+            category: "incompatible",
+            message: "private provider diagnostic",
+            reason: "runtime-incompatible",
+            diagnostic: {
+              stage: "version-check",
+              kind: "version-mismatch",
+              detectedVersion: "2.23.3",
+              supportedVersion: "2.24.1",
+            },
+          }),
+        acquire: () => Effect.die("unused"),
+      }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "incompatible", reason: "runtime-incompatible" },
+    });
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "incompatible",
+      detectedVersion: "2.23.3",
+      message: "Provider runtime 2.24.1 or later is required.",
+    });
+    expect(JSON.stringify(fixture.runtime.observedState(instanceId))).not.toContain(
+      "private provider diagnostic",
+    );
+  });
+
   it("updates a provider-owned CLI directly and probes after releasing the instance lock", async () => {
     const fixture = serviceFixture({
       instances: [

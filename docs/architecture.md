@@ -703,7 +703,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   for a workspace), and tool verification. OpenCode and ACP probe refusals
   carry a closed Octant-authored `reason` plus bounded process diagnostics;
   free-form driver or provider text does not cross to clients, and Settings
-  maps the reason to copy and next-step guidance. A connection offers `subscribe` — a
+  maps the reason to copy and next-step guidance. A version check may show
+  its structured minimum version in provider readiness; free-form probe text
+  remains redacted. A connection offers `subscribe` — a
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
