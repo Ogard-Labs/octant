@@ -2132,7 +2132,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   min-width: 0;
   padding: var(--oct-space-3);
-  border: 1px solid var(--octant-border-soft);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--octant-floating);
   box-shadow: var(--octant-shadow-overlay);
@@ -2160,7 +2160,7 @@ input.switch:checked::after {
 }
 .toast__dismiss {
   flex: none;
-  margin: -6px -6px 0 0;
+  margin: -10px -10px 0 0;
 }
 .toast .toast-title {
   display: block;
@@ -2173,6 +2173,24 @@ input.switch:checked::after {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+.toast .toast__action {
+  display: inline-flex;
+  min-height: 24px;
+  height: auto;
+  gap: 3px;
+  padding: 0 2px;
+  margin-inline-start: 2px;
+  color: var(--oct-fg);
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  white-space: normal;
+  vertical-align: baseline;
+}
+.toast .toast__action:hover,
+.toast .toast__action:focus-visible {
+  color: var(--oct-accent-fg);
 }
 
 /* ─── breadcrumb ────────────────────────────────────────────────────── */

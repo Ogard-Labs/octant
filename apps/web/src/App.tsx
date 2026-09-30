@@ -13,6 +13,7 @@ import { buildAutomationEditorCatalog } from "./automation/automationEditorCatal
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
+import { useAppUpdateReadyNotice } from "./settings/useAppUpdateReadyNotice";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -1331,6 +1332,9 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
+    props.hostBridge?.subscribeAppUpdateState,
+  );
   const threadExportClient = useMemo(
     () =>
       resolveThreadExportClient({
@@ -6831,15 +6835,30 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      {threadExportNotice === undefined ? null : (
+      {threadExportNotice !== undefined || updateReadyNotice ? (
         <div className="toast-stack">
-          <OctantToast
-            detail={threadExportNotice}
-            onDismiss={() => setThreadExportNotice(undefined)}
-            title="Workspace activity"
-          />
+          {updateReadyNotice ? (
+            <OctantToast
+              action={{
+                label: "View update",
+                onSelect: () =>
+                  void controller.openSettings({ section: "general", setting: "app-updates" }),
+              }}
+              detail="Use Relaunch to update in Settings to install it."
+              onDismiss={dismissUpdateReadyNotice}
+              title="Update downloaded"
+              tone="success"
+            />
+          ) : null}
+          {threadExportNotice === undefined ? null : (
+            <OctantToast
+              detail={threadExportNotice}
+              onDismiss={() => setThreadExportNotice(undefined)}
+              title="Workspace activity"
+            />
+          )}
         </div>
-      )}
+      ) : null}
       <ComputerUseActivitySurface
         changeRevision={machineChanges.computerUse}
         client={computerUseClient}
