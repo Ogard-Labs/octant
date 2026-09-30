@@ -104,6 +104,10 @@ describe("Code operation approval view controller", () => {
     expect(html).toContain('id="cancel"');
     expect(html).toContain('id="approve"');
     expect(html).toContain("Show authority details");
+    expect(html).toContain("Permission requested");
+    expect(html).toContain('class="heading-icon" aria-hidden="true"');
+    expect(html).toContain("overflow-wrap:anywhere");
+    expect(html).toContain(".actions{display:flex");
     expect(html).toContain("disabled>Allow</button>");
     expect(html).toContain('role="alertdialog"');
     expect(html).toContain('aria-labelledby="message"');
