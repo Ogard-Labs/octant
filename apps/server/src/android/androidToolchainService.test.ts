@@ -119,7 +119,7 @@ function discoveryExecutor() {
     if (argv.includes("input tap") || argv.includes("input swipe") || argv.includes("input text")) {
       return processResult("");
     }
-    if (argv.includes("emu kill")) return processResult("");
+    if (argv.includes("root") || argv.includes("reboot")) return processResult("");
     return processResult("");
   });
 }

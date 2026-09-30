@@ -518,8 +518,15 @@ export class AndroidToolchainService {
     }
     if (request.kind === "shutdown") {
       const target = serial;
+      // `emu kill` needs the console-auth token that confined launches do not
+      // mount. Powering off through adbd reaches the same outcome and keeps the
+      // console-control secret out of the sandbox; `adb root` is best-effort so
+      // adbd can honour `reboot -p` on userdebug images, and a production image
+      // that refuses either step reports an honest failure instead of the
+      // console's `KO` the state update would mistake for success.
+      await this.#command([adb, "-s", target, "root"], context, 15_000, signal);
       const result = await this.#command(
-        [adb, "-s", target, "emu", "kill"],
+        [adb, "-s", target, "shell", "reboot", "-p"],
         context,
         request.timeoutMs,
         signal,
