@@ -12,6 +12,8 @@ const technicalMonoSelectors = new Set([
   // A path the host observed changing is an identifier, not prose: mono is
   // what keeps `research/notes.txt` legible and its segments distinguishable.
   ".work-thread-workspace__file",
+  // The dock overview's checkout chip carries a branch name, an identifier.
+  ".dock-overview__chip",
 ]);
 
 describe("interface typography contract", () => {
