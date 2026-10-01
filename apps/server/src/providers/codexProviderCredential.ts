@@ -21,6 +21,12 @@ export interface CodexProviderCredential {
   readonly envKey: string;
   /** Whether the variable would reach the runtime's environment. */
   readonly present: boolean;
+  /**
+   * The host exports static AWS IAM keys, which the allowlist withholds by
+   * design: they grant far more than model access, and the Codex runtime is
+   * not confined, so a model-generated command could read them.
+   */
+  readonly withheldStaticKeys?: true;
 }
 
 // The built-in provider that authenticates outside the OpenAI login and the
@@ -57,7 +63,11 @@ export function codexProviderCredential(
       (nonempty(allowed, "AWS_PROFILE") ||
         nonempty(allowed, "AWS_CONFIG_FILE") ||
         nonempty(allowed, "AWS_SHARED_CREDENTIALS_FILE")));
-  return { envKey, present };
+  const withheldStaticKeys =
+    !present &&
+    provider.id === "amazon-bedrock" &&
+    (nonempty(environment, "AWS_ACCESS_KEY_ID") || nonempty(environment, "AWS_SECRET_ACCESS_KEY"));
+  return withheldStaticKeys ? { envKey, present, withheldStaticKeys } : { envKey, present };
 }
 
 function nonempty(environment: NodeJS.ProcessEnv, key: string): boolean {

@@ -77,6 +77,20 @@ describe("codexProviderCredential", () => {
         envKey: "AWS_BEARER_TOKEN_BEDROCK",
         present: false,
       });
+      expect(
+        codexProviderCredential({
+          CODEX_HOME: home,
+          AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+          AWS_SECRET_ACCESS_KEY: "secret",
+        }),
+      ).toEqual({ envKey: "AWS_BEARER_TOKEN_BEDROCK", present: false, withheldStaticKeys: true });
+      expect(
+        codexProviderCredential({
+          CODEX_HOME: home,
+          AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+          AWS_PROFILE: "work",
+        }),
+      ).toEqual({ envKey: "AWS_BEARER_TOKEN_BEDROCK", present: true });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

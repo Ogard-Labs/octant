@@ -832,9 +832,11 @@ function normalizeProbe(
           message:
             missingCredential === undefined
               ? "Authenticate Codex and make at least one usable model available."
-              : missingCredential === "AWS_BEARER_TOKEN_BEDROCK"
-                ? "The Bedrock provider needs AWS_BEARER_TOKEN_BEDROCK, or an AWS profile or shared credentials file, in the Codex runtime."
-                : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
+              : providerCredential?.withheldStaticKeys === true
+                ? "Octant does not pass static AWS IAM keys (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) to the Codex runtime. Set AWS_BEARER_TOKEN_BEDROCK, or an AWS_PROFILE whose keys are in the AWS shared config."
+                : missingCredential === "AWS_BEARER_TOKEN_BEDROCK"
+                  ? "The Bedrock provider needs AWS_BEARER_TOKEN_BEDROCK, or an AWS profile or shared credentials file, in the Codex runtime."
+                  : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
         }),
     observedAt: observedAt as UtcTimestamp,
   });
