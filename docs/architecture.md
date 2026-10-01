@@ -990,6 +990,13 @@ prompt, schema, tool, route, model, or capability.
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.
+  On macOS the deny-default Seatbelt profile reads the system roots, the
+  component's own roots, and its runtime's install: the executable's folder
+  and, for a Homebrew runtime, `<prefix>/Cellar`, `<prefix>/opt`, and
+  `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
+  `/` and metadata of every parent folder of those roots, because a runtime
+  such as node will not start without them. Metadata names a folder; it does
+  not read its contents.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
