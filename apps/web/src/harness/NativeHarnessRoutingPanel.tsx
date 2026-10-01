@@ -11,6 +11,7 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
+import { SettingsSection } from "../settings/primitives";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -142,8 +143,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
 
   return (
     <section aria-label="Model slots" className="native-harness-panel">
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Model slots</h2>
+      <SettingsSection title="Model slots">
         {props.providers.length === 0 && !hasSavedRouting ? (
           <SurfaceEmpty
             action={
@@ -158,7 +158,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
             tone="page"
           />
         ) : (
-          <>
+          <div className="settings-panel__body">
             <p className="native-harness-panel__lead">
               The first model in each role is preferred; the others are fallbacks. An empty role
               uses <code>default</code> and shows a warning.
@@ -322,9 +322,9 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 {message}
               </p>
             )}
-          </>
+          </div>
         )}
-      </div>
+      </SettingsSection>
     </section>
   );
 }

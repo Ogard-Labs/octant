@@ -76,34 +76,121 @@ describe("node extension process port", () => {
     }
   });
 
-  macosOnly("denies sandboxed extension reads outside the declared roots", async () => {
-    const secretDirectory = await mkdtemp(join(homedir(), ".octant-extension-sandbox-test-"));
-    receiptDirectories.push(secretDirectory);
-    const secretPath = join(secretDirectory, "private.txt");
-    await writeFile(secretPath, "private");
+  it("lets a Homebrew runtime read its own libraries and OpenSSL config, not the rest of the prefix", async () => {
+    let profile: string | undefined;
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      const [command, args, options] = input;
+      profile = String(args?.[1]);
+      return nodeSpawn(command, ["-e", ""], options);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+    });
+    const child = await port
+      .start({
+        ...startInput,
+        command: "/opt/homebrew/Cellar/node/26.7.0/bin/node",
+        readiness: "spawn",
+        sandbox: {
+          kind: "macos-seatbelt",
+          scope: {
+            hostId: "local",
+            mode: "work",
+            projectId: null,
+            threadId: "thread-1",
+            providerFamily: "openai-compatible",
+          },
+          allowRead: ["/Users/example/plugin"],
+          allowWrite: ["/Users/example/plugin-data"],
+          allowNetwork: false,
+        },
+      } as never)
+      .catch(() => undefined);
+    await child?.stop().catch(() => undefined);
+
+    expect(profile).toContain('(allow file-read* (subpath "/opt/homebrew/Cellar"))');
+    expect(profile).toContain('(allow file-read* (subpath "/opt/homebrew/opt"))');
+    expect(profile).toContain('(allow file-read* (subpath "/opt/homebrew/etc/openssl@3"))');
+    expect(profile).not.toContain('(subpath "/opt/homebrew")');
+    expect(profile).not.toContain("/opt/homebrew/var");
+    expect(profile).toContain('(allow file-read-metadata (literal "/Users/example"))');
+    expect(profile).not.toContain('(allow file-read* (subpath "/Users/example"))');
+  });
+
+  macosOnly("starts a runtime script from a plugin folder under the home directory", async () => {
+    const pluginRoot = await mkdtemp(join(homedir(), ".octant-extension-sandbox-plugin-"));
+    receiptDirectories.push(pluginRoot);
+    const script = join(pluginRoot, "server.mjs");
+    await writeFile(
+      script,
+      "process.stdout.write('OCTANT_EXTENSION_READY\\n'); setInterval(() => undefined, 1000);\n",
+    );
     const port = createNodeExtensionProcessPort({ shutdownTimeoutMs: 100 });
     const child = await port.start({
       ...startInput,
-      args: ["-e", `require("node:fs").readFileSync(${JSON.stringify(secretPath)})`],
-      readiness: "spawn",
+      args: [script],
+      cwd: pluginRoot,
       sandbox: {
         kind: "macos-seatbelt",
         scope: {
           hostId: "local",
-          mode: "chat",
+          mode: "work",
           projectId: null,
           threadId: "thread-1",
           providerFamily: "openai-compatible",
         },
-        allowRead: [process.cwd()],
-        allowWrite: [tmpdir()],
+        allowRead: [pluginRoot],
+        allowWrite: [pluginRoot],
         allowNetwork: false,
       },
     } as never);
-
-    const exit = await child.wait;
-    expect(exit.code).not.toBe(0);
+    try {
+      await expect(child.ready).resolves.toBeUndefined();
+    } finally {
+      await child.stop().catch(() => undefined);
+    }
   });
+
+  macosOnly("denies sandboxed extension reads outside the declared roots", async () => {
+    const secretDirectory = await mkdtemp(join(homedir(), ".octant-extension-sandbox-test-"));
+    const allowedDirectory = await mkdtemp(join(homedir(), ".octant-extension-sandbox-allowed-"));
+    receiptDirectories.push(secretDirectory, allowedDirectory);
+    const secretPath = join(secretDirectory, "private.txt");
+    const allowedPath = join(allowedDirectory, "public.txt");
+    await writeFile(secretPath, "private");
+    await writeFile(allowedPath, "public");
+    const port = createNodeExtensionProcessPort({ shutdownTimeoutMs: 100 });
+    const readUnderSandbox = async (path: string) => {
+      const child = await port.start({
+        ...startInput,
+        args: ["-e", `require("node:fs").readFileSync(${JSON.stringify(path)})`],
+        readiness: "spawn",
+        sandbox: {
+          kind: "macos-seatbelt",
+          scope: {
+            hostId: "local",
+            mode: "chat",
+            projectId: null,
+            threadId: "thread-1",
+            providerFamily: "openai-compatible",
+          },
+          allowRead: [process.cwd(), allowedDirectory],
+          allowWrite: [tmpdir()],
+          allowNetwork: false,
+        },
+      } as never);
+      return (await child.wait).code;
+    };
+
+    // The allowed read succeeding is what shows the refusal below is the
+    // sandbox at work, not a runtime that could not start at all.
+    expect(await readUnderSandbox(allowedPath)).toBe(0);
+    expect(await readUnderSandbox(secretPath)).not.toBe(0);
+  });
+
   it("owns a detached child process and reaps its process group on stop", async () => {
     const port = createNodeExtensionProcessPort({ shutdownTimeoutMs: 100 });
     const child = await port.start(startInput);

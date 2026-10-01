@@ -5,7 +5,7 @@ import {
   type AutomationNotificationClient,
 } from "@octant/client-runtime/automation-notification-client";
 import { OctantButton } from "../ui/base/OctantButton";
-import { SettingRow, SettingsFactList } from "../settings/primitives";
+import { SettingRow, SettingsFactList, SettingsSection } from "../settings/primitives";
 
 /**
  * Host Settings → Automation notifications. Opt-in preferences plus honest
@@ -103,15 +103,11 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
   const deliveryLabel = status.deliveryEnabled ? "Enabled" : "Unavailable";
 
   return (
-    <section
-      aria-label="Automation notifications"
-      className="settings-card-section settings-card-section--open host-settings__notifications"
+    <SettingsSection
+      className="host-settings__notifications"
+      description="Get notified when an automation needs attention or finishes. Notifications include status only, without prompts, files, credentials, or access details."
+      title="Automation notifications"
     >
-      <h2>Automation notifications</h2>
-      <p className="settings-section-note">
-        Get notified when an automation needs attention or finishes. Notifications include status
-        only, without prompts, files, credentials, or access details.
-      </p>
       <div className="setgroup">
         <SettingRow
           description="Send automation status notifications from this host."
@@ -150,6 +146,6 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
           notifications cannot be delivered yet.
         </p>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }

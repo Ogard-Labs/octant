@@ -138,7 +138,7 @@ always publishes `default`. Vivid reads best in the light theme.
 ### Shapes and depth
 
 Radius has one number per role, defined once as `--oct-radius-*` in
-`octant.css`: a compact control is 8px, a control or a row 10px, a card, panel,
+`octant.css`: a compact control is 8px, a control or a row 10px, an object resting inside a card or well, such as a Settings page's icon tile, 12px (`--oct-radius-inset`), a card, panel,
 menu, or popover 16px. The recipes reach the same numbers through `--radius`,
 whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
 a menu and the popover beside it share a corner. Welcome composers and
@@ -147,7 +147,7 @@ bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). A card is for a discrete object a person acts on
 as a whole: a count tile, a live running-thread card, an action tile, a board
-card, a provider, a Settings group of rows. Plain lists, empty states, and
+card, a provider, a Settings group of rows (see "Page shell"). Plain lists, empty states, and
 headers are never cards. A button shaped like a card asks the shared button
 recipe for its `bare` variant, which draws nothing, and the feature stylesheet
 owns its face; every other button keeps the recipe's paint.
@@ -202,6 +202,53 @@ open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
+
+Every Settings page is built from one kit, in `settings/primitives.tsx`:
+
+- **Page header.** A 42px icon tile (12px radius, a faint 8% ink fill, a
+  hairline) holding the page's own navigation icon at 20px, the page title
+  (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
+  optional ghost action at the far edge (Appearance's "Reset to default").
+  The tile is decoration and hidden from assistive technology; the h1 is the
+  only heading that names the page.
+- **On this page.** A page with three sections or more shows a row of pill
+  links to them under the header. They are links, not headings, so the page's
+  heading outline is unchanged. Sections register themselves with the shell,
+  so one that mounts late joins the row and the row never names one that is
+  not drawn.
+- **Section.** A 14px label in medium weight, an optional one-line
+  description in the secondary ink below it, then one grouped card: the 16px
+  card radius, one hairline, a fill one step above the workspace
+  (`color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg))`), no shadow. The
+  card never clips: a section keeps `overflow: visible` because its rows hold
+  menus and popovers, so the first and last row round themselves instead.
+  Rows are divided by a hairline inset 16px from the card's edges. A section
+  label may carry ghost actions that act on the whole section on its own
+  line; a primary never lives in a section head.
+- **Row.** At least 52px tall with a 12px by 16px inset: a 14px row label and
+  a one-sentence 13px detail on the left, the control at the right edge. A
+  compound editor stacks its control under the label. Single-line controls
+  stay 28px tall.
+- **Saved.** Settings save as you change them. A slot of fixed width at the
+  right of the top rail shows a check and "Saved" for about two seconds once
+  a change resolves (a shell setting or a theme write), and holds its place
+  when empty so nothing shifts. A host that refuses a change shows nothing.
+  A Save button exists only for compound forms: a provider's connection
+  details and the harness model slots.
+- **Destructive.** A page's destructive group (logging out of GitHub,
+  disconnecting Linear, purging thread history, revoking paired devices) is
+  its own section, last on the page, whose card holds the destructive row
+  with the destructive button variant. The danger is carried by the
+  placement and the confirm control; the label keeps its ink.
+- **Rail.** Each page keeps its icon (16px) in the navigation rail, and
+  Device tools has its own, apart from Computer use. Search is an icon beside
+  the "Settings" heading that reveals the field; Cmd/Ctrl+F reveals and
+  focuses it, the field stays mounted while folded away, and it folds back
+  when it loses focus empty. Below the narrow breakpoint the field is always
+  shown.
+
+This kit reverses the earlier open-row layout, in which a section was a label
+over hairline rows on the page ground, at the maintainer's request.
 
 ### Content tabs
 
@@ -607,8 +654,9 @@ then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
-and unshadowed; setup objects, settings sections (0109), and cards use the
-card recipe (`OctantCard`), which draws a hairline ring rather than a shadow —
+and unshadowed; setup objects and cards use the card recipe (`OctantCard`), and
+a Settings section's group is the same hairline-ringed shape in its own fill,
+and neither draws a shadow —
 a card sits in the page, and shadow is reserved for something that floats
 above it (0090). Welcome composers keep their raised frame.
 Chat, Work, and Code welcome composers share the `.composer` frame (20px,
@@ -673,8 +721,8 @@ reading above it and both ends named below. Popovers, menus, dialogs, and hover 
 the floating surface and the overlay shadow, and have exactly one 1px hairline
 edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
-never sets its fill, border, or shadow. Environment and inline Settings sections remain
-flat on their owning surface. Frosted material is limited to native/optional sidebar
+never sets its fill, border, or shadow. Environment stays flat on its owning surface, and a
+Settings section is a hairline-ringed card on the page, not a floating object. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
@@ -824,34 +872,29 @@ arrangements, the Project tree and the Activity feed, are a visible
 Projects/Activity switch on the row the Project view picker uses, not an icon
 in the header.
 
-Settings is a grouped form page. The shared resizable navigation rail and
-search remain fixed while one centred, bounded 920px reading column scrolls.
-A 32–64px workspace gutter protects the content at narrower widths. The page
-title, quiet section captions, and primary field labels have distinct roles;
-sections follow a consistent 28px rhythm. Navigation groups use quiet
-sentence-case labels without hairlines between groups. A section is an open object: its content is one
-hairline-separated row list on the page ground, while the label and its one-line
-description remain outside the list. Discrete editors and protected actions may
-retain a bounded surface when their hierarchy requires it.
-Everything inside takes the section's inset, including content that is not a
-row. A section keeps `overflow: visible`, because its rows hold menus and
-popovers that have to escape it. Keybindings have their own destination and raw
-JSON stays behind an advanced disclosure. Inline profile and provider editors keep
-their aligned row edges (0096), now measured from the section's inset rather
-than the page's. Ready providers open
-onto a bounded model list with search, shown counts, and shared visibility
+Settings is a grouped form page. The shared resizable navigation rail
+stays fixed while one centred, bounded 920px reading column scrolls. A 32–64px
+workspace gutter protects the content at narrower widths. The page title,
+section labels, and row labels have distinct roles; sections follow a
+consistent 28px rhythm. Navigation groups use quiet sentence-case labels
+without hairlines between groups. A section is a label and its one-line
+description over one grouped card of hairline-divided rows (see "Page shell"
+for the kit). Discrete editors and install reviews keep their own boundaries
+inside a section. Everything inside takes the card's 16px inset, including
+content that is not a row. Keybindings have their own destination and raw JSON
+stays behind an advanced disclosure. Inline profile and provider editors keep
+their aligned row edges (0096), measured from the card's inset. Ready providers
+open onto a bounded model list with search, shown counts, and shared visibility
 switches. Routine connection diagnostics and capabilities use a separate
-disclosure; setup and authentication guidance remains visible. Install reviews, visual
-theme previews, and confirmation dialogs retain their discrete boundaries. A destructive group is an open section at the end of
-its page, marked by that placement and by its confirm control, not by heading
-colour or a card. Labels and descriptions align left, controls align
-right, and compound editors may expand below. A section label may carry the
-ghost actions that act on the whole section on its own line; a primary never
-lives in a section head. A row's "more" (a custom font stack, network
-details, what an update check sends) sits behind one `.settings-disclosure`
-recipe: a 12px summary with the app's chevron, never the browser's marker.
-Loading and status lines are one quiet sentence; only an error keeps a box.
-Essential labels and explanatory
+disclosure; setup and authentication guidance remains visible. Visual theme
+previews and confirmation dialogs retain their discrete boundaries. A
+destructive group is its own section at the end of its page, marked by that
+placement and by its confirm control, not by heading colour. Labels and
+descriptions align left, controls align right, and compound editors may expand
+below. A row's "more" (a custom font stack, network details, what an update
+check sends) sits behind one `.settings-disclosure` recipe: a 12px summary with
+the app's chevron, never the browser's marker. Loading and status lines are one
+quiet sentence; only an error keeps a box. Essential labels and explanatory
 text are at least 12px at the default interface scale. Every control uses the
 owned Octant/shadcn adapter, inherits the interface typography projection, and
 either saves immediately or uses a compact Save action for a compound form.

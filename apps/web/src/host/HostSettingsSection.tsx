@@ -21,7 +21,13 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
-import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
+import {
+  SettingRow,
+  SettingsFactList,
+  SettingsPanel,
+  SettingsSection,
+  SettingsState,
+} from "../settings/primitives";
 import {
   AutomationNotificationSettings,
   type AutomationNotificationSettingsProps,
@@ -216,9 +222,8 @@ export function HostSettingsSection({
           <SettingsState kind="error">{refreshMessage}</SettingsState>
         )}
       </div>
-      <section aria-label="Identity" className="settings-card-section settings-card-section--open">
-        <div className="settings-section-head">
-          <h2>Identity</h2>
+      <SettingsSection
+        actions={
           <OctantButton
             disabled={refreshing}
             onClick={() => void refresh()}
@@ -228,8 +233,10 @@ export function HostSettingsSection({
           >
             Refresh status
           </OctantButton>
-        </div>
-        <p className="settings-section-note">The host process serving this workspace.</p>
+        }
+        description="The host process serving this workspace."
+        title="Identity"
+      >
         <SettingsFactList
           facts={[
             { label: "Host", value: <Identifier>{status.identity.hostId}</Identifier> },
@@ -239,13 +246,9 @@ export function HostSettingsSection({
             { label: "Wire version", value: <Identifier>{status.versions.wire}</Identifier> },
           ]}
         />
-      </section>
+      </SettingsSection>
 
-      <section
-        aria-label="Service policy"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Service policy</h2>
+      <SettingsSection title="Service policy">
         <div className="setgroup">
           <SettingRow
             description={
@@ -273,11 +276,9 @@ export function HostSettingsSection({
             </OctantButton>
           </SettingRow>
         </div>
-      </section>
+      </SettingsSection>
 
-      <section aria-label="Readiness" className="settings-card-section settings-card-section--open">
-        <h2>Readiness</h2>
-        <p className="settings-section-note">Current storage and client health.</p>
+      <SettingsSection description="Current storage and client health." title="Readiness">
         <SettingsFactList
           facts={[
             {
@@ -302,18 +303,13 @@ export function HostSettingsSection({
             },
           ]}
         />
-      </section>
+      </SettingsSection>
 
-      <section
-        aria-label="Capabilities"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Capabilities</h2>
-        <p className="settings-section-note">Host services available to this app.</p>
+      <SettingsSection description="Host services available to this app." title="Capabilities">
         {status.capabilities.length === 0 ? (
           <SettingsState kind="empty">No platform capabilities reported.</SettingsState>
         ) : (
-          <ul className="host-settings__capabilities">
+          <ul className="setgroup host-settings__capabilities">
             {status.capabilities.map((capability) => (
               <li className="oct-row-detail" key={capability}>
                 {capabilityLabel(capability)}
@@ -321,10 +317,9 @@ export function HostSettingsSection({
             ))}
           </ul>
         )}
-      </section>
+      </SettingsSection>
 
-      <section aria-label="Lifecycle" className="settings-card-section settings-card-section--open">
-        <h2>Lifecycle</h2>
+      <SettingsSection title="Lifecycle">
         <div className="setgroup">
           <SettingRow
             description="Stop or restart the selected host process."
@@ -365,7 +360,7 @@ export function HostSettingsSection({
         ) : (
           <SettingsState kind="error">{lifecycleMessage.text}</SettingsState>
         )}
-      </section>
+      </SettingsSection>
 
       {automationNotifications === undefined ? null : (
         <AutomationNotificationSettings
@@ -474,12 +469,7 @@ export function HostDataSettingsSection({
     <section aria-label="Data & privacy" className="host-settings" id="settings-data">
       <DataMapPanel state={dataMapState} />
 
-      <div ref={retentionRef}>
-        <ThreadRetentionPanel client={client} />
-      </div>
-
-      <section aria-label="Backup" className="settings-card-section settings-card-section--open">
-        <h2>Backup</h2>
+      <SettingsSection title="Backup">
         <div className="setgroup">
           <SettingRow
             description="Create a named snapshot before risky changes."
@@ -513,7 +503,7 @@ export function HostDataSettingsSection({
         {backupState.kind === "error" ? (
           <SettingsState kind="error">{backupState.message}</SettingsState>
         ) : null}
-      </section>
+      </SettingsSection>
 
       <SettingsPanel
         title="Recovery"
@@ -530,6 +520,11 @@ export function HostDataSettingsSection({
           )}
         </div>
       </SettingsPanel>
+
+      {/* Purging history is the page's destructive group, so it sits last. */}
+      <div ref={retentionRef}>
+        <ThreadRetentionPanel client={client} />
+      </div>
     </section>
   );
 }

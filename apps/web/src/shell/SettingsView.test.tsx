@@ -869,20 +869,20 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("draws every preference section as an open row surface", () => {
+  it("draws every preference section as a label over a grouped card", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(
       /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
     );
-    // A section remains the object that owns its label and rows (0109), while
-    // routine content stays on the page ground with one hairline per row
-    // under the scoped presentation supersession in 0116.
+    // A section owns its label and its card. The section itself stays on the
+    // page ground; the group inside it is the raised card (the base group rule
+    // stays transparent for first run, which shares it outside Settings).
     expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
     expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
-    expect(styles).toMatch(
-      /\.settings-card-section--open\s*>\s*\.setgroup\s*\{[\s\S]*background:\s*transparent;/,
+    expect(styles.replace(/\s+/g, " ")).toMatch(
+      /\.settings-view \.settings-card-section--open > :is\(\.setgroup, \.settings-fact-list, \.settings-panel__body\) \{[^}]*background: var\(--oct-settings-card-fill\);/,
     );
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
     // Code defaults are SettingRows in the shared open sections; there is no
@@ -910,6 +910,7 @@ describe("SettingsView", () => {
   it("keeps search and the existing mode-switcher mutation wired", async () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
+    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
       target: { value: "translucent" },
@@ -941,6 +942,7 @@ describe("SettingsView", () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
 
+    await user.click(screen.getByRole("button", { name: "Search settings" }));
     const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
     await user.type(searchbox, "mode switcher");
     const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
@@ -991,7 +993,7 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "appearance", setting: "reset-appearance" },
       themeController,
     });
-    expect(screen.getByRole("button", { name: "Reset" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Reset to default" })).toHaveFocus();
   });
 
   it("sends a link to a setting's old page to the page it moved to", () => {
@@ -1409,6 +1411,78 @@ describe("SettingsView", () => {
     expect(screen.queryByText(/357\.89/)).toBeNull();
   });
 
+  it("names the page with an icon tile and its own heading, and says Saved after a change", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+
+    const header = screen.getByRole("heading", { level: 1, name: "General" }).closest("header")!;
+    const tile = header.querySelector(".settings-view__header-tile");
+    expect(tile).toHaveAttribute("aria-hidden", "true");
+    expect(tile?.querySelector("svg")).not.toBeNull();
+    // The tile is decoration: nothing else carries the page's name as a heading.
+    expect(screen.getAllByRole("heading", { name: "General" })).toHaveLength(1);
+
+    expect(screen.queryByText("Saved")).toBeNull();
+    await user.click(screen.getByRole("switch", { name: "Enable Chat" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ chatEnabled: false });
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved");
+  });
+
+  it("says nothing was saved when the host refuses the change", async () => {
+    const user = userEvent.setup();
+    renderSettings({ onSettingsChange: vi.fn(async () => false) });
+
+    await user.click(screen.getByRole("switch", { name: "Enable Chat" }));
+
+    await waitFor(() => expect(screen.queryByText("Saved")).toBeNull());
+  });
+
+  it("links to each section from an On this page row on a page with three or more", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const outline = screen.getByRole("navigation", { name: "On this page" });
+    const links = within(outline).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Available modes",
+      "Updates",
+      "Files",
+      "Threads",
+    ]);
+    const updates = screen.getByRole("heading", { name: "Updates" }).closest("section")!;
+    updates.scrollIntoView = vi.fn();
+    await user.click(within(outline).getByRole("link", { name: "Updates" }));
+    expect(updates.scrollIntoView).toHaveBeenCalled();
+    expect(within(outline).getByRole("link", { name: "Updates" })).toHaveAttribute(
+      "href",
+      `#${updates.id}`,
+    );
+
+    navigateTo("Work");
+    expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
+  });
+
+  it("focuses search from the rail's icon and from Cmd+F", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    expect(screen.queryByRole("searchbox", { name: "Search settings" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Search settings" }));
+    await waitFor(() =>
+      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus(),
+    );
+    // Leaving the empty field folds it back into the icon.
+    await user.click(document.body);
+    await waitFor(() =>
+      expect(screen.queryByRole("searchbox", { name: "Search settings" })).toBeNull(),
+    );
+
+    fireEvent.keyDown(document, { key: "f", metaKey: true });
+    await waitFor(() =>
+      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus(),
+    );
+  });
+
   it("assigns the settings surface an explicit visual class contract", () => {
     const onSettingsChange = vi.fn();
     render(
@@ -1430,6 +1504,7 @@ describe("SettingsView", () => {
       "settings-view__sidebar",
     );
     expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
     expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveClass(
       "settings-view__text-input",
     );
