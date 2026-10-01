@@ -163,6 +163,24 @@ describe("Local provider usage history", () => {
     },
   );
 
+  it("inside Settings puts each reading in a kit section and adds no title of its own", async () => {
+    render(
+      <ProviderUsageHistoryWorkspace
+        client={{ load: vi.fn().mockResolvedValue(history()) }}
+        embedded
+      />,
+    );
+    await screen.findByRole("heading", { name: /\$|K|—/ });
+
+    for (const name of ["Usage overview", "Token totals", "Usage breakdown"]) {
+      expect(screen.getByRole("region", { name })).toHaveClass("settings-card-section--open");
+    }
+    expect(screen.queryByRole("heading", { name: "Usage" })).toBeNull();
+    // The breakdown is labelled once, by its section, with the switch on that line.
+    expect(screen.getAllByRole("heading", { name: "Breakdown" })).toHaveLength(1);
+    expect(screen.getByRole("group", { name: "Breakdown by" })).toBeVisible();
+  });
+
   it("continues a partial import and replaces its subtotal with the completed reading", async () => {
     const partial = history();
     const complete = { ...history(), totals: { ...history().totals, totalTokens: 2400 } };
