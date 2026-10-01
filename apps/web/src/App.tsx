@@ -112,6 +112,7 @@ import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
+import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   enforceSidebarBackgroundAccessibility,
@@ -142,6 +143,7 @@ import "./styles/environment.css";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
+import { countSidebarTiles } from "./shell/sidebarTileCounts";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   resolveSidebarDestinationContributions,
@@ -905,12 +907,27 @@ function LaunchedShell(
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
   const [searchQuery, setSearchQuery] = useState("");
+  // The sidebar's in-place filter is its own query: the command overlay
+  // searches every thread, while this one only narrows the rows in view.
+  const [sidebarFilterQuery, setSidebarFilterQuery] = useState("");
+  const [sidebarListRequest, setSidebarListRequest] = useState<{
+    readonly view: "activity" | "completed";
+    readonly sequence: number;
+  }>();
+  const requestSidebarList = useCallback((view: "activity" | "completed") => {
+    setSidebarListRequest((current) => ({ view, sequence: (current?.sequence ?? 0) + 1 }));
+  }, []);
   // Deep-link target from a content search hit; cleared when Search opens again.
   const [revealChatTurn, setRevealChatTurn] = useState<
     { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
   >(undefined);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
+    setRevealChatTurn(undefined);
+    setSearchOpen(true);
+  }, []);
+  const searchEveryThread = useCallback((query: string) => {
+    setSearchQuery(query);
     setRevealChatTurn(undefined);
     setSearchOpen(true);
   }, []);
@@ -3437,6 +3454,21 @@ function LaunchedShell(
     workNavigation.navigation,
   ]);
 
+  const sidebarTileCounts = useMemo(
+    () =>
+      countSidebarTiles(
+        activeMode === "chat"
+          ? chatController.status === "ready"
+            ? navigationModel.markedChatNavigation
+            : []
+          : activeMode === "code"
+            ? navigationModel.codeProjectThreads
+            : navigationModel.workProjectThreads,
+        minuteNow,
+      ),
+    [activeMode, chatController.status, minuteNow, navigationModel],
+  );
+
   useMenuBarTasks({
     bridge: props.hostBridge,
     ready: controller.status === "ready",
@@ -5691,6 +5723,21 @@ function LaunchedShell(
             onSelectMode={handleSelectMode}
             {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
             inboxCount={inboxCount}
+            countTiles={{
+              ...sidebarTileCounts,
+              // Chat has no board, so its Running tile opens the Activity feed,
+              // where running threads lead.
+              ...(activeMode === "chat"
+                ? { onOpenRunning: () => requestSidebarList("activity") }
+                : {}),
+              onOpenReview: () => requestSidebarList("activity"),
+              onOpenDone: () => requestSidebarList("completed"),
+            }}
+            threadFilter={{
+              query: sidebarFilterQuery,
+              onQueryChange: setSidebarFilterQuery,
+              onSearchEverywhere: searchEveryThread,
+            }}
             settings={presentedShellSettings ?? controller.settings}
             workspace={controller.workspace}
             backgroundCoveredByWorkspace={shellBackdropCoversSidebar}
@@ -5722,11 +5769,21 @@ function LaunchedShell(
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
+                          onProjectViewSwitcherPresentationChange: (
+                            presentation: ProjectViewSwitcherPresentation,
+                          ) =>
+                            void controller.updateSettings({
+                              projectViewSwitcherPresentation: presentation,
+                            }),
                           projectViewEnvironmentOptions:
                             projectViewEnvironmentOptionsFromHosts(hosts),
                         }
                       : {})}
                     activityMode={activeMode}
+                    {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
+                    {...(sidebarListRequest === undefined
+                      ? {}
+                      : { listRequest: sidebarListRequest })}
                     rowProperties={controller.settings.sidebarRowProperties}
                     onRowPropertiesChange={(sidebarRowProperties) => {
                       void controller.updateSettings({ sidebarRowProperties });

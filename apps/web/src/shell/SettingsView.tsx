@@ -1748,6 +1748,47 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
               />
             </SettingRow>
           ) : null}
+          {isAvailable("sidebar-count-tiles") ? (
+            <SettingRow
+              description="Show Inbox, Running, To review, and Done today as count tiles. Off keeps the plain Inbox and Board rows."
+              focused={focusedSetting === settingId("sidebar-count-tiles")}
+              label="Count tiles"
+              scope="app"
+              settingId="sidebar-count-tiles"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarCountTiles}
+                describedBy="sidebar-count-tiles-description"
+                label="Count tiles"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ sidebarCountTiles: checked })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-search") ? (
+            <SettingRow
+              description="An icon that opens a filter for the thread list, or a filter that is always shown."
+              focused={focusedSetting === settingId("sidebar-search")}
+              label="Thread filter"
+              scope="app"
+              settingId="sidebar-search"
+            >
+              <OctantToggleGroup<ShellSettings["sidebarSearchPresentation"]>
+                aria-label="Thread filter"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) {
+                    props.onSettingsChange({ sidebarSearchPresentation: selected });
+                  }
+                }}
+                value={[props.settings.sidebarSearchPresentation]}
+              >
+                <OctantToggleGroupItem value="icon">Icon</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="field">Always shown</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </SettingRow>
+          ) : null}
           {isAvailable("mode-switcher") ? (
             <SettingRow
               focused={focusedSetting === settingId("mode-switcher")}

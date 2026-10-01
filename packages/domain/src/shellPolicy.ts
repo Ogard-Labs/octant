@@ -157,6 +157,8 @@ export function defaultShellSettings(): ShellSettings {
     sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND,
     sidebarDestinations: { order: [], visibility: [] },
     sidebarMoreEnabled: true,
+    sidebarCountTiles: true,
+    sidebarSearchPresentation: "icon",
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,
