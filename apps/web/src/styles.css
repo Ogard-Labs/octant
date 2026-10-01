@@ -1513,17 +1513,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project (and branch) the thread works in. Capped at 45% of the handle
-   so it can never crowd out the title, and given a much higher flex-shrink
-   than the title (docs/design/workspace.md: "The chip truncates before the
-   title does") so it absorbs the pane narrowing first; the title only gives
-   up room once the chip has already shrunk to its own floor. No min-width
-   floor on the chip itself — that widened a short chip past its own name and
-   cut into a title that had room. */
+/* The Project the thread works in. The title and the chips shrink together,
+   in proportion to their widths, and each chip is capped at 30% of the
+   handle. Shrinking the chips first (the earlier rule) left a long title
+   whole beside "octant…" and "m…", two chips that no longer named anything. */
 .workspace-pane__context {
-  flex: 0 20 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 45%;
+  max-width: 30%;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
@@ -1537,12 +1534,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* The branch is its own chip beside the Project's, in the identifier face so
-   a branch name never reads as prose. It shrinks as eagerly as the Project
-   chip, so the title is the last thing to lose room. */
+   a branch name never reads as prose. It shrinks with the title and the
+   Project chip, under the same 30% cap. */
 .workspace-pane__branch {
-  flex: 0 20 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 40%;
+  max-width: 30%;
   overflow: hidden;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);

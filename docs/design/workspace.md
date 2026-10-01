@@ -78,7 +78,7 @@ Thread titles appear once in the title row. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host), the title, a quiet chip naming the Project, and for
-Code a second chip naming the branch. The chips truncate before the title does;
+Code a second chip naming the branch. The title and the chips shrink together, each chip capped at 30% of the header, so a long title never squeezes a chip to one letter;
 the Project chip is omitted without a Project and the branch chip without a
 branch. While the host projects the thread as executing, a "Running" pill with
 a spinner follows them; it carries no elapsed time because the host does not
