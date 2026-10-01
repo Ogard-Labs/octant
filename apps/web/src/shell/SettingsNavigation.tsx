@@ -20,6 +20,7 @@ import {
   Radio,
   Server,
   Settings2,
+  TabletSmartphone,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -70,7 +71,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   voice: { group: "Models", icon: Mic },
   "image-generation": { group: "Models", icon: ImageIcon },
   "computer-use": { group: "Agents", icon: Monitor },
-  "device-tools": { group: "Agents", icon: Monitor },
+  "device-tools": { group: "Agents", icon: TabletSmartphone },
   skills: { group: "Agents", icon: Blocks },
   github: { group: "Integrations", icon: FolderGit2 },
   linear: { group: "Integrations", icon: ListTodo },
@@ -79,6 +80,11 @@ const SETTINGS_NAVIGATION_META: Readonly<
   "remote-access": { group: "System", icon: Radio },
   usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
 };
+
+/** The page's nav icon, shared with the tile in that page's header. */
+export function settingsSectionIcon(id: SettingsSectionId): LucideIcon {
+  return SETTINGS_NAVIGATION_META[id].icon;
+}
 
 /**
  * Persistent Settings section navigator.

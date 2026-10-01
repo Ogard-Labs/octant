@@ -4,7 +4,7 @@ import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
-import { SettingRow } from "../settings/primitives";
+import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import "./agent-hierarchy.css";
 
@@ -100,8 +100,7 @@ export function AgentRunSettingsPanel(props: {
 
   return (
     <section aria-label="Agents" className="agent-run-settings-panel">
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Helper agents</h2>
+      <SettingsSection title="Helper agents">
         <div className="setgroup">
           <SettingRow
             description={DESCRIPTION[on ? "automatic" : "off"]}
@@ -123,7 +122,7 @@ export function AgentRunSettingsPanel(props: {
             {message}
           </p>
         )}
-      </div>
+      </SettingsSection>
     </section>
   );
 }

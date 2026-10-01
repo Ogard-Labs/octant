@@ -4172,6 +4172,8 @@ describe("App", () => {
     );
 
     await openSettingsFromSidebar(user);
+    // The rail shows an icon until search is asked for.
+    await user.click(await screen.findByRole("button", { name: "Search settings" }));
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search is navigation: typing "material" shows a result list, and
@@ -4202,6 +4204,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSettingsFromSidebar(user);
+    // The rail shows an icon until search is asked for.
+    await user.click(await screen.findByRole("button", { name: "Search settings" }));
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search "providers" and deep-link to the Providers & Models section.

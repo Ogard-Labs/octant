@@ -7,7 +7,7 @@ import type {
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo, useState } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import { SettingRow } from "../settings/primitives";
+import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -197,14 +197,11 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
   }
 
   return (
-    <section
-      aria-labelledby="chat-defaults-heading"
-      className="settings-card-section settings-card-section--open chat-settings"
+    <SettingsSection
+      className="chat-settings"
+      description="These defaults apply only to new threads. Existing threads keep their explicit values."
+      title="Chat defaults"
     >
-      <h2 id="chat-defaults-heading">Chat defaults</h2>
-      <p className="settings-section-note">
-        These defaults apply only to new threads. Existing threads keep their explicit values.
-      </p>
       <form
         aria-label="Chat defaults"
         className="setgroup"
@@ -375,25 +372,26 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             value={draft.defaultPersonalityInstructions}
           />
         </SettingRow>
-        <div className="settings-feedback-slot" aria-live="polite">
-          {props.message === undefined ? null : (
-            <p className="provider-settings__alert" role="alert">
-              {props.message}
-            </p>
-          )}
-          {endpointError === undefined ? null : (
-            <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
-              {endpointError}
-            </p>
-          )}
-          {formError === undefined ? null : (
-            <p className="provider-settings__alert" role="alert">
-              {formError}
-            </p>
-          )}
-        </div>
       </form>
-    </section>
+      {/* Outside the card so the reserved line never reads as an empty row. */}
+      <div className="settings-feedback-slot" aria-live="polite">
+        {props.message === undefined ? null : (
+          <p className="provider-settings__alert" role="alert">
+            {props.message}
+          </p>
+        )}
+        {endpointError === undefined ? null : (
+          <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
+            {endpointError}
+          </p>
+        )}
+        {formError === undefined ? null : (
+          <p className="provider-settings__alert" role="alert">
+            {formError}
+          </p>
+        )}
+      </div>
+    </SettingsSection>
   );
 }
 

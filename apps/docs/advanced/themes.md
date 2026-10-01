@@ -16,7 +16,26 @@ The **Appearance** page covers the color scheme and presets, UI/editor/terminal
 typography, theme accessibility, and theme import and export, then **Window**
 (Glass), **Background**, **Sidebar** (width, destinations, the More row, the
 mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
-(transcript text size and width).
+(transcript text size and width). **Reset to default**, at the right of the page
+title, returns every appearance setting to its default.
+
+Every Settings page is laid out the same way: an icon tile, the page title and
+a one-line description, then sections. A page with three or more sections adds
+a row of links under the title that jumps to each one. Each section is a label
+over one grouped card, and a page that has something destructive (logging out,
+revoking a device, purging history) keeps it in its own section at the end.
+Settings save as you change them; **Saved** appears at the right of the top bar
+for a moment after each change. Only compound forms, such as a provider's
+connection details, have a Save button.
+
+### Style
+
+**Style** sits under the color scheme. **Default** keeps the app monochrome.
+**Vivid** adds colour where something has a name: the welcome greeting, the
+sidebar's count tiles, board columns, and each Project's colour. Vivid uses
+your preset's palette, so it changes with light and dark, and it never
+recolours a warning or an error. It looks best in the light theme.
+**Increased contrast** always uses the Default style.
 
 ### Style
 

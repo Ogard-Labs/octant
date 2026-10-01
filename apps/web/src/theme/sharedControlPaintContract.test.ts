@@ -28,7 +28,7 @@ describe("shared control paint ownership", () => {
     expect(controlRules).not.toMatch(/rgb\(/);
   });
 
-  it("keeps composer depth while preference groups remain flat", () => {
+  it("keeps composer depth while preference groups stay flat, shadowless cards", () => {
     const composerRules = between(
       systemStyles,
       "/* The composer is a raised object, not a field ruled onto the page:",
@@ -42,6 +42,13 @@ describe("shared control paint ownership", () => {
     expect(settingsGroupRules).toMatch(/background:\s*transparent/);
     expect(settingsGroupRules).toMatch(/box-shadow:\s*none/);
     expect(settingsGroupRules).not.toMatch(/rgb\(/);
+    // Inside Settings the group is a card one step above the page: raised by
+    // fill and a hairline, never by shadow.
+    const card = settingsStyles
+      .replace(/\s+/g, " ")
+      .match(/\.settings-view \.settings-card-section--open > :is\([^)]*\) \{([^}]*)\}/)?.[1];
+    expect(card).toMatch(/box-shadow:\s*none/);
+    expect(card).not.toMatch(/rgb\(/);
   });
 
   it("uses the shared pill radius token instead of literal pill values", () => {
