@@ -116,10 +116,14 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 - Service `app.octant.provider-credentials`, account `<lowercase-instanceId>:<storeScope/hostId>`.
 - Bundled helper `out/Octant.app/Contents/Resources/native/octant-keychain-helper` reads stdin JSON
   `{version:1,storeScope,operation:"set"|"has"|"resolve"|"delete",providerInstanceId,credential}`
-  (`resolve` reads; there is no `get`). It is FLAKY/strict:
-  a set can return ok:true once and later get/set on the same entry return `{"error":"failed"}` — do not
-  trust it for read-back verification. Direct `security add-generic-password -s … -a … -w "$KEY" -U` +
-  `security find-generic-password -w` works reliably and matches the app's own entry format.
+  (`resolve` reads; there is no `get`, so a `get` probe always returns `failed`).
+- Items live in the file-based login keychain, whose ACL + `partition_id` trust the creating binary's
+  cdhash. The ad-hoc helper's cdhash changes whenever its Swift source changes (same source → same
+  cdhash), and `security add-generic-password` items trust only `/usr/bin/security`. Such a foreign item
+  shows `has: present` but `resolve: unavailable`; re-saving the key in the app makes the helper delete
+  the foreign item by reference and re-add it under its own identity. Inspect ACLs with
+  `security dump-keychain -a ~/Library/Keychains/login.keychain-db` (look for `partition_id`). Do not
+  seed credentials with the `security` CLI — write them through the app.
 - Symptom cluster meaning the provider-service plane is down on a build: provider cards show
   "Incompatible", `POST /api/providers/<id>/probe` → 503 "Octant Provider service is unavailable", and
   image jobs fail `image.job-status-changed` with `failure.category="unauthenticated"`,
@@ -156,9 +160,8 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 - Post-#840 the create form carries REAL preset values → UI create works end-to-end and writes the
   credential through the real `setProviderCredential` path (Keychain entry appears at
   `app.octant.provider-credentials`, acct `<lowercase-instanceId>:<storeScope>` — verify via
-  `security dump-keychain`, NOT the flaky bundled helper). IMPORTANT: manual
-  `security add-generic-password` seeding in the same format does NOT satisfy the app's credential
-  read path — a card will show "Not configured"; only entries written by the app's own create work.
+  `security dump-keychain`). Manual `security add-generic-password` seeding produces a foreign item the
+  helper cannot read (see "Provider credentials in Keychain"); write credentials through the app.
 - Post-#841 image profiles are exempt from chat-runtime probing → honest badge is "Not checked"
   (not "Incompatible"). The `GET /api/providers/<id>/probe` 503 plane is no longer exercised.
 - REAL GENERATION WORKS end-to-end on 696647fb: More → Image generator → "Create image…" → profile +
