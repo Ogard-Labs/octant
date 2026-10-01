@@ -138,8 +138,10 @@ always publishes `default`. Vivid reads best in the light theme.
 ### Shapes and depth
 
 Radius has one number per role, defined once as `--oct-radius-*` in
-`octant.css`: a compact control is 8px, a control or a row 10px, an object resting inside a card or well, such as a Settings page's icon tile, 12px (`--oct-radius-inset`), a card, panel,
-menu, or popover 16px. The recipes reach the same numbers through `--radius`,
+`octant.css`: a compact control is 8px, a control or a row 10px, an object
+resting inside a card or well, such as a Settings page's icon tile or a board
+card in its column, 12px (`--oct-radius-inset`), and a card, panel, menu, or
+popover 16px. The recipes reach the same numbers through `--radius`,
 whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
 a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
@@ -1022,14 +1024,28 @@ is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
-four lanes show by default, each named once by mark, label, and count with no
-rule under the head, as a 12px meta label with the count at the lane's
-trailing edge; a Board/List toggle leads the toolbar, and every control on it
+four lanes show by default as soft wells: a faint tint of the text ink (3%)
+over the workspace colour, one soft hairline, the 16px radius, 8px of inner
+padding, and 12px between wells. A well's head names it once by mark, name,
+and count, with no rule under it: the name at the section-label step in the
+secondary ink and the count pinned to the trailing edge in the meta ink. The
+mark is told apart by shape, not hue: Ready a hollow ring, In Progress a small
+turning arc while any card in the column is executing and a filled dot when
+none is, Waiting a filled dot, Done a check. Under the Vivid style the marks
+take palette colours (Ready stays grey, In Progress orange, Waiting purple,
+Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one 28px rail
-control. A card is a flat
-hairline-edged object on the card fill: the Project as an eyebrow, the title,
-and one line of what the thread waits on or is doing, active runs and failing
-checks, who runs it, and when it last moved. Checkout, branch, plan, and
+control. A card is a raised object inside its well: the card fill, a hairline,
+the 12px inset radius, and 12px of padding. It carries the Project as an
+eyebrow, the title, and, while the thread is executing, a live line under the
+title (a small turning arc and the latest sub-agent line in the mono meta voice,
+or "Working…" before one reports). Under that come what the thread waits on,
+active runs and failing checks, and each linked pull request as a compact
+preview box (the PR mark and title, then the repository, state, and checks).
+The card ends with a footer row: the provider mark (the same glyph as the
+sidebar's, 16px, named for assistive technology), the worktree branch in a mono
+chip and the diff size in the existing green and red roles (Code only, and only
+when the tree changed), and the age at the trailing edge. Checkout, plan, and
 review facts live on the list view and the thread. Waiting does not become a
 warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
