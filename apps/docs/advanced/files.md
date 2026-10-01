@@ -72,8 +72,13 @@ deep links, and recent items.
 ## Agent-authored documents and canvases
 
 Agents receive usage instructions with the tools available to their current
-task. In a Chat Project, `octant_canvas` creates and revises structured reports,
-diagrams, tables, and dashboards. Its read-only `describe` operation lists the
+task. In Chat, Work, and Code, `octant_canvas` creates and revises structured
+plans, designs, reports, reviews, diagrams, tables, and dashboards. When you ask
+for something substantial, the agent builds it as a Canvas and replies with a
+short pointer; brief answers stay in the conversation. A follow-up such as "add
+a risks section" revises the existing Canvas: the read-only `list` operation
+returns the thread's Canvases and `read` returns one's current blocks and
+sequence. Its read-only `describe` operation lists the
 supported block kinds and a creation example. Requesting up to three
 `blockKinds` returns their exact schemas from the host's block contracts:
 
@@ -87,7 +92,7 @@ last observed version sequence; creation starts at sequence 1. Raw HTML,
 JavaScript, CSS, and invented file or artifact references are not Canvas
 content.
 
-A created Canvas appears as a card in its Chat with **Open Canvas**. Octant
+A created Canvas appears as a card in its thread with **Open Canvas**. Octant
 can also offer newly authored documents beside the conversation.
 
 ### Diagrams as boards

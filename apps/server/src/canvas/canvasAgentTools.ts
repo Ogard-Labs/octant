@@ -2,6 +2,7 @@ import {
   CanvasBlock,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
+  decodeCanvasId,
   type ChatThread,
   type HostId,
   type PermissionPersistence,
@@ -29,7 +30,7 @@ const blockKinds = CanvasBlock.members.map((block) => block.fields.kind.literals
 const canvasDefinitionSchema = {
   type: "object",
   properties: {
-    operation: { type: "string", enum: ["describe", "create", "revise"] },
+    operation: { type: "string", enum: ["describe", "list", "read", "create", "revise"] },
     blockKinds: {
       type: "array",
       items: { type: "string", enum: blockKinds },
@@ -39,7 +40,10 @@ const canvasDefinitionSchema = {
         "For describe: request the schemas of up to three block kinds. Omit to list kinds and see a create example.",
     },
     title: { type: "string", maxLength: MAX_TITLE_CHARS, description: "Title of a new Canvas." },
-    canvasId: { type: "string", description: "For revise: the id returned by create." },
+    canvasId: {
+      type: "string",
+      description: "For read and revise: the id returned by create or list.",
+    },
     expectedSequence: {
       type: "integer",
       minimum: 1,
@@ -86,7 +90,7 @@ export interface CanvasAgentToolPort {
   ) => Promise<
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
-  readonly canvas: Pick<CanvasService, "create" | "revise">;
+  readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
   readonly uuid: () => string;
   readonly hostId: HostId;
   /**
@@ -205,7 +209,15 @@ function toolDescription(mode: "chat" | "work" | "code"): string {
       : mode === "work"
         ? "this Work thread's folder"
         : "this Code thread's checkout";
-  return `Create or revise an Octant Canvas — a structured document for a plan, review, audit, report, diagram, table, chart, or dashboard — bound to ${where}. Prefer a Canvas for substantial plans, reviews, audits, and reports; keep brief answers in the conversation. Start with describe to see the available block kinds and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL. Revise the returned canvasId with the last observed expectedSequence and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.`;
+  return [
+    `Create, read, or revise an Octant Canvas: a structured, revisable document bound to ${where}.`,
+    "When the user asks you to make, draft, write, design, plan, draw, compare, summarize, review, or audit something substantial (a plan, design or mockup, diagram, report, review, audit, comparison, table, chart, or dashboard), deliver it as a Canvas rather than as a long reply: author it here, then reply with one or two sentences saying what the Canvas contains. Do not repeat its content in the conversation.",
+    "Keep short answers, clarifying questions, and conversation in the reply. If it is unclear whether the user wants a document, you may ask whether they want it as a Canvas.",
+    "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
+    "Start with describe to see the block kinds and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid.",
+    "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
+    "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
+  ].join(" ");
 }
 
 interface CanvasAuthoringInput {
@@ -222,7 +234,9 @@ type CanvasToolInput =
   | {
       readonly operation: "describe";
       readonly blockKinds?: ReadonlyArray<string>;
-    };
+    }
+  | { readonly operation: "list" }
+  | { readonly operation: "read"; readonly canvasId: string };
 
 /**
  * The authority a Canvas an agent wrote carries: none.
@@ -280,8 +294,15 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
       };
     return { operation, blockKinds: requested };
   }
+  if (operation === "list") return { operation };
+  if (operation === "read") {
+    const canvasId = record["canvasId"];
+    return typeof canvasId === "string"
+      ? { operation, canvasId }
+      : { error: "Reading a Canvas needs its canvasId." };
+  }
   if (operation !== "create" && operation !== "revise") {
-    return { error: "Canvas tool operation must be describe, create, or revise." };
+    return { error: "Canvas tool operation must be describe, list, read, create, or revise." };
   }
   const blocks = record["blocks"];
   if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -381,6 +402,49 @@ export function createCanvasAgentTools(
         return { result: { error: target.error }, isError: true };
       }
 
+      if (input.operation === "list") {
+        const canvases = options.port.canvas
+          .threadReferenceCards({
+            mode: target.mode,
+            threadId: owner.thread.id,
+            projectId: target.context.projectId,
+          })
+          .flatMap((card) => {
+            const outcome = options.port.canvas.get(card.canvasId, target.context, target.project);
+            return outcome.kind === "ready"
+              ? [
+                  {
+                    canvasId: String(card.canvasId),
+                    title: card.title,
+                    sequence: outcome.version.sequence,
+                  },
+                ]
+              : [];
+          });
+        return { result: { canvases } };
+      }
+
+      if (input.operation === "read") {
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(input.canvasId);
+        } catch {
+          return { result: { error: "That Canvas is unavailable." }, isError: true };
+        }
+        const outcome = options.port.canvas.get(canvasId, target.context, target.project);
+        if (outcome.kind !== "ready") {
+          return { result: { error: "That Canvas is unavailable." }, isError: true };
+        }
+        return {
+          result: {
+            canvasId: input.canvasId,
+            title: outcome.version.definition.title,
+            sequence: outcome.version.sequence,
+            blocks: outcome.version.definition.blocks,
+          },
+        };
+      }
+
       if (input.operation === "create") {
         const result = options.port.canvas.create(
           {
@@ -408,6 +472,7 @@ export function createCanvasAgentTools(
           result: {
             canvasId: result.card.canvasId,
             versionId: result.card.versionId,
+            sequence: 1,
             blocks: input.blocks.length,
           },
         };
