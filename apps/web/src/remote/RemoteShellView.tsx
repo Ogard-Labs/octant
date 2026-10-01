@@ -114,6 +114,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         <h1 className="remote-shell__title">Octant</h1>
         <HostSelector hosts={hosts} />
         <ModeSwitcher
+          separateChat
           activeMode={activeMode}
           modes={["chat", "work", "code"]}
           onSelectMode={setActiveMode}

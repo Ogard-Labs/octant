@@ -370,7 +370,8 @@ describe("ShellSidebar", () => {
       const onOpenSearch = vi.fn();
       const onOpenSettings = vi.fn();
       const workspace = { ...defaultWindowWorkspace(windowId), activeMode: mode };
-      const modeLabel = mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
+      // Chat and Work are one visible mode, so a Chat thread's sidebar reads Work.
+      const modeLabel = mode === "code" ? "Code" : "Work";
       const { container } = render(
         <ShellSidebar
           {...(mode === "work"
@@ -946,8 +947,8 @@ describe("ShellSidebar", () => {
       "aria-current",
       "page",
     );
-    await user.click(within(rail).getByRole("button", { name: "Chat" }));
-    expect(onSelectMode).toHaveBeenCalledWith("chat");
+    await user.click(within(rail).getByRole("button", { name: "Work" }));
+    expect(onSelectMode).toHaveBeenCalledWith("work");
     await user.click(within(rail).getByRole("button", { name: "Running, 2" }));
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toHaveTextContent("3");

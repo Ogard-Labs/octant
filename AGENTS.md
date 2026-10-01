@@ -109,6 +109,10 @@ test count.
 
 - Chat, Work, and Code are server-enforced domain modes, not renderer flags.
   Code is always available; disabling Chat or Work never deletes their data.
+  The shell presents Chat and Work as one visible Work mode beside Code: its
+  new-thread composer chooses Chat (no folder) or Work in a folder, and the
+  server keeps both domains and their authority unchanged. A thread keeps the
+  kind it was created with; the choice never converts or widens a thread.
 - Chat Projects are virtual, memory-scoped containers with no implicit filesystem
   or shell authority. Work binds one OS-confined project root. Code binds one
   OS-confined directory and starts approval-gated unless Full access was explicitly

@@ -63,6 +63,7 @@ import {
 import { useThreadMentions } from "../../chat/useThreadMentions";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
+import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
 
 export interface WorkComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -344,6 +345,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         <div className="composer-stack">
           <div className="composer-tray composer-tray--above" aria-label="Thread context">
             <div className="composer-tray__leading">
+              <WorkKindSwitch />
               {projectControl}
               {environmentControl}
             </div>

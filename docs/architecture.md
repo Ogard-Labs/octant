@@ -339,6 +339,16 @@ Modes are server-enforced domain policy, not renderer flags. Chat and Work can
 be disabled in settings; Code is always available; disabling a mode never
 deletes its data.
 
+The shell shows two modes, **Work** and **Code**. Work presents the Chat and
+Work domains together: one sidebar lists both kinds of thread and Project, and
+a new-thread composer chooses **Chat** (creates a Chat thread, no folder) or
+**In a folder** (creates a Work thread bound to a Project root). The choice is
+only which create command the composer sends; the active server mode still
+follows the thread or draft on screen, each row opens in its own mode and
+reaches its own kind's commands, and nothing in the renderer can turn a Chat
+into Work or a Work thread into Chat. Settings' Chat and Work switches still
+gate their domains: with one off, the composer offers only the other kind.
+
 | Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |

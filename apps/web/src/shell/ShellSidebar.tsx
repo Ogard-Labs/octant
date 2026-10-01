@@ -23,6 +23,7 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
 import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
+import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
@@ -83,7 +84,8 @@ export interface ShellSidebarProps {
   /** Hides the sidebar; the window chrome then offers the matching Show control. */
   readonly onCollapseSidebar?: () => void;
   readonly onRetryChat?: () => void;
-  readonly onSelectMode: (mode: OctantMode) => void;
+  /** Chat and Work show as one Work mode; App resolves which kind it opens. */
+  readonly onSelectMode: (mode: VisibleMode) => void;
   readonly settings: ShellSettings;
   readonly workspace: WindowWorkspace;
   readonly projectSection: ReactNode;
@@ -394,7 +396,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
             }
             activeMode={props.workspace.activeMode}
             modes={modes}
-            onSelectMode={props.onSelectMode}
+            onSelectMode={(mode) => {
+              if (mode !== "chat") props.onSelectMode(mode);
+            }}
             presentation={props.settings.modeSwitcherPresentation}
           />
           {filterShown && filter !== undefined ? (

@@ -12,8 +12,9 @@ Unfinished plugin extraction and other proposals are separate from these rules.
 
 ## Navigation and Projects
 
-The window is mode-first: a persistent left sidebar with the Chat, Work, and
-Code selector, optional count tiles, mode-aware destinations, Projects and
+The window is mode-first: a persistent left sidebar with the Work and Code
+selector (Work presents the Chat and Work domains together; see
+[architecture](../architecture.md#modes-chat-work-and-code)), optional count tiles, mode-aware destinations, Projects and
 threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,

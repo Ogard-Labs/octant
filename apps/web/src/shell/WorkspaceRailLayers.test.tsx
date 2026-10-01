@@ -424,7 +424,7 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Workspace mode, Chat" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Workspace mode, Work" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Board" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Thread board" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();

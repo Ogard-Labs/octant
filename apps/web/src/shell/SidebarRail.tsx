@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { modeIcons, modeLabels, modeOrder } from "./ModeSwitcher";
+import { modeIcons, modeLabels } from "./ModeSwitcher";
+import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import type { SidebarTile, SidebarTileId } from "./SidebarCountTiles";
 import { navigationIcon } from "./SidebarNavigation";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
@@ -33,7 +34,7 @@ export interface SidebarRailProps {
   readonly onOpenSearch?: () => void;
   readonly activeMode: OctantMode;
   readonly modes: ReadonlyArray<OctantMode>;
-  readonly onSelectMode: (mode: OctantMode) => void;
+  readonly onSelectMode: (mode: VisibleMode) => void;
   /** The count tiles, drawn as icons with their counts as badges. */
   readonly tiles: ReadonlyArray<SidebarTile>;
   /** Destination rows still shown beside the tiles (Board, Pull requests, …). */
@@ -68,7 +69,8 @@ const RAIL_PROJECT_LIMIT = 6;
  * counts, the modes, and their Projects with it.
  */
 export function SidebarRail(props: SidebarRailProps) {
-  const modes = modeOrder.filter((mode) => props.modes.includes(mode));
+  const modes = visibleModes(props.modes);
+  const activeMode = visibleModeOf(props.activeMode);
   const visibleProjects = props.projects.slice(0, RAIL_PROJECT_LIMIT);
   return (
     <aside aria-label="Octant sidebar, collapsed" className="sidebar-rail" data-octant-sidebar-rail>
@@ -93,12 +95,12 @@ export function SidebarRail(props: SidebarRailProps) {
             <div aria-label="Workspace mode" className="sidebar-rail__group" role="group">
               {modes.map((mode) => (
                 <RailButton
-                  active={mode === props.activeMode}
+                  active={mode === activeMode}
                   icon={modeIcons[mode]}
                   key={mode}
                   label={modeLabels[mode]}
                   onSelect={() => {
-                    if (mode !== props.activeMode) props.onSelectMode(mode);
+                    if (mode !== activeMode) props.onSelectMode(mode);
                   }}
                 />
               ))}
