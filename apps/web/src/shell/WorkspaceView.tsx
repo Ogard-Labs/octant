@@ -1971,6 +1971,9 @@ function renderNonCodeTab(
         (project) => project.type === tab.mode && project.lifecycle === "active",
       )}
       mode={tab.mode === "code" ? "code" : "work"}
+      greetingName={props.greetingName}
+      reviewCount={props.homeStart?.reviewCount}
+      runningCount={props.homeStart?.runningCount}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined
         ? {}

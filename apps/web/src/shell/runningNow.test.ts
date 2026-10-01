@@ -5,6 +5,7 @@ import {
   reviewWaitingCount,
   runningCardsFromBoard,
   runningCardsFromNavigation,
+  runningThreadCount,
 } from "./runningNow";
 
 function row(overrides: Partial<ChatThreadNavigationItem>): ChatThreadNavigationItem {
@@ -95,5 +96,20 @@ describe("the threads Running now lists", () => {
     );
 
     expect(cards.map((card) => card.threadId)).toEqual(["newer", "older"]);
+  });
+});
+
+describe("the running count in a start screen's heading", () => {
+  it("counts every running thread even when the cards stop at four", () => {
+    const working = Array.from({ length: 6 }, (_, index) =>
+      row({ threadId: `running-${String(index)}`, activity: "working" }),
+    );
+    expect(runningCardsFromNavigation(working, new Map())).toHaveLength(4);
+    expect(
+      runningThreadCount([
+        ...working,
+        row({ threadId: "rested", activity: "working", shelf: "snoozed" }),
+      ]),
+    ).toBe(6);
   });
 });

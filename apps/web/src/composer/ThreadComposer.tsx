@@ -90,6 +90,12 @@ export interface ThreadComposerProps {
   readonly ariaLabel?: string | undefined;
   /** Appended after `composer`; positions the frame within the surface. */
   readonly className?: string | undefined;
+  /**
+   * Where a new thread will run (Project, branch, Environment), as the first
+   * row inside a start screen's card, above the chips and the message. A
+   * thread's own composer never takes it: its context is already fixed.
+   */
+  readonly startContext?: ReactNode;
   /** Attachment and mention chips shown above the input. */
   readonly chips?: ReactNode;
   readonly label?: ThreadComposerLabel | undefined;
@@ -109,6 +115,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
   const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
   const message = (
     <>
+      {props.startContext}
       <ComposerFollowUpSuggestions />
       {props.chips}
       {props.label === undefined ? (

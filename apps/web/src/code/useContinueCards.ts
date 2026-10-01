@@ -17,6 +17,8 @@ export type ContinueCards =
        * listed twice on the same screen.
        */
       readonly running: ReadonlyArray<CodeBoardCard>;
+      /** How many are executing in all; `running` stops at the cards the screen shows. */
+      readonly runningTotal: number;
     };
 
 /**
@@ -50,6 +52,7 @@ export function useContinueCards(
           kind: "ready",
           cards: ordered.filter((card) => !card.executing).slice(0, CONTINUE_LIMIT),
           running: ordered.filter((card) => card.executing).slice(0, RUNNING_LIMIT),
+          runningTotal: ordered.filter((card) => card.executing).length,
         });
       },
       () => {

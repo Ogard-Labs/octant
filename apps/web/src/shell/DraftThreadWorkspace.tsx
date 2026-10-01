@@ -81,6 +81,7 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
 import { HomeStart, type HomeAction } from "./HomeStart";
+import { WelcomeHeading } from "../composer/WelcomeHeading";
 import type { RunningNowCard } from "./runningNow";
 import type { OctantHostBridge } from "./hostBridge";
 
@@ -206,6 +207,11 @@ export interface DraftThreadWorkspaceProps {
   readonly homeStart?: {
     /** Finished threads waiting to be opened; the Review tile needs more than none. */
     readonly reviewCount: number;
+    /**
+     * Every thread executing now. The cards below are capped, so the heading
+     * counts from here rather than from how many cards happen to show.
+     */
+    readonly runningCount: number;
     readonly onReview?: () => void;
     readonly running: ReadonlyArray<RunningNowCard>;
     readonly onOpenRunning?: (card: RunningNowCard) => void;
@@ -705,6 +711,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       <>
         <CodeComposerAdapter
           greetingName={props.greetingName}
+          reviewCount={props.homeStart?.reviewCount}
+          runningCount={props.homeStart?.runningCount}
           suggestions={CODE_SUGGESTIONS}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
           {...(beneath === undefined ? {} : { beneath })}
@@ -822,6 +830,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       <>
         <WorkComposerAdapter
           greetingName={props.greetingName}
+          reviewCount={props.homeStart?.reviewCount}
+          runningCount={props.homeStart?.runningCount}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
@@ -1031,24 +1041,32 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
+          <WelcomeHeading
+            greetingName={props.greetingName}
+            reviewCount={props.homeStart?.reviewCount}
+            runningCount={props.homeStart?.runningCount}
+          />
         </div>
 
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
-          <div className="composer-tray composer-tray--above" aria-label="Thread context">
-            <DraftContextStrip
-              mode={props.mode}
-              {...hostSelectorBinding}
-              {...(props.approvalLabel === undefined ? {} : { approvalLabel: props.approvalLabel })}
-              {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-              {...(props.mode === "chat" || props.projectName === undefined
-                ? {}
-                : { projectName: props.projectName })}
-              {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-            />
-          </div>
           <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <DraftContextStrip
+                  mode={props.mode}
+                  {...hostSelectorBinding}
+                  {...(props.approvalLabel === undefined
+                    ? {}
+                    : { approvalLabel: props.approvalLabel })}
+                  {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+                  {...(props.mode === "chat" || props.projectName === undefined
+                    ? {}
+                    : { projectName: props.projectName })}
+                  {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+                />
+              </div>
+            }
             chips={<ComputerUseMention controller={computer} surface="chips" />}
             typeahead={
               slash.open ? (

@@ -107,7 +107,7 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("keeps full example descriptions visible and fills the prompt only when chosen", async () => {
+  it("offers prompt suggestions as label-only chips that fill the prompt only when chosen", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
     render(
@@ -124,10 +124,9 @@ describe("CodeComposerAdapter", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /example details/i })).toBeNull();
-    expect(screen.getByText("Explain the entry points and data flow.")).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Explain this codebase" }),
-    ).toHaveAccessibleDescription("Explain the entry points and data flow.");
+    const chip = screen.getByRole("button", { name: "Explain this codebase" });
+    expect(chip).toHaveAccessibleDescription("Explain the entry points and data flow.");
+    expect(chip).toHaveAttribute("title", "Explain the entry points and data flow.");
     await user.click(screen.getByRole("button", { name: "Explain this codebase" }));
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Explain the entry points and data flow.",
@@ -138,7 +137,8 @@ describe("CodeComposerAdapter", () => {
 
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("What should we build");
+    expect(html).toMatch(/Good (morning|afternoon|evening)/);
+    expect(html).not.toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
   });
@@ -234,19 +234,24 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("puts Project, branch, and Environment on the context row above the composer", () => {
+  it("puts Project, branch, and Environment on the context row inside the composer, above the prompt", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");
-    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
     if (frame === null || dock === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    expect(frame.contains(dock)).toBe(false);
-    expect(dock.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(frame.contains(dock)).toBe(true);
+    expect(
+      dock.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(row.querySelector(".host-selector")).toBeNull();
     expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
@@ -324,13 +329,13 @@ describe("CodeComposerAdapter", () => {
     expect(trailing?.textContent).not.toContain("Choose a Project");
   });
 
-  it("keeps repository context on the context row above the composer", () => {
+  it("keeps repository context on the context row inside the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
-    expect(frame?.contains(dock)).toBe(false);
+    expect(frame?.contains(dock)).toBe(true);
     expect(dock?.textContent).toContain("development");
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });

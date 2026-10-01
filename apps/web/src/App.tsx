@@ -407,6 +407,7 @@ import {
   reviewWaitingCount,
   runningCardsFromBoard,
   runningCardsFromNavigation,
+  runningThreadCount,
 } from "./shell/runningNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
@@ -3732,6 +3733,12 @@ function LaunchedShell(
           reviewCount: reviewWaitingCount(
             activeMode === "code" ? codeProjectThreads : workProjectThreads,
           ),
+          runningCount:
+            activeMode === "code"
+              ? continueCards.kind === "ready"
+                ? continueCards.runningTotal
+                : 0
+              : runningThreadCount(workProjectThreads),
           onReview: openInbox,
           running:
             activeMode === "code"

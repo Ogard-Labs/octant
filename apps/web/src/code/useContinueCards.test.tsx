@@ -65,6 +65,7 @@ describe("the threads a Code start screen offers to continue", () => {
     await waitFor(() => expect(result.current.kind).toBe("ready"));
     const ready = result.current.kind === "ready" ? result.current : undefined;
     expect(titles(ready?.running ?? [])).toEqual(["Running but quiet"]);
+    expect(ready?.runningTotal).toBe(1);
     expect(titles(ready?.cards ?? [])).not.toContain("Running but quiet");
     expect(ready?.cards).toHaveLength(6);
   });

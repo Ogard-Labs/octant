@@ -80,6 +80,16 @@ export function runningCardsFromBoard(
     });
 }
 
+/** A row is running only while the host projects it as executing; a rested row never is. */
+function isRunningThread(thread: ChatThreadNavigationItem): boolean {
+  return thread.shelf === undefined && threadRowActivity(thread) === "working";
+}
+
+/** How many navigation rows are running, however many cards the screen has room for. */
+export function runningThreadCount(threads: ReadonlyArray<ChatThreadNavigationItem>): number {
+  return threads.filter(isRunningThread).length;
+}
+
 /**
  * Executing threads read from navigation rows, for a mode with no board card
  * to read (Work). A row is running only while the host projects it as
@@ -90,7 +100,7 @@ export function runningCardsFromNavigation(
   projectNames: ReadonlyMap<string, string>,
 ): ReadonlyArray<RunningNowCard> {
   return threads
-    .filter((thread) => thread.shelf === undefined && threadRowActivity(thread) === "working")
+    .filter(isRunningThread)
     .toSorted((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
     .slice(0, RUNNING_NOW_LIMIT)
     .map((thread) => {

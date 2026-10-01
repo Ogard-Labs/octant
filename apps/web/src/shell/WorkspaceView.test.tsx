@@ -91,8 +91,10 @@ describe("WorkspaceView welcome", () => {
   it("uses the shared Code composer when the only Code Project is archived", async () => {
     render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);
 
-    expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
   });
 
   it("keeps a new task's message when its Project binding changes and clears only for an explicit new draft", async () => {
@@ -163,9 +165,11 @@ describe("WorkspaceView welcome", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+    ).toBeVisible();
     expect(screen.getByText("Octant")).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
   });
 });
 
