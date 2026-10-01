@@ -14,6 +14,7 @@ function sources(overrides: Partial<OctantCommandSources> = {}): OctantCommandSo
     projects: [],
     onOpenProject: vi.fn(),
     skills: [],
+    pluginServers: [],
     appleProjects: [],
     onOpenAppleProject: vi.fn(),
     ...overrides,
@@ -61,5 +62,23 @@ describe("the Zen command", () => {
     expect(
       buildOctantCommands(sources()).some((command) => command.id === "workspace:zen-mode"),
     ).toBe(false);
+  });
+});
+
+describe("plugin MCP server commands", () => {
+  it("writes the exact plugin component reference into the composer", () => {
+    const command = buildOctantCommands(
+      sources({
+        pluginServers: [
+          { reference: "@notes-plugin/mcp-notes", displayName: "notes", pluginName: "Notes" },
+        ],
+      }),
+    ).find((candidate) => candidate.group === "Plugins");
+
+    expect(command).toMatchObject({
+      title: "notes",
+      detail: "MCP server · Notes",
+      action: { kind: "address", reference: "@notes-plugin/mcp-notes" },
+    });
   });
 });

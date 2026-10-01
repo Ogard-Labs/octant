@@ -103,6 +103,93 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
 
+  it("asks before a selected MCP server's tool runs in this Work thread", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000002",
+      threadId: String(threadId),
+      packageId: "90000000-0000-4000-8000-000000000003",
+      componentId: "notes-server",
+      providerToolName: "plugin__notes__search",
+      mcpToolName: "search",
+      inputJson: '{"q":"plan"}',
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const otherThread = {
+      ...approval,
+      approvalId: "90000000-0000-4000-8000-000000000004",
+      threadId: "10000000-0000-4000-8000-000000000999",
+      mcpToolName: "elsewhere",
+    };
+    const extensionClient = {
+      listToolApprovals: vi.fn(async () => [otherThread, approval]),
+      decideToolApproval: vi.fn(async () => undefined),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        extensionClient={extensionClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Extension tool approval" });
+    expect(row).toHaveTextContent("Allow search?");
+    expect(row).toHaveTextContent('{"q":"plan"}');
+    await user.click(within(row).getByRole("button", { name: "Approve once" }));
+    expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
+      approvalId: approval.approvalId,
+      decision: "approved",
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Extension tool approval" })).toBeNull(),
+    );
+  });
+
+  it("keeps an MCP tool approval open and explains a failed decision", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000005",
+      threadId: String(threadId),
+      packageId: "90000000-0000-4000-8000-000000000003",
+      componentId: "notes-server",
+      providerToolName: "plugin__notes__search",
+      mcpToolName: "search",
+      inputJson: "{}",
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const extensionClient = {
+      listToolApprovals: vi.fn(async () => [approval]),
+      decideToolApproval: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        extensionClient={extensionClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Extension tool approval" });
+    await user.click(within(row).getByRole("button", { name: "Deny" }));
+    expect(await within(row).findByRole("alert")).toHaveTextContent(
+      "The approval could not be sent. Keep this request open and retry.",
+    );
+    expect(screen.getByRole("group", { name: "Extension tool approval" })).toBeInTheDocument();
+  });
+
   it("saves reasoning for the current Work model and restores its default", async () => {
     const user = userEvent.setup();
     const execute = vi.fn<WorkThreadClient["execute"]>(async (command) => ({

@@ -189,6 +189,9 @@
   --oct-section-y-phone: 32px;
   --oct-radius-sm: 10px;
   --oct-radius-md: 16px;
+  /* An object resting inside a 16px well: a board card in its column. One
+     step under the well keeps the gap between the two corners even. */
+  --oct-radius-inset: 12px;
   --oct-radius-lg: 20px;
   --oct-radius-pill: 9999px;
 

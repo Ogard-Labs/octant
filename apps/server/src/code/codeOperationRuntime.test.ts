@@ -2683,6 +2683,9 @@ function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
+  resolveSelectedExtensions?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveSelectedExtensions"];
   computerUseUnattachedTools?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["computerUseUnattachedTools"];
@@ -2809,6 +2812,9 @@ function runtimeFixture(options: {
     ...(options.computerUseTools === undefined
       ? {}
       : { computerUseTools: options.computerUseTools }),
+    ...(options.resolveSelectedExtensions === undefined
+      ? {}
+      : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.computerUseUnattachedTools === undefined
       ? {}
       : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
@@ -3600,5 +3606,47 @@ it("keeps the selected Computer tool instead of the refusal stub when @Computer 
 
   expect(unattachedCalls).toHaveLength(0);
   expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
+  fixture.close();
+});
+
+it("offers a selected MCP server's tools to the Code provider", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const starts: Array<ProviderSessionStart> = [];
+  const provider = providerDriver(providerConnection(queue, starts));
+  const fixture = runtimeFixture({
+    provider,
+    supportsAppManagedTools: true,
+    resolveSelectedExtensions: async () => ({
+      kind: "resolved",
+      context: [],
+      tools: {
+        definitions: [{ name: "notes_search", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: "framed notes" }),
+      },
+    }),
+  });
+
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(82),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+    extensionSelections: [
+      {
+        kind: "plugin",
+        extensionId: "94000000-0000-4000-8000-000000000011",
+        packageId: "94000000-0000-4000-8000-000000000012",
+        componentId: "notes-server",
+        packageVersion: "1.0.0",
+        packageDigest: `sha256:${"a".repeat(64)}`,
+        catalogEpoch: `sha256:${"b".repeat(64)}`,
+        origin: { kind: "draft", reference: "notes" },
+      },
+    ],
+  });
+
+  expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("notes_search");
   fixture.close();
 });

@@ -1,19 +1,27 @@
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { resolveDraftExtensionReference } from "@octant/plugin-host";
 import { buildCatalogs } from "./extensionChatResolver";
-import { decodeWorkThread } from "@octant/contracts";
-import { decodeExtensionSnapshot } from "@octant/contracts/extension-rpc";
+import { decodeWindowId, decodeWorkThread } from "@octant/contracts";
+import {
+  decodeExtensionSnapshot,
+  type ExtensionEffectiveSnapshot,
+  type ExtensionSnapshot,
+} from "@octant/contracts/extension-rpc";
 import { ExtensionSelection, ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { Schema } from "effect";
-import { describe, expect, it } from "vitest";
-import { createSelectedSkillContextResolver } from "./selectedSkillContext";
+import { describe, expect, it, vi } from "vitest";
+import { createSelectedExtensionResolver } from "./selectedExtensions";
 import {
   ExtensionActivationService,
   createLocalExtensionActivationPolicy,
 } from "./extensionActivationService";
-import { createStoredExtensionMaterialLoader } from "./extensionChatResolver";
+import {
+  createStoredExtensionMaterialLoader,
+  type ExtensionToolExecutionPort,
+} from "./extensionChatResolver";
 
 const digest = `sha256:${"a".repeat(64)}`;
+const windowId = decodeWindowId("94000000-0000-4000-8000-000000000020");
 const now = "2026-09-15T00:00:00.000Z";
 const thread = decodeWorkThread({
   id: "94000000-0000-4000-8000-000000000004",
@@ -76,7 +84,7 @@ function fixture(mode: "work" | "code") {
     catalogEpoch: activation.resolve(snapshot, { scope }).catalogEpoch,
     origin: { kind: "draft", reference: "review" },
   });
-  const resolver = createSelectedSkillContextResolver({
+  const resolve = createSelectedExtensionResolver({
     snapshot: async () => snapshot,
     resolveEffectiveState: (state, query) => activation.resolve(state, query),
     providerFamily: () => Schema.decodeUnknownSync(ExtensionProviderFamily)("openai-compatible"),
@@ -87,7 +95,8 @@ function fixture(mode: "work" | "code") {
     }),
   });
   return {
-    resolver,
+    resolver: (input: Omit<Parameters<typeof resolve>[0], "windowId">) =>
+      resolve({ ...input, windowId }),
     selection,
     draftEpoch: activation.resolve(snapshot, { scope: { ...scope, threadId: null } }).catalogEpoch,
     catalog: () =>
@@ -221,6 +230,141 @@ describe("selected skill context", () => {
     ).resolves.toEqual({
       kind: "resolved",
       context: [{ kind: "instructions", text: "Use the synthetic checklist." }],
+    });
+  });
+});
+
+describe("selected MCP servers in Work and Code", () => {
+  const extensionId = "94000000-0000-4000-8000-000000000011";
+  const packageId = "94000000-0000-4000-8000-000000000012";
+  const catalogEpoch = `sha256:${"b".repeat(64)}`;
+
+  function mcpFixture(mode: "work" | "code", options: { readonly carriesTools?: boolean } = {}) {
+    const packageState = {
+      extensionId,
+      packageId,
+      slug: "notes",
+      displayName: "Notes",
+      stateVersion: 1,
+      version: "1.0.0",
+      digest,
+      source: { kind: "catalog", catalogId: "octant", entryId: "notes" },
+      compatibility: {
+        platforms: ["macos"],
+        modes: ["chat", "work", "code"],
+        providerFamilies: [],
+      },
+      components: [
+        {
+          component: {
+            id: "notes-server",
+            kind: "mcp-server",
+            displayName: "Notes server",
+            declaredCapabilities: ["mcp"],
+          },
+          effectiveState: { kind: "effective" },
+        },
+      ],
+      diagnostics: [],
+    };
+    const snapshot = {
+      sequence: 1,
+      snapshotAt: now,
+      packages: [packageState],
+      skills: [],
+      collisions: [],
+    } as unknown as ExtensionSnapshot;
+    const effective = {
+      ...snapshot,
+      scope: {
+        hostId: LOCAL_HOST_ID,
+        mode,
+        projectId: thread.projectId,
+        threadId: thread.id,
+        providerFamily: "openai-compatible",
+      },
+      catalogEpoch,
+      catalogStatus: "available",
+      stale: false,
+    } as unknown as ExtensionEffectiveSnapshot;
+    const execute = vi.fn<ExtensionToolExecutionPort["execute"]>(async () => ({
+      result: "framed notes",
+    }));
+    const reconcile = vi.fn(async () => undefined);
+    const resolve = createSelectedExtensionResolver({
+      snapshot: async () => snapshot,
+      resolveEffectiveState: () => effective,
+      reconcileEffectiveState: reconcile,
+      providerFamily: () => Schema.decodeUnknownSync(ExtensionProviderFamily)("openai-compatible"),
+      materialLoader: {
+        load: async () => ({
+          tools: [{ name: "notes_search", inputSchema: { type: "object" } }],
+        }),
+      },
+      toolExecution: { availability: () => "available", execute },
+      carriesAppManagedTools: () => options.carriesTools ?? true,
+    });
+    const selection = Schema.decodeUnknownSync(ExtensionSelection)({
+      kind: "plugin",
+      extensionId,
+      packageId,
+      componentId: "notes-server",
+      packageVersion: "1.0.0",
+      packageDigest: digest,
+      catalogEpoch,
+      origin: { kind: "draft", reference: "notes" },
+    });
+    return { resolve, selection, execute, reconcile, effective };
+  }
+
+  it.each(["work", "code"] as const)(
+    "offers a selected MCP server's tools to a %s turn, answered in the thread's own scope and window",
+    async (mode) => {
+      const test = mcpFixture(mode);
+      const result = await test.resolve({ mode, thread, selections: [test.selection], windowId });
+      if (result.kind !== "resolved" || result.tools === undefined) {
+        throw new Error(`Expected tools, got ${JSON.stringify(result)}`);
+      }
+      expect(test.reconcile).toHaveBeenCalledWith(test.effective);
+      expect(result.context).toEqual([]);
+      expect(result.tools.definitions.map((definition) => definition.name)).toEqual([
+        "notes_search",
+      ]);
+      await expect(
+        result.tools.execute({ name: "notes_search", inputJson: '{"q":"plan"}' }),
+      ).resolves.toEqual({ result: "framed notes" });
+      expect(test.execute).toHaveBeenCalledWith({
+        thread: { id: String(thread.id), projectId: String(thread.projectId) },
+        windowId,
+        name: "notes_search",
+        inputJson: '{"q":"plan"}',
+      });
+    },
+  );
+
+  it("refuses a tool the turn did not select", async () => {
+    const test = mcpFixture("work");
+    const result = await test.resolve({
+      mode: "work",
+      thread,
+      selections: [test.selection],
+      windowId,
+    });
+    if (result.kind !== "resolved") throw new Error("Expected a resolved selection.");
+    await expect(result.tools?.execute({ name: "other_tool", inputJson: "{}" })).resolves.toEqual({
+      result: { error: "extension-tool-not-selected" },
+      isError: true,
+    });
+    expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses a selected server when the provider cannot carry Octant's tools", async () => {
+    const test = mcpFixture("work", { carriesTools: false });
+    await expect(
+      test.resolve({ mode: "work", thread, selections: [test.selection], windowId }),
+    ).resolves.toMatchObject({
+      kind: "unavailable",
+      message: expect.stringMatching(/cannot carry/),
     });
   });
 });

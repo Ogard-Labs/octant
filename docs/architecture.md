@@ -371,9 +371,15 @@ and `other` also covers Octant's own managed MCP tools, so an agent that labels
 a command `other` still reaches a person's approval rather than running unasked.
 Because a provider's in-process shell can emit no protocol request at all —
 observed on Linux where a Vibe Work turn ran real commands inside its jail —
-every Work-mode provider launch also confines with process exec and fork
-denied, so the OS itself refuses a shell the protocol never sees. Octant's
-own harness gives Work no shell port. File writes inside the Project
+the ACP, OpenCode, and Pi runtimes also launch confined in Work with process
+exec and fork denied, so the OS itself refuses a shell the protocol never
+sees. An ACP profile whose entrypoint spawns its own stdio server keeps fork,
+which reaches no shell without a second exec target. Work never runs at Full
+access, so these launches are always wrapped. The Codex app-server and the
+Claude postures Work uses are not wrapped (see
+[security and authority](#security-and-authority)); they withhold the shell
+through the thread config and tool list above instead. Octant's own harness
+gives Work no shell port. File writes inside the Project
 remain approval-gated in every driver. Work that needs a shell or Git is
 promoted to Code (below).
 
@@ -401,6 +407,15 @@ Provider-owned memory stays off in every mode. Octant's memory is scoped to a
 Project, and a provider's global memory reaches across all of them: Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
 sandbox's readable roots, and Claude runs with no setting sources.
+
+Withholding the shell does not cut Work off from a person's integrations.
+Work is for files, browsers, and documents, and what separates it from Code
+is Git and the developer environment, not the tools a person plugs in. An MCP
+server the person installed and enabled as an Octant plugin is selectable in
+Work and Code exactly as in Chat (see
+[Extensions and skills](#extensions-and-skills)). It runs in Octant's own
+supervised session rather than inside the provider, so the Work-mode launch
+confinement does not stop it, and every call it answers waits for a person.
 
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
@@ -1025,6 +1040,13 @@ prompt, schema, tool, route, model, or capability.
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.
+  On macOS the deny-default Seatbelt profile reads the system roots, the
+  component's own roots, and its runtime's install: the executable's folder
+  and, for a Homebrew runtime, `<prefix>/Cellar`, `<prefix>/opt`, and
+  `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
+  `/` and metadata of every parent folder of those roots, because a runtime
+  such as node will not start without them. Metadata names a folder; it does
+  not read its contents.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
@@ -1038,6 +1060,15 @@ prompt, schema, tool, route, model, or capability.
   cache. A candidate that fails validation is not listed. Opening Settings does
   not fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
+- A selected MCP server component reaches Chat, Work, and Code turns through
+  the provider's app-managed tool transport. The host resolves the selection
+  against the thread's own mode scope, connects the supervised session for
+  that scope, offers only the selected tools, and refuses the turn when the
+  provider or model cannot carry Octant's tools. Every call waits for a
+  one-time approval in the turn's window, shown in the open thread. An MCP
+  server's launch command starts the server, not a shell the model holds, so
+  a stdio server is declared `mcp`, not `shell`, whichever package format
+  carried it.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
   depends on an optional extension. Computer use is destination-shaped: the
