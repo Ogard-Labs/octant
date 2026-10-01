@@ -115,6 +115,42 @@ describe("ProjectOverview renderer flows", () => {
     expect(onRename).toHaveBeenCalledTimes(2);
   });
 
+  it("shows the Project's colour tile in the header and changes the colour from it", async () => {
+    const user = userEvent.setup();
+    const onColorChange = vi.fn(async () => true);
+    const props = { onArchive: vi.fn(), onRelink: vi.fn(), onRename: vi.fn() };
+    const view = render(
+      <ProjectOverview {...props} onColorChange={onColorChange} project={codeProject()} />,
+    );
+
+    const trigger = screen.getByRole("button", { name: /Project colour for/ });
+    expect(trigger.querySelector(".project-tile")).toHaveAttribute("data-project-color", "none");
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Pink" }));
+    expect(onColorChange).toHaveBeenCalledWith(projectId, "pink");
+
+    view.rerender(
+      <ProjectOverview
+        {...props}
+        onColorChange={onColorChange}
+        project={codeProject({ color: "pink" })}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /Project colour for/ }).querySelector(".project-tile"),
+    ).toHaveAttribute("data-view-color", "pink");
+
+    view.rerender(
+      <ProjectOverview
+        {...props}
+        onColorChange={onColorChange}
+        project={codeProject({ color: "pink", lifecycle: "archived" })}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Project colour for/ })).not.toBeInTheDocument();
+  });
+
   it("does not relink after cancellation and keeps the Project ID", async () => {
     const user = userEvent.setup();
     const onRelink = vi.fn();

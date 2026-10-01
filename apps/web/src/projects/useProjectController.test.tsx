@@ -482,6 +482,32 @@ describe("useProjectController", () => {
     expect(result.current.announcement).toMatch(/renamed/i);
   });
 
+  it("sets and clears a Project colour with the authoritative expected version", async () => {
+    const server = client();
+    vi.mocked(server.api.executeProject).mockResolvedValue({} as never);
+    const { result } = renderHook(() =>
+      useProjectController({ activeMode: "chat", activeProjectId: chatId, client: server.api }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.setColor(chatId, "blue");
+    });
+    expect(server.api.executeProject).toHaveBeenLastCalledWith({
+      kind: "change-project-color",
+      projectId: chatId,
+      expectedVersion: 1,
+      color: "blue",
+    });
+
+    // Choosing the colour the Project already has sends nothing.
+    vi.mocked(server.api.executeProject).mockClear();
+    await act(async () => {
+      await result.current.setColor(chatId, null);
+    });
+    expect(server.api.executeProject).not.toHaveBeenCalled();
+  });
+
   /**
    * A habit only counts once it survives the journal. The controller
    * must send the versioned Project command and refuse to send one for a
