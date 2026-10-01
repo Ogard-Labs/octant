@@ -6,6 +6,11 @@ description: Work mode binds one OS-confined folder for local knowledge work wit
 
 Work is local knowledge work for documents, presentations, spreadsheets, reports, PDFs, images, and artifacts. Each Work Project binds exactly one OS-confined project root selected through the native directory picker.
 
+The **Work** mode also holds your chats. Above its composer, **Chat** starts a
+conversation with no file access, and **In a folder** starts work in one folder
+you choose. Both kinds of thread show in the same sidebar list, and each keeps
+the kind it started as.
+
 ## Work Projects
 
 Create a Work Project from the sidebar:
@@ -39,7 +44,7 @@ thread has a current plan artifact, instead of replacing the Work thread. The
 sidebar follows the pane that last received pointer or keyboard input and
 restores that thread's open tools and selected tool when you return to it.
 
-The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
+The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Each column is a soft well headed by a mark, its name, and a count; the In progress mark turns while a task is running. A card shows its title, a live line while the task is executing, what it waits on, any linked pull request as a small preview, and a footer with the provider and when it last moved. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
 
 Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 

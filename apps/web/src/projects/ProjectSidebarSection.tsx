@@ -1,4 +1,9 @@
-import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type {
+  ProjectAvailability,
+  ProjectColor,
+  ProjectId,
+  ProjectSummary,
+} from "@octant/contracts/projects";
 import type { ContextHealth } from "@octant/contracts/context";
 import {
   DEFAULT_SIDEBAR_ROW_PROPERTIES,
@@ -10,14 +15,14 @@ import {
   Box,
   Briefcase,
   Bug,
-  Bell,
   ChevronRight,
   Clock3,
   Code,
   Flag,
   Folder,
-  FolderOpen,
   FolderGit,
+  FolderTree,
+  History,
   Layers,
   ListFilter,
   ListTree,
@@ -33,12 +38,19 @@ import {
 } from "lucide-react";
 import { groupProjectsForView, sortProjectsForView } from "@octant/domain";
 import { ContextHealthWarning } from "../context/ContextHealthWarning";
+import {
+  PROJECT_COLOR_MENU_ITEMS,
+  ProjectTile,
+  projectColorFromMenuValue,
+  projectColorMenuValue,
+} from "./ProjectTile";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   OctantMenu,
   OctantMenuCheckboxItem,
@@ -132,7 +144,6 @@ import {
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
@@ -244,6 +255,8 @@ export interface ProjectSidebarSectionProps {
     readonly sequence: number;
   }>;
   readonly onArchive: (projectId: ProjectId) => void;
+  /** Absent when the host cannot accept a colour change, which hides the Colour choice. */
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onNewChatInProject?: (projectId: ProjectId) => void;
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
@@ -274,6 +287,14 @@ export interface ProjectSidebarSectionProps {
   readonly projectViewsMode?: ProjectViewMode;
   readonly projectViewSwitcherPresentation?: ProjectViewSwitcherPresentation;
   /**
+   * Saves the views' presentation from the filter menu, so switching between
+   * a dropdown and buttons does not need a trip to Settings. Absent hides the
+   * choice there.
+   */
+  readonly onProjectViewSwitcherPresentationChange?: (
+    presentation: ProjectViewSwitcherPresentation,
+  ) => void;
+  /**
    * Which facts a thread row may show. The host-backed shell settings own the
    * choice; the sidebar only reads it. Absent keeps each view's defaults.
    */
@@ -288,6 +309,14 @@ export interface ProjectSidebarSectionProps {
   readonly activityMode?: SidebarActivityMode;
   /** In-place filter of the current mode's visible thread rows. */
   readonly searchQuery?: string;
+  /**
+   * Asks the list to show a view from outside it: a sidebar tile opening the
+   * Activity feed, or the Completed shelf. A new sequence repeats the ask.
+   */
+  readonly listRequest?: Readonly<{
+    readonly view: "activity" | "completed";
+    readonly sequence: number;
+  }>;
 }
 
 export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
@@ -398,12 +427,17 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       ? projectCandidates
       : sortProjectsForView(projectCandidates, currentFilters.sorting, timeFilteredThreads ?? []);
   const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
+  // A thread filed in no Project (a Chat started without one, a Code thread
+  // in the default folder) belongs to no view but All Projects, which keeps it
+  // under Recents rather than hiding it because no Project names it.
+  const allProjectsView = projectViewState?.activeViewId === ALL_CODE_PROJECTS_VIEW_ID;
   const viewScopedThreads =
     currentFilters === undefined || timeFilteredThreads === undefined
       ? timeFilteredThreads
-      : timeFilteredThreads.filter(
-          (thread) =>
-            thread.projectId !== undefined && visibleProjectIds.has(String(thread.projectId)),
+      : timeFilteredThreads.filter((thread) =>
+          thread.projectId === undefined
+            ? allProjectsView
+            : visibleProjectIds.has(String(thread.projectId)),
         );
   const threads =
     viewScopedThreads === undefined || !searching
@@ -461,13 +495,29 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
   }, [activityMode]);
 
-  function toggleActivityView() {
-    setActivityView((current) => {
-      const next = !current;
-      writeActivityViewEnabled(next, undefined, globalThis, activityMode);
-      return next;
-    });
+  function showActivityView(next: boolean) {
+    setActivityView(next);
+    writeActivityViewEnabled(next, undefined, globalThis, activityMode);
   }
+
+  const [completedShelfOpen, setCompletedShelfOpen] = useState(false);
+  const listRequestSequence = props.listRequest?.sequence;
+  useEffect(() => {
+    const request = props.listRequest;
+    if (request === undefined) return;
+    if (request.view === "activity") {
+      showActivityView(true);
+      return;
+    }
+    setCompletedShelfOpen(true);
+    requestAnimationFrame(() =>
+      document
+        .querySelector('[data-shelf="completed"]')
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
+    // The sequence is the request; the object around it is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listRequestSequence]);
 
   useEffect(() => {
     if (props.projectViewsEnabled === true) {
@@ -555,6 +605,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         hideWhenEmpty={hideEmptyProjects}
         label={label}
         onArchive={props.onArchive}
+        {...(props.onColorChange === undefined ? {} : { onColorChange: props.onColorChange })}
         onMove={props.onMove}
         onRestore={props.onRestore}
         {...(onNewThread === undefined ? {} : { newThreadVerb, onNewThreadInProject: onNewThread })}
@@ -588,38 +639,53 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
       <nav aria-label="Projects" className="project-nav window-no-drag">
         {/* Views sort and filter Projects; with none yet the row only said
-            "All Projects" over a heading that said "Projects" again. */}
-        {props.projectViewsEnabled === true &&
-        projectViewState !== undefined &&
-        props.projects.length > 0 ? (
-          <CodeProjectViewSwitcher
-            onCreate={() => setProjectViewEditor({ mode: "create" })}
-            onDelete={(viewId) =>
-              persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
-            }
-            onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
-            onSelect={(viewId) =>
-              persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
-            }
-            filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
-            onFiltersChange={persistProjectViewFilters}
-            onRowPropertiesChange={(next) =>
-              props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
-            }
-            rowProperties={rowProperties[rowPropertyView]}
-            rowPropertyView={rowPropertyView}
-            environmentOptions={
-              props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
-            }
-            presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
-            projectCountFor={(viewId) =>
-              visibleCodeProjects(
-                props.projects.map((project) => ({ ...project, id: String(project.id) })),
-                { ...projectViewState, activeViewId: viewId },
-              ).length
-            }
-            state={projectViewState}
-          />
+            "All Projects" over a heading that said "Projects" again. The
+            Projects/Activity switch shares the row so the list's two
+            questions, which Projects and which arrangement, sit together. */}
+        {(props.projectViewsEnabled === true &&
+          projectViewState !== undefined &&
+          props.projects.length > 0) ||
+        nestThreads ? (
+          <div className="project-nav__toolbar">
+            {props.projectViewsEnabled === true &&
+            projectViewState !== undefined &&
+            props.projects.length > 0 ? (
+              <CodeProjectViewSwitcher
+                onCreate={() => setProjectViewEditor({ mode: "create" })}
+                onDelete={(viewId) =>
+                  persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
+                }
+                onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
+                onSelect={(viewId) =>
+                  persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
+                }
+                filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
+                onFiltersChange={persistProjectViewFilters}
+                onRowPropertiesChange={(next) =>
+                  props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
+                }
+                rowProperties={rowProperties[rowPropertyView]}
+                rowPropertyView={rowPropertyView}
+                environmentOptions={
+                  props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
+                }
+                presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
+                {...(props.onProjectViewSwitcherPresentationChange === undefined
+                  ? {}
+                  : { onPresentationChange: props.onProjectViewSwitcherPresentationChange })}
+                projectCountFor={(viewId) =>
+                  visibleCodeProjects(
+                    props.projects.map((project) => ({ ...project, id: String(project.id) })),
+                    { ...projectViewState, activeViewId: viewId },
+                  ).length
+                }
+                state={projectViewState}
+              />
+            ) : null}
+            {nestThreads ? (
+              <ThreadListViewSwitch activity={activityView} onChange={showActivityView} />
+            ) : null}
+          </div>
         ) : null}
         {projectViewEditor === undefined || projectViewState === undefined ? null : (
           <CodeProjectViewEditorDialog
@@ -637,9 +703,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             {...(editingView === undefined ? {} : { view: editingView })}
           />
         )}
-        {nestThreads ? (
-          <ActivityViewToggle enabled={activityView} onToggle={toggleActivityView} />
-        ) : null}
         {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
           <ProjectThreadStatus
             {...(props.threadErrorMessage === undefined
@@ -718,11 +781,17 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                   className="project-archive project-shelf"
                   data-shelf={shelf.label.toLowerCase()}
                   key={shelf.label}
+                  onToggle={(event) => {
+                    if (shelf.label === "Completed")
+                      setCompletedShelfOpen(event.currentTarget.open);
+                  }}
                   open={
-                    props.activeThreadId !== undefined &&
-                    shelf.threads.some(
-                      (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
-                    )
+                    (shelf.label === "Completed" && completedShelfOpen) ||
+                    (props.activeThreadId !== undefined &&
+                      shelf.threads.some(
+                        (thread) =>
+                          (thread.navigationId ?? thread.threadId) === props.activeThreadId,
+                      ))
                       ? true
                       : undefined
                   }
@@ -797,6 +866,7 @@ function ProjectGroup(props: {
   readonly onAddProject?: () => void;
   readonly addProjectLabel?: "chat-project" | "folder";
   readonly onArchive: (projectId: ProjectId) => void;
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onRestore: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
@@ -924,7 +994,7 @@ function ProjectGroup(props: {
                 type="button"
                 variant="ghost"
               >
-                <ProjectFolderIcon expanded={showNested && expanded} project={project} />
+                <ProjectTile project={project} />
                 <span className="project-row__copy">
                   <span>{project.name}</span>
                   {unavailable ? <small>Relink required</small> : null}
@@ -947,6 +1017,9 @@ function ProjectGroup(props: {
                 }
                 canMoveUp={(props.sort === undefined || props.sort === "manual") && index > 0}
                 onArchive={props.onArchive}
+                {...(props.onColorChange === undefined
+                  ? {}
+                  : { onColorChange: props.onColorChange })}
                 onMove={props.onMove}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
@@ -1045,28 +1118,12 @@ function ProjectStatusRollup(props: {
   );
 }
 
-function ProjectFolderIcon(props: {
-  readonly expanded: boolean;
-  readonly project: ProjectSummary;
-}) {
-  const Icon = props.expanded ? FolderOpen : props.project.type === "code" ? FolderGit : Folder;
-  return (
-    <span
-      aria-hidden="true"
-      className="project-row__folder-icon"
-      data-folder-state={props.expanded ? "open" : "closed"}
-      data-project-icon={props.project.type}
-    >
-      <Icon size={14} strokeWidth={1.65} />
-    </span>
-  );
-}
-
 function ProjectActionsMenu(props: {
   readonly canMoveDown: boolean;
   readonly canMoveUp: boolean;
   readonly nextProjectId?: ProjectId;
   readonly onArchive: (projectId: ProjectId) => void;
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onOpen: (project: ProjectSummary) => void;
   readonly onReorder: (
@@ -1079,37 +1136,77 @@ function ProjectActionsMenu(props: {
   readonly previousProjectId?: ProjectId;
   readonly project: ProjectSummary;
 }) {
-  const items: ReadonlyArray<OctantMenuItem> = [
-    { label: "Open Project", value: "open" },
-    { label: props.project.pinned ? "Unpin Project" : "Pin Project", value: "pin" },
-    { disabled: !props.canMoveUp, label: "Move up", value: "up" },
-    { disabled: !props.canMoveDown, label: "Move down", value: "down" },
-    {
-      label: props.project.lifecycle === "archived" ? "Restore Project" : "Archive Project",
-      value: props.project.lifecycle === "archived" ? "restore" : "archive",
-    },
-  ];
+  const { project } = props;
+  const archived = project.lifecycle === "archived";
+  // An archived Project is read-only, so its colour is as fixed as its name.
+  const onColorChange = archived ? undefined : props.onColorChange;
   return (
-    <OctantMenu
-      items={items}
-      onValueChange={(value) => {
-        if (value === "open") props.onOpen(props.project);
-        if (value === "pin") props.onMove(props.project.id, !props.project.pinned);
-        if (value === "up") {
-          props.onReorder(props.project.id, props.project.pinned, props.previousProjectId);
-        }
-        if (value === "down") {
-          props.onReorder(props.project.id, props.project.pinned, undefined, props.nextProjectId);
-        }
-        if (value === "archive") props.onArchive(props.project.id);
-        if (value === "restore") props.onRestore(props.project.id);
-      }}
-      trigger={<MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />}
-      triggerClassName="project-row__action project-row__action--icon inline-flex items-center justify-center"
-      triggerLabel={`Project actions for ${props.project.name}`}
-      value=""
-      selectionMode="action"
-    />
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label={`Project actions for ${project.name}`}
+        className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
+      >
+        <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner className="z-50 outline-none window-no-drag">
+          <OctantMenuPopup className="window-no-drag">
+            <OctantMenuActionItem onClick={() => props.onOpen(project)}>
+              Open Project
+            </OctantMenuActionItem>
+            <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>
+              {project.pinned ? "Unpin Project" : "Pin Project"}
+            </OctantMenuActionItem>
+            <OctantMenuActionItem
+              disabled={!props.canMoveUp}
+              onClick={() => props.onReorder(project.id, project.pinned, props.previousProjectId)}
+            >
+              Move up
+            </OctantMenuActionItem>
+            <OctantMenuActionItem
+              disabled={!props.canMoveDown}
+              onClick={() =>
+                props.onReorder(project.id, project.pinned, undefined, props.nextProjectId)
+              }
+            >
+              Move down
+            </OctantMenuActionItem>
+            {onColorChange === undefined ? null : (
+              <OctantMenuSub>
+                <OctantMenuSubTrigger>Colour</OctantMenuSubTrigger>
+                <OctantMenuSubPopup>
+                  <OctantMenuRadioGroup
+                    onValueChange={(value) => {
+                      if (typeof value !== "string") return;
+                      const color = projectColorFromMenuValue(value);
+                      if (color !== undefined) onColorChange(project.id, color);
+                    }}
+                    value={projectColorMenuValue(project.color)}
+                  >
+                    {PROJECT_COLOR_MENU_ITEMS.map((item) => (
+                      <OctantMenuRadioItem closeOnClick key={item.value} value={item.value}>
+                        <span
+                          aria-hidden="true"
+                          className="flex size-4 items-center justify-center"
+                        >
+                          {item.icon}
+                        </span>
+                        {item.label}
+                      </OctantMenuRadioItem>
+                    ))}
+                  </OctantMenuRadioGroup>
+                </OctantMenuSubPopup>
+              </OctantMenuSub>
+            )}
+            <OctantMenuActionItem
+              onClick={() => (archived ? props.onRestore(project.id) : props.onArchive(project.id))}
+            >
+              {archived ? "Restore Project" : "Archive Project"}
+            </OctantMenuActionItem>
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
   );
 }
 
@@ -1125,23 +1222,33 @@ function sortProjects(
   );
 }
 
-function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggle: () => void }) {
-  const [host, setHost] = useState<Element | null>(null);
-  useEffect(() => {
-    setHost(document.querySelector("[data-octant-sidebar-chrome-actions]"));
-  }, []);
-  const button = (
-    <IconButton
-      aria-pressed={props.enabled}
-      className="project-nav__activity-toggle"
-      // The inbox glyph now belongs to the Inbox destination; activity keeps
-      // its recency-feed behavior under a bell so the two never read as one.
-      icon={Bell}
-      label={props.enabled ? "Turn off activity view" : "Turn on activity view"}
-      onClick={props.onToggle}
-    />
+/**
+ * The list's two arrangements as one visible switch. It used to be a bell in
+ * the sidebar header that toggled the feed, which people read as
+ * notifications and rarely found; two named choices say what each one does.
+ */
+function ThreadListViewSwitch(props: {
+  readonly activity: boolean;
+  readonly onChange: (activity: boolean) => void;
+}) {
+  return (
+    <OctantToggleGroup<"projects" | "activity">
+      aria-label="Thread list"
+      className="project-nav__list-switch"
+      onValueChange={(value) => {
+        const selected = value[0];
+        if (selected !== undefined) props.onChange(selected === "activity");
+      }}
+      value={[props.activity ? "activity" : "projects"]}
+    >
+      <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
+        <FolderTree aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantToggleGroupItem>
+      <OctantToggleGroupItem aria-label="Activity feed" title="Activity feed" value="activity">
+        <History aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantToggleGroupItem>
+    </OctantToggleGroup>
   );
-  return host === null ? button : createPortal(button, host);
 }
 
 function ActivityThreadList(props: {
@@ -1311,6 +1418,7 @@ function CodeProjectViewSwitcher(props: {
   readonly rowPropertyView: SidebarRowPropertyView;
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly presentation: ProjectViewSwitcherPresentation;
+  readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly projectCountFor: (viewId: string) => number;
   readonly state: CodeProjectViewState;
 }) {
@@ -1412,6 +1520,10 @@ function CodeProjectViewSwitcher(props: {
         environmentOptions={props.environmentOptions}
         filters={props.filters}
         onChange={props.onFiltersChange}
+        presentation={props.presentation}
+        {...(props.onPresentationChange === undefined
+          ? {}
+          : { onPresentationChange: props.onPresentationChange })}
         onRowPropertiesChange={props.onRowPropertiesChange}
         rowProperties={props.rowProperties}
         rowPropertyView={props.rowPropertyView}
@@ -1510,6 +1622,8 @@ function ProjectViewFilterMenu(props: {
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly filters: ProjectViewFilters;
   readonly onChange: (filters: ProjectViewFilters) => void;
+  readonly presentation: ProjectViewSwitcherPresentation;
+  readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly rowProperties: SidebarRowPropertyVisibility;
   readonly rowPropertyView: SidebarRowPropertyView;
@@ -1634,6 +1748,19 @@ function ProjectViewFilterMenu(props: {
                 options={PROJECT_VIEW_SORTING_OPTIONS}
                 value={props.filters.sorting}
               />
+              {props.onPresentationChange === undefined ? null : (
+                <FilterRadioSubmenu
+                  label="Show views as"
+                  onValueChange={(value) => {
+                    const option = PROJECT_VIEW_PRESENTATION_OPTIONS.find(
+                      (candidate) => candidate.id === value,
+                    );
+                    if (option !== undefined) props.onPresentationChange?.(option.id);
+                  }}
+                  options={PROJECT_VIEW_PRESENTATION_OPTIONS}
+                  value={props.presentation}
+                />
+              )}
             </OctantMenuGroup>
             <OctantMenuSeparator />
             <SidebarRowPropertyMenu
@@ -1824,6 +1951,15 @@ function ProjectViewStatusMenu(props: {
     </OctantMenuSub>
   );
 }
+
+/** The same two choices Settings › Code offers for the Project view switcher. */
+const PROJECT_VIEW_PRESENTATION_OPTIONS = [
+  { id: "dropdown", label: "Dropdown" },
+  { id: "inline", label: "Buttons" },
+] as const satisfies ReadonlyArray<{
+  readonly id: ProjectViewSwitcherPresentation;
+  readonly label: string;
+}>;
 
 function FilterRadioSubmenu(props: {
   readonly label: string;

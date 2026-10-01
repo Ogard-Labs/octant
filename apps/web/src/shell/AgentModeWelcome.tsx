@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import { FolderOpen, FolderPlus, SquarePen } from "lucide-react";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { OctantButton } from "../ui/base/OctantButton";
+import { WorkKindSwitch } from "./WorkKindSwitch";
 
 export interface AgentModeWelcomeProps {
   readonly mode: Extract<OctantMode, "work" | "code">;
@@ -107,6 +108,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
           <h1 className="oct-title oct-title--hero">{folderQuestion[props.mode]}</h1>
         )}
         <p className="agent-mode-welcome__lead">{presentation.lead}</p>
+        <WorkKindSwitch />
         <div className="agent-mode-welcome__actions">
           {leadsWithTask ? newTask : addFolder}
           {leadsWithTask ? addFolder : newTask}

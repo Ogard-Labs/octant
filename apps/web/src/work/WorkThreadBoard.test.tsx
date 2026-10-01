@@ -229,6 +229,31 @@ describe("WorkThreadBoard", () => {
     expect(screen.getByText("Kept")).toBeVisible();
   });
 
+  it("shows the latest child-run line live under an executing task's title, or Working… before one reports", async () => {
+    const reporting = card({ id: "01", status: "in-progress", title: "Reporting task" });
+    const loadBoard = vi.fn(async () =>
+      view([
+        {
+          ...reporting,
+          childRuns: { ...reporting.childRuns, latestSummary: "Reading the sources" },
+        },
+        card({ id: "02", status: "in-progress", title: "Silent task" }),
+        card({ id: "03", status: "ready", title: "Idle task" }),
+      ]),
+    );
+    render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByRole("button", { name: "Reporting task" });
+    expect(cardFor("Reporting task").querySelector(".board-card-live")).toHaveTextContent(
+      "Reading the sources",
+    );
+    expect(cardFor("Silent task").querySelector(".board-card-live")).toHaveTextContent("Working…");
+    expect(cardFor("Idle task").querySelector(".board-card-live")).toBeNull();
+    expect(
+      screen.getByRole("region", { name: "In progress (2)" }).querySelector(".board-status-mark"),
+    ).toHaveAttribute("data-executing", "true");
+  });
+
   it("keeps the card face to what needs the person, who runs it, and when it moved; the rest waits for the list view", async () => {
     const loadBoard = vi.fn(async () =>
       view([
@@ -288,8 +313,13 @@ describe("WorkThreadBoard", () => {
     expect(facts).toHaveTextContent("Follow-up");
     expect(facts).toHaveTextContent("Recovering");
     expect(facts).toHaveTextContent("Goal · active");
-    expect(facts).toHaveTextContent("Studio");
-    expect(facts).toHaveTextContent(/\d+d ago/);
+    // Who runs the task and when it moved sit in the footer, not the facts.
+    const meta = article.querySelector(".board-card-meta");
+    if (meta === null) throw new Error("Expected the card footer");
+    expect(meta).toHaveTextContent("Studio");
+    expect(meta.querySelector(".board-card-meta__age")).toHaveTextContent(/\d+d ago/);
+    expect(meta.querySelector(".board-card-meta__branch")).toBeNull();
+    expect(meta.querySelector(".board-card-meta__diff")).toBeNull();
     // Folder, model, artifacts, citations, and delivery wait for the list view.
     expect(facts).not.toHaveTextContent("research/brief");
     expect(facts).not.toHaveTextContent("model-a");

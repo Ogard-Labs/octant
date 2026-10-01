@@ -169,6 +169,135 @@ html[data-octant-native-host="true"]
   grid-column: 1;
 }
 
+/* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
+   column and material, at a width that still clears the native traffic
+   lights, and the chrome and workspace return to the second column. */
+.shell.shell-frame.shell--sidebar-rail {
+  --octant-rendered-sidebar-width: var(--oct-sidebar-rail-w, 76px);
+  grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+}
+
+.shell--sidebar-rail.shell-frame > .window-chrome,
+.shell--sidebar-rail.shell-frame > .workspace-layer {
+  grid-column: 2;
+}
+
+.shell-frame > .sidebar-rail {
+  display: flex;
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--octant-sidebar-translucent);
+}
+
+.shell--material-opaque.shell-frame > .sidebar-rail {
+  background: var(--octant-sidebar-opaque);
+}
+
+.sidebar-rail__traffic-lights {
+  display: block;
+  flex: 0 0 var(--oct-title-rail-h);
+}
+
+.sidebar-rail__column {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--oct-space-2) 0 var(--oct-space-3);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar-rail__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-rail__button {
+  display: block;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.sidebar-rail__face {
+  --sidebar-rail-fill: transparent;
+  position: relative;
+  display: flex;
+  width: 40px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--oct-radius-sm);
+  background: var(--sidebar-rail-fill);
+  color: var(--oct-muted);
+}
+
+.sidebar-rail__button:hover .sidebar-rail__face,
+.sidebar-rail__button:focus-visible .sidebar-rail__face {
+  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  color: var(--oct-fg);
+}
+
+.sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
+  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  color: var(--oct-fg);
+}
+
+.sidebar-rail__badge {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  min-width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  padding: 0 var(--oct-space-1);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 14%, transparent);
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-sidebar-opaque);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  text-align: center;
+}
+
+.sidebar-rail__project {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.sidebar-rail__divider {
+  display: block;
+  width: 28px;
+  height: 1px;
+  flex: 0 0 auto;
+  margin: var(--oct-space-1) 0;
+  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+}
+
+.sidebar-rail__spacer {
+  display: block;
+  flex: 1 1 auto;
+}
+
 .window-chrome__leading {
   display: flex;
   flex: 0 0 auto;
@@ -644,6 +773,171 @@ html[data-octant-native-host="true"]
 /* Navigation rows must not shrink when the Project tree below them grows. */
 .sidebar-navigation > .sidebar-item {
   flex: 0 0 auto;
+}
+
+/* ── Sidebar count tiles and thread filter ────────────────────────────────
+   The tiles are the four counts a person checks first, so they get shape:
+   a 2×2 grid of faces with the count large and the name small. The button
+   is the link recipe, which paints nothing; the face inside it carries the
+   fill, so the shared button recipe is never repainted here. */
+
+.sidebar-tiles {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-1) 0 var(--oct-space-2);
+}
+
+.sidebar-tile {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  text-align: start;
+}
+
+.sidebar-tile__face {
+  --sidebar-tile-fill: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  display: flex;
+  min-height: 64px;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  border-radius: var(--oct-radius-sm);
+  background: var(--sidebar-tile-fill);
+  color: var(--oct-fg);
+}
+
+.sidebar-tile:hover .sidebar-tile__face,
+.sidebar-tile:focus-visible .sidebar-tile__face {
+  --sidebar-tile-fill: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+}
+
+.sidebar-tile[aria-current="page"] .sidebar-tile__face {
+  --sidebar-tile-fill: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.sidebar-tile__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-tile__count {
+  font-size: var(--oct-text-xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1;
+}
+
+.sidebar-tile__label {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.2;
+}
+
+/* Vivid: each tile takes a palette hue. In the light theme the palette roles
+   are dark enough to carry primary-foreground text on a solid face, the
+   look the style was approved in; in the dark theme they are light, so the
+   face is a tint and the hue moves to the count and icon instead. */
+.sidebar-tile[data-tile="inbox"] {
+  --sidebar-tile-hue: var(--oct-vivid-inbox, var(--octant-palette-blue, currentColor));
+}
+.sidebar-tile[data-tile="running"] {
+  --sidebar-tile-hue: var(--oct-vivid-running, var(--octant-palette-orange, currentColor));
+}
+.sidebar-tile[data-tile="review"] {
+  --sidebar-tile-hue: var(--oct-vivid-review, var(--octant-palette-purple, currentColor));
+}
+.sidebar-tile[data-tile="done"] {
+  --sidebar-tile-hue: var(--oct-vivid-done, var(--octant-palette-green, currentColor));
+}
+
+:root[data-octant-style="vivid"] .sidebar-tile__face {
+  --sidebar-tile-fill: color-mix(in oklab, var(--sidebar-tile-hue) 18%, transparent);
+  border-color: color-mix(in oklab, var(--sidebar-tile-hue) 30%, transparent);
+}
+
+:root[data-octant-style="vivid"] .sidebar-tile__icon,
+:root[data-octant-style="vivid"] .sidebar-tile__count {
+  color: var(--sidebar-tile-hue);
+}
+
+:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__face {
+  border-color: color-mix(in oklab, var(--sidebar-tile-hue) 70%, transparent);
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklab, var(--sidebar-tile-hue) 72%, var(--octant-primary-foreground)) 0%,
+    var(--sidebar-tile-hue) 78%
+  );
+  box-shadow: 0 6px 16px color-mix(in oklab, var(--sidebar-tile-hue) 24%, transparent);
+  color: var(--octant-primary-foreground);
+}
+
+:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__icon,
+:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__count,
+:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .sidebar-tile__label {
+  color: var(--octant-primary-foreground);
+}
+
+:root[data-octant-style="vivid"][data-octant-theme-mode="light"]
+  .sidebar-tile:hover
+  .sidebar-tile__face {
+  filter: brightness(1.06);
+}
+
+/* The thread filter opens under the header when the Search icon asks for
+   it, or stays there when Settings › Sidebar keeps it shown. The input keeps
+   the field recipe; only its leading room for the glyph is set here. */
+.sidebar-search {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-bottom: var(--oct-space-2);
+}
+
+.sidebar-search__icon {
+  position: absolute;
+  inset-inline-start: var(--oct-space-3);
+  color: var(--oct-muted);
+  pointer-events: none;
+}
+
+.sidebar-search__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline-start: calc(var(--oct-space-3) + 20px);
+}
+
+.sidebar-search__close {
+  flex: 0 0 auto;
+}
+
+/* Project views and the Projects/Activity switch share one row. */
+.project-nav__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.project-nav__toolbar > :first-child:not(.project-nav__list-switch) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.project-nav__list-switch {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
 }
 
 .sidebar-navigation__threads {

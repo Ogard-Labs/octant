@@ -306,6 +306,11 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /** Lets the model author a Canvas bound to this thread's checkout. */
+  readonly canvas?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
   /**
    * The agent-run tool set for this thread: the model petitions the server's
    * own run admission for a child run, scoped to this thread as the parent.
@@ -373,7 +378,7 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
-  readonly resolveSelectedSkillContext?: CodeOperationServiceOptions["resolveSelectedSkillContext"];
+  readonly resolveSelectedExtensions?: CodeOperationServiceOptions["resolveSelectedExtensions"];
   /**
    * Where a curated scaffold runs. Absent on a host that offers none, which
    * refuses the operation rather than running a generator nobody configured.
@@ -711,9 +716,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),
-    ...(options.resolveSelectedSkillContext === undefined
+    ...(options.resolveSelectedExtensions === undefined
       ? {}
-      : { resolveSelectedSkillContext: options.resolveSelectedSkillContext }),
+      : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.resolveProfileSkills === undefined
       ? {}
       : { resolveProfileSkills: options.resolveProfileSkills }),
@@ -1390,6 +1395,8 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
 
 interface ActiveTurn {
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
+  /** The selected MCP servers' tools, resolved when the turn was accepted. */
+  readonly extensionTools?: AppManagedToolSet;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -1600,6 +1607,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
+      ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -2007,6 +2015,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
         this.#options.agentMessages?.({ thread: active.thread }),
         this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
@@ -2032,7 +2041,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
       );
     }
-    return sets.length === 0 ? undefined : combineAppManagedToolSets(...sets);
+    sets.push(active.extensionTools);
+    return sets.every((set) => set === undefined) ? undefined : combineAppManagedToolSets(...sets);
   }
 
   #owned(thread: CodeThread, checkoutRoot: string): ActiveTurn | undefined {

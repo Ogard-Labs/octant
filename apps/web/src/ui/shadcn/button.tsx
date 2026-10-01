@@ -26,6 +26,11 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         link: "h-auto p-0 text-foreground underline-offset-4 hover:underline",
+        // A card-shaped button (a count tile, a rail entry, a live card) whose
+        // feature stylesheet owns the paint. It keeps the button's behaviour,
+        // focus handling, and disabled state and draws nothing of its own, so
+        // the feature never fights a ghost hover fill or a fixed height.
+        bare: "h-auto rounded-none p-0 text-inherit",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between

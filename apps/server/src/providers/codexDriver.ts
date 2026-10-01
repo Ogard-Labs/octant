@@ -43,12 +43,14 @@ import { codexProviderCredential, type CodexProviderCredential } from "./codexPr
 import {
   decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
+  decodeConfigReadResult,
   decodeModelListResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeTurnInterruptResult,
   decodeTurnStartResult,
   type CodexAccountReadResult,
+  type CodexConfigReadResult,
   type CodexDynamicToolSpec,
   type CodexModelListResult,
   type CodexRpcId,
@@ -80,9 +82,11 @@ export interface CodexThreadStartInput {
   readonly serviceTier?: string;
   /**
    * app-server config overrides: `model_reasoning_effort` carries the reasoning
-   * selection, and a Work thread carries `CODEX_WORK_CONFIG`.
+   * selection, and a Work or Chat thread carries its mode's overrides.
    */
   readonly config?: CodexThreadConfig;
+  /** An empty list gives the thread no execution environment (Chat). */
+  readonly environments?: readonly [];
   readonly dynamicTools?: readonly CodexDynamicToolSpec[];
 }
 
@@ -90,6 +94,10 @@ export interface CodexThreadConfig {
   readonly model_reasoning_effort?: string;
   readonly "features.shell_tool"?: false;
   readonly "features.unified_exec"?: false;
+  readonly "features.view_image"?: false;
+  readonly "features.plugins"?: false;
+  readonly "features.apps"?: false;
+  readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
 }
 
 export interface CodexThreadResumeInput {
@@ -112,6 +120,56 @@ const CODEX_WORK_CONFIG = {
   "features.unified_exec": false,
 } as const satisfies CodexThreadConfig;
 
+/**
+ * Chat has no filesystem or shell authority, but Codex's read-only sandbox
+ * still reads the whole disk: measured against codex-cli 0.159.2, a Chat turn
+ * in its scratch directory ran `ls` and `cat` on another repository and read
+ * the user's Codex memories without asking, because reads never escalate. A
+ * Chat thread therefore gets no execution environment at all (`environments:
+ * []` on the thread and on every turn), which removes the shell, `apply_patch`,
+ * and `view_image` together. The feature overrides say the same thing to a
+ * CLI that ignores `environments`, and switching plugins and apps off removes
+ * the user's own plugin tools, which on that host included a computer-use MCP
+ * server. Like Work's, these overrides are forgotten on a plain resume.
+ *
+ * The user's own MCP servers are a separate door: in the same measurement the
+ * model reached a `node_repl` server from `~/.codex/config.toml` through its
+ * `exec` tool and read the other repository with `fs.readdir`, with no
+ * environment and no approval. No setting switches every configured server
+ * off, and `mcp_servers = {}` merges into the user's table rather than
+ * replacing it, so each server the effective config names is switched off by
+ * name (see `codexChatThreadConfig`).
+ */
+const CODEX_CHAT_CONFIG = {
+  ...CODEX_WORK_CONFIG,
+  "features.view_image": false,
+  "features.plugins": false,
+  "features.apps": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * A Chat thread's overrides: `CODEX_CHAT_CONFIG` plus every MCP server in the
+ * effective config at `cwd`, switched off by name. The names go in a nested
+ * table rather than dotted keys, which would split a server named with a dot.
+ * A Chat thread whose servers cannot be listed does not start.
+ */
+function codexChatThreadConfig(
+  client: CodexClientPort,
+  cwd: string,
+): Effect.Effect<CodexThreadConfig, ProviderFailure> {
+  return request(() => client.configRead({ cwd })).pipe(
+    Effect.map((result) => ({
+      ...CODEX_CHAT_CONFIG,
+      mcp_servers: Object.fromEntries(
+        Object.keys(result.config.mcp_servers ?? {}).map((name) => [
+          name,
+          { enabled: false } as const,
+        ]),
+      ),
+    })),
+  );
+}
+
 export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly url: string };
@@ -119,6 +177,8 @@ export type CodexTurnInputItem =
 export interface CodexTurnStartInput {
   readonly threadId: string;
   readonly input: readonly CodexTurnInputItem[];
+  /** Restated per turn, because a turn without it falls back to the thread's. */
+  readonly environments?: readonly [];
   readonly approvalPolicy: "never" | "on-request";
   readonly sandboxPolicy:
     | { readonly type: "dangerFullAccess" }
@@ -136,6 +196,7 @@ export interface CodexClientPort {
   accountRead(): Promise<CodexAccountReadResult>;
   rateLimitsRead(): Promise<CodexRateLimitsReadResult>;
   modelList(cursor?: string): Promise<CodexModelListResult>;
+  configRead(input: { readonly cwd: string }): Promise<CodexConfigReadResult>;
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
@@ -532,6 +593,7 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
         { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
         decodeModelListResult,
       ),
+    configRead: (input) => rpc.request("config/read", input, decodeConfigReadResult),
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),
     turnStart: (input) => rpc.request("turn/start", input, decodeTurnStartResult),
@@ -806,6 +868,10 @@ function makeConnection(
     })();
     let unsubscribe: (() => void) | undefined;
     let pendingLifecycleRegistrations = 0;
+    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig | undefined, ProviderFailure> =>
+      mode === "chat"
+        ? codexChatThreadConfig(client, projectRoot)
+        : Effect.succeed(mode === "work" ? CODEX_WORK_CONFIG : undefined);
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     const activate = (state: SessionState) => {
@@ -920,6 +986,9 @@ function makeConnection(
             // the agent; only a Project-confined file change may reach a
             // person.
             (mode === "work" && item.approval.kind !== "file-change") ||
+            // Chat has no filesystem or shell authority at all, so nothing
+            // Codex asks for is anyone's to approve.
+            mode === "chat" ||
             !approvalRequestIsProjectConfined(item.approval, state.projectRoot)
           ) {
             Effect.runFork(
@@ -1124,8 +1193,9 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
+            const modeConfig = yield* modeThreadConfig();
             const config =
-              mode === "work" ? { ...optionSettings.config, ...CODEX_WORK_CONFIG } : undefined;
+              modeConfig === undefined ? undefined : { ...optionSettings.config, ...modeConfig };
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
@@ -1133,6 +1203,7 @@ function makeConnection(
                 ...settings,
                 ...optionSettings,
                 ...(config === undefined ? {} : { config }),
+                ...(mode === "chat" ? { environments: [] as const } : {}),
                 ...(dynamicTools === undefined ? {} : { dynamicTools }),
               }),
             );
@@ -1161,6 +1232,7 @@ function makeConnection(
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
             ensureSubscribed();
+            const modeConfig = yield* modeThreadConfig();
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>
@@ -1175,7 +1247,7 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    ...(mode === "work" ? { config: CODEX_WORK_CONFIG } : {}),
+                    ...(modeConfig === undefined ? {} : { config: modeConfig }),
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),
@@ -1238,6 +1310,7 @@ function makeConnection(
                       threadId: state.threadId,
                       input: codexTurnInput(input),
                       ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
+                      ...(mode === "chat" ? { environments: [] as const } : {}),
                     });
                     if (state.activeTurnId !== undefined && state.activeTurnId !== turn.turn.id) {
                       throw failure(

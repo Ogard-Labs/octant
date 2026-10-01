@@ -311,4 +311,136 @@ describe("createCanvasAgentTools", () => {
     expect(outcome).toMatchObject({ isError: true });
     expect(create).not.toHaveBeenCalled();
   });
+
+  describe("in a Work or Code thread", () => {
+    const workspaces = {
+      work: { kind: "work-root", projectId, rootId: "77777777-7777-4777-8777-777777777777" },
+      code: {
+        kind: "code-worktree",
+        projectId,
+        repositoryId: "88888888-8888-4888-8888-888888888888",
+        worktreeId: "99999999-9999-4999-8999-999999999999",
+      },
+    } as const;
+
+    function boundTools(mode: "work" | "code", overrides: Record<string, unknown> = {}) {
+      const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+        kind: "accepted" as const,
+        card: { canvasId: "canvas-1", versionId: "version-1" },
+      }));
+      const revise = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+        kind: "accepted" as const,
+        receipt: { versionId: "version-2", sequence: 2 },
+      }));
+      const resolveWorkspace = vi.fn(() => workspaces[mode]);
+      const port = {
+        activeContext: vi.fn(() => {
+          throw new Error("A Work or Code Canvas must not follow the window's active mode.");
+        }),
+        project: vi.fn(async () => ({ id: projectId, type: mode, lifecycle: "active" })),
+        canvas: { create, revise },
+        uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
+        hostId: "66666666-6666-4666-8666-666666666666",
+        resolveWorkspace,
+        ...overrides,
+      } as never;
+      return {
+        create,
+        revise,
+        resolveWorkspace,
+        set: createCanvasAgentTools({ windowId, mode, thread, port }),
+      };
+    }
+
+    for (const mode of ["work", "code"] as const) {
+      it(`creates a ${mode} Canvas bound to the workspace the host resolves for the thread`, async () => {
+        const { create, resolveWorkspace, set } = boundTools(mode);
+        const outcome = await set.execute({
+          name: CANVAS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "create", title: "Plan", blocks: [diagram] }),
+        });
+
+        expect(outcome.isError).not.toBe(true);
+        expect(resolveWorkspace).toHaveBeenCalledWith({ mode, threadId });
+        expect(create).toHaveBeenCalledWith(
+          expect.objectContaining({ mode, workspace: workspaces[mode], originThreadId: threadId }),
+          { mode, projectId, workspace: workspaces[mode], originThreadId: threadId },
+          { id: projectId, type: mode, lifecycle: "active" },
+          [expect.objectContaining({ kind: "diagram" })],
+        );
+      });
+
+      it(`revises a ${mode} Canvas within the same resolved workspace`, async () => {
+        const { revise, set } = boundTools(mode);
+        const outcome = await set.execute({
+          name: CANVAS_TOOL_NAME,
+          inputJson: JSON.stringify({
+            operation: "revise",
+            canvasId: "canvas-1",
+            expectedSequence: 1,
+            blocks: [diagram],
+          }),
+        });
+
+        expect(outcome.isError).not.toBe(true);
+        expect(revise).toHaveBeenCalledWith(
+          expect.objectContaining({ mode, workspace: workspaces[mode], originThreadId: threadId }),
+          expect.objectContaining({ mode, workspace: workspaces[mode] }),
+          expect.objectContaining({ type: mode }),
+          expect.anything(),
+        );
+      });
+    }
+
+    it("refuses a Code thread whose checkout the host cannot resolve", async () => {
+      const { create, set } = boundTools("code", { resolveWorkspace: vi.fn(() => undefined) });
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "create", blocks: [diagram] }),
+      });
+
+      expect(outcome.isError).toBe(true);
+      expect(outcome.result).toEqual({
+        error: "This Code thread's workspace is unavailable, so no Canvas can be bound to it.",
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("refuses a workspace that belongs to another Project than the thread", async () => {
+      const { create, set } = boundTools("work", {
+        resolveWorkspace: vi.fn(() => ({
+          ...workspaces.work,
+          projectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        })),
+      });
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "create", blocks: [diagram] }),
+      });
+
+      expect(outcome.isError).toBe(true);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("refuses a thread whose Project is not of the thread's own mode", async () => {
+      const { create, set } = boundTools("work", {
+        project: vi.fn(async () => ({ id: projectId, type: "code", lifecycle: "active" })),
+      });
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "create", blocks: [diagram] }),
+      });
+
+      expect(outcome.isError).toBe(true);
+      expect(outcome.result).toEqual({ error: "The Canvas Project is unavailable." });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("tells the agent to prefer a Canvas for plans and reviews bound to the thread's checkout", () => {
+      const description = boundTools("code").set.definitions[0]?.description ?? "";
+      expect(description).toContain("plan, review, audit, report");
+      expect(description).toContain("this Code thread's checkout");
+      expect(description).toContain("grants no file, shell, Git, or network access");
+    });
+  });
 });

@@ -1,4 +1,3 @@
-import { useComposerTip } from "../composer/useComposerTip";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
@@ -244,12 +243,6 @@ export function ChatComposer(props: ChatComposerProps) {
   const offeredCommands = useOctantCommands().filter(
     (command) => command.action.kind === "run" || props.onResolveExtensionReference !== undefined,
   );
-  const tip = useComposerTip({
-    scopeKey: String(props.caretRestoreKey ?? "chat"),
-    threads: props.threadMentions !== undefined,
-    commands: offeredCommands.map((command) => command.id),
-    computer: computer.available,
-  });
   const [commandToken, setCommandToken] = useState<SlashCommandToken | undefined>(undefined);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const commandMatches =
@@ -646,7 +639,7 @@ export function ChatComposer(props: ChatComposerProps) {
       onKeyDown={onDraftKeyDown}
       onKeyUp={onDraftKeyUp}
       onPaste={onDraftPaste}
-      placeholder={props.isSending ? "Send the next message…" : tip}
+      placeholder={props.isSending ? "Send the next message…" : "Reply…"}
       ref={messageRef}
       rows={1}
       value={props.draft}

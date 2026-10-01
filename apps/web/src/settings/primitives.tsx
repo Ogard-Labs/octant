@@ -1,5 +1,13 @@
 import { ChevronRight } from "lucide-react";
-import { createContext, useContext, useEffect, useId, useRef, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import type { SettingsScope } from "./registry";
 
 const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
@@ -164,18 +172,51 @@ export function SettingGroup({ label, description, children }: SettingGroupProps
   );
 }
 
-export interface SettingsSectionProps {
+/** One section as the "On this page" row names it. */
+export interface SettingsOutlineEntry {
+  readonly id: string;
   readonly title: string;
-  readonly description?: ReactNode;
-  readonly children: ReactNode;
-  readonly id?: string;
-  readonly className?: string;
+  readonly element: HTMLElement;
 }
 
 /**
- * Shared open section grammar for Settings pages. The section owns its title
- * and optional note; callers provide rows, facts, or a specialist editor in
- * the body without adding another card shell.
+ * Where a section reports itself so the page header can link to it. Sections
+ * are rendered by dozens of components far below the shell, so each one
+ * registers instead of the shell scanning the DOM: a section that mounts late
+ * (the provider list after its first answer) joins the row without a
+ * MutationObserver, and the row never names a section that is not drawn.
+ */
+export const SettingsOutlineRegistration = createContext<
+  ((entry: SettingsOutlineEntry) => () => void) | undefined
+>(undefined);
+
+export interface SettingsSectionProps {
+  readonly title: string;
+  readonly description?: ReactNode;
+  /** A section may be only its label and description, as when a feature is unavailable. */
+  readonly children?: ReactNode;
+  /** The anchor the "On this page" link scrolls to; one is generated when absent. */
+  readonly id?: string;
+  readonly className?: string;
+  /**
+   * A destructive section. It sits last on its page and its card holds the
+   * destructive row; the heading keeps its ink, so danger is carried by the
+   * placement and the confirm control, not by a coloured label.
+   */
+  readonly tone?: "danger";
+  /** Ghost actions that act on the whole section, on the label's own line. */
+  readonly actions?: ReactNode;
+  /**
+   * The region's accessible name when it differs from the visible label: the
+   * provider list is labelled "Configured providers" and named "Providers".
+   */
+  readonly ariaLabel?: string;
+}
+
+/**
+ * The shared section of every Settings page: a label, an optional one-line
+ * description in muted ink, then one grouped card that holds the rows. The
+ * caller provides the rows, facts, or a specialist editor as children.
  */
 export function SettingsSection({
   title,
@@ -183,41 +224,66 @@ export function SettingsSection({
   children,
   id,
   className,
+  tone,
+  actions,
+  ariaLabel,
 }: SettingsSectionProps) {
   const titleId = useId();
+  const generatedId = useId();
+  const anchorId = id ?? generatedId;
+  const register = useContext(SettingsOutlineRegistration);
+  const element = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (register === undefined || element.current === null) return;
+    return register({ id: anchorId, title, element: element.current });
+  }, [register, anchorId, title]);
   return (
     <section
-      aria-labelledby={titleId}
+      {...(ariaLabel === undefined ? { "aria-labelledby": titleId } : { "aria-label": ariaLabel })}
       className={`settings-card-section settings-card-section--open${
         className === undefined ? "" : ` ${className}`
       }`}
-      {...(id === undefined ? {} : { id })}
+      data-tone={tone}
+      id={anchorId}
+      ref={element}
     >
-      <h2 id={titleId}>{title}</h2>
+      {actions === undefined ? (
+        <h2 id={titleId}>{title}</h2>
+      ) : (
+        <div className="settings-section-head">
+          <h2 id={titleId}>{title}</h2>
+          <div className="settings-section-head__actions">{actions}</div>
+        </div>
+      )}
       {description === undefined ? null : <p className="settings-section-note">{description}</p>}
       {children}
     </section>
   );
 }
 
+/**
+ * A section whose card holds free-form content (a form, a list of devices, a
+ * map) rather than a list of {@link SettingRow}s. It is the same section as
+ * {@link SettingsSection}, so it takes the same label, description, anchor, and
+ * danger tone; only the card pads itself.
+ */
 export function SettingsPanel(props: {
   readonly title: string;
   readonly description?: ReactNode;
   readonly children: ReactNode;
+  readonly id?: string;
   readonly tone?: "default" | "danger";
 }) {
-  const titleId = useId();
   return (
-    <section
-      aria-labelledby={titleId}
-      className={`settings-panel${props.tone === "danger" ? " settings-panel--danger" : ""}`}
+    <SettingsSection
+      className="settings-panel"
+      {...(props.description === undefined ? {} : { description: props.description })}
+      {...(props.id === undefined ? {} : { id: props.id })}
+      {...(props.tone === "danger" ? { tone: "danger" as const } : {})}
+      title={props.title}
     >
-      <header className="settings-panel__header">
-        <h2 id={titleId}>{props.title}</h2>
-        {props.description === undefined ? null : <p>{props.description}</p>}
-      </header>
       <div className="settings-panel__body">{props.children}</div>
-    </section>
+    </SettingsSection>
   );
 }
 

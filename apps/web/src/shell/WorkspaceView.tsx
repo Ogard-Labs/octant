@@ -24,6 +24,7 @@ import type {
 import type {
   ProjectAvailability,
   ProjectId,
+  ProjectColor,
   ProjectProviderPolicy,
   ProjectSummary,
 } from "@octant/contracts/projects";
@@ -352,6 +353,10 @@ export interface WorkspaceViewProps {
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
+  readonly onProjectColorChange?: (
+    projectId: ProjectId,
+    color: ProjectColor | null,
+  ) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
@@ -373,6 +378,7 @@ export interface WorkspaceViewProps {
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
+    mode: OctantMode,
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ) => void;
@@ -1003,6 +1009,14 @@ function renderCodeTab(
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : {
+              onCanvasReferencesObserved: (
+                threadId: string,
+                cards: ReadonlyArray<CanvasThreadReferenceCard>,
+              ) => props.onCanvasReferencesObserved?.("code", threadId, cards),
+            })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
       />
     </Suspense>
@@ -1442,7 +1456,10 @@ function renderNonCodeTab(
           : { onOpenCanvasReference: props.onOpenCanvasReference })}
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
-          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+          : {
+              onCanvasReferencesObserved: (threadId, cards) =>
+                props.onCanvasReferencesObserved?.("chat", threadId, cards),
+            })}
         {...(props.onThreadHandedOff === undefined
           ? {}
           : { onThreadHandedOff: props.onThreadHandedOff })}
@@ -1541,6 +1558,12 @@ function renderNonCodeTab(
                 title={tab.title}
                 providerGroups={props.workProviderGroups ?? []}
                 {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+                {...(props.onCanvasReferencesObserved === undefined
+                  ? {}
+                  : {
+                      onCanvasReferencesObserved: (threadId, cards) =>
+                        props.onCanvasReferencesObserved?.("work", threadId, cards),
+                    })}
                 {...(props.imageGenerationClient === undefined
                   ? {}
                   : { imageGenerationClient: props.imageGenerationClient })}
@@ -1908,6 +1931,9 @@ function renderNonCodeTab(
         providerInstances={props.providerController.instances ?? []}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
+        {...(props.onProjectColorChange === undefined
+          ? {}
+          : { onColorChange: props.onProjectColorChange })}
         project={project}
         canvasInventory={
           props.canvasClient !== undefined && props.onOpenCanvas !== undefined ? (

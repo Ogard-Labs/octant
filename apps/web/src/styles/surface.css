@@ -20,24 +20,26 @@
 
 /* ── Type roles ─────────────────────────────────────────────────────────
    Five roles cover every heading and label. Weight is 500 by default and
-   600 only for the page title; uppercase and letter-spaced eyebrows are
-   not part of the language. */
+   700 only for the page title and the welcome greeting it grows into;
+   uppercase and letter-spaced eyebrows are not part of the language. The
+   title is large on purpose: at 20px a page had no clear top, and the
+   hierarchy fell to the hairlines. */
 
 .oct-title {
   margin: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-strong);
+  font-size: calc(28 * var(--oct-text-step));
+  font-weight: var(--oct-weight-title);
   letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.2;
+  line-height: 1.15;
   text-wrap: balance;
 }
 
 .oct-title--hero {
-  font-size: calc(28 * var(--oct-text-step));
-  font-weight: var(--oct-weight-display);
-  line-height: 1.15;
+  font-size: var(--oct-text-3xl);
+  letter-spacing: var(--oct-tracking-stat);
+  line-height: 1.1;
 }
 
 .oct-subtitle {
@@ -55,7 +57,7 @@
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: 1.3;
   text-transform: none;
@@ -603,9 +605,14 @@
 }
 
 .app-backdrop__builtin {
+  background-image: var(--app-backdrop-image, none);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
+}
+
+:root[data-octant-theme-mode="light"] .app-backdrop__builtin {
+  background-image: var(--app-backdrop-image-light, var(--app-backdrop-image, none));
 }
 
 /* A printed picture is a coarse grid scaled up with nearest-neighbour

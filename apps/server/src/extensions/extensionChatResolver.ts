@@ -48,14 +48,24 @@ export interface ExtensionMaterialLoaderPort {
   }>;
 }
 
+/**
+ * The thread an extension tool call answers to. Chat, Work, and Code threads
+ * all carry these, and a call is refused when they do not match the scope its
+ * MCP session was connected for.
+ */
+export interface ExtensionToolThread {
+  readonly id: string;
+  readonly projectId?: string | undefined;
+}
+
 export interface ExtensionToolExecutionPort {
   availability(input: {
-    readonly thread: ChatThread;
+    readonly thread: ExtensionToolThread;
     readonly definitions: ReadonlyArray<ProviderToolDefinition>;
   }): "available" | "unavailable" | "waiting";
   execute(input: {
     readonly windowId?: WindowId;
-    readonly thread: ChatThread;
+    readonly thread: ExtensionToolThread;
     readonly name: string;
     readonly inputJson: string;
     readonly signal?: AbortSignal;

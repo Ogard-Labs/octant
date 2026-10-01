@@ -4,6 +4,7 @@ import {
   decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
   decodeCodexServerMessage,
+  decodeConfigReadResult,
   decodeInitializeResult,
   decodeModelListResult,
   decodeThreadResumeResult,
@@ -113,6 +114,21 @@ describe("Codex stable 0.144.4 protocol", () => {
       turn: { id: "turn-1", status: "inProgress" },
     });
     expect(decodeTurnInterruptResult({ futureField: true })).toEqual({});
+  });
+
+  it("refuses an MCP server named __proto__ instead of dropping it from the list", () => {
+    const servers = '{"node_repl":{"command":"node_repl"}}';
+    expect(
+      Object.keys(
+        decodeConfigReadResult(JSON.parse(`{"config":{"mcp_servers":${servers}}}`)).config
+          .mcp_servers ?? {},
+      ),
+    ).toEqual(["node_repl"]);
+    expect(() =>
+      decodeConfigReadResult(
+        JSON.parse('{"config":{"mcp_servers":{"__proto__":{"command":"x"},"node_repl":{}}}}'),
+      ),
+    ).toThrow();
   });
 
   it("decodes turns whose error field arrives as explicit null", () => {

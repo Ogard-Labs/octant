@@ -1,6 +1,6 @@
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
-import { createSelectedSkillContextResolver } from "./extensions/selectedSkillContext";
+import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
 import {
   createDesktopComputerUsePort,
   type DesktopComputerUsePort,
@@ -673,6 +673,7 @@ import {
 } from "./android/androidToolchainService";
 import { AndroidRuntimeStore } from "./android/androidRuntimeStore";
 import { spawnDetachedProcess } from "./android/spawnDetachedProcess";
+import { serveAvdFromEnvironment } from "./android/serveAvdBrokerClient";
 import { createAndroidToolchainRouteHandler } from "./androidToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -3487,7 +3488,7 @@ export function startOctantServer(
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
     });
-    const resolveSelectedSkillContext = createSelectedSkillContextResolver({
+    const resolveSelectedExtensions = createSelectedExtensionResolver({
       snapshot: async () => {
         await standaloneSkillService.reconcile();
         return extensionApiService.snapshot();
@@ -3500,7 +3501,25 @@ export function startOctantServer(
           ? undefined
           : Schema.decodeUnknownSync(ExtensionProviderFamily)(instance.driverKind);
       },
-      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore),
+      reconcileEffectiveState: async (effective) => {
+        await agentPluginMcpSessionManager.reconcile(effective);
+        return agentPluginMcpSessionManager.projectEffectiveState(effective);
+      },
+      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore, {
+        mcpToolsForComponent: ({ packageId, componentId, scope }) =>
+          agentPluginMcpSessionManager.toolDefinitionsFor(packageId, componentId, scope),
+      }),
+      toolExecution:
+        options.extensionToolExecution ?? agentPluginMcpSessionManager.createToolExecutionPort(),
+      carriesAppManagedTools: (thread) => {
+        const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+        return (
+          observed?.capabilities.appManagedTools === "supported" ||
+          observed?.verifiedToolModelIds?.some(
+            (candidate) => String(candidate) === String(thread.modelId),
+          ) === true
+        );
+      },
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     const extensionRoutes = createExtensionRouteHandler({
@@ -4051,7 +4070,7 @@ export function startOctantServer(
       codeOperationRuntime = createCodeOperationRuntime({
         gitMutationPort,
         agentRuns: agentRunPersistence,
-        resolveSelectedSkillContext,
+        resolveSelectedExtensions,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(
             decodeComputerUseOwner({
@@ -4394,6 +4413,20 @@ export function startOctantServer(
             uuid: randomUUID,
             clock: () => new Date().toISOString(),
           }),
+        canvas: ({ windowId, thread }) =>
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                mode: "code",
+                thread: {
+                  id: String(thread.id),
+                  projectId: String(thread.projectId),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                },
+                port: canvasAgentToolPort,
+              }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
@@ -4786,9 +4819,11 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => androidProcess.reconcile());
+    const serveAvd = serveAvdFromEnvironment(process.env);
     const androidToolchainService = new AndroidToolchainService({
       execute: (input, signal) => androidProcess.execute(input, signal),
       spawnDetached: spawnDetachedProcess,
+      ...(serveAvd === undefined ? {} : { serveAvd }),
       observeEmulators: (emulators) =>
         androidInputGrants.closeUnlessBooted(
           emulators.map((emulator) => ({
@@ -5942,7 +5977,7 @@ export function startOctantServer(
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
-      resolveSelectedSkillContext,
+      resolveSelectedExtensions,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       onRequestSettled: (input, release) =>
@@ -6006,6 +6041,20 @@ export function startOctantServer(
               mode: "work",
               projectId: input.thread.projectId,
             });
+        const canvasTools =
+          !browserSupported || canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId: input.windowId,
+                mode: "work",
+                thread: {
+                  id: String(input.thread.id),
+                  projectId: String(input.thread.projectId),
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                },
+                port: canvasAgentToolPort,
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -6025,10 +6074,18 @@ export function startOctantServer(
           browser === undefined &&
           sideTaskTools === undefined &&
           agentsTools === undefined &&
-          computer === undefined
+          computer === undefined &&
+          canvasTools === undefined
         )
           return undefined;
-        return combineAppManagedToolSets(native, browser, computer, sideTaskTools, agentsTools);
+        return combineAppManagedToolSets(
+          native,
+          browser,
+          computer,
+          sideTaskTools,
+          agentsTools,
+          canvasTools,
+        );
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -7807,6 +7864,7 @@ export function startOctantServer(
       canvas: canvasService,
       uuid: randomUUID,
       hostId: LOCAL_HOST_ID,
+      resolveWorkspace: resolveCanvasWorkspace,
     };
     // Canvas sharing is local-only: a snapshot is served over the loopback
     // Canvas API to a principal this host authenticates, never uploaded or

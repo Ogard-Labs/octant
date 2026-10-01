@@ -24,6 +24,8 @@ export interface DockCanvasToolProps {
   readonly threadId: string;
   /** The Canvas to show first when the thread has several — the one just written. */
   readonly preferredCanvasId?: string;
+  /** Changes when a referenced Canvas gains a version; the open document reloads. */
+  readonly revision?: string;
 }
 
 /**
@@ -74,7 +76,14 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
     return () => {
       alive = false;
     };
-  }, [props.client, props.mode, props.preferredCanvasId, props.projectId, props.threadId]);
+  }, [
+    props.client,
+    props.mode,
+    props.preferredCanvasId,
+    props.projectId,
+    props.revision,
+    props.threadId,
+  ]);
 
   if (status === "loading") {
     return <ShellState state="loading" title="Loading canvas" />;
@@ -140,7 +149,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
           </OctantButton>
         )}
         <Suspense fallback={<ShellState state="loading" title="Loading canvas" />}>
-          <CanvasWorkspaceTab client={props.client} tab={tab} />
+          <CanvasWorkspaceTab key={String(openCard.versionId)} client={props.client} tab={tab} />
         </Suspense>
       </div>
     );

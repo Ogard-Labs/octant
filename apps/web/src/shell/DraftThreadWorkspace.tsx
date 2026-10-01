@@ -84,6 +84,7 @@ import { HomeStart, type HomeAction } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import type { RunningNowCard } from "./runningNow";
 import type { OctantHostBridge } from "./hostBridge";
+import { WorkKindSwitch } from "./WorkKindSwitch";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -1053,6 +1054,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           <ThreadComposer
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                {props.mode === "chat" ? <WorkKindSwitch /> : null}
                 <DraftContextStrip
                   mode={props.mode}
                   {...hostSelectorBinding}

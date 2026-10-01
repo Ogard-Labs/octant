@@ -33,6 +33,7 @@ import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
 } from "@octant/plugin-host/capability-mentions";
+import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 
 export interface ChatWelcomeProps {
   /** The threads this mode already has, shown under the starter ideas. */
@@ -144,6 +145,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">
                 <div className="composer-tray__leading">
+                  <WorkKindSwitch />
                   <HostSelector
                     presentation="environment"
                     {...(props.hosts === undefined ? {} : { hosts: props.hosts })}

@@ -543,7 +543,7 @@ describe("WorkTurnService", () => {
   it("sends approved selected skill instructions to the Work provider", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     const fixture = serviceFixture({
-      resolveSelectedSkillContext: async () => ({
+      resolveSelectedExtensions: async () => ({
         kind: "resolved",
         context: [{ kind: "instructions", text: "Use the synthetic Work checklist." }],
       }),
@@ -575,7 +575,7 @@ describe("WorkTurnService", () => {
 
   it("refuses changed skill selections when a Work request is retried", async () => {
     const fixture = serviceFixture({
-      resolveSelectedSkillContext: async () => ({
+      resolveSelectedExtensions: async () => ({
         kind: "resolved",
         context: [{ kind: "instructions", text: "Synthetic review instructions." }],
       }),
@@ -607,10 +607,62 @@ describe("WorkTurnService", () => {
     ).rejects.toMatchObject({ failure: { category: "stale" } });
   });
 
+  it("offers a selected MCP server's tools to the Work provider beside the host's own", async () => {
+    const offered: Array<ReadonlyArray<string>> = [];
+    const answers: Array<unknown> = [];
+    const resolveSelectedExtensions = vi.fn<
+      NonNullable<WorkTurnServiceDependencies["resolveSelectedExtensions"]>
+    >(async () => ({
+      kind: "resolved",
+      context: [],
+      tools: {
+        definitions: [{ name: "notes_search", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: "framed notes" }),
+      },
+    }));
+    const fixture = serviceFixture({
+      resolveSelectedExtensions,
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: "browser" }),
+      }),
+      turnRuntime: {
+        run: async (input) => {
+          offered.push(input.appManagedTools?.definitions.map(({ name }) => name) ?? []);
+          answers.push(
+            await input.appManagedTools?.execute({ name: "notes_search", inputJson: "{}" }),
+          );
+          return { kind: "completed", response: "Ready" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [
+        {
+          kind: "plugin",
+          extensionId: "94000000-0000-4000-8000-000000000011",
+          packageId: "94000000-0000-4000-8000-000000000012",
+          componentId: "notes-server",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "notes" },
+        },
+      ],
+    });
+    await fixture.waitForIdle();
+    expect(resolveSelectedExtensions).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "work", windowId: ids.window }),
+    );
+    expect(offered).toEqual([["octant_browser", "notes_search"]]);
+    expect(answers).toEqual([{ result: "framed notes" }]);
+  });
+
   it("refuses selected skill instructions that exceed the Work input budget", async () => {
     const fixture = serviceFixture({
       safeInputBudgetTokens: 500,
-      resolveSelectedSkillContext: async () => ({
+      resolveSelectedExtensions: async () => ({
         kind: "resolved",
         context: [{ kind: "instructions", text: "Synthetic required instructions. ".repeat(1000) }],
       }),
@@ -650,7 +702,7 @@ describe("WorkTurnService", () => {
     ).rejects.toMatchObject({
       failure: {
         category: "unavailable",
-        message: "Selected skill context is unavailable for Work on this host.",
+        message: "Selected extension is unavailable for Work on this host.",
       },
     });
     expect(fixture.acquireInputs).toHaveLength(0);
@@ -1490,7 +1542,7 @@ function serviceFixture(
     readonly contextHarness?: ContextHarnessService;
     readonly contextFacts?: ProviderDriver["contextFacts"];
     readonly safeInputBudgetTokens?: number;
-    readonly resolveSelectedSkillContext?: WorkTurnServiceDependencies["resolveSelectedSkillContext"];
+    readonly resolveSelectedExtensions?: WorkTurnServiceDependencies["resolveSelectedExtensions"];
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
@@ -1644,9 +1696,9 @@ function serviceFixture(
     ...(options.safeInputBudgetTokens === undefined
       ? {}
       : { safeInputBudgetTokens: options.safeInputBudgetTokens }),
-    ...(options.resolveSelectedSkillContext === undefined
+    ...(options.resolveSelectedExtensions === undefined
       ? {}
-      : { resolveSelectedSkillContext: options.resolveSelectedSkillContext }),
+      : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),

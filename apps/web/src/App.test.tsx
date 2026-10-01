@@ -353,7 +353,7 @@ describe("App", () => {
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
 
-  it("hides the sidebar from its own control and brings it back from the window chrome", async () => {
+  it("collapses the sidebar to its icon rail and brings it back from the rail", async () => {
     const user = userEvent.setup();
     render(
       <App
@@ -371,6 +371,11 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Show sidebar" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
     expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
+    const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(within(rail).getByRole("button", { name: "New task" })).toBeVisible();
+    expect(within(rail).getByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
+    // The rail carries Show sidebar, so the window chrome does not offer a second one.
+    expect(screen.getAllByRole("button", { name: "Show sidebar" })).toHaveLength(1);
     expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBe("true");
     // The activated control is unmounted by its own state change, so focus
     // moves to the control that replaced it instead of the document body.
@@ -3175,10 +3180,10 @@ describe("App", () => {
       "Keep my unsent draft",
     );
     await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
     expect(screen.queryByDisplayValue("Keep my unsent draft")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New chat" }));
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
@@ -3836,7 +3841,8 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "New task" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "More destinations" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
+    // The Board's row became the Running tile; the tile goes to the same place.
+    expect(screen.getByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
     expect(within(sidebar).getByRole("button", { name: "Pull requests" })).toBeVisible();
     await user.click(projectsDestination);
     const projectsDirectory = document.querySelector<HTMLElement>(".projects-directory");
@@ -3853,7 +3859,7 @@ describe("App", () => {
         name: /Octant, Code Project, Relink required/,
       }),
     ).toBeVisible();
-    for (const destination of ["Board", "Pull requests", "Inbox"]) {
+    for (const destination of [/^Running, \d+$/, "Pull requests", /^Inbox, \d+$/]) {
       await user.click(within(sidebar).getByRole("button", { name: destination }));
       expect(within(sidebar).queryByRole("region", { name: "Projects sidebar" })).toBeNull();
       expect(document.querySelector(".shell-frame")).not.toHaveClass(
@@ -3866,10 +3872,10 @@ describe("App", () => {
     // A mode switch is a navigation away from the Projects page, so the page
     // must not keep sitting over the workspace it belongs to.
     await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
     expect(screen.queryByRole("searchbox", { name: "Search Projects" })).toBeNull();
     expect(document.querySelector(".projects-page-layer")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
@@ -3897,8 +3903,10 @@ describe("App", () => {
     });
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
 
-    // Sidebar Search opens one centered, mode-scoped thread finder.
+    // Sidebar Search opens the in-place filter; Enter hands its text to the
+    // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
     const search = screen.getByRole("combobox", { name: "Search Code threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
@@ -4173,6 +4181,8 @@ describe("App", () => {
     );
 
     await openSettingsFromSidebar(user);
+    // The rail shows an icon until search is asked for.
+    await user.click(await screen.findByRole("button", { name: "Search settings" }));
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search is navigation: typing "material" shows a result list, and
@@ -4203,6 +4213,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSettingsFromSidebar(user);
+    // The rail shows an icon until search is asked for.
+    await user.click(await screen.findByRole("button", { name: "Search settings" }));
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search "providers" and deep-link to the Providers & Models section.
@@ -4680,7 +4692,7 @@ describe("App", () => {
 
     // The Board is a page about many threads; while it is up the dock steps
     // aside and the page has the pane.
-    await user.click(screen.getByRole("button", { name: "Board" }));
+    await user.click(screen.getByRole("button", { name: /^Running, \d+$/ }));
     await waitFor(() =>
       expect(
         screen.queryByRole("complementary", { name: "Right Utility Dock" }),
@@ -4736,7 +4748,7 @@ describe("App", () => {
     // The Board is a page about many threads and shows none of them, so the
     // panel steps aside the way the dock does instead of keeping a quarter of
     // the viewport for one thread's terminal.
-    await user.click(screen.getByRole("button", { name: "Board" }));
+    await user.click(screen.getByRole("button", { name: /^Running, \d+$/ }));
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument(),
     );

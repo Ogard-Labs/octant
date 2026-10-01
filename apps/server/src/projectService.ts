@@ -35,6 +35,7 @@ import {
   changeCodeProjectAccess,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectColor,
   changeProjectProviderPolicy,
   createMemoryEntry,
   createProject,
@@ -631,6 +632,10 @@ export class ProjectService implements ProjectServiceApi {
           project = renameProject(current, command.name, timestamp);
           kind = "project-renamed";
           eventName = "project.renamed@1";
+        } else if (command.kind === "change-project-color") {
+          project = changeProjectColor(current, command.color, timestamp);
+          kind = "project-color-changed";
+          eventName = "project.color-changed@1";
         } else if (command.kind === "move-project") {
           const beforeProject =
             command.beforeProjectId === undefined
