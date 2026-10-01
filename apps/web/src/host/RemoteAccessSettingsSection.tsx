@@ -1,7 +1,13 @@
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
-import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
+import {
+  SettingRow,
+  SettingsFactList,
+  SettingsPanel,
+  SettingsSection,
+  SettingsState,
+} from "../settings/primitives";
 import type {
   PrivateListenerEnableRequest,
   PrivateListenerPublicStatus,
@@ -259,12 +265,12 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const activeDevices = devices.filter((device) => device.state === "active");
 
   return (
-    <section aria-label="Remote access" className="settings-section" id="settings-remote-access">
-      <section
-        aria-label="Remote listener"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Remote listener</h2>
+    <section
+      aria-label="Remote access"
+      className="settings-section settings-section-stack"
+      id="settings-remote-access"
+    >
+      <SettingsSection title="Remote listener">
         {listener.kind === "loading" ? (
           <SettingsState kind="loading">Reading the remote listener…</SettingsState>
         ) : listener.kind === "error" ? (
@@ -438,13 +444,9 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
         {listenerMessage === undefined ? null : (
           <SettingsState kind="error">{listenerMessage}</SettingsState>
         )}
-      </section>
+      </SettingsSection>
 
-      <section
-        aria-label="Pair a device"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Pair a device</h2>
+      <SettingsSection title="Pair a device">
         <div className="setgroup">
           <SettingRow
             description="A pairing link is single-use and expires in five minutes. Open it on the other device, then approve the request that appears below."
@@ -510,7 +512,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
         {pending.length === 0 ? null : (
           <ul aria-label="Pairing requests" className="settings-panel__stack">
             {pending.map((request) => (
-              <li className="settings-panel" key={request.ticketId}>
+              <li className="settings-card" key={request.ticketId}>
                 <SettingsFactList
                   facts={[
                     { label: "Device", value: request.deviceLabel },
@@ -555,11 +557,13 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
             {pairingMessage}
           </SettingsState>
         )}
-      </section>
+      </SettingsSection>
 
+      {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel
         title="Paired devices"
         description="Revoking a device ends its sessions and streams immediately; it must pair again to return."
+        tone="danger"
       >
         <div className="settings-panel__stack">
           {activeDevices.length === 0 ? (

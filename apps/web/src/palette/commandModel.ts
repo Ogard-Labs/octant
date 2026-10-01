@@ -12,6 +12,7 @@
 
 export type OctantCommandGroup =
   | "Skills"
+  | "Plugins"
   | "Modes"
   | "Threads"
   | "Projects"

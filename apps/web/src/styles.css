@@ -29,6 +29,7 @@
 @import "./styles/project-threads.css";
 @import "./styles/surface.css";
 @import "./styles/board.css";
+@import "./styles/vivid.css";
 
 :root {
   color-scheme: dark;

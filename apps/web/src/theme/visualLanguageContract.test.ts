@@ -431,8 +431,8 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(/\.settings-card-section--open\s*\{[^}]*box-shadow:\s*none/);
-    // Routine Settings sections use open row surfaces under 0116; discrete
-    // editors retain their own boundaries rather than boxing every group.
+    // The section itself stays unboxed: its label and description sit on the
+    // page, and the card is the group inside it (see sectionObject.test.ts).
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
     expect(settings).not.toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
     expect(settings).toMatch(

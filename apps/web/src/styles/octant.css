@@ -158,6 +158,9 @@
   --oct-weight-medium: 500;
   --oct-weight-display: 500;
   --oct-weight-strong: 600;
+  /* The page title and the welcome greeting only (surface.css type roles);
+     the stylesheet check refuses it anywhere else. */
+  --oct-weight-title: 700;
 
   /* tracking: negative tightens display type as it grows, positive opens
      mono labels. Every letter-spacing in the system comes from here. */
@@ -186,6 +189,9 @@
   --oct-section-y-phone: 32px;
   --oct-radius-sm: 10px;
   --oct-radius-md: 16px;
+  /* An object resting inside a 16px well: a board card in its column. One
+     step under the well keeps the gap between the two corners even. */
+  --oct-radius-inset: 12px;
   --oct-radius-lg: 20px;
   --oct-radius-pill: 9999px;
 

@@ -1,4 +1,4 @@
-import type { ThemeSettings } from "@octant/contracts/theme";
+import type { ThemeSettings, ThemeStyle } from "@octant/contracts/theme";
 import { THEME_PRESETS } from "@octant/theme";
 import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
@@ -8,7 +8,8 @@ import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { SettingRow, SettingsDisclosure } from "../settings/primitives";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { SettingRow, SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
@@ -67,11 +68,11 @@ export function ThemeAppearanceEditor(props: {
           </p>
         ) : null}
       </div>
-      <section
-        aria-label="Theme"
-        className="settings-card-section settings-card-section--open settings-theme-editor__scheme-section"
+      <SettingsSection
+        className="settings-theme-editor__scheme-section"
+        id="settings-color-scheme"
+        title="Color scheme"
       >
-        <h2>Color scheme</h2>
         <div className="setgroup">
           <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
             {(
@@ -145,13 +146,36 @@ export function ThemeAppearanceEditor(props: {
               value={draft.darkPresetId ?? "system"}
             />
           </SettingRow>
+          <SettingRow
+            description="Default keeps the chrome monochrome. Vivid colours tiles, board marks, and Project accents."
+            focused={focusedSetting === "appearance.scheme.style"}
+            label="Style"
+            scope="app"
+            settingId="appearance.scheme.style"
+          >
+            <OctantToggleGroup<ThemeStyle>
+              aria-label="Style"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected === undefined || selected === (draft.style ?? "default")) return;
+                void theme.applyPatch({ style: selected });
+              }}
+              value={[draft.style ?? "default"]}
+            >
+              <OctantToggleGroupItem value="default">Default</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="vivid">Vivid</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
         </div>
-      </section>
+      </SettingsSection>
       {props.afterScheme}
       {/* The interface font and its size are among the most-changed settings
           in the app, so they are not worth a click to reach. */}
-      <section className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
-        <h2>Typography</h2>
+      <SettingsSection
+        className="settings-theme-editor__disclosure"
+        id="settings-typography"
+        title="Typography"
+      >
         <div className="setgroup settings-theme-editor__disclosure-body">
           <TypographyControl
             label="Interface typography"
@@ -195,10 +219,13 @@ export function ThemeAppearanceEditor(props: {
             />
           </SettingsDisclosure>
         </div>
-      </section>
+      </SettingsSection>
       {props.afterTypography}
-      <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
-        <legend>Accessibility</legend>
+      <SettingsSection
+        className="settings-theme-editor__accessibility"
+        id="settings-accessibility"
+        title="Accessibility"
+      >
         <div className="setgroup">
           <SettingRow
             label="Increased contrast"
@@ -237,7 +264,7 @@ export function ThemeAppearanceEditor(props: {
             />
           </SettingRow>
         </div>
-      </fieldset>
+      </SettingsSection>
       <details
         className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
         {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}
