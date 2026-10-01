@@ -3,6 +3,7 @@ import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
+import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 
@@ -100,7 +101,7 @@ function CommentMarker(props: {
   readonly onOpen: () => void;
 }) {
   return (
-    <button
+    <OctantButton
       aria-label={
         props.count === 0
           ? `Comment on ${props.label}`
@@ -110,9 +111,10 @@ function CommentMarker(props: {
       data-has-comments={props.count === 0 ? "false" : "true"}
       onClick={props.onOpen}
       type="button"
+      variant="bare"
     >
       <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
       {props.count === 0 ? null : <span>{props.count}</span>}
-    </button>
+    </OctantButton>
   );
 }
