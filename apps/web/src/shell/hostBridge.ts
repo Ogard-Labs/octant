@@ -69,6 +69,7 @@ export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported?: boolean;
   readonly liveSimulatorFrameSupported?: boolean;
+  readonly liveAndroidFrameSupported?: boolean;
 }
 
 export interface BrowserSurfaceTabState {

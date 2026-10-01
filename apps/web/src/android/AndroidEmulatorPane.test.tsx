@@ -78,7 +78,7 @@ describe("AndroidEmulatorPane", () => {
           {
             getHostCapabilities: () => ({
               sidebarVibrancySupported: false,
-              liveSimulatorFrameSupported: true,
+              liveAndroidFrameSupported: true,
             }),
           } as never
         }
