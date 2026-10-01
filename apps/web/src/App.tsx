@@ -4197,7 +4197,9 @@ function LaunchedShell(
           now: minuteNow.getTime(),
         })}
         threadId={dockThread.threadId}
-        worktree={codeRow?.checkoutChip !== undefined}
+        // Only a worktree Octant made is a worktree to the person: the
+        // Project's own folder also carries a chip (as an existing checkout).
+        worktree={codeRow?.checkoutChip?.checkoutKind === "managed-worktree"}
       />
     );
   })();
