@@ -22,8 +22,7 @@
     "apps/web/src/styles/octant.css": 1,
     "apps/web/src/styles/project-threads.css": 1,
     "apps/web/src/styles/remote-pairing.css": 1,
-    "apps/web/src/styles/remote-shell.css": 1,
-    "apps/web/src/styles/surface.css": 1
+    "apps/web/src/styles/remote-shell.css": 1
   },
   "control-repaint": {
     "apps/web/src/context/context.css": 5,

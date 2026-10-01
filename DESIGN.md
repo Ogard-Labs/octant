@@ -88,8 +88,8 @@ essential sits under 12px at the default.
 
 | Role          | Size | Weight | Colour          | Where                                                     |
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
-| Hero          | 36   | 600    | primary         | Welcome question only (`oct-title--hero`)                 |
-| Title         | 28   | 600    | primary         | One per page (`oct-title`)                                |
+| Hero          | 36   | 700    | primary         | Welcome question only (`oct-title--hero`)                 |
+| Title         | 28   | 700    | primary         | One per page (`oct-title`)                                |
 | Section label | 14   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
 | Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |

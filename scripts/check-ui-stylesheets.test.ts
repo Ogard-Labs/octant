@@ -301,6 +301,20 @@ describe("UI stylesheet check", () => {
     ).toEqual(["heavy-weight 2", "heavy-weight 3"]);
   });
 
+  it("lets only the title roles in surface.css use the title weight", () => {
+    const rule = ".oct-title { font-weight: var(--oct-weight-title); }";
+    expect(
+      findStylesheetFindings({ "apps/web/src/styles/surface.css": rule }).map(
+        (finding) => finding.rule,
+      ),
+    ).toEqual([]);
+    expect(
+      findStylesheetFindings({ [CSS]: rule }).map(
+        (finding) => `${finding.rule} ${String(finding.line)}`,
+      ),
+    ).toEqual(["heavy-weight 1"]);
+  });
+
   it("flags feature rules that repaint a shared control instead of placing it", () => {
     const primitives = collectPrimitiveClasses({
       "apps/web/src/code/CodeHome.tsx":

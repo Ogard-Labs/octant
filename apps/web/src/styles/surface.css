@@ -20,7 +20,7 @@
 
 /* ── Type roles ─────────────────────────────────────────────────────────
    Five roles cover every heading and label. Weight is 500 by default and
-   600 only for the page title and the welcome greeting it grows into;
+   700 only for the page title and the welcome greeting it grows into;
    uppercase and letter-spaced eyebrows are not part of the language. The
    title is large on purpose: at 20px a page had no clear top, and the
    hierarchy fell to the hairlines. */
@@ -30,7 +30,7 @@
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: calc(28 * var(--oct-text-step));
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-title);
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.15;
   text-wrap: balance;

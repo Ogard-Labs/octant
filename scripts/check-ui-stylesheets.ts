@@ -72,7 +72,14 @@ const ACCESSIBILITY_MEDIA =
 
 // DESIGN.md: nothing is bold except a page title. Content emphasis (`strong`,
 // transcript headings) and the handful of titles are the accepted residue.
-const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
+const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\)|var\(--oct-weight-title\))$/;
+
+// The title weight is the page title's and the welcome greeting's alone: the
+// type roles in surface.css may use it, and anywhere else it is as heavy as
+// any other bold. Allowing it by token rather than by number keeps a feature
+// from writing 700 and calling it a title.
+const TITLE_WEIGHT = "var(--oct-weight-title)";
+const TITLE_ROLE_FILE = "styles/surface.css";
 
 // CSS allows whitespace between `!` and the keyword and matches the keyword
 // case-insensitively, so `! IMPORTANT` is the same annotation as `!important`.
@@ -396,7 +403,8 @@ export function findStylesheetFindings(
       if (IMPORTANT_ANNOTATION.test(value) && !isAccessibilityFallback(headers)) {
         push("important", `${property} uses !important outside an accessibility fallback`);
       }
-      if (!isToken && name === "font-weight" && isHeavyWeight(value)) {
+      const titleRole = value.trim() === TITLE_WEIGHT && normalized.endsWith(TITLE_ROLE_FILE);
+      if (!isToken && name === "font-weight" && isHeavyWeight(value) && !titleRole) {
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
       if (!isToken && PAINT_PROPERTY.test(name)) {
