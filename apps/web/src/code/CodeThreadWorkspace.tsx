@@ -629,7 +629,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const messages = props.controller.conversation;
   const settledReplyCount = messages.filter(
     (message) =>
-      message.role === "assistant" && message.status !== undefined && message.status !== "waiting",
+      message.role === "assistant" &&
+      (message.status === "completed" ||
+        message.status === "interrupted" ||
+        message.status === "failed"),
   ).length;
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
