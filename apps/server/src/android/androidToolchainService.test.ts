@@ -116,14 +116,14 @@ function discoveryExecutor() {
         "List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64\n",
       );
     }
-    if (argv.includes("emu avd name") || argv.includes("avd name")) {
-      return processResult("Pixel_8_API_34\r\nOK\r\n");
+    if (argv.includes("ro.boot.qemu.avd_name")) {
+      return processResult("Pixel_8_API_34\n");
     }
     if (argv.includes("sys.boot_completed")) return processResult("1\n");
     if (argv.includes("input tap") || argv.includes("input swipe") || argv.includes("input text")) {
       return processResult("");
     }
-    if (argv.includes("emu kill")) return processResult("");
+    if (argv.includes("root") || argv.includes("reboot")) return processResult("");
     return processResult("");
   });
 }
@@ -495,7 +495,7 @@ describe("AndroidToolchainService", () => {
             : "List of devices attached\n",
         );
       }
-      if (argv.includes("avd name")) return processResult("Pixel_8_API_34\r\nOK\r\n");
+      if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
       if (argv.includes("sys.boot_completed")) return processResult("1\n");
       return processResult("");
     });
