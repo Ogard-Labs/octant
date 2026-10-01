@@ -9,7 +9,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import { SettingRow, SettingsDisclosure } from "../settings/primitives";
+import { SettingRow, SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
@@ -68,11 +68,11 @@ export function ThemeAppearanceEditor(props: {
           </p>
         ) : null}
       </div>
-      <section
-        aria-label="Theme"
-        className="settings-card-section settings-card-section--open settings-theme-editor__scheme-section"
+      <SettingsSection
+        className="settings-theme-editor__scheme-section"
+        id="settings-color-scheme"
+        title="Color scheme"
       >
-        <h2>Color scheme</h2>
         <div className="setgroup">
           <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
             {(
@@ -167,12 +167,15 @@ export function ThemeAppearanceEditor(props: {
             </OctantToggleGroup>
           </SettingRow>
         </div>
-      </section>
+      </SettingsSection>
       {props.afterScheme}
       {/* The interface font and its size are among the most-changed settings
           in the app, so they are not worth a click to reach. */}
-      <section className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
-        <h2>Typography</h2>
+      <SettingsSection
+        className="settings-theme-editor__disclosure"
+        id="settings-typography"
+        title="Typography"
+      >
         <div className="setgroup settings-theme-editor__disclosure-body">
           <TypographyControl
             label="Interface typography"
@@ -216,10 +219,13 @@ export function ThemeAppearanceEditor(props: {
             />
           </SettingsDisclosure>
         </div>
-      </section>
+      </SettingsSection>
       {props.afterTypography}
-      <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
-        <legend>Accessibility</legend>
+      <SettingsSection
+        className="settings-theme-editor__accessibility"
+        id="settings-accessibility"
+        title="Accessibility"
+      >
         <div className="setgroup">
           <SettingRow
             label="Increased contrast"
@@ -258,7 +264,7 @@ export function ThemeAppearanceEditor(props: {
             />
           </SettingRow>
         </div>
-      </fieldset>
+      </SettingsSection>
       <details
         className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
         {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}

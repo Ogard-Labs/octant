@@ -8,6 +8,7 @@ import {
   SettingRow,
   SettingsDisclosure,
   SettingsFactList,
+  SettingsOutlineRegistration,
   SettingsPanel,
   SettingsSection,
   SettingsState,
@@ -157,6 +158,43 @@ describe("shared Settings surfaces", () => {
       "settings-section-note",
     );
     expect(within(section).getByTestId("setting-row")).toBeInTheDocument();
+  });
+
+  it("anchors a section, marks a destructive one, and reports itself to the page outline", () => {
+    const register = vi.fn(() => vi.fn());
+    const { unmount } = render(
+      <SettingsOutlineRegistration.Provider value={register}>
+        <SettingsSection id="danger-zone" title="Revoke access" tone="danger">
+          <p>Body</p>
+        </SettingsSection>
+      </SettingsOutlineRegistration.Provider>,
+    );
+
+    const section = screen.getByRole("region", { name: "Revoke access" });
+    expect(section).toHaveAttribute("id", "danger-zone");
+    expect(section).toHaveAttribute("data-tone", "danger");
+    expect(register).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "danger-zone", title: "Revoke access", element: section }),
+    );
+    const unregister = register.mock.results[0]?.value as ReturnType<typeof vi.fn>;
+    unmount();
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it("gives a section without an id a stable anchor of its own", () => {
+    render(
+      <SettingsSection title="Files">
+        <p>Body</p>
+      </SettingsSection>,
+    );
+    expect(screen.getByRole("region", { name: "Files" }).id).not.toBe("");
+  });
+
+  it("puts a section's actions on its label line", () => {
+    render(<SettingsSection actions={<button type="button">Refresh</button>} title="Identity" />);
+    const head = screen.getByRole("heading", { name: "Identity" }).parentElement;
+    expect(head).toHaveClass("settings-section-head");
+    expect(within(head as HTMLElement).getByRole("button", { name: "Refresh" })).toBeVisible();
   });
 
   it("renders one quiet panel hierarchy", () => {

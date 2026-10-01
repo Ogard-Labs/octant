@@ -13,7 +13,7 @@ import {
 import { useMemo } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsSection } from "./primitives";
 import { settingId } from "./registry";
 
 export interface NavigatorAssistantSettingsViewProps {
@@ -74,8 +74,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
           Navigator.
         </p>
       ) : null}
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Models</h2>
+      <SettingsSection title="Models">
         <div className="setgroup">
           <SettingRow
             description="The model Navigator uses. Without one, Navigator stays unavailable rather than silently picking a model."
@@ -166,7 +165,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             )}
           </SettingRow>
         </div>
-      </div>
+      </SettingsSection>
     </section>
   );
 }
