@@ -24,6 +24,7 @@ export function ExtensionToolApprovalPrompt(props: {
   const { client, threadId, turnActive } = props;
   const [approvals, setApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
   const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string>();
   useEffect(() => {
     if (client === undefined || threadId === undefined) {
       setApprovals([]);
@@ -65,11 +66,16 @@ export function ExtensionToolApprovalPrompt(props: {
   async function decide(decision: "approved" | "denied") {
     if (pending === undefined || client === undefined || busy) return;
     setBusy(true);
+    setMessage(undefined);
     try {
       await client.decideToolApproval({ approvalId: pending.approvalId, decision });
       setApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pending.approvalId),
       );
+    } catch {
+      // The call is still waiting on the host, so the request stays on screen
+      // for another answer rather than vanishing as if it had been decided.
+      setMessage("The approval could not be sent. Keep this request open and retry.");
     } finally {
       setBusy(false);
     }
@@ -108,6 +114,11 @@ export function ExtensionToolApprovalPrompt(props: {
       <code className="approval-row__code">
         {pending.inputJson === "" ? "(empty input)" : pending.inputJson}
       </code>
+      {message === undefined ? null : (
+        <p className="approval-row__detail" role="alert">
+          {message}
+        </p>
+      )}
     </section>
   );
 }
