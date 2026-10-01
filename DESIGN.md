@@ -311,8 +311,9 @@ A Work or Code pane with no thread and no Project asks one centred question
 ("Pick a folder to work in"), says in one sentence what choosing a folder
 means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
-Start-screen composers ask in plain words ("Ask anything…") rather than
-showing a feature tip; tips belong to a thread's follow-up composer.
+Start-screen composers ask in plain words ("Ask anything…"); a thread's
+follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
+tip.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
@@ -1043,9 +1044,12 @@ groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab: a 16px
-gauge with a full faint track and a 2px round-capped arc filled clockwise from
-twelve o'clock by the used share, in the foreground ink (the theme's warning
-ink from 80%). It opens an opaque 320px popover: a header with the used and
+gauge with a full track and a 2px round-capped arc filled clockwise from
+twelve o'clock by the used share. It is the one composer mark that carries
+colour in every style: the arc is the palette's amber with its track a faint
+step of the same hue, and from 80% the ring turns red, so how full the window
+is reads at a glance. It
+opens an opaque 320px popover: a header with the used and
 maximum figures and share, one 4px segmented bar whose empty track is the free
 space, a breakdown folded behind a chevron each time the popover opens, the
 provider's limits as a name, a reset countdown or weekday, a share, and a thin
@@ -1054,10 +1058,10 @@ Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
 overhead, reserve, and free space; a provider-reported window shows used and
 free, with the thread's input and output totals kept apart because they are
-sums over turns, not parts of the window. Categories are told apart by a
-graded neutral ramp mixed from the foreground and each swatch is named. A limit
-near its cap is marked on its row and in its bar's value text, never by ink
-alone. Unknown or stale data is labeled as such and never rendered as zero.
+sums over turns, not parts of the window. Categories are told apart by palette
+hues (the largest share in blue) and each swatch is named; limit bars fill in
+blue. A limit near its cap is marked on its row and in its bar's value text,
+never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
 
 The task visualizer is a compact composer-adjacent chip backed by the thread's
 journaled plan. It appears only when a real plan exists, shows proposed review
