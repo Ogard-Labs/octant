@@ -12,7 +12,7 @@ import type {
   CanvasReviseRequest,
   CanvasVersionHistoryEntry,
 } from "@octant/contracts/canvas-revision";
-import type { CanvasCommentCommand } from "@octant/contracts/canvas-board";
+import type { CanvasCommentCommand, CanvasCommentThread } from "@octant/contracts/canvas-board";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type {
   CanvasRefreshCancelRequest,
@@ -30,7 +30,12 @@ import type {
   CanvasShareSnapshotRevokeRequest,
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
+import { ChevronDown, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import { ShellState } from "../shell/ShellState";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
@@ -42,7 +47,11 @@ import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPa
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
+import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
+
+const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share"] as const;
+type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 
 export interface CanvasWorkspaceTabProps {
   readonly client: CanvasClient | undefined;
@@ -65,6 +74,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [expectedSequence, setExpectedSequence] = useState(1);
   const [refreshSkills, setRefreshSkills] = useState<ReadonlyArray<CanvasRefreshSkillOption>>([]);
   const [shares, setShares] = useState<CanvasShareOverview | undefined>(undefined);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>(undefined);
+  const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [dialog, setDialog] = useState<CanvasToolDialog | undefined>(undefined);
+  const [compare, setCompare] = useState<
+    | {
+        readonly kind: "ready";
+        readonly earlier: { readonly sequence: number; readonly definition: CanvasDefinition };
+      }
+    | { readonly kind: "unavailable" }
+    | undefined
+  >(undefined);
   const [reviseBase, setReviseBase] = useState<Omit<
     CanvasReviseRequest,
     "schemaVersion" | "kind" | "requestId" | "expectedSequence" | "prompt"
@@ -419,79 +441,253 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     );
   }
 
+  const selectedEntry = history.find(
+    (entry) => String(entry.versionId) === String(selectedVersionId),
+  );
+  const previousEntry =
+    selectedEntry === undefined
+      ? undefined
+      : history
+          .filter((entry) => entry.sequence < selectedEntry.sequence)
+          .reduce<CanvasVersionHistoryEntry | undefined>(
+            (best, entry) => (best === undefined || entry.sequence > best.sequence ? entry : best),
+            undefined,
+          );
+  const commentsAvailable = commentsClient !== undefined && reviseBase !== null;
+  const openThreads = commentThreads.filter((thread) => thread.comment.resolvedAt === undefined);
+  const openCounts = new Map<string, number>();
+  for (const thread of openThreads) {
+    const blockId = String(thread.comment.anchor.blockId);
+    openCounts.set(blockId, (openCounts.get(blockId) ?? 0) + 1);
+  }
+  const overflowItems = [
+    ...(reviseBase !== null && reviseBase.mode === "chat"
+      ? [{ label: "Refine…", value: "refine" }]
+      : []),
+    ...(refreshRecipe !== undefined && refreshBase !== undefined
+      ? [{ label: "Refresh…", value: "refresh" }]
+      : []),
+    ...(shares !== undefined && selectedVersionId !== undefined
+      ? [{ label: "Share…", value: "share" }]
+      : []),
+  ];
+
+  const openCommentsOn = (blockId: string | undefined) => {
+    setFocusedBlockId(blockId);
+    setCommentsOpen(true);
+  };
+
+  const openCompare = async () => {
+    setVersionsOpen(false);
+    if (props.client === undefined || previousEntry === undefined) return;
+    const outcome = await props.client.get(props.tab.canvasId, String(previousEntry.versionId));
+    setCompare(
+      outcome.kind === "ready"
+        ? {
+            kind: "ready",
+            earlier: {
+              sequence: outcome.version.sequence,
+              definition: outcome.version.definition,
+            },
+          }
+        : { kind: "unavailable" },
+    );
+  };
+
   return (
     <div className="canvas-workspace-tab">
-      {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
-        <CanvasWorkspaceTabActions
-          currentSequence={expectedSequence}
-          currentVersionId={selectedVersionId}
-          displayName={definition.title}
-          onAttachContext={props.onAttachContext}
-          {...(props.onPinCanvasInFocusZone === undefined
-            ? {}
-            : {
-                onPinInFocusZone: () =>
-                  props.onPinCanvasInFocusZone?.({
-                    canvasId: props.tab.canvasId,
-                    title: definition.title,
-                  }),
-              })}
-          tab={props.tab}
-        />
-      ) : null}
-      <div className="canvas-workspace-tab__body">
-        <div className="canvas-workspace-tab__main">
-          <CanvasView
-            input={definition}
-            {...(actionRuntime === undefined ? {} : { actionRuntime })}
-            {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+      <header className="canvas-workspace-tab__toolbar">
+        <OctantPopover
+          align="start"
+          className="canvas-workspace-tab__versions"
+          onOpenChange={setVersionsOpen}
+          open={versionsOpen}
+          title="Version history"
+          trigger={
+            <>
+              <span>v{expectedSequence}</span>
+              {String(selectedVersionId) === tipVersionId ? null : (
+                <span className="canvas-workspace-tab__older">older</span>
+              )}
+              <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+            </>
+          }
+          triggerLabel={`Version history, v${String(expectedSequence)}`}
+          triggerVariant="ghost"
+        >
+          <CanvasVersionHistoryPanel
+            entries={history}
+            selectedVersionId={selectedVersionId === undefined ? "" : String(selectedVersionId)}
+            currentVersionId={tipVersionId}
+            onSelect={(versionId) => {
+              setVersionsOpen(false);
+              handleSelectVersion(versionId);
+            }}
           />
-        </div>
-        <aside className="canvas-workspace-tab__sidebar">
-          {reviseBase !== null && reviseBase.mode === "chat" ? (
-            <ReviseCanvasDraft
-              expectedSequence={expectedSequence}
-              requestBase={reviseBase}
-              onRevise={handleRevise}
-            />
-          ) : null}
-          {refreshRecipe !== undefined && refreshBase !== undefined ? (
-            <CanvasRefreshPanel
-              recipe={refreshRecipe}
-              requestBase={refreshBase}
-              onRefresh={handleRefresh}
-              skillOptions={refreshSkills}
-              {...(cancelRefresh === undefined ? {} : { onCancel: handleCancelRefresh })}
-            />
-          ) : null}
-          {commentsClient !== undefined && reviseBase !== null ? (
+          {previousEntry === undefined ? null : (
+            <OctantButton
+              onClick={() => void openCompare()}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Compare with v{previousEntry.sequence}
+            </OctantButton>
+          )}
+        </OctantPopover>
+        <span className="canvas-workspace-tab__spacer" />
+        {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
+          <CanvasWorkspaceTabActions
+            currentSequence={expectedSequence}
+            currentVersionId={selectedVersionId}
+            displayName={definition.title}
+            onAttachContext={props.onAttachContext}
+            {...(props.onPinCanvasInFocusZone === undefined
+              ? {}
+              : {
+                  onPinInFocusZone: () =>
+                    props.onPinCanvasInFocusZone?.({
+                      canvasId: props.tab.canvasId,
+                      title: definition.title,
+                    }),
+                })}
+            tab={props.tab}
+          />
+        ) : null}
+        {commentsAvailable ? (
+          <OctantButton
+            aria-expanded={commentsOpen}
+            aria-label={
+              openThreads.length === 0 ? "Comments" : `Comments, ${String(openThreads.length)} open`
+            }
+            onClick={() => (commentsOpen ? setCommentsOpen(false) : openCommentsOn(undefined))}
+            size="sm"
+            type="button"
+            variant={commentsOpen ? "secondary" : "ghost"}
+          >
+            <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+            Comments
+            {openThreads.length === 0 ? null : (
+              <span className="canvas-workspace-tab__count">{openThreads.length}</span>
+            )}
+          </OctantButton>
+        ) : null}
+        {overflowItems.length === 0 ? null : (
+          <OctantMenu
+            items={overflowItems}
+            onValueChange={(value) => {
+              const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
+              if (chosen !== undefined) setDialog(chosen);
+            }}
+            selectionMode="action"
+            trigger={<MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />}
+            triggerClassName="canvas-workspace-tab__overflow"
+            triggerLabel="More Canvas actions"
+            value=""
+          />
+        )}
+      </header>
+      <div className="canvas-workspace-tab__body">
+        <CanvasView
+          input={definition}
+          {...(actionRuntime === undefined ? {} : { actionRuntime })}
+          {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+          {...(commentsAvailable ? { comments: { openCounts, onOpen: openCommentsOn } } : {})}
+        />
+        {commentsClient !== undefined && reviseBase !== null ? (
+          <aside
+            aria-label="Comments"
+            className="canvas-workspace-tab__drawer"
+            hidden={!commentsOpen}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setCommentsOpen(false);
+            }}
+          >
+            <div className="canvas-workspace-tab__drawer-header">
+              <h2>Comments</h2>
+              <OctantButton
+                aria-label="Close comments"
+                onClick={() => setCommentsOpen(false)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <X aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantButton>
+            </div>
             <CanvasCommentsPanel
               author={reviseBase.actor}
               canvasId={props.tab.canvasId}
               definition={definition}
               load={commentsClient.load}
+              onShowAllBlocks={() => setFocusedBlockId(undefined)}
+              onThreadsChange={setCommentThreads}
               send={commentsClient.send}
+              {...(focusedBlockId === undefined ? {} : { focusedBlockId })}
             />
-          ) : null}
-          {shares !== undefined && selectedVersionId !== undefined ? (
-            <CanvasSharePanel
-              canvasId={props.tab.canvasId}
-              expectedSequence={expectedSequence}
-              onOpen={handleOpenShare}
-              onRevoke={handleRevokeShare}
-              onShare={handleShare}
-              overview={shares}
-              versionId={selectedVersionId}
-            />
-          ) : null}
-          <CanvasVersionHistoryPanel
-            entries={history}
-            selectedVersionId={selectedVersionId === undefined ? "" : String(selectedVersionId)}
-            currentVersionId={tipVersionId}
-            onSelect={handleSelectVersion}
-          />
-        </aside>
+          </aside>
+        ) : null}
       </div>
+      <OctantDialog
+        label="Refine canvas"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "refine"}
+      >
+        {reviseBase !== null && reviseBase.mode === "chat" ? (
+          <ReviseCanvasDraft
+            expectedSequence={expectedSequence}
+            requestBase={reviseBase}
+            onRevise={handleRevise}
+          />
+        ) : null}
+      </OctantDialog>
+      <OctantDialog
+        label="Refresh canvas"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "refresh"}
+      >
+        {refreshRecipe !== undefined && refreshBase !== undefined ? (
+          <CanvasRefreshPanel
+            recipe={refreshRecipe}
+            requestBase={refreshBase}
+            onRefresh={handleRefresh}
+            skillOptions={refreshSkills}
+            {...(cancelRefresh === undefined ? {} : { onCancel: handleCancelRefresh })}
+          />
+        ) : null}
+      </OctantDialog>
+      <OctantDialog
+        className="canvas-workspace-tab__share-dialog"
+        label="Share canvas"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "share"}
+      >
+        {shares !== undefined && selectedVersionId !== undefined ? (
+          <CanvasSharePanel
+            canvasId={props.tab.canvasId}
+            expectedSequence={expectedSequence}
+            onOpen={handleOpenShare}
+            onRevoke={handleRevokeShare}
+            onShare={handleShare}
+            overview={shares}
+            versionId={selectedVersionId}
+          />
+        ) : null}
+      </OctantDialog>
+      <OctantDialog
+        label="Compare versions"
+        onClose={() => setCompare(undefined)}
+        open={compare !== undefined}
+      >
+        {compare?.kind === "ready" ? (
+          <CanvasVersionCompare
+            earlier={compare.earlier}
+            later={{ sequence: expectedSequence, definition }}
+          />
+        ) : compare?.kind === "unavailable" ? (
+          <p className="canvas-compare__note">The earlier version is unavailable.</p>
+        ) : null}
+      </OctantDialog>
     </div>
   );
 }

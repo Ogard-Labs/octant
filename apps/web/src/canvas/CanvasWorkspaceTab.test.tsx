@@ -1,6 +1,7 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
   canvasInventoryProjectId,
@@ -79,6 +80,16 @@ function createCanvasClient(
     threadReferenceCards: vi.fn(),
     ...overrides,
   } as CanvasClient;
+}
+
+async function openVersionHistory() {
+  fireEvent.click(await screen.findByRole("button", { name: /^Version history/ }));
+}
+
+async function openCanvasTool(label: string) {
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "More Canvas actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: label }));
 }
 
 describe("CanvasWorkspaceTab", () => {
@@ -218,9 +229,11 @@ describe("CanvasWorkspaceTab", () => {
     );
 
     // Two quick selections: first the older version, then back to the tip.
+    await openVersionHistory();
     fireEvent.click(await screen.findByTestId("canvas-version-1"));
+    await openVersionHistory();
     fireEvent.click(
-      screen.getByTestId(`canvas-version-${quarterlyInventoryEntry.currentSequence}`),
+      await screen.findByTestId(`canvas-version-${quarterlyInventoryEntry.currentSequence}`),
     );
 
     // The later selection answers first; the abandoned earlier one straggles
@@ -354,7 +367,8 @@ describe("CanvasWorkspaceTab", () => {
     );
     render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
     await screen.findByRole("button", { name: "Report" });
-    fireEvent.click(await screen.findByRole("button", { name: /Version 1\b|sequence 1|v1/i }));
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-1"));
     await waitFor(() =>
       expect(screen.getByRole("group", { name: "Board" })).toHaveAttribute(
         "data-editable",
@@ -426,6 +440,7 @@ describe("CanvasWorkspaceTab", () => {
 
     render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
+    await openCanvasTool("Refresh…");
     fireEvent.click(await screen.findByRole("button", { name: /Refresh canvas/i }));
 
     await waitFor(() => {
@@ -465,6 +480,7 @@ describe("CanvasWorkspaceTab", () => {
 
     render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
+    await openCanvasTool("Refresh…");
     fireEvent.click(await screen.findByRole("button", { name: /Refresh canvas/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Cancel refresh/i }));
 
@@ -504,6 +520,7 @@ describe("CanvasWorkspaceTab", () => {
 
     render(<CanvasWorkspaceTab tab={{ ...canvasTab, mode: "work" }} client={client} />);
 
+    await openCanvasTool("Refresh…");
     fireEvent.click(await screen.findByRole("button", { name: /Refresh canvas/i }));
 
     // The scope the host published travels back verbatim; a fabricated
@@ -537,5 +554,130 @@ describe("CanvasWorkspaceTab", () => {
     });
     expect(screen.queryByRole("button", { name: /Refresh canvas/i })).toBeNull();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps the document full width and opens a block's comments over it from the margin marker", async () => {
+    const author = readyVersion.version.createdBy;
+    const thread = (commentId: string, blockId: string, body: string, resolved = false) => ({
+      comment: {
+        commentId: commentId as never,
+        anchor: { kind: "block" as const, blockId: blockId as never },
+        author,
+        origin: { kind: "host" as const },
+        body,
+        createdAt: "2026-08-01T21:00:00.000Z" as never,
+        ...(resolved ? { resolvedAt: "2026-08-01T22:00:00.000Z" as never } : {}),
+      },
+      replies: [],
+    });
+    const comments = vi.fn(async () => ({
+      kind: "ready" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 3,
+      threads: [
+        thread("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "heading-1", "Rename the overview"),
+        thread("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "callout-1", "Cite the source"),
+        thread("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3", "heading-1", "Already fixed", true),
+        thread("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4", "removed-block", "About a deleted block"),
+      ],
+    }));
+    const client = createCanvasClient(readyVersion, undefined, {
+      comments,
+      comment: vi.fn(),
+    } as unknown as Partial<CanvasClient>);
+
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    const toggle = await screen.findByRole("button", { name: "Comments, 3 open" });
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "1 open comment on Q3 Overview" }));
+    expect(screen.getByRole("complementary", { name: "Comments" })).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Rename the overview")).toBeInTheDocument();
+    expect(screen.queryByText("Cite the source")).toBeNull();
+    expect(screen.queryByText("Already fixed")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByText("Cite the source")).toBeInTheDocument();
+    expect(screen.getByText("About a deleted block")).toBeInTheDocument();
+    expect(screen.getByText("No longer on the canvas")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resolved" }));
+    expect(screen.getByText("Already fixed")).toBeInTheDocument();
+    expect(screen.queryByText("Rename the overview")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close comments" }));
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+  });
+
+  it("compares the selected version with the one before it, block by block", async () => {
+    const olderVersionId = "45454545-4545-4545-8545-454545454545";
+    const blocks = canvasFixture.blocks;
+    const olderDefinition = {
+      ...canvasFixture,
+      title: "Draft Q3 report",
+      blocks: [
+        { ...blocks[0], text: "Q3 Draft" },
+        ...blocks.slice(2),
+        { schemaVersion: CANVAS_SCHEMA_VERSION, blockId: "dropped-1", kind: "divider" },
+      ],
+    } as unknown as typeof canvasFixture;
+    const entry = (versionId: string, sequence: number) => ({
+      versionId: versionId as never,
+      sequence,
+      schemaVersion: 1,
+      title: quarterlyInventoryEntry.title,
+      createdAt: "2026-08-01T21:00:00.000Z" as never,
+      createdBy: readyVersion.version.createdBy,
+      providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+      modelId: "octant-test-model" as never,
+    });
+    const client = createCanvasClient(
+      readyVersion,
+      {
+        kind: "ready",
+        history: {
+          canvasId: quarterlyCanvasId,
+          currentVersionId: quarterlyInventoryEntry.currentVersionId,
+          entries: [
+            entry(
+              quarterlyInventoryEntry.currentVersionId,
+              quarterlyInventoryEntry.currentSequence,
+            ),
+            entry(olderVersionId, 1),
+          ],
+        },
+      } as unknown as Awaited<ReturnType<CanvasClient["history"]>>,
+      {
+        get: vi.fn(async (_canvasId, versionId) =>
+          versionId === olderVersionId
+            ? {
+                ...readyVersion,
+                version: {
+                  ...readyVersion.version,
+                  versionId: olderVersionId as never,
+                  sequence: 1,
+                  definition: olderDefinition,
+                },
+              }
+            : readyVersion,
+        ),
+      },
+    );
+
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+    await openVersionHistory();
+    fireEvent.click(await screen.findByRole("button", { name: "Compare with v1" }));
+
+    const changes = await screen.findByRole("region", {
+      name: `Changes from v1 to v${String(quarterlyInventoryEntry.currentSequence)}`,
+    });
+    expect(changes).toHaveTextContent("Title changed from “Draft Q3 report”.");
+    expect(changes).toHaveTextContent("ChangedQ3 Overview");
+    expect(changes).toHaveTextContent("Addedrich text");
+    expect(changes).toHaveTextContent("Removeddivider");
   });
 });
