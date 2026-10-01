@@ -4033,7 +4033,7 @@ input.switch:checked::after {
 .modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode-switcher__brand {
   flex: 1 0 auto;
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
 }
 .modeswitch__tray {
