@@ -4024,11 +4024,11 @@ input.switch:checked::after {
 }
 /* Work and Code: with Chat folded into Work the switcher has two choices,
    and two icons alone asked a reader to learn which glyph meant which. With
-   two, the labels show beside the icons in a faint tray, so the header reads
+   two, the labels replace the icons in a faint tray, so the header reads
    "Octant  [Work | Code]" as the approved sidebar does. Three or more keep
    the bare icons above. */
 .modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode-switcher__brand {
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   font-size: var(--oct-text-lg);
   font-weight: var(--oct-weight-medium);
   letter-spacing: var(--oct-tracking-tight);
@@ -4055,14 +4055,10 @@ input.switch:checked::after {
   clip-path: none;
   font-size: var(--oct-text-xs);
 }
+/* Labels alone: the words already say which is which, and the icons cost
+   the brand its room in a sidebar at its default width. */
 .modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode__icon-frame {
-  width: 14px;
-  height: 14px;
-  flex-basis: 14px;
-}
-.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode__icon-frame > .icon {
-  width: 14px;
-  height: 14px;
+  display: none;
 }
 
 /* Three 30px buttons need 98px and a compact sidebar is 52. It is already

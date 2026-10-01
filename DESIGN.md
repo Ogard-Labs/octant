@@ -732,8 +732,8 @@ The app has three server-enforced modes—Chat, Work, and Code—shown as two:
 composer opens with a Chat / In a folder switch in its context tray, and
 **Code**. Work reopens on the kind last used. Mode switching is available as a
 labeled selector, compact list, or icon presentation according to the user's
-setting; with two modes the icon presentation shows each label beside its icon
-in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
+setting; with two modes the icon presentation shows the labels instead of
+icons in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
 compact thread list. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the
