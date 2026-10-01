@@ -74,9 +74,14 @@ export async function startServeAvdBroker(
       env: spec.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // An unread stderr pipe fills and stalls serve-avd. An unhandled spawn
+    // error is thrown in Electron main.
+    child.on("error", () => undefined);
+    child.stderr?.resume();
     tools.trackProcess("serve-avd", child);
     child.once("exit", onExit);
     const endpoint = await readStdoutEndpoint(child, serial, AbortSignal.timeout(readyMs));
+    child.stdout?.resume();
     if (endpoint === undefined || closed) {
       child.kill("SIGTERM");
       return undefined;
@@ -205,7 +210,8 @@ function readStdoutEndpoint(
       if (settled) return;
       settled = true;
       child.stdout?.off("data", onData);
-      child.off("exit", onExit);
+      child.off("close", onClose);
+      child.off("error", onError);
       signal.removeEventListener("abort", onAbort);
       resolve(value);
     };
@@ -232,10 +238,15 @@ function readStdoutEndpoint(
       buffer = lines.pop() ?? "";
       for (const line of lines) consider(line);
     };
-    const onExit = () => consider(buffer);
+    const onClose = () => {
+      consider(buffer);
+      finish(undefined);
+    };
+    const onError = () => finish(undefined);
     const onAbort = () => finish(undefined);
     child.stdout?.on("data", onData);
-    child.once("exit", onExit);
+    child.once("close", onClose);
+    child.once("error", onError);
     if (signal.aborted) finish(undefined);
     else signal.addEventListener("abort", onAbort, { once: true });
   });

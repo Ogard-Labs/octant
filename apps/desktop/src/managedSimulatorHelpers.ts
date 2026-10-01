@@ -119,10 +119,14 @@ export function createManagedSimulatorHelpers(
       env: spec.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // An unread stderr pipe fills and stalls the tool. An unhandled spawn
+    // error is thrown in Electron main.
+    discardChildNoise(child);
     tools.trackProcess("serve-sim", child);
     live.add(child);
     forget(child);
     const endpoint = await readEndpoint(child, udid, AbortSignal.timeout(readyMs));
+    child.stdout?.resume();
     if (endpoint === undefined || disposed) {
       child.kill("SIGTERM");
       return undefined;
@@ -156,6 +160,18 @@ export function createManagedSimulatorHelpers(
     return session;
   }
 
+  function retire(session: StreamSession): void {
+    if (session.closed) return;
+    session.closed = true;
+    sessions.delete(session.udid);
+    session.streamAbort?.abort();
+    void session.reader?.cancel();
+    failWaiters(session);
+    for (const viewer of session.viewers) viewer.onEnd();
+    session.viewers.clear();
+    session.child.kill("SIGTERM");
+  }
+
   function sessionFor(udid: string): Promise<StreamSession | undefined> {
     const existing = sessions.get(udid);
     if (existing !== undefined) return existing;
@@ -183,6 +199,7 @@ export function createManagedSimulatorHelpers(
       env: spec.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    discardChildNoise(child);
     tools.trackProcess("serve-sim", child);
     live.add(child);
     forget(child);
@@ -355,7 +372,11 @@ export function createManagedSimulatorHelpers(
       void ensureFrames(session);
       const frame = await waitForFrame(session, firstFrameMs);
       if (frame === undefined || session.closed || !session.viewers.has(viewer)) {
+        const streamFailed = frame === undefined && !session.closed;
         stopView(session, viewer);
+        // A session that never produced a frame must not keep later taps on
+        // serve-sim while the picture comes from the device helper.
+        if (streamFailed) retire(session);
         return native.watch(simulatorId, watchOptions, viewer, timeoutMs);
       }
       return {
@@ -522,7 +543,8 @@ function readEndpoint(
       if (settled) return;
       settled = true;
       child.stdout?.off("data", onData);
-      child.off("exit", onExit);
+      child.off("close", onClose);
+      child.off("error", onError);
       signal.removeEventListener("abort", onAbort);
       resolve(value);
     };
@@ -551,10 +573,15 @@ function readEndpoint(
       buffer = lines.pop() ?? "";
       for (const line of lines) consider(line);
     };
-    const onExit = () => consider(buffer);
+    const onClose = () => {
+      consider(buffer);
+      finish(undefined);
+    };
+    const onError = () => finish(undefined);
     const onAbort = () => finish(undefined);
     child.stdout?.on("data", onData);
-    child.once("exit", onExit);
+    child.once("close", onClose);
+    child.once("error", onError);
     if (signal.aborted) finish(undefined);
     else signal.addEventListener("abort", onAbort, { once: true });
   });
@@ -573,6 +600,7 @@ function childExit(child: ChildProcess, signal: AbortSignal): Promise<number | n
       child.kill("SIGTERM");
       finish(null);
     };
+    child.once("error", () => finish(1));
     child.once("exit", (code) => finish(code));
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
@@ -592,6 +620,11 @@ function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
       { once: true },
     );
   });
+}
+
+function discardChildNoise(child: ChildProcess): void {
+  child.on("error", () => undefined);
+  child.stderr?.resume();
 }
 
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array {

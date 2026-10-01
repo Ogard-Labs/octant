@@ -744,15 +744,18 @@ export class AndroidToolchainService {
     const fetchImpl = this.#options.fetchImpl ?? fetch;
     const screen = await readServeAvdScreen(fetchImpl, attachment, serial, signal);
     if (screen === undefined || signal.aborted) return undefined;
+    const headers = headerDeadline(signal, 5_000);
     let response: Response;
     try {
       response = await fetchImpl(attachment.streamUrl, {
         redirect: "error",
         credentials: "omit",
-        signal,
+        signal: headers.signal,
       });
     } catch {
       return undefined;
+    } finally {
+      headers.stop();
     }
     if (!response.ok || response.body === null) {
       await response.body?.cancel();
@@ -835,7 +838,7 @@ export class AndroidToolchainService {
           method: "POST",
           redirect: "error",
           credentials: "omit",
-          signal,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
         },
@@ -1428,6 +1431,22 @@ function serveAvdCommand(request: AndroidEmulatorRequest): ServeAvdCommand | und
   return undefined;
 }
 
+/** Aborts the stream request if headers do not arrive. The body keeps the parent signal. */
+function headerDeadline(
+  parent: AbortSignal,
+  timeoutMs: number,
+): { readonly signal: AbortSignal; stop: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onParent = () => controller.abort();
+  if (parent.aborted) controller.abort();
+  else parent.addEventListener("abort", onParent, { once: true });
+  return {
+    signal: controller.signal,
+    stop: () => clearTimeout(timer),
+  };
+}
+
 function screenFraction(
   point: { readonly x: number; readonly y: number },
   screen: { readonly width: number; readonly height: number },
@@ -1447,7 +1466,7 @@ async function readServeAvdScreen(
     response = await fetchImpl(`${attachment.origin}/helper/${encodeURIComponent(serial)}/config`, {
       redirect: "error",
       credentials: "omit",
-      signal,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
     });
   } catch {
     return undefined;

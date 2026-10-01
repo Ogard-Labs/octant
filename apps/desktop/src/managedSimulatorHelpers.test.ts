@@ -197,6 +197,36 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("uses the native helper after the managed stream produces no frame", async () => {
+    const native = nativeHelpers();
+    const managed = tools();
+    const fetchNoFrame: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/config")) return new Response(JSON.stringify({ width: 100, height: 200 }));
+      if (url.endsWith("/stream.mjpeg")) return new Response(new Uint8Array());
+      return new Response("missing", { status: 404 });
+    };
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchNoFrame,
+      firstFrameMs: 200,
+    });
+    try {
+      await expect(
+        helpers.watch(
+          udid,
+          { maxHeight: 100, quality: 0.5, framesPerSecond: 1 },
+          { onFrame: () => undefined, onEnd: () => undefined },
+          1_000,
+        ),
+      ).resolves.toEqual({ status: "unavailable", message: "native watch" });
+      await helpers.send(udid, { op: "hello" }, 1_000);
+      const launches = managed.commands.filter((args) => args.includes("--no-preview"));
+      expect(launches).toHaveLength(2);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("keeps the native helper when the tool prints a non-loopback stream", async () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(native, tools({ badHost: true }), {
