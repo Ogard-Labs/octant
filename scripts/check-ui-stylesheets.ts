@@ -112,7 +112,7 @@ const PRIMITIVE_OPENING =
 const UNSTYLED_ON = /\bunstyled(?![\w-])(?!\s*=\s*\{\s*false\s*\})/;
 // The bare variant is the button recipe's own way of handing the paint over:
 // it draws nothing, so the feature stylesheet styling it repaints nothing.
-const BARE_VARIANT = /\bvariant\s*=\s*(?:"bare"|'bare'|\{\s*"bare"\s*\})/;
+const BARE_VARIANT = /\bvariant\s*=\s*(?:"bare"|'bare'|\{\s*(?:"bare"|'bare')\s*\})/;
 const CLASS_ATTRIBUTE = /\bclassName\s*=\s*/;
 const STRING_LITERAL = /"([^"]*)"|'([^']*)'|`([^`$]*)`/g;
 
