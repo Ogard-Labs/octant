@@ -112,6 +112,7 @@ import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
+import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   enforceSidebarBackgroundAccessibility,
@@ -5795,6 +5796,12 @@ function LaunchedShell(
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
+                          onProjectViewSwitcherPresentationChange: (
+                            presentation: ProjectViewSwitcherPresentation,
+                          ) =>
+                            void controller.updateSettings({
+                              projectViewSwitcherPresentation: presentation,
+                            }),
                           projectViewEnvironmentOptions:
                             projectViewEnvironmentOptionsFromHosts(hosts),
                         }

@@ -275,6 +275,14 @@ export interface ProjectSidebarSectionProps {
   readonly projectViewsMode?: ProjectViewMode;
   readonly projectViewSwitcherPresentation?: ProjectViewSwitcherPresentation;
   /**
+   * Saves the views' presentation from the filter menu, so switching between
+   * a dropdown and buttons does not need a trip to Settings. Absent hides the
+   * choice there.
+   */
+  readonly onProjectViewSwitcherPresentationChange?: (
+    presentation: ProjectViewSwitcherPresentation,
+  ) => void;
+  /**
    * Which facts a thread row may show. The host-backed shell settings own the
    * choice; the sidebar only reads it. Absent keeps each view's defaults.
    */
@@ -644,6 +652,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                   props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
                 }
                 presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
+                {...(props.onProjectViewSwitcherPresentationChange === undefined
+                  ? {}
+                  : { onPresentationChange: props.onProjectViewSwitcherPresentationChange })}
                 projectCountFor={(viewId) =>
                   visibleCodeProjects(
                     props.projects.map((project) => ({ ...project, id: String(project.id) })),
@@ -1361,6 +1372,7 @@ function CodeProjectViewSwitcher(props: {
   readonly rowPropertyView: SidebarRowPropertyView;
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly presentation: ProjectViewSwitcherPresentation;
+  readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly projectCountFor: (viewId: string) => number;
   readonly state: CodeProjectViewState;
 }) {
@@ -1462,6 +1474,10 @@ function CodeProjectViewSwitcher(props: {
         environmentOptions={props.environmentOptions}
         filters={props.filters}
         onChange={props.onFiltersChange}
+        presentation={props.presentation}
+        {...(props.onPresentationChange === undefined
+          ? {}
+          : { onPresentationChange: props.onPresentationChange })}
         onRowPropertiesChange={props.onRowPropertiesChange}
         rowProperties={props.rowProperties}
         rowPropertyView={props.rowPropertyView}
@@ -1560,6 +1576,8 @@ function ProjectViewFilterMenu(props: {
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly filters: ProjectViewFilters;
   readonly onChange: (filters: ProjectViewFilters) => void;
+  readonly presentation: ProjectViewSwitcherPresentation;
+  readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly rowProperties: SidebarRowPropertyVisibility;
   readonly rowPropertyView: SidebarRowPropertyView;
@@ -1684,6 +1702,19 @@ function ProjectViewFilterMenu(props: {
                 options={PROJECT_VIEW_SORTING_OPTIONS}
                 value={props.filters.sorting}
               />
+              {props.onPresentationChange === undefined ? null : (
+                <FilterRadioSubmenu
+                  label="Show views as"
+                  onValueChange={(value) => {
+                    const option = PROJECT_VIEW_PRESENTATION_OPTIONS.find(
+                      (candidate) => candidate.id === value,
+                    );
+                    if (option !== undefined) props.onPresentationChange?.(option.id);
+                  }}
+                  options={PROJECT_VIEW_PRESENTATION_OPTIONS}
+                  value={props.presentation}
+                />
+              )}
             </OctantMenuGroup>
             <OctantMenuSeparator />
             <SidebarRowPropertyMenu
@@ -1874,6 +1905,15 @@ function ProjectViewStatusMenu(props: {
     </OctantMenuSub>
   );
 }
+
+/** The same two choices Settings › Code offers for the Project view switcher. */
+const PROJECT_VIEW_PRESENTATION_OPTIONS = [
+  { id: "dropdown", label: "Dropdown" },
+  { id: "inline", label: "Buttons" },
+] as const satisfies ReadonlyArray<{
+  readonly id: ProjectViewSwitcherPresentation;
+  readonly label: string;
+}>;
 
 function FilterRadioSubmenu(props: {
   readonly label: string;
