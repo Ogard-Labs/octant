@@ -509,7 +509,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               {String(selectedVersionId) === tipVersionId ? null : (
                 <span className="canvas-workspace-tab__older">older</span>
               )}
-              <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+              <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
             </>
           }
           triggerLabel={`Version history, v${String(expectedSequence)}`}
@@ -580,7 +580,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               if (chosen !== undefined) setDialog(chosen);
             }}
             selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />}
+            trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
             triggerClassName="canvas-workspace-tab__overflow"
             triggerLabel="More Canvas actions"
             value=""

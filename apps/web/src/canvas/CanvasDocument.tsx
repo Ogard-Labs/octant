@@ -111,7 +111,7 @@ function CommentMarker(props: {
       onClick={props.onOpen}
       type="button"
     >
-      <MessageSquare aria-hidden="true" size={13} strokeWidth={1.8} />
+      <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
       {props.count === 0 ? null : <span>{props.count}</span>}
     </button>
   );
