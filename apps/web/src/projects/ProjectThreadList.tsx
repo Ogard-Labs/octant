@@ -39,6 +39,7 @@ import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
+import { groupThreadsByCheckout, type CheckoutThreadGroup } from "./projectThreadGrouping";
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
@@ -692,6 +693,17 @@ export interface ProjectThreadRowsProps {
   readonly onSelectThread: (threadId: string) => void;
   /** Resolves the Project name for the thread; used only by the hover info card. */
   readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
+  /**
+   * The threads fork and lineage marks resolve against. A list that shows only
+   * part of a Project's threads passes them all, so a fork on another
+   * checkout still finds its parent. Absent uses the rows themselves.
+   */
+  readonly lineageThreads?: ReadonlyArray<ChatThreadNavigationItem>;
+  /**
+   * Leaves the branch fact off every row. A checkout heading above the rows
+   * already says it once, and repeating it on each row only adds a line.
+   */
+  readonly hideCheckoutFact?: boolean;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
   /**
    * Rows shown before the list folds behind Show more. Absent shows every
@@ -728,6 +740,7 @@ interface ProjectThreadRowProps {
   readonly activeThreadId?: string;
   /** Every thread this window has open, so a split view marks all of them. */
   readonly openThreadIds?: ReadonlyArray<string>;
+  readonly hideCheckoutFact?: boolean;
   readonly isRenaming: boolean;
   readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly onCancelRename: () => void;
@@ -788,7 +801,8 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     );
   }
   const rowPullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
-  const rowCheckout = shows.branch ? props.thread.checkoutChip : undefined;
+  const rowCheckout =
+    shows.branch && props.hideCheckoutFact !== true ? props.thread.checkoutChip : undefined;
   // A snoozed row says when it comes back, not when it was last touched; a row
   // whose snooze ended says so until it is opened, because it reappears where
   // it was rather than at the top. Hiding Last updated hides the timestamp,
@@ -1000,7 +1014,8 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
       onCancelRename={onCancelRename}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
       onSelectThread={props.onSelectThread}
-      lineageThreads={props.threads}
+      lineageThreads={props.lineageThreads ?? props.threads}
+      {...(props.hideCheckoutFact === true ? { hideCheckoutFact: true } : {})}
       {...(props.projectNameForThread === undefined
         ? {}
         : { projectNameForThread: props.projectNameForThread })}
@@ -1108,6 +1123,12 @@ export interface ProjectThreadListProps {
   /** Every thread this window has open, so a split view marks all of them. */
   readonly openThreadIds?: ReadonlyArray<string>;
   readonly onRenameThread?: (threadId: string, title: string) => void;
+  /**
+   * Nests the rows under the checkout they run in, when the list has threads in
+   * two or more. The Project tree opts in; a flat list of one Project's threads
+   * elsewhere has no use for the extra level.
+   */
+  readonly groupByCheckout?: boolean;
   /** Shown only when the list is ready and genuinely holds no threads. */
   readonly emptyMessage?: string;
   readonly errorMessage?: string;
@@ -1133,6 +1154,22 @@ export interface ProjectThreadListProps {
  */
 export function ProjectThreadList(props: ProjectThreadListProps) {
   const status = props.status ?? "ready";
+  const groups = props.groupByCheckout === true ? groupThreadsByCheckout(props.threads) : undefined;
+  const rows = (threads: ReadonlyArray<ChatThreadNavigationItem>, grouped: boolean) => (
+    <ProjectThreadRows
+      {...(props.actions === undefined ? {} : { actions: props.actions })}
+      {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+      {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+      {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
+      onSelectThread={props.onSelectThread}
+      {...(props.projectNameForThread === undefined
+        ? {}
+        : { projectNameForThread: props.projectNameForThread })}
+      {...(props.collapsedLimit === undefined ? {} : { collapsedLimit: props.collapsedLimit })}
+      {...(grouped ? { hideCheckoutFact: true, lineageThreads: props.threads } : {})}
+      threads={threads}
+    />
+  );
   return (
     <div
       {...(props.label === undefined
@@ -1149,21 +1186,54 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
         />
       )}
       {props.threads.length > 0 ? (
-        <ProjectThreadRows
-          {...(props.actions === undefined ? {} : { actions: props.actions })}
-          {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
-          {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
-          onSelectThread={props.onSelectThread}
-          {...(props.projectNameForThread === undefined
-            ? {}
-            : { projectNameForThread: props.projectNameForThread })}
-          {...(props.collapsedLimit === undefined ? {} : { collapsedLimit: props.collapsedLimit })}
-          threads={props.threads}
-        />
+        groups === undefined ? (
+          rows(props.threads, false)
+        ) : (
+          groups.map((group) => (
+            <ProjectCheckoutGroup group={group} key={group.key}>
+              {rows(group.threads, true)}
+            </ProjectCheckoutGroup>
+          ))
+        )
       ) : status === "ready" && props.emptyMessage !== undefined ? (
         <p className="project-threads__empty">{props.emptyMessage}</p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The checkout a run of threads belongs to: a heading that names the branch and
+ * what kind of checkout it is, and the threads indented one step beneath it.
+ *
+ * The heading is inert. Nothing about a checkout is opened or changed from the
+ * tree, so making it a button would add a tab stop that does nothing; the group
+ * carries the same text as its accessible name instead.
+ */
+function ProjectCheckoutGroup(props: {
+  readonly children: ReactNode;
+  readonly group: CheckoutThreadGroup;
+}) {
+  const kind = props.group.kind === "primary" ? "Primary checkout" : "Worktree";
+  return (
+    <div
+      aria-label={props.group.branch === undefined ? kind : `${kind}, ${props.group.branch}`}
+      className="project-checkout"
+      data-kind={props.group.kind}
+      role="group"
+    >
+      <div aria-hidden="true" className="project-checkout__row">
+        <span className="project-checkout__glyph">
+          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+        </span>
+        {props.group.branch === undefined ? null : (
+          <span className="project-checkout__branch" title={props.group.branch}>
+            {props.group.branch}
+          </span>
+        )}
+        <span className="project-checkout__kind">{kind}</span>
+      </div>
+      <div className="project-checkout__threads">{props.children}</div>
     </div>
   );
 }

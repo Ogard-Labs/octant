@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import {
+  groupThreadsByCheckout,
   groupThreadsByProject,
   orderThreadsByRecency,
   threadsInProject,
@@ -23,6 +24,46 @@ describe("groupThreadsByProject", () => {
   it("answers for one Project exactly as it groups for many", () => {
     expect(threadsInProject(threads, "project-a")).toEqual([threads[0]]);
     expect(threadsInProject(threads, "project-gone")).toEqual([threads[1]]);
+  });
+});
+
+describe("groupThreadsByCheckout", () => {
+  const onMain = { checkoutKind: "existing-worktree", label: "main" } as const;
+  const onFeature = { checkoutKind: "managed-worktree", label: "feature/lexer" } as const;
+
+  it("splits nothing while every thread runs in one checkout", () => {
+    expect(
+      groupThreadsByCheckout([
+        { threadId: "a", title: "A", checkoutChip: onMain },
+        { threadId: "b", title: "B", checkoutChip: onMain },
+      ]),
+    ).toBeUndefined();
+    expect(groupThreadsByCheckout([{ threadId: "a", title: "A" }])).toBeUndefined();
+  });
+
+  it("groups threads by checkout once there are two, with primary checkouts first", () => {
+    const groups = groupThreadsByCheckout([
+      { threadId: "a", title: "A", checkoutChip: onFeature },
+      { threadId: "b", title: "B", checkoutChip: onMain },
+      { threadId: "c", title: "C", checkoutChip: onFeature },
+    ]);
+
+    expect(
+      groups?.map((group) => [group.kind, group.branch, group.threads.map((t) => t.threadId)]),
+    ).toEqual([
+      ["primary", "main", ["b"]],
+      ["worktree", "feature/lexer", ["a", "c"]],
+    ]);
+  });
+
+  it("names no branch for a thread the host reported no checkout for", () => {
+    const groups = groupThreadsByCheckout([
+      { threadId: "a", title: "A" },
+      { threadId: "b", title: "B", checkoutChip: onFeature },
+    ]);
+
+    expect(groups?.[0]).toMatchObject({ kind: "primary", threads: [{ threadId: "a" }] });
+    expect(groups?.[0]?.branch).toBeUndefined();
   });
 });
 
