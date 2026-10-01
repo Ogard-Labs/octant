@@ -5876,6 +5876,11 @@ function LaunchedShell(
                       (presentedShellSettings ?? controller.settings)
                         .projectViewSwitcherPresentation
                     }
+                    onProjectViewSwitcherPresentationChange={(presentation) =>
+                      void controller.updateSettings({
+                        projectViewSwitcherPresentation: presentation,
+                      })
+                    }
                     projectViewEnvironmentOptions={projectViewEnvironmentOptionsFromHosts(hosts)}
                     activityMode={activeMode === "code" ? "code" : "work"}
                     {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}

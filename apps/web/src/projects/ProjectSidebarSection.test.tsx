@@ -1023,6 +1023,40 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.queryByRole("menuitemcheckbox", { name: "Devbox" })).not.toBeInTheDocument();
   });
 
+  it("switches the views between a dropdown and buttons from the filter menu", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    const onPresentationChange = vi.fn();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onProjectViewSwitcherPresentationChange={onPresentationChange}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewSwitcherPresentation="dropdown"
+        projectViewsEnabled
+        projects={[codeProjectA]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Project view filters" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Show views as" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Dropdown" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    // The submenu is still animating in under jsdom, so the pointer is refused;
+    // a plain click reaches the same handler.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Buttons" }));
+    expect(onPresentationChange).toHaveBeenCalledWith("inline");
+  });
+
   it("lists a connected host when the window actually reported one", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
