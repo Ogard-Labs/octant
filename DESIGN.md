@@ -61,7 +61,7 @@ but they do not own a second palette or visual language.
 - **Crafted, not vibed.** Hierarchy comes from size and colour, not from
   weight or capitals. One title per page. Section labels are sentence-case
   and quiet. Nothing is uppercase except a monospace identifier that already
-  is. Nothing is bold except the page title.
+  is. Nothing is bold except the page title and the welcome greeting.
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
 - **One sentence of help.** A subtitle or row description is one sentence
@@ -88,8 +88,8 @@ essential sits under 12px at the default.
 
 | Role          | Size | Weight | Colour          | Where                                                     |
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
-| Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
-| Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
+| Hero          | 36   | 600    | primary         | Welcome question only (`oct-title--hero`)                 |
+| Title         | 28   | 600    | primary         | One per page (`oct-title`)                                |
 | Section label | 14   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
 | Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |
@@ -113,6 +113,16 @@ outlines and halos so selected and expanded fills carry the visible state cue
 (0094). See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
+
+Settings › Appearance › Style chooses how much of that palette the chrome
+uses. **Default** is the monochrome described above. **Vivid** lets the
+places that name something carry colour: the welcome greeting, the sidebar's
+count tiles, board column marks, and a Project's accent. Vivid draws every
+hue from the preset's palette roles (`--octant-palette-*`, read through the
+`--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
+dark theme and any tinted preset, and it never recolours a warning, a
+failure, or a diff. The root carries `data-octant-style`; increased contrast
+always publishes `default`. Vivid reads best in the light theme.
 
 ### Shapes and depth
 
@@ -250,7 +260,11 @@ supported. Existing thread selections remain authoritative.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page (the default). Effect: the picture is shown as it is, pixelated, or
+plain page. A fresh install starts on Soft glow, one of three Gradient
+pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
+print, so the ground follows the window's scheme; the stylesheet swaps them
+by `data-octant-theme-mode`. A settings row written before the ground
+existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it: the drawn dot pattern and its pulse and wave motions read as

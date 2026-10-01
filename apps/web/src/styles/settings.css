@@ -237,13 +237,10 @@
   margin-bottom: 36px;
 }
 
+/* Size, weight, and tracking come from the shared page-title role. */
 .settings-view__header h1 {
   color: var(--octant-text-primary);
   margin: 0;
-  font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.03em;
-  line-height: 1.2;
 }
 
 .settings-view__header .oct-subtitle {
