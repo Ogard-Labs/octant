@@ -10,7 +10,6 @@ import {
   Box,
   Briefcase,
   Bug,
-  Bell,
   ChevronRight,
   Clock3,
   Code,
@@ -18,6 +17,8 @@ import {
   Folder,
   FolderOpen,
   FolderGit,
+  FolderTree,
+  History,
   Layers,
   ListFilter,
   ListTree,
@@ -39,6 +40,7 @@ import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   OctantMenu,
   OctantMenuCheckboxItem,
@@ -132,7 +134,6 @@ import {
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
@@ -288,6 +289,14 @@ export interface ProjectSidebarSectionProps {
   readonly activityMode?: SidebarActivityMode;
   /** In-place filter of the current mode's visible thread rows. */
   readonly searchQuery?: string;
+  /**
+   * Asks the list to show a view from outside it: a sidebar tile opening the
+   * Activity feed, or the Completed shelf. A new sequence repeats the ask.
+   */
+  readonly listRequest?: Readonly<{
+    readonly view: "activity" | "completed";
+    readonly sequence: number;
+  }>;
 }
 
 export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
@@ -461,13 +470,29 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
   }, [activityMode]);
 
-  function toggleActivityView() {
-    setActivityView((current) => {
-      const next = !current;
-      writeActivityViewEnabled(next, undefined, globalThis, activityMode);
-      return next;
-    });
+  function showActivityView(next: boolean) {
+    setActivityView(next);
+    writeActivityViewEnabled(next, undefined, globalThis, activityMode);
   }
+
+  const [completedShelfOpen, setCompletedShelfOpen] = useState(false);
+  const listRequestSequence = props.listRequest?.sequence;
+  useEffect(() => {
+    const request = props.listRequest;
+    if (request === undefined) return;
+    if (request.view === "activity") {
+      showActivityView(true);
+      return;
+    }
+    setCompletedShelfOpen(true);
+    requestAnimationFrame(() =>
+      document
+        .querySelector('[data-shelf="completed"]')
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
+    // The sequence is the request; the object around it is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listRequestSequence]);
 
   useEffect(() => {
     if (props.projectViewsEnabled === true) {
@@ -588,38 +613,50 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
       <nav aria-label="Projects" className="project-nav window-no-drag">
         {/* Views sort and filter Projects; with none yet the row only said
-            "All Projects" over a heading that said "Projects" again. */}
-        {props.projectViewsEnabled === true &&
-        projectViewState !== undefined &&
-        props.projects.length > 0 ? (
-          <CodeProjectViewSwitcher
-            onCreate={() => setProjectViewEditor({ mode: "create" })}
-            onDelete={(viewId) =>
-              persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
-            }
-            onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
-            onSelect={(viewId) =>
-              persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
-            }
-            filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
-            onFiltersChange={persistProjectViewFilters}
-            onRowPropertiesChange={(next) =>
-              props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
-            }
-            rowProperties={rowProperties[rowPropertyView]}
-            rowPropertyView={rowPropertyView}
-            environmentOptions={
-              props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
-            }
-            presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
-            projectCountFor={(viewId) =>
-              visibleCodeProjects(
-                props.projects.map((project) => ({ ...project, id: String(project.id) })),
-                { ...projectViewState, activeViewId: viewId },
-              ).length
-            }
-            state={projectViewState}
-          />
+            "All Projects" over a heading that said "Projects" again. The
+            Projects/Activity switch shares the row so the list's two
+            questions, which Projects and which arrangement, sit together. */}
+        {(props.projectViewsEnabled === true &&
+          projectViewState !== undefined &&
+          props.projects.length > 0) ||
+        nestThreads ? (
+          <div className="project-nav__toolbar">
+            {props.projectViewsEnabled === true &&
+            projectViewState !== undefined &&
+            props.projects.length > 0 ? (
+              <CodeProjectViewSwitcher
+                onCreate={() => setProjectViewEditor({ mode: "create" })}
+                onDelete={(viewId) =>
+                  persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
+                }
+                onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
+                onSelect={(viewId) =>
+                  persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
+                }
+                filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
+                onFiltersChange={persistProjectViewFilters}
+                onRowPropertiesChange={(next) =>
+                  props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
+                }
+                rowProperties={rowProperties[rowPropertyView]}
+                rowPropertyView={rowPropertyView}
+                environmentOptions={
+                  props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
+                }
+                presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
+                projectCountFor={(viewId) =>
+                  visibleCodeProjects(
+                    props.projects.map((project) => ({ ...project, id: String(project.id) })),
+                    { ...projectViewState, activeViewId: viewId },
+                  ).length
+                }
+                state={projectViewState}
+              />
+            ) : null}
+            {nestThreads ? (
+              <ThreadListViewSwitch activity={activityView} onChange={showActivityView} />
+            ) : null}
+          </div>
         ) : null}
         {projectViewEditor === undefined || projectViewState === undefined ? null : (
           <CodeProjectViewEditorDialog
@@ -637,9 +674,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             {...(editingView === undefined ? {} : { view: editingView })}
           />
         )}
-        {nestThreads ? (
-          <ActivityViewToggle enabled={activityView} onToggle={toggleActivityView} />
-        ) : null}
         {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
           <ProjectThreadStatus
             {...(props.threadErrorMessage === undefined
@@ -718,11 +752,17 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                   className="project-archive project-shelf"
                   data-shelf={shelf.label.toLowerCase()}
                   key={shelf.label}
+                  onToggle={(event) => {
+                    if (shelf.label === "Completed")
+                      setCompletedShelfOpen(event.currentTarget.open);
+                  }}
                   open={
-                    props.activeThreadId !== undefined &&
-                    shelf.threads.some(
-                      (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
-                    )
+                    (shelf.label === "Completed" && completedShelfOpen) ||
+                    (props.activeThreadId !== undefined &&
+                      shelf.threads.some(
+                        (thread) =>
+                          (thread.navigationId ?? thread.threadId) === props.activeThreadId,
+                      ))
                       ? true
                       : undefined
                   }
@@ -1125,23 +1165,33 @@ function sortProjects(
   );
 }
 
-function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggle: () => void }) {
-  const [host, setHost] = useState<Element | null>(null);
-  useEffect(() => {
-    setHost(document.querySelector("[data-octant-sidebar-chrome-actions]"));
-  }, []);
-  const button = (
-    <IconButton
-      aria-pressed={props.enabled}
-      className="project-nav__activity-toggle"
-      // The inbox glyph now belongs to the Inbox destination; activity keeps
-      // its recency-feed behavior under a bell so the two never read as one.
-      icon={Bell}
-      label={props.enabled ? "Turn off activity view" : "Turn on activity view"}
-      onClick={props.onToggle}
-    />
+/**
+ * The list's two arrangements as one visible switch. It used to be a bell in
+ * the sidebar header that toggled the feed, which people read as
+ * notifications and rarely found; two named choices say what each one does.
+ */
+function ThreadListViewSwitch(props: {
+  readonly activity: boolean;
+  readonly onChange: (activity: boolean) => void;
+}) {
+  return (
+    <OctantToggleGroup<"projects" | "activity">
+      aria-label="Thread list"
+      className="project-nav__list-switch"
+      onValueChange={(value) => {
+        const selected = value[0];
+        if (selected !== undefined) props.onChange(selected === "activity");
+      }}
+      value={[props.activity ? "activity" : "projects"]}
+    >
+      <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
+        <FolderTree aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantToggleGroupItem>
+      <OctantToggleGroupItem aria-label="Activity feed" title="Activity feed" value="activity">
+        <History aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantToggleGroupItem>
+    </OctantToggleGroup>
   );
-  return host === null ? button : createPortal(button, host);
 }
 
 function ActivityThreadList(props: {

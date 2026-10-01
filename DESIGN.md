@@ -754,8 +754,23 @@ folded. Keyboard focus uses neutral fill and text emphasis. Project View and
 Project Overview are real features, not
 decorative shortcuts.
 
-Primary sidebar destinations are New thread, Board, and Pull requests
-when valid for the active mode. The destinations a person placed under Menu
+The sidebar header carries the mode switcher, Search, and New thread (New
+chat in Chat, New task in Work and Code); the New thread row no longer
+repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
+threads that need the person), Running (threads the host projects as
+executing), To review (finished turns not opened since), and Done today
+(threads completed since local midnight). Each tile is one button whose name
+carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
+Board (the Activity feed in Chat, which has no board), To review opens the
+Activity feed, and Done today opens the Completed shelf. With the tiles on,
+the Inbox and Board rows are left out because their tiles go to the same
+place. Settings › Sidebar › Count tiles turns them off and brings the rows
+back. Tiles are neutral faces in the Default style; under Vivid each takes a
+palette hue, as a solid face with primary-foreground text in the light theme
+and as a tint with a coloured count in the dark one.
+
+Primary sidebar destinations are Board and Pull requests when valid for the
+active mode. The destinations a person placed under Menu
 only wait in a More row that closes the destination list — an ellipsis opening
 a popup beside the rail with those destinations and Customize sidebar; the
 setting that turns the More row off returns them to the bottom-left identity
@@ -763,7 +778,14 @@ menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
 Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
 above its identity row, aligned to the
 row’s leading edge. Search is a compact in-place filter for the current mode's visible
-threads, with a command-style overlay available for broader actions.
+threads: the header's Search icon opens a Filter threads field under the
+header, Escape or its close control clears and hides it, and Settings ›
+Sidebar › Thread filter can keep the field always shown. Enter in the field
+hands its text to the command-style overlay, which searches every thread of
+the mode; the overlay also stays in the command palette. The list's two
+arrangements, the Project tree and the Activity feed, are a visible
+Projects/Activity switch on the row the Project view picker uses, not an icon
+in the header.
 
 Settings is a grouped form page. The shared resizable navigation rail and
 search remain fixed while one centred, bounded 920px reading column scrolls.

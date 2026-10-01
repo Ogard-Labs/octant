@@ -3832,7 +3832,8 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "New task" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "More destinations" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
+    // The Board's row became the Running tile; the tile goes to the same place.
+    expect(screen.getByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
     expect(within(sidebar).getByRole("button", { name: "Pull requests" })).toBeVisible();
     await user.click(projectsDestination);
     const projectsDirectory = document.querySelector<HTMLElement>(".projects-directory");
@@ -3849,7 +3850,7 @@ describe("App", () => {
         name: /Octant, Code Project, Relink required/,
       }),
     ).toBeVisible();
-    for (const destination of ["Board", "Pull requests", "Inbox"]) {
+    for (const destination of [/^Running, \d+$/, "Pull requests", /^Inbox, \d+$/]) {
       await user.click(within(sidebar).getByRole("button", { name: destination }));
       expect(within(sidebar).queryByRole("region", { name: "Projects sidebar" })).toBeNull();
       expect(document.querySelector(".shell-frame")).not.toHaveClass(
@@ -3893,8 +3894,10 @@ describe("App", () => {
     });
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
 
-    // Sidebar Search opens one centered, mode-scoped thread finder.
+    // Sidebar Search opens the in-place filter; Enter hands its text to the
+    // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
     const search = screen.getByRole("combobox", { name: "Search Code threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
@@ -4676,7 +4679,7 @@ describe("App", () => {
 
     // The Board is a page about many threads; while it is up the dock steps
     // aside and the page has the pane.
-    await user.click(screen.getByRole("button", { name: "Board" }));
+    await user.click(screen.getByRole("button", { name: /^Running, \d+$/ }));
     await waitFor(() =>
       expect(
         screen.queryByRole("complementary", { name: "Right Utility Dock" }),
@@ -4732,7 +4735,7 @@ describe("App", () => {
     // The Board is a page about many threads and shows none of them, so the
     // panel steps aside the way the dock does instead of keeping a quarter of
     // the viewport for one thread's terminal.
-    await user.click(screen.getByRole("button", { name: "Board" }));
+    await user.click(screen.getByRole("button", { name: /^Running, \d+$/ }));
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument(),
     );

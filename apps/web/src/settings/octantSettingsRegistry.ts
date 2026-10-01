@@ -194,6 +194,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "sidebar more row hidden menu destinations account customize reveal expand",
         },
         {
+          id: settingId("sidebar-count-tiles"),
+          label: "Count tiles",
+          scope: "app",
+          keywords: "sidebar count tiles inbox running review done today cards counts",
+        },
+        {
+          id: settingId("sidebar-search"),
+          label: "Thread filter",
+          scope: "app",
+          keywords: "sidebar search filter field icon always shown threads find",
+        },
+        {
           id: settingId("mode-switcher"),
           label: "Mode switcher",
           scope: "app",
