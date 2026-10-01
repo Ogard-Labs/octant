@@ -361,9 +361,15 @@ and `other` also covers Octant's own managed MCP tools, so an agent that labels
 a command `other` still reaches a person's approval rather than running unasked.
 Because a provider's in-process shell can emit no protocol request at all —
 observed on Linux where a Vibe Work turn ran real commands inside its jail —
-every Work-mode provider launch also confines with process exec and fork
-denied, so the OS itself refuses a shell the protocol never sees. Octant's
-own harness gives Work no shell port. File writes inside the Project
+the ACP, OpenCode, and Pi runtimes also launch confined in Work with process
+exec and fork denied, so the OS itself refuses a shell the protocol never
+sees. An ACP profile whose entrypoint spawns its own stdio server keeps fork,
+which reaches no shell without a second exec target. Work never runs at Full
+access, so these launches are always wrapped. The Codex app-server and the
+Claude postures Work uses are not wrapped (see
+[security and authority](#security-and-authority)); they withhold the shell
+through the thread config and tool list above instead. Octant's own harness
+gives Work no shell port. File writes inside the Project
 remain approval-gated in every driver. Work that needs a shell or Git is
 promoted to Code (below).
 
