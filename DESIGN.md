@@ -21,7 +21,9 @@ Read the relevant section rather than the entire document:
 
 Octant is a local-first desktop workspace for supervising Chat, Work, and Code
 threads, providers, Projects, agents, changes, and delivery. Its visual north
-star is a quiet graphite workbench:
+star is a calm graphite workbench that shows what is happening at a glance —
+counts, running work, and whose thing is whose — and turns vivid when a person
+asks for it (Settings › Appearance › Style):
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
@@ -36,14 +38,19 @@ star is a quiet graphite workbench:
   pane. A capable region with no selected tool shows a compact launcher; a pane
   with no valid tool exposes no dock toggle. Neither region fabricates a tab or
   repeats another pane's content.
-- Hierarchy comes from typography, spacing, hairline borders, and selection
-  fills. Colour is scarce and semantic.
+- Hierarchy comes from typography (size first, then weight), spacing, cards
+  for discrete objects, and selection fills. In the Default style the chrome is
+  monochrome; colour names identity (a Project, a provider, a count tile under
+  Vivid) and never stands in for status, which keeps its own warning, failure,
+  and diff roles.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
-Avoid dashboard walls, decorative gradients, neon developer styling, permanent
-low-frequency controls, oversized setup cards, pill-shaped everything, and
-invented data. A feature that is not available must explain why and offer the
+Avoid dashboard walls (counts belong in a few tiles, not a grid of them),
+neon developer styling, permanent low-frequency controls, oversized setup
+cards, pill-shaped everything, and invented data. Gradients belong to the
+application ground, to a Vivid tile's face, and to a Project's letter tile;
+chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
 person's photo, shown plain or through one still print effect, behind the
@@ -58,10 +65,14 @@ but they do not own a second palette or visual language.
 
 ### Voice
 
-- **Crafted, not vibed.** Hierarchy comes from size and colour, not from
-  weight or capitals. One title per page. Section labels are sentence-case
-  and quiet. Nothing is uppercase except a monospace identifier that already
-  is. Nothing is bold except the page title and the welcome greeting.
+- **Crafted, not vibed.** Hierarchy comes from size, then weight, then
+  colour — never capitals. One title per page. Section labels are
+  sentence-case and quiet. Nothing is uppercase except a monospace identifier
+  that already is. Weights follow one ladder: 400 for reading text, 500 for
+  labels and controls, 600 for emphasis (section and card titles, counts, the
+  app's name), and 700 only for the page title and the welcome greeting,
+  through the title-only `--oct-weight-title` token the stylesheet check
+  refuses anywhere else.
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
 - **One sentence of help.** A subtitle or row description is one sentence
@@ -134,8 +145,12 @@ a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
-(`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
-never cards.
+(`--octant-shadow-overlay`). A card is for a discrete object a person acts on
+as a whole: a count tile, a live running-thread card, an action tile, a board
+card, a provider, a Settings group of rows. Plain lists, empty states, and
+headers are never cards. A button shaped like a card asks the shared button
+recipe for its `bare` variant, which draws nothing, and the feature stylesheet
+owns its face; every other button keeps the recipe's paint.
 
 The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
