@@ -820,7 +820,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
 
 ### Context and usage accounting
 
-Context usage is a thin used-versus-available bar, with its percentage, on
+Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
 composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain

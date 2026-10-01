@@ -29,7 +29,7 @@ Capability-aware workspace surfaces available in Work include:
 - Research with citations and provenance
 - Scoped memory and child agents
 
-The active Work thread's composer shows a thin context-usage bar with its percentage. Opening
+The active Work thread's composer shows a circular context-usage meter. Opening
 it shows the authoritative used-versus-available breakdown for that thread.
 Project memory lives on the Work Project Overview. Navigator opens from the
 bottom-left profile and Settings control without changing the active Project

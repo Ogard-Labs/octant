@@ -23,7 +23,7 @@ Chat threads receive no filesystem, shell, or repository authority. The composer
 
 Chat does not expose Terminal, Files, Diff, or Git surfaces. The server enforces this boundary; renderer focus cannot grant authority.
 
-The active Chat thread's composer shows a thin context-usage bar with its percentage. Opening it shows the authoritative used-versus-available breakdown for that thread.
+The active Chat thread's composer shows a circular context-usage meter. Opening it shows the authoritative used-versus-available breakdown for that thread.
 
 ## Scoped memory
 

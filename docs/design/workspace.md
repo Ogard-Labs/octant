@@ -252,7 +252,7 @@ Refusal fails creation visibly. No Linear write-back path exists.
 
 ## Context and usage
 
-The composer's context bar opens the host's attributed context breakdown without
+The circular composer meter opens the host's attributed context breakdown without
 another provider call. Inspect context opens the composition inspector; before a
 plan exists it is a successful empty view. Saved observations retain their original
 time after restart. Unknown limits and measurements remain unavailable, and

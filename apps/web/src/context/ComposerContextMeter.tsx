@@ -27,7 +27,9 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import "./context.css";
 
-/** The share at which the meter bar and a limit's bar take the warning ink. */
+const RING_SIZE = 16;
+const RING_RADIUS = 7;
+/** The share at which the ring and a limit's bar take the warning ink. */
 const NEAR_LIMIT_PERCENT = 80;
 
 export function ComposerContextMeterShortcut() {
@@ -130,10 +132,10 @@ export function ComposerContextMeter() {
         open={open}
         side="top"
         title={panelTitle}
-        trigger={<UsageBar alert={limitAlert !== undefined} usedPercent={usedPercent} />}
+        trigger={<UsageRing alert={limitAlert !== undefined} usedPercent={usedPercent} />}
         triggerClassName="composer-context-meter__button"
         triggerLabel={triggerLabel}
-        triggerVariant="ghost"
+        triggerVariant="ghost-icon"
       >
         {windowModel === undefined || snapshot === undefined ? (
           fallback === undefined ? (
@@ -196,26 +198,43 @@ export function ComposerContextMeter() {
 }
 
 /**
- * A thin bar and its figure, not a ring. A circle beside Send read as a
- * loading spinner once a turn ended, however faint its track. A flat bar
- * cannot be mistaken for something turning: it fills, and the percentage
- * beside it says by how much. The alert mark sits at the bar's end and
- * differs by shape (hollow, then solid), so the warning never rests on ink.
+ * A gauge, not an activity mark: a full faint track with the used share drawn
+ * clockwise from twelve o'clock. The arc is measured on a path length of 100,
+ * so its dash is the used percentage itself. The earlier ring read as a
+ * spinner because its track was barely visible and the arc wore the secondary
+ * ink, so a short arc looked like something turning rather than filling.
  */
-function UsageBar(props: { readonly alert: boolean; readonly usedPercent: number }) {
+function UsageRing(props: { readonly alert: boolean; readonly usedPercent: number }) {
+  const centre = RING_SIZE / 2;
   return (
-    <>
-      <span aria-hidden="true" className="composer-context-meter__bar">
-        <span
+    <svg
+      aria-hidden="true"
+      className="composer-context-meter__ring"
+      viewBox={`0 0 ${String(RING_SIZE)} ${String(RING_SIZE)}`}
+    >
+      <circle
+        className="composer-context-meter__track"
+        cx={centre}
+        cy={centre}
+        fill="none"
+        r={RING_RADIUS}
+      />
+      {props.usedPercent > 0 ? (
+        <circle
           className="composer-context-meter__used"
-          style={{ width: `${String(props.usedPercent)}%` }}
+          cx={centre}
+          cy={centre}
+          fill="none"
+          pathLength={100}
+          r={RING_RADIUS}
+          strokeDasharray={`${String(props.usedPercent)} 100`}
+          transform={`rotate(-90 ${String(centre)} ${String(centre)})`}
         />
-      </span>
-      <span aria-hidden="true" className="composer-context-meter__percent">
-        {String(Math.round(props.usedPercent))}%
-      </span>
-      {props.alert ? <span aria-hidden="true" className="composer-context-meter__alert" /> : null}
-    </>
+      ) : null}
+      {props.alert ? (
+        <circle className="composer-context-meter__alert" cx="13" cy="3" r="2.5" />
+      ) : null}
+    </svg>
   );
 }
 
@@ -288,7 +307,7 @@ function reportedSegments(
 /**
  * The fullest provider account window, when no context share exists to draw.
  * A provider that cannot say how large the model's window is may still report
- * how much of the account's quota is spent — a dead bar next to a number the
+ * how much of the account's quota is spent — a dead ring next to a number the
  * popover already carries is the misleading option.
  */
 function bindingLimit(
@@ -306,7 +325,7 @@ function bindingLimit(
 }
 
 /**
- * The worst account window the provider reported. The bar's alert mark is the only
+ * The worst account window the provider reported. The ring's dot is the only
  * at-a-glance warning left in the composer once the status line moved in,
  * so "exhausted" must win over "warning" and "allowed" draws nothing.
  */
@@ -829,7 +848,7 @@ function meterLabel(input: {
       const limitText =
         limit === undefined
           ? ""
-          : ` The bar shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
+          : ` The ring shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
       return `${action} context usage. ${providerUsageLabel(input.fallback)}. Context window maximum unavailable.${limitText}`;
     }
     return `${action} context usage. ${emptyMessage(input.status)}`;
@@ -861,7 +880,7 @@ function liveLabel(input: {
       const limitText =
         limit === undefined
           ? ""
-          : ` The bar shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
+          : ` The ring shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
       return `${providerUsageLabel(input.fallback)}. Context window maximum unavailable.${limitText}`;
     }
     return emptyMessage(input.status);
