@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DEFAULT_APP_BACKGROUND, type SidebarBackgroundMetadata } from "@octant/contracts/theme";
+import {
+  decodeAppBackground,
+  DEFAULT_APP_BACKGROUND,
+  type SidebarBackgroundMetadata,
+} from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { AppBackgroundSettings, type BackgroundImageLibrary } from "./AppBackgroundSettings";
 
@@ -353,10 +357,25 @@ describe("AppBackgroundSettings", () => {
     expect(screen.getByRole("radio", { name: "Warm walnut" })).toBeChecked();
   });
 
-  it("shows a ground saved as the retired dot pattern as None, with nothing to tune", () => {
+  it("starts a fresh install on the soft gradient picture", () => {
     render(
       <AppBackgroundSettings
         background={DEFAULT_APP_BACKGROUND}
+        library={library()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Application background" })).toHaveTextContent(
+      "Built-in picture",
+    );
+    expect(screen.getByRole("radio", { name: "Soft glow" })).toBeChecked();
+  });
+
+  it("shows a ground saved as the retired dot pattern as None, with nothing to tune", () => {
+    render(
+      <AppBackgroundSettings
+        background={decodeAppBackground({ kind: "theme" })}
         library={library()}
         onChange={vi.fn()}
       />,

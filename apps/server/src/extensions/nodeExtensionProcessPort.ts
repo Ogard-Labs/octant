@@ -248,9 +248,22 @@ async function prepareProcessLaunch(
     "/Library/Apple",
     executableDirectory,
     executableRuntime,
+    ...homebrewRuntimeRoots(executable),
     input.cwd,
     ...input.sandbox.allowRead,
   ]);
+  // Measured on macOS with node 22 and 26: node aborts at start unless it can
+  // read "/" itself, realpaths its entry script by lstat-ing every parent
+  // folder, and is launched through the PATH symlink (`/opt/homebrew/bin/node`),
+  // which must be readable before exec. These grant names and metadata only,
+  // never the contents of a parent folder.
+  const readLiterals = uniqueAbsolutePaths([
+    "/",
+    ...(executable === input.command ? [] : [input.command]),
+  ]);
+  const metadataLiterals = uniqueAbsolutePaths(
+    [...readRoots, ...readLiterals].flatMap((path) => parentFolders(path)),
+  );
   const writeRoots = uniqueAbsolutePaths(input.sandbox.allowWrite);
   const profile = [
     "(version 1)",
@@ -260,6 +273,8 @@ async function prepareProcessLaunch(
     "(allow signal (target self))",
     "(allow sysctl-read)",
     ...readRoots.map((path) => seatbeltRule("file-read*", path)),
+    ...readLiterals.map((path) => seatbeltLiteral("file-read*", path)),
+    ...metadataLiterals.map((path) => seatbeltLiteral("file-read-metadata", path)),
     ...writeRoots.map((path) => seatbeltRule("file-write*", path)),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.sandbox.allowNetwork ? ["(allow network*)"] : []),
@@ -277,6 +292,34 @@ function uniqueAbsolutePaths(paths: ReadonlyArray<string>): string[] {
     unique.add(path);
   }
   return [...unique].sort();
+}
+
+/**
+ * A runtime installed by Homebrew (`<prefix>/Cellar/<formula>/<version>/...`)
+ * loads its libraries through `<prefix>/opt/<dependency>` links into other
+ * formulae, and OpenSSL reads `<prefix>/etc/openssl@3`. Without them node
+ * aborted before running a line. These hold installed software only; the
+ * prefix's `var` (service data) and the rest of `etc` stay unreadable.
+ */
+function homebrewRuntimeRoots(executable: string): ReadonlyArray<string> {
+  const marker = "/Cellar/";
+  const index = executable.indexOf(marker);
+  if (index <= 0) return [];
+  const prefix = executable.slice(0, index);
+  return [join(prefix, "Cellar"), join(prefix, "opt"), join(prefix, "etc", "openssl@3")];
+}
+
+function parentFolders(path: string): ReadonlyArray<string> {
+  const parents: string[] = [];
+  for (let current = dirname(path); current !== dirname(current); current = dirname(current)) {
+    parents.push(current);
+  }
+  return parents;
+}
+
+function seatbeltLiteral(operation: "file-read*" | "file-read-metadata", path: string): string {
+  const escaped = path.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return `(allow ${operation} (literal "${escaped}"))`;
 }
 
 function seatbeltRule(operation: "file-read*" | "file-write*", path: string): string {

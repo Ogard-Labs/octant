@@ -112,6 +112,7 @@ import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
+import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   enforceSidebarBackgroundAccessibility,
@@ -142,6 +143,7 @@ import "./styles/environment.css";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
+import { countSidebarTiles } from "./shell/sidebarTileCounts";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   resolveSidebarDestinationContributions,
@@ -407,7 +409,7 @@ import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
-import { useCommandSkills } from "./palette/useCommandSkills";
+import { useCommandExtensions } from "./palette/useCommandSkills";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -905,12 +907,27 @@ function LaunchedShell(
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
   const [searchQuery, setSearchQuery] = useState("");
+  // The sidebar's in-place filter is its own query: the command overlay
+  // searches every thread, while this one only narrows the rows in view.
+  const [sidebarFilterQuery, setSidebarFilterQuery] = useState("");
+  const [sidebarListRequest, setSidebarListRequest] = useState<{
+    readonly view: "activity" | "completed";
+    readonly sequence: number;
+  }>();
+  const requestSidebarList = useCallback((view: "activity" | "completed") => {
+    setSidebarListRequest((current) => ({ view, sequence: (current?.sequence ?? 0) + 1 }));
+  }, []);
   // Deep-link target from a content search hit; cleared when Search opens again.
   const [revealChatTurn, setRevealChatTurn] = useState<
     { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
   >(undefined);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
+    setRevealChatTurn(undefined);
+    setSearchOpen(true);
+  }, []);
+  const searchEveryThread = useCallback((query: string) => {
+    setSearchQuery(query);
     setRevealChatTurn(undefined);
     setSearchOpen(true);
   }, []);
@@ -990,6 +1007,14 @@ function LaunchedShell(
   const sidebarIsDrawer = useSidebarDrawerViewport();
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
   const presentedSidebarCollapsed = sidebarIsDrawer ? !sidebarDrawerOpen : sidebarCollapsed;
+  // The rail is a wide-window state: below the drawer breakpoint a collapsed
+  // sidebar is a closed drawer, and a strip of icons would only take width
+  // from the page it was hidden to make room for.
+  const sidebarRail =
+    !sidebarIsDrawer &&
+    !isNarrow &&
+    sidebarCollapsed &&
+    (presentedShellSettings ?? controller.settings)?.sidebarCollapsedPresentation !== "hidden";
   const setSidebarCollapsedPersistent = useCallback(
     (collapsed: boolean) => {
       sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
@@ -1001,6 +1026,15 @@ function LaunchedShell(
       writeSidebarCollapsed(globalThis, collapsed);
     },
     [sidebarIsDrawer],
+  );
+  // A count tile on the collapsed rail asks for a list the rail cannot show,
+  // so it expands the sidebar first; an open sidebar only switches its list.
+  const openSidebarList = useCallback(
+    (view: "activity" | "completed") => {
+      if (presentedSidebarCollapsed) setSidebarCollapsedPersistent(false);
+      requestSidebarList(view);
+    },
+    [presentedSidebarCollapsed, requestSidebarList, setSidebarCollapsedPersistent],
   );
   useLayoutEffect(() => {
     const label = sidebarToggleFocusRef.current;
@@ -1293,10 +1327,10 @@ function LaunchedShell(
     configuration: navigatorConfigurationKey(controller.settings?.navigatorAssistant),
   });
   const chatReadCursorStore = useMemo(() => createChatReadCursorStore(), []);
-  // Skills this host reports as installed and effective. They become the
-  // Skills group of the `/` composer affordance; an unreachable extension
-  // service simply contributes nothing.
-  const commandSkills = useCommandSkills(extensionClient, {
+  // Skills and plugin MCP servers this host reports as installed and
+  // effective. They become the Skills and Plugins groups of the `/` composer
+  // affordance; an unreachable extension service simply contributes nothing.
+  const commandExtensions = useCommandExtensions(extensionClient, {
     refreshMs: 0,
     changeRevision: machineChanges.extensions,
   });
@@ -3437,6 +3471,21 @@ function LaunchedShell(
     workNavigation.navigation,
   ]);
 
+  const sidebarTileCounts = useMemo(
+    () =>
+      countSidebarTiles(
+        activeMode === "chat"
+          ? chatController.status === "ready"
+            ? navigationModel.markedChatNavigation
+            : []
+          : activeMode === "code"
+            ? navigationModel.codeProjectThreads
+            : navigationModel.workProjectThreads,
+        minuteNow,
+      ),
+    [activeMode, chatController.status, minuteNow, navigationModel],
+  );
+
   useMenuBarTasks({
     bridge: props.hostBridge,
     ready: controller.status === "ready",
@@ -5215,7 +5264,8 @@ function LaunchedShell(
         mode: project.type,
       })),
     onOpenProject: openCommandProject,
-    skills: commandSkills,
+    skills: commandExtensions.skills,
+    pluginServers: commandExtensions.pluginServers,
     appleProjects,
     onOpenAppleProject: (project) => {
       // The thread's own controller, not the window's reader: the window's
@@ -5564,10 +5614,10 @@ function LaunchedShell(
             isNarrow={isNarrow}
             material={material}
             nativeTitlebarInset={hostReservesTitlebarInset}
-            {...(presentedSidebarCollapsed
+            {...(presentedSidebarCollapsed && !sidebarRail
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            {...(presentedSidebarCollapsed
+            {...(presentedSidebarCollapsed && !sidebarRail
               ? {
                   newThreadLabel: activeMode === "chat" ? "New chat" : "New task",
                   onNewThread: () => {
@@ -5593,6 +5643,7 @@ function LaunchedShell(
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={presentedSidebarCollapsed}
+        sidebarRail={sidebarRail}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
@@ -5690,6 +5741,37 @@ function LaunchedShell(
             onSelectMode={handleSelectMode}
             {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
             inboxCount={inboxCount}
+            countTiles={{
+              ...sidebarTileCounts,
+              // Chat has no board, so its Running tile opens the Activity feed,
+              // where running threads lead.
+              ...(activeMode === "chat"
+                ? { onOpenRunning: () => openSidebarList("activity") }
+                : {}),
+              onOpenReview: () => openSidebarList("activity"),
+              onOpenDone: () => openSidebarList("completed"),
+            }}
+            {...(sidebarRail
+              ? {
+                  rail: {
+                    onExpand: () => setSidebarCollapsedPersistent(false),
+                    onOpenActivity: () => openSidebarList("activity"),
+                    projects: projectController.projects.map((project) => ({
+                      id: String(project.id),
+                      name: project.name,
+                      active:
+                        activeProjectId !== undefined &&
+                        String(activeProjectId) === String(project.id),
+                      onOpen: () => void openSelectedProject(project),
+                    })),
+                  },
+                }
+              : {})}
+            threadFilter={{
+              query: sidebarFilterQuery,
+              onQueryChange: setSidebarFilterQuery,
+              onSearchEverywhere: searchEveryThread,
+            }}
             settings={presentedShellSettings ?? controller.settings}
             workspace={controller.workspace}
             backgroundCoveredByWorkspace={shellBackdropCoversSidebar}
@@ -5721,11 +5803,21 @@ function LaunchedShell(
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
+                          onProjectViewSwitcherPresentationChange: (
+                            presentation: ProjectViewSwitcherPresentation,
+                          ) =>
+                            void controller.updateSettings({
+                              projectViewSwitcherPresentation: presentation,
+                            }),
                           projectViewEnvironmentOptions:
                             projectViewEnvironmentOptionsFromHosts(hosts),
                         }
                       : {})}
                     activityMode={activeMode}
+                    {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
+                    {...(sidebarListRequest === undefined
+                      ? {}
+                      : { listRequest: sidebarListRequest })}
                     rowProperties={controller.settings.sidebarRowProperties}
                     onRowPropertiesChange={(sidebarRowProperties) => {
                       void controller.updateSettings({ sidebarRowProperties });
@@ -6728,6 +6820,7 @@ function LaunchedShell(
             void openDraftInKnownProject(projectId, mode, name);
           }}
           searchOpen={searchOpen}
+          searchQuery={searchQuery}
           searchThreads={threadSearchThreads}
           searchProjects={threadSearchProjects}
           searchListing={threadSearchListing}

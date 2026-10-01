@@ -55,9 +55,10 @@ further provider or network call.
 
 ## Settings search
 
-Settings search is a keyboard-navigable result list that deep-links to the
-focused control. Press Enter to activate a result and land on the setting it
-points to.
+Settings search starts as an icon beside the **Settings** heading. Select it
+or press **⌘/Ctrl+F** while Settings is open to reveal the field and focus it.
+Results are a keyboard-navigable list that deep-links to the focused control.
+Press Enter to activate a result and land on the setting it points to.
 
 ## Keyboard shortcuts
 

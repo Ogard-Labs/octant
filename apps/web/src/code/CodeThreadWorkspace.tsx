@@ -85,6 +85,7 @@ import {
 } from "../transcript/TurnHeader";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
@@ -1545,6 +1546,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           )}
         </div>
       )}
+      <ExtensionToolApprovalPrompt
+        className="thread-column"
+        client={props.extensionClient}
+        threadId={String(props.threadId)}
+        turnActive={busy}
+      />
       <ThreadComposer
         presentation="follow-up"
         context={

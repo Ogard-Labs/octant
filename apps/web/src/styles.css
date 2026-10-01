@@ -29,6 +29,7 @@
 @import "./styles/project-threads.css";
 @import "./styles/surface.css";
 @import "./styles/board.css";
+@import "./styles/vivid.css";
 
 :root {
   color-scheme: dark;
@@ -2099,14 +2100,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 /* The provider list is an open section of .provrow items (octant.css). The
    rules below are the app-side residue that vocabulary does not cover. */
-
-/* The shell is open (0072): rows over hairlines at the section edge. The
-   first row draws the rule under the label the way Appearance's first row
-   does; octant.css's card version cleared it. */
-.settings-card-section--open > .provlist > .provrow {
-  padding-inline: 0;
-  border-top: 1px solid var(--oct-hairline);
-}
 
 .provider-settings__summary {
   margin: 0;

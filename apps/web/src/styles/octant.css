@@ -158,6 +158,9 @@
   --oct-weight-medium: 500;
   --oct-weight-display: 500;
   --oct-weight-strong: 600;
+  /* The page title and the welcome greeting only (surface.css type roles);
+     the stylesheet check refuses it anywhere else. */
+  --oct-weight-title: 700;
 
   /* tracking: negative tightens display type as it grows, positive opens
      mono labels. Every letter-spacing in the system comes from here. */

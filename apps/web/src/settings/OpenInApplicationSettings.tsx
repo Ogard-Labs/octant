@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { OctantHostBridge, OpenInApplicationDescriptor } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingRow, SettingsState } from "./primitives";
+import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
 export interface OpenInApplicationSettingsProps {
   readonly applications: ReadonlyArray<OpenInApplicationId>;
@@ -45,19 +45,19 @@ export function OpenInApplicationSettings(props: OpenInApplicationSettingsProps)
 
   if (listApplications === undefined) {
     return (
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Open in applications</h2>
-        <p className="settings-section-note">Available in the macOS desktop app.</p>
-      </div>
+      <SettingsSection
+        description="Available in the macOS desktop app."
+        title="Open in applications"
+      />
     );
   }
 
   return (
-    <div className="settings-card-section settings-card-section--open open-in-settings">
-      <h2>Open in applications</h2>
-      <p className="settings-section-note">
-        Enabled applications appear in this order. Applications that are not installed stay hidden.
-      </p>
+    <SettingsSection
+      className="open-in-settings"
+      description="Enabled applications appear in this order. Applications that are not installed stay hidden."
+      title="Open in applications"
+    >
       {error !== undefined ? (
         <SettingsState kind="error">{error}</SettingsState>
       ) : rows.length === 0 ? (
@@ -114,7 +114,7 @@ export function OpenInApplicationSettings(props: OpenInApplicationSettingsProps)
           })}
         </div>
       )}
-    </div>
+    </SettingsSection>
   );
 }
 

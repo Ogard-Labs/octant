@@ -394,8 +394,9 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Board" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Board" }));
+    // With the count tiles on (the default), the Running tile is the way to the board.
+    expect(await screen.findByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Running, \d+$/ }));
     expect(await screen.findByRole("region", { name: "Thread board" })).toBeVisible();
     await waitFor(() => expect(queryBoard).toHaveBeenCalled());
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
@@ -425,6 +426,7 @@ describe("WorkspaceRailLayers", () => {
 
     expect(await screen.findByRole("button", { name: "Workspace mode, Chat" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Board" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Thread board" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
   });
 });

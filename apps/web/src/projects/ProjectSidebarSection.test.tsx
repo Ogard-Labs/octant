@@ -540,16 +540,24 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      const activityToggle = screen.getByRole("button", { name: "Turn on activity view" });
-      expect(activityToggle).toBeVisible();
-      expect(activityToggle).toHaveClass("shell-icon-button");
-      expect(activityToggle).not.toHaveTextContent("Turn on activity view");
+      const listSwitch = screen.getByRole("group", { name: "Thread list" });
+      expect(within(listSwitch).getByRole("button", { name: "Project tree" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(within(listSwitch).getByRole("button", { name: "Activity feed" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
       expect(screen.queryByRole("heading", { name: "Priority" })).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+      await user.click(screen.getByRole("button", { name: "Activity feed" }));
 
-      expect(screen.getByRole("button", { name: "Turn off activity view" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
       expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Priority" })).toBeVisible();
       expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
@@ -582,7 +590,7 @@ describe("ProjectSidebarSection activity view", () => {
       await user.click(screen.getByRole("button", { name: /Update AuroraDocs logos/ }));
       expect(onSelectThread).toHaveBeenCalledWith("thread-today");
 
-      await user.click(screen.getByRole("button", { name: "Turn off activity view" }));
+      await user.click(screen.getByRole("button", { name: "Project tree" }));
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
       expect(screen.queryByRole("heading", { name: "Priority" })).not.toBeInTheDocument();
     } finally {
@@ -619,7 +627,7 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+      await user.click(screen.getByRole("button", { name: "Activity feed" }));
       expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
 
       rerender(
@@ -647,7 +655,10 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Turn on activity view" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
       expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
     } finally {
@@ -779,7 +790,7 @@ describe("ProjectSidebarSection code project views", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
     expect(screen.getByRole("button", { name: /Octant task/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Aurora task/i })).not.toBeInTheDocument();
   });
@@ -980,6 +991,40 @@ describe("ProjectSidebarSection code project views", () => {
     expect(await screen.findByRole("menuitemcheckbox", { name: "All environments" })).toBeVisible();
     expect(screen.getByRole("menuitemcheckbox", { name: "Local" })).toBeVisible();
     expect(screen.queryByRole("menuitemcheckbox", { name: "Devbox" })).not.toBeInTheDocument();
+  });
+
+  it("switches the views between a dropdown and buttons from the filter menu", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    const onPresentationChange = vi.fn();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onProjectViewSwitcherPresentationChange={onPresentationChange}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewSwitcherPresentation="dropdown"
+        projectViewsEnabled
+        projects={[codeProjectA]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Project view filters" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Show views as" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Dropdown" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    // The submenu is still animating in under jsdom, so the pointer is refused;
+    // a plain click reaches the same handler.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Buttons" }));
+    expect(onPresentationChange).toHaveBeenCalledWith("inline");
   });
 
   it("lists a connected host when the window actually reported one", async () => {
@@ -1669,7 +1714,7 @@ describe("ProjectSidebarSection search", () => {
 
     try {
       const { rerender } = render(<ProjectSidebarSection {...sharedProps} />);
-      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+      await user.click(screen.getByRole("button", { name: "Activity feed" }));
 
       expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
       expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
@@ -1705,7 +1750,7 @@ describe("ProjectSidebarSection search", () => {
 
     try {
       render(<ProjectSidebarSection {...sharedProps} searchQuery="test" />);
-      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+      await user.click(screen.getByRole("button", { name: "Activity feed" }));
 
       const today = screen.getByRole("region", { name: "Today" });
       expect(within(today).getByRole("button", { name: /Planning/i })).toHaveTextContent("Test");
@@ -1823,6 +1868,50 @@ describe("snoozed and completed shelves", () => {
     await user.click(within(completed!).getByText("Completed"));
     await user.click(within(completed!).getByRole("button", { name: /Shipped the fix/ }));
     expect(onSelectThread).toHaveBeenCalledWith("thread-c");
+  });
+
+  it("opens the Completed shelf, or the Activity feed, when a sidebar tile asks for it", () => {
+    window.localStorage.clear();
+    const section = (listRequest?: { view: "activity" | "completed"; sequence: number }) => (
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        {...(listRequest === undefined ? {} : { listRequest })}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[chatProjectA]}
+        threads={[
+          { projectId: String(chatProjectA.id), threadId: "thread-a", title: "Planning" },
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-c",
+            title: "Shipped the fix",
+            shelf: "completed",
+            completedAt: "2026-09-06T10:00:00.000Z",
+          },
+        ]}
+      />
+    );
+    const { rerender } = render(section());
+    expect(screen.getByText("Completed").closest("details")).not.toHaveAttribute("open");
+
+    rerender(section({ view: "completed", sequence: 1 }));
+    expect(screen.getByText("Completed").closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    rerender(section({ view: "activity", sequence: 2 }));
+    expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    window.localStorage.clear();
   });
 
   it("opens the shelf that holds the thread on screen so the row never hides its own selection", () => {
@@ -1944,7 +2033,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
     await user.hover(screen.getByRole("button", { name: /Alternate plan/ }));
     const details = await screen.findByRole("group", { name: "Thread details" });
     expect(details).toHaveTextContent("Forked from Planning");
@@ -1959,7 +2048,7 @@ describe("ProjectSidebarSection row property visibility", () => {
       activity: { project: true, branch: true, pullRequest: true, lastUpdated: true, status: true },
     });
     render(<ProjectSidebarSection {...props} threadActions={{ onOpenPullRequest }} />);
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
     const row = screen.getByRole("button", { name: /Planning/ });
     expect(within(row).getByText("feature/sidebar")).toBeVisible();
     // The row names the request whether or not it can also open it. It used to
@@ -1997,7 +2086,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
 
     const fold = screen.getByRole("button", { name: /^Earlier/ });
     expect(fold).toHaveAttribute("aria-expanded", "false");
@@ -2026,7 +2115,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
 
     // Folded, the only match sat under a heading that showed a count and no row.
     expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
@@ -2042,7 +2131,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     const onArchiveThread = vi.fn();
     const props = sidebarProps();
     render(<ProjectSidebarSection {...props} threadActions={{ onPinThread, onArchiveThread }} />);
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
     const pin = screen.getByRole("button", { name: "Pin thread" });
     await user.click(pin);
     expect(onPinThread).toHaveBeenCalledWith(codeThread.threadId, true);
@@ -2063,7 +2152,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(within(treeRow).getByText("2h")).toBeVisible();
     expect(treeRow.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
     const feedRow = screen.getByRole("button", { name: /Planning/ });
     expect(within(feedRow).getByText("octant")).toBeVisible();
     expect(within(feedRow).queryByText("#12")).toBeNull();
@@ -2091,7 +2180,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     ).toBeVisible();
 
     // The feed never agreed to hide anything; its own defaults are untouched.
-    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("octant"),
     ).toBeVisible();
@@ -2111,7 +2200,7 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     // Back in the tree the pull request is still hidden: one view's choice
     // never rewrites the other's.
-    await user.click(screen.getByRole("button", { name: "Turn off activity view" }));
+    await user.click(screen.getByRole("button", { name: "Project tree" }));
     expect(within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12")).toBeNull();
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("feature/sidebar"),
