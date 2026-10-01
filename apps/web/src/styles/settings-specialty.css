@@ -255,14 +255,8 @@
   gap: 0;
 }
 
-.settings-view .extensions-settings__body {
-  gap: 0;
-  padding: 0;
-  border-top: 1px solid var(--oct-hairline);
-}
-
 .settings-view .extensions-settings__cards .extcard {
-  padding: 14px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--oct-hairline);
   border-radius: 0;
   background: transparent;

@@ -206,6 +206,11 @@ export interface SettingsSectionProps {
   readonly tone?: "danger";
   /** Ghost actions that act on the whole section, on the label's own line. */
   readonly actions?: ReactNode;
+  /**
+   * The region's accessible name when it differs from the visible label: the
+   * provider list is labelled "Configured providers" and named "Providers".
+   */
+  readonly ariaLabel?: string;
 }
 
 /**
@@ -221,6 +226,7 @@ export function SettingsSection({
   className,
   tone,
   actions,
+  ariaLabel,
 }: SettingsSectionProps) {
   const titleId = useId();
   const generatedId = useId();
@@ -233,7 +239,7 @@ export function SettingsSection({
   }, [register, anchorId, title]);
   return (
     <section
-      aria-labelledby={titleId}
+      {...(ariaLabel === undefined ? { "aria-labelledby": titleId } : { "aria-label": ariaLabel })}
       className={`settings-card-section settings-card-section--open${
         className === undefined ? "" : ` ${className}`
       }`}

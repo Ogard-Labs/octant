@@ -909,9 +909,19 @@ with the current selection in the row and the searchable catalog in a bounded
 popup. Unconfigured defaults say Choose model.
 
 Operational settings use progressive disclosure. Provider and skill lists lead
-with compact readiness counts. Provider rows show identity, one effective
-status, details, and enablement; ordering controls appear only in an explicit
-Reorder mode. Skill rows show the source class and one effective state;
+with compact readiness counts. A provider is a row card on the Settings kit:
+a 48px rounded logo tile (the licensed bundled mark, or a monogram when there is
+none, never an approximation of a brand mark), the name in the row-label role,
+the maker and runtime in meta ink, a state line, and the details chevron and
+enable switch at the trailing edge. Cards sit two to a row, one to a row under
+900px, and a card whose details are open takes the whole row. The state line
+reads from a dot that carries the state without colour: a filled ink dot is
+ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
+checked, and a failure keeps its red role. Only under Vivid does ready turn the
+palette's green and setup the palette's orange. The detected, supported-but-not-
+detected, and other groups are Settings sections; the readiness summary is the
+label's description. Ordering controls appear only in an explicit Reorder mode.
+Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Reasoning, cache, execution time, and
@@ -922,7 +932,10 @@ remaining percentage and an accessible meter, followed by its reset countdown.
 Account, model, and provider-instance scopes remain distinct. An elapsed reset
 shows Awaiting updated limits until a fresh reading arrives; it never implies
 refilled capacity. Provider cards use the shared surface typography and tokens
-and stack at narrow widths.
+and stack at narrow widths. Inside Settings, Usage has no title of its own: its
+controls sit above kit sections (overview, token totals, provider limits,
+breakdown), each a label over one card, and the Settings header is the only
+title.
 
 First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
@@ -1011,9 +1024,11 @@ warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 
-Usage totals and filters are raised cards. Provider create forms, individual
-extension objects, and artifact cards use the same raised recipe; extension and
-skill collection shells remain open. The command palette
+Usage totals sit in the Settings kit's card inside Settings. Provider create
+forms, individual extension objects, and artifact cards use the same raised
+recipe; in Settings, the extension and skill collections are kit cards too, and
+the Installed and Marketplace switch rides the first section's label line. The
+command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
@@ -1301,7 +1316,7 @@ follows the rendered contracts encoded by their selectors and tests.
 Background refresh preserves already loaded controls and active drafts. Use the
 initial loading view only before a surface has data. Provider and theme feedback
 occupy bounded, scrollable status slots; a changed status must not push the form
-below it. Provider metadata uses fixed columns and shows Checking during probes.
+below it. A provider card's state line keeps its own grid area and shows Checking during probes.
 Last observed model facts are presentation only and never authorize selection
 or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual

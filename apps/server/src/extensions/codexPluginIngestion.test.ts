@@ -1,3 +1,4 @@
+import { isExtensionComponentModeSafe } from "@octant/plugin-host";
 import { describe, expect, it } from "vitest";
 import { normalizeCodexPluginPackage, type CodexPluginPackageInput } from "./codexPluginIngestion";
 import { inspectExtensionPackage } from "./packageInspector";
@@ -78,6 +79,24 @@ describe("Codex-compatible plugin ingestion", () => {
       ".mcp.json",
       "skills/review/SKILL.md",
     ]);
+  });
+
+  it("lets a plugin's command-launched MCP server run in Work, like an Agent Plugin's", () => {
+    const entries = fixture().entries.map((entry) =>
+      entry.path === ".mcp.json"
+        ? {
+            ...entry,
+            content: new TextEncoder().encode(
+              JSON.stringify({ mcpServers: { notes: { command: "node", args: ["server.js"] } } }),
+            ),
+          }
+        : entry,
+    );
+    const inspected = inspectExtensionPackage(normalizeCodexPluginPackage(fixture({ entries })));
+    const server = inspected.manifest.components.find((component) => component.id === "mcp-notes");
+
+    expect(server?.declaredCapabilities).toEqual(["mcp"]);
+    expect(server === undefined ? false : isExtensionComponentModeSafe("work", server)).toBe(true);
   });
 
   it("rejects unsupported plugin surfaces instead of silently dropping them", () => {

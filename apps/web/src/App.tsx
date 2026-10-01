@@ -409,7 +409,7 @@ import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
-import { useCommandSkills } from "./palette/useCommandSkills";
+import { useCommandExtensions } from "./palette/useCommandSkills";
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -1318,10 +1318,10 @@ function LaunchedShell(
     configuration: navigatorConfigurationKey(controller.settings?.navigatorAssistant),
   });
   const chatReadCursorStore = useMemo(() => createChatReadCursorStore(), []);
-  // Skills this host reports as installed and effective. They become the
-  // Skills group of the `/` composer affordance; an unreachable extension
-  // service simply contributes nothing.
-  const commandSkills = useCommandSkills(extensionClient, {
+  // Skills and plugin MCP servers this host reports as installed and
+  // effective. They become the Skills and Plugins groups of the `/` composer
+  // affordance; an unreachable extension service simply contributes nothing.
+  const commandExtensions = useCommandExtensions(extensionClient, {
     refreshMs: 0,
     changeRevision: machineChanges.extensions,
   });
@@ -5255,7 +5255,8 @@ function LaunchedShell(
         mode: project.type,
       })),
     onOpenProject: openCommandProject,
-    skills: commandSkills,
+    skills: commandExtensions.skills,
+    pluginServers: commandExtensions.pluginServers,
     appleProjects,
     onOpenAppleProject: (project) => {
       // The thread's own controller, not the window's reader: the window's
