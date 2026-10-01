@@ -87,6 +87,13 @@ describe("ThreadSearchOverlay", () => {
     expect(screen.queryByText("Release branch")).toBeNull();
   });
 
+  it("opens on a query handed over from the sidebar filter and lists its hits", () => {
+    renderOverlay({ initialQuery: "release" });
+
+    expect(screen.getByRole("combobox")).toHaveValue("release");
+    expect(screen.getAllByRole("option").length).toBe(3);
+  });
+
   it("groups archived hits after live ones and marks them in words", async () => {
     const user = userEvent.setup();
     renderOverlay();
