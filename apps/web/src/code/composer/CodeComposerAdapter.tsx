@@ -916,6 +916,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         )}
 
+        {/* The action tiles and Running now come first: a running thread is
+            what a person most often came back to, and below the five
+            suggestions it sat under the fold. */}
+        {props.homeStart}
         {/* A draft of only spaces is empty to submit, so it is empty here too:
             the suggestions stay reachable instead of disappearing behind a
             stray space. */}
@@ -945,7 +949,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             ))}
           </div>
         )}
-        {props.homeStart}
         {props.beneath}
 
         {props.errorMessage !== undefined ? (

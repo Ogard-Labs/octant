@@ -231,7 +231,7 @@ from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
 
 Under the composer, Work and Code start screens offer a row of action tiles and
-then a Running now strip, both on the composer's measure. A tile is a card
+then a Running now strip, both on the composer's measure and ahead of Code's prompt suggestions, so a running thread is never under the fold. A tile is a card
 button: a 36px icon square, the action as a row label, and one detail line.
 Code offers **Add a folder** (Bind a repository as a Project), **Open
 terminal** (A shell on this computer, in Octant) once a Project is selected,
