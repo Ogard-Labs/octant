@@ -1027,6 +1027,15 @@ function LaunchedShell(
     },
     [sidebarIsDrawer],
   );
+  // A count tile on the collapsed rail asks for a list the rail cannot show,
+  // so it expands the sidebar first; an open sidebar only switches its list.
+  const openSidebarList = useCallback(
+    (view: "activity" | "completed") => {
+      if (presentedSidebarCollapsed) setSidebarCollapsedPersistent(false);
+      requestSidebarList(view);
+    },
+    [presentedSidebarCollapsed, requestSidebarList, setSidebarCollapsedPersistent],
+  );
   useLayoutEffect(() => {
     const label = sidebarToggleFocusRef.current;
     if (label === undefined) return;
@@ -5737,19 +5746,16 @@ function LaunchedShell(
               // Chat has no board, so its Running tile opens the Activity feed,
               // where running threads lead.
               ...(activeMode === "chat"
-                ? { onOpenRunning: () => requestSidebarList("activity") }
+                ? { onOpenRunning: () => openSidebarList("activity") }
                 : {}),
-              onOpenReview: () => requestSidebarList("activity"),
-              onOpenDone: () => requestSidebarList("completed"),
+              onOpenReview: () => openSidebarList("activity"),
+              onOpenDone: () => openSidebarList("completed"),
             }}
             {...(sidebarRail
               ? {
                   rail: {
                     onExpand: () => setSidebarCollapsedPersistent(false),
-                    onOpenActivity: () => {
-                      setSidebarCollapsedPersistent(false);
-                      requestSidebarList("activity");
-                    },
+                    onOpenActivity: () => openSidebarList("activity"),
                     projects: projectController.projects.map((project) => ({
                       id: String(project.id),
                       name: project.name,
@@ -6807,6 +6813,7 @@ function LaunchedShell(
             void openDraftInKnownProject(projectId, mode, name);
           }}
           searchOpen={searchOpen}
+          searchQuery={searchQuery}
           searchThreads={threadSearchThreads}
           searchProjects={threadSearchProjects}
           searchListing={threadSearchListing}

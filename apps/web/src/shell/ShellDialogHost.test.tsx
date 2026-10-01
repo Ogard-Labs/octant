@@ -140,6 +140,7 @@ function hostProps(): ShellDialogHostProps {
     searchArchivedListing: "ready",
     searchListing: "ready",
     searchOpen: false,
+    searchQuery: "",
     searchProjects: [],
     searchThreads: [],
     zenActive: false,

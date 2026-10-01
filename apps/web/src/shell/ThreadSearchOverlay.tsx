@@ -47,6 +47,8 @@ export interface ThreadSearchOverlayProps {
   readonly contentTruncated?: boolean;
   /** Reports the typed query so the host can list its archived and content matches. */
   readonly onQueryChange?: (query: string) => void;
+  /** The query the overlay opens with, so a search handed over from the sidebar filter is not shown empty. */
+  readonly initialQuery?: string;
   readonly onClose: () => void;
   readonly onNewThread?: () => void;
   readonly onNewProject?: () => void;
@@ -91,7 +93,7 @@ function optionId(index: number): string {
  */
 export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(props.initialQuery ?? "");
   const [activeIndex, setActiveIndex] = useState(0);
 
   const listing = props.listing ?? "ready";
