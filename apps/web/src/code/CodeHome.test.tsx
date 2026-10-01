@@ -145,7 +145,7 @@ describe("CodeHome", () => {
       <CodeHome
         onPickGithub={vi.fn()}
         onPickIssue={vi.fn()}
-        continueCards={{ kind: "ready", cards: [thread] }}
+        continueCards={{ kind: "ready", cards: [thread], running: [] }}
         onOpenThread={onOpenThread}
       />,
     );
@@ -196,7 +196,7 @@ describe("CodeHome", () => {
             } as never,
           ],
         })}
-        continueCards={{ kind: "ready", cards: continueCards }}
+        continueCards={{ kind: "ready", cards: continueCards, running: [] }}
         loadOpenLinearIssues={async () => ({
           rows: [
             {
@@ -405,7 +405,7 @@ describe("CodeHome", () => {
 
     render(
       <CodeHome
-        continueCards={{ kind: "ready", cards: continueCards }}
+        continueCards={{ kind: "ready", cards: continueCards, running: [] }}
         onOpenThread={vi.fn()}
         onPickGithub={vi.fn()}
         onPickIssue={vi.fn()}

@@ -2,10 +2,22 @@ import { useEffect, useState } from "react";
 import type { CodeBoardCard, CodeBoardQuery, CodeBoardView } from "@octant/contracts";
 
 const CONTINUE_LIMIT = 6;
+const RUNNING_LIMIT = 4;
 
 export type ContinueCards =
   | { readonly kind: "idle" }
-  | { readonly kind: "ready"; readonly cards: ReadonlyArray<CodeBoardCard> };
+  | {
+      readonly kind: "ready";
+      /** The threads to pick back up: the latest ones that are not running. */
+      readonly cards: ReadonlyArray<CodeBoardCard>;
+      /**
+       * The threads executing right now. They are chosen before the Continue
+       * limit rather than out of it, so a running thread is never crowded out
+       * by six quieter ones, and they leave Continue so one thread is not
+       * listed twice on the same screen.
+       */
+      readonly running: ReadonlyArray<CodeBoardCard>;
+    };
 
 /**
  * The threads the Code start screen offers to continue, read from the board.
@@ -33,7 +45,12 @@ export function useContinueCards(
     loadBoard({ version: 1 }).then(
       (view) => {
         if (cancelled) return;
-        setCards({ kind: "ready", cards: latestFirst(view) });
+        const ordered = latestFirst(view);
+        setCards({
+          kind: "ready",
+          cards: ordered.filter((card) => !card.executing).slice(0, CONTINUE_LIMIT),
+          running: ordered.filter((card) => card.executing).slice(0, RUNNING_LIMIT),
+        });
       },
       () => {
         // A board that cannot be read says nothing new, so the section keeps
@@ -48,9 +65,7 @@ export function useContinueCards(
 }
 
 function latestFirst(view: CodeBoardView): ReadonlyArray<CodeBoardCard> {
-  return [...view.cards]
-    .sort((a, b) =>
-      (b.lastMeaningfulActivityAt ?? "").localeCompare(a.lastMeaningfulActivityAt ?? ""),
-    )
-    .slice(0, CONTINUE_LIMIT);
+  return [...view.cards].sort((a, b) =>
+    (b.lastMeaningfulActivityAt ?? "").localeCompare(a.lastMeaningfulActivityAt ?? ""),
+  );
 }

@@ -230,6 +230,26 @@ The row wraps rather than grows: a control that needs a list ("Create
 from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
 
+Under the composer, Work and Code start screens offer a row of action tiles and
+then a Running now strip, both on the composer's measure. A tile is a card
+button: a 36px icon square, the action as a row label, and one detail line.
+Code offers **Add a folder** (Bind a repository as a Project), **Open
+terminal** (A shell on this computer, in Octant) once a Project is selected,
+and **Review N changes** (Finished threads that wait for you) when N is above
+zero, where N counts unread threads that are not running or rested, the
+sidebar's To review rule. Open terminal starts a Project terminal and pins it in
+Zen, the only place one lives. Work offers the same tiles without a terminal,
+because Work has no shell. Review opens the Inbox. Running now is a section
+label with an Open board link and up to four cards, one per executing thread:
+provider mark, title, a small spinner, how long ago the thread last moved, a
+Project chip, in Code a mono branch chip, and the host's latest activity line
+in a mono well. The host keeps no turn start time on the board or in
+navigation, so a card says "Active 4m ago" rather than an elapsed time, and a
+fact the host does not report is left out rather than invented. Running
+threads show here instead of in Continue, so one thread is not listed twice.
+Each part leaves when it has nothing to show. Under the Vivid style the tiles'
+icon squares take the blue, orange, and purple palette hues.
+
 First-run setup is optional from its first step. Skipping preserves settled answers,
 waits for pending writes, and grants no authority. Profile editing has its own
 Personal settings destination. Code suggestions keep their full descriptions

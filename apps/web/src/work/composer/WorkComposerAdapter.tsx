@@ -96,6 +96,8 @@ export interface WorkComposerAdapterProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
+  /** The start screen's action tiles and Running now strip, under the composer. */
+  readonly homeStart?: ReactNode;
   readonly folderControl?: ReactNode;
   readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
@@ -519,6 +521,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             }}
           />
         </div>
+
+        {props.homeStart}
 
         {props.errorMessage !== undefined ? (
           <p className="work-composer-adapter__error" role="alert">

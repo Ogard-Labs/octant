@@ -271,6 +271,41 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.queryByText("Octant Work")).not.toBeInTheDocument();
   });
 
+  it("offers Open terminal on Code's start screen but never on Work's", async () => {
+    const user = userEvent.setup();
+    const onOpenTerminal = vi.fn();
+    const homeStart = { reviewCount: 2, onReview: vi.fn(), running: [], onOpenTerminal };
+    const { unmount } = render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={homeStart}
+        mode="code"
+        onAttachFolder={vi.fn()}
+        projectId={codeProjectId}
+        projects={projects}
+      />,
+    );
+    const tiles = within(screen.getByRole("group", { name: "Quick actions" }));
+    expect(tiles.getByRole("button", { name: /Review 2 changes/ })).toBeVisible();
+    await user.click(tiles.getByRole("button", { name: /Open terminal/ }));
+    expect(onOpenTerminal).toHaveBeenCalledExactlyOnceWith(codeProjectId);
+    unmount();
+
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={homeStart}
+        mode="work"
+        onAttachFolder={vi.fn()}
+        projectId={workProjectId}
+        projects={projects}
+      />,
+    );
+    const workTiles = within(screen.getByRole("group", { name: "Quick actions" }));
+    expect(workTiles.getByRole("button", { name: /Add a folder/ })).toBeVisible();
+    expect(workTiles.queryByRole("button", { name: /Open terminal/ })).not.toBeInTheDocument();
+  });
+
   it("renders intent cards for the active mode", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();

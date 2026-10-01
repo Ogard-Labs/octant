@@ -148,6 +148,11 @@ export interface CodeComposerAdapterProps {
   readonly createFromControl?: ReactNode;
   /** Ready-made prompts shown under the composer; choosing one fills the prompt. */
   readonly suggestions?: ReadonlyArray<CodeComposerSuggestion>;
+  /**
+   * The start screen's action tiles and Running now strip, directly under the
+   * composer and its suggestions, ahead of the sections in `beneath`.
+   */
+  readonly homeStart?: ReactNode;
   /** Content shown under the composer (what is waiting, what to continue). */
   readonly beneath?: ReactNode;
   /**
@@ -940,6 +945,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             ))}
           </div>
         )}
+        {props.homeStart}
         {props.beneath}
 
         {props.errorMessage !== undefined ? (

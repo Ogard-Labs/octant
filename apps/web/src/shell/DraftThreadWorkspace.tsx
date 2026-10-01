@@ -80,6 +80,8 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
+import { HomeStart, type HomeAction } from "./HomeStart";
+import type { RunningNowCard } from "./runningNow";
 import type { OctantHostBridge } from "./hostBridge";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
@@ -196,6 +198,21 @@ export interface DraftThreadWorkspaceProps {
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
+  /**
+   * What a Work or Code start screen offers under the composer besides its
+   * own sections: tiles for the next likely actions and the threads running
+   * now. Each action appears only when its owner supplies a way to do it.
+   */
+  readonly homeStart?: {
+    /** Finished threads waiting to be opened; the Review tile needs more than none. */
+    readonly reviewCount: number;
+    readonly onReview?: () => void;
+    readonly running: ReadonlyArray<RunningNowCard>;
+    readonly onOpenRunning?: (card: RunningNowCard) => void;
+    readonly onOpenBoard?: () => void;
+    /** Code only: a shell at the selected Project's root. Work has no shell. */
+    readonly onOpenTerminal?: (projectId: ProjectId) => void;
+  };
   /**
    * What the Code start screen shows under the composer: the threads to
    * continue, the Linear loader for Up next, names for cards, and the openers
@@ -511,6 +528,48 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     else props.onAttachFolder?.();
   }
 
+  const homeStartNode = (() => {
+    const home = props.homeStart;
+    if (home === undefined || (props.mode !== "code" && props.mode !== "work")) return undefined;
+    const actions: HomeAction[] = [];
+    if (props.onCreateProject !== undefined || props.onAttachFolder !== undefined) {
+      actions.push({
+        id: "add-folder",
+        title: "Add a folder",
+        detail:
+          props.mode === "code" ? "Bind a repository as a Project" : "Bind a folder as a Project",
+        onSelect: addFolder,
+      });
+    }
+    const terminalProjectId = selectedProject?.id;
+    const openTerminal = home.onOpenTerminal;
+    if (props.mode === "code" && openTerminal !== undefined && terminalProjectId !== undefined) {
+      actions.push({
+        id: "open-terminal",
+        title: "Open terminal",
+        detail: "A shell on this computer, in Octant",
+        onSelect: () => openTerminal(terminalProjectId),
+      });
+    }
+    const review = home.onReview;
+    if (home.reviewCount > 0 && review !== undefined) {
+      actions.push({
+        id: "review",
+        title: `Review ${String(home.reviewCount)} ${home.reviewCount === 1 ? "change" : "changes"}`,
+        detail: "Finished threads that wait for you",
+        onSelect: review,
+      });
+    }
+    return (
+      <HomeStart
+        actions={actions}
+        running={home.running}
+        {...(home.onOpenRunning === undefined ? {} : { onOpenRunning: home.onOpenRunning })}
+        {...(home.onOpenBoard === undefined ? {} : { onOpenBoard: home.onOpenBoard })}
+      />
+    );
+  })();
+
   const folderControl =
     props.mode === "chat" || props.mode === "code" || props.mode === "work" ? (
       <ComposerProjectSelector
@@ -647,6 +706,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <CodeComposerAdapter
           greetingName={props.greetingName}
           suggestions={CODE_SUGGESTIONS}
+          {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
           {...(beneath === undefined ? {} : { beneath })}
           {...(promptRequest === undefined ? {} : { promptRequest })}
           {...hostSelectorBinding}
@@ -762,6 +822,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       <>
         <WorkComposerAdapter
           greetingName={props.greetingName}
+          {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}

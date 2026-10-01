@@ -421,6 +421,7 @@ export interface WorkspaceViewProps {
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
   readonly linearPluginEnabled?: boolean;
   readonly codeHome?: import("./DraftThreadWorkspace").DraftThreadWorkspaceProps["codeHome"];
+  readonly homeStart?: import("./DraftThreadWorkspace").DraftThreadWorkspaceProps["homeStart"];
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
     signal?: AbortSignal,
@@ -1287,6 +1288,7 @@ function renderNonCodeTab(
             ? {}
             : { linearPluginEnabled: props.linearPluginEnabled })}
           {...(props.codeHome === undefined ? {} : { codeHome: props.codeHome })}
+          {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
           {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
           {...(props.onDraftSelectProject === undefined
             ? {}
