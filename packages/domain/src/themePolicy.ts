@@ -77,6 +77,8 @@ export interface ResolvedAppBackground {
   readonly backgroundUrl: string | null;
   /** Still asset for previews and reduced-motion fallback. */
   readonly backgroundStillUrl: string | null;
+  /** The built-in's light-theme picture, or null when it has one picture for both. */
+  readonly backgroundLightUrl: string | null;
   /** Whether the selected built-in asset is allowed to animate. */
   readonly backgroundAnimated: boolean;
   /** How the picture is printed: as it is, pixelated, or dithered. */
@@ -128,6 +130,7 @@ export function resolveAppBackground(
       backgroundId: null,
       backgroundUrl: null,
       backgroundStillUrl: null,
+      backgroundLightUrl: null,
       backgroundAnimated: false,
     };
   }
@@ -142,6 +145,7 @@ export function resolveAppBackground(
       backgroundId: background.presetId,
       backgroundUrl: backgroundAnimated ? preset.src : stillUrl,
       backgroundStillUrl: stillUrl,
+      backgroundLightUrl: "lightSrc" in preset ? preset.lightSrc : null,
       backgroundAnimated,
     };
   }
@@ -151,6 +155,7 @@ export function resolveAppBackground(
     backgroundId: background.backgroundId,
     backgroundUrl: null,
     backgroundStillUrl: null,
+    backgroundLightUrl: null,
     backgroundAnimated: false,
   };
 }

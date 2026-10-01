@@ -18,6 +18,15 @@ typography, theme accessibility, and theme import and export, then **Window**
 mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
 (transcript text size and width).
 
+### Style
+
+**Style** sits under the color scheme. **Default** keeps the app monochrome.
+**Vivid** adds colour where something has a name: the welcome greeting, the
+sidebar's count tiles, board columns, and each Project's colour. Vivid uses
+your preset's palette, so it changes with light and dark, and it never
+recolours a warning or an error. It looks best in the light theme.
+**Increased contrast** always uses the Default style.
+
 **Project view switcher** lives in **Settings → Code**. It chooses how the Code
 sidebar offers saved project views: a dropdown, or one icon button per view
 that shows the view name on hover. Each project view can be given its own icon
@@ -103,7 +112,11 @@ overlay opacity to at least 80%.
 
 ### Background
 
-The app can sit on a picture of its own. It is off until you pick one.
+The app sits on a picture of its own. A new install starts on **Soft glow**, a
+soft colour gradient that switches between a light and a dark print with your
+color scheme. **Graphite** and **Sunset** are the other gradients. If you set
+up Octant before this picture existed, your page stays as it was until you
+pick one.
 
 **Background** is the picture behind Octant. **Built-in picture**
 uses the same still or animated first-party image catalog as Zen; the current
@@ -111,7 +124,7 @@ picture stands for the set until you choose **Change**. **Your photo** uses a
 picture of yours: upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels,
 or pick one already on this host, and **Photo strength** sets how strongly it
 shows. The sidebar and the background share one photo library, and a photo in
-use cannot be deleted. **None** (the default) keeps the plain page.
+use cannot be deleted. **None** keeps the plain page.
 
 **Effect** prints a picture: **Off** shows it as it is, **Pixelate** draws it in
 square pixels, and **Dither** does that with fewer colours, like a print.
