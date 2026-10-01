@@ -185,6 +185,8 @@
   --oct-section-y-tablet: 48px;
   --oct-section-y-phone: 32px;
   --oct-radius-sm: 10px;
+  /* A page icon tile (the Settings page head) sits between a control and a card. */
+  --oct-radius-tile: 12px;
   --oct-radius-md: 16px;
   --oct-radius-lg: 20px;
   --oct-radius-pill: 9999px;

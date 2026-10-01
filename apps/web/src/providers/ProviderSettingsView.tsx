@@ -36,6 +36,7 @@ import type {
 } from "@octant/contracts";
 import { isImageProfileDriverKind } from "@octant/domain";
 import type { ReactNode } from "react";
+import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import {
@@ -453,8 +454,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onModelDataTagsChange={props.onModelDataTagsChange}
         onVerifyFoundryTools={props.onVerifyFoundryTools}
       />
-      <section aria-label="Defaults" className="settings-card-section settings-card-section--open">
-        <h2>Defaults</h2>
+      <SettingsSection title="Defaults">
         <div className="setgroup">
           <div className="setrow">
             <span className="setrow-label">Permission persistence</span>
@@ -478,7 +478,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             </div>
           </div>
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }

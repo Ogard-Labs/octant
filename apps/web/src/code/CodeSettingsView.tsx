@@ -1,7 +1,7 @@
 import type { CodeSettings } from "@octant/contracts/code";
 import type { SettingsSettingId } from "@octant/contracts";
 import { useState } from "react";
-import { SettingRow } from "../settings/primitives";
+import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -147,11 +147,10 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   return (
     <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Thread defaults</h2>
-        <p className="settings-section-note">
-          These defaults apply only to new Code threads. Existing threads keep their access.
-        </p>
+      <SettingsSection
+        description="These defaults apply only to new Code threads. Existing threads keep their access."
+        title="Thread defaults"
+      >
         <div className="setgroup">
           <SettingRow
             description="The authority a new Code thread requests at creation."
@@ -233,9 +232,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
         </div>
-      </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>External editor</h2>
+      </SettingsSection>
+      <SettingsSection title="External editor">
         <div className="setgroup">
           <SettingRow
             description="An absolute path to the editor Octant opens files in."
@@ -280,7 +278,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
           )}
         </div>
-      </div>
+      </SettingsSection>
     </section>
   );
 }
