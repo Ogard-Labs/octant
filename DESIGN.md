@@ -101,7 +101,7 @@ essential sits under 12px at the default.
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
 | Hero          | 36   | 700    | primary         | Welcome question only (`oct-title--hero`)                 |
 | Title         | 28   | 700    | primary         | One per page (`oct-title`)                                |
-| Section label | 14   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
+| Section label | 14   | 600    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
 | Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |
 | Detail        | 13   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |

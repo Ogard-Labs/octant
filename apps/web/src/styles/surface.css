@@ -57,7 +57,7 @@
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: 1.3;
   text-transform: none;
