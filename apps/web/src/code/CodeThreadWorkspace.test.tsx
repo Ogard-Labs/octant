@@ -1248,7 +1248,7 @@ describe("CodeThreadWorkspace", () => {
   it("keeps post-preview Canvas tools out of the live thread toolbar", () => {
     render(
       <CodeThreadWorkspace
-        canvasClient={{} as never}
+        canvasClient={{ threadReferenceCards: async () => ({ cards: [] }) } as never}
         controller={controller()}
         threadId={threadId}
       />,

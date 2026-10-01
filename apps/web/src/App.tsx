@@ -2130,10 +2130,11 @@ function LaunchedShell(
    * new writing, so reopening an old thread never raises the dock.
    */
   function noteCanvasReferences(
+    mode: OctantMode,
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ): void {
-    const key = threadUtilityDockKey("chat", threadId);
+    const key = threadUtilityDockKey(mode, threadId);
     const documents = cards
       .filter(isAuthorizedCanvasDocument)
       .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));

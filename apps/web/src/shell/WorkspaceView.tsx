@@ -373,6 +373,7 @@ export interface WorkspaceViewProps {
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
+    mode: OctantMode,
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ) => void;
@@ -1002,6 +1003,14 @@ function renderCodeTab(
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : {
+              onCanvasReferencesObserved: (
+                threadId: string,
+                cards: ReadonlyArray<CanvasThreadReferenceCard>,
+              ) => props.onCanvasReferencesObserved?.("code", threadId, cards),
+            })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
       />
     </Suspense>
@@ -1440,7 +1449,10 @@ function renderNonCodeTab(
           : { onOpenCanvasReference: props.onOpenCanvasReference })}
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
-          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+          : {
+              onCanvasReferencesObserved: (threadId, cards) =>
+                props.onCanvasReferencesObserved?.("chat", threadId, cards),
+            })}
         {...(props.onThreadHandedOff === undefined
           ? {}
           : { onThreadHandedOff: props.onThreadHandedOff })}
@@ -1539,6 +1551,12 @@ function renderNonCodeTab(
                 title={tab.title}
                 providerGroups={props.workProviderGroups ?? []}
                 {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+                {...(props.onCanvasReferencesObserved === undefined
+                  ? {}
+                  : {
+                      onCanvasReferencesObserved: (threadId, cards) =>
+                        props.onCanvasReferencesObserved?.("work", threadId, cards),
+                    })}
                 {...(props.imageGenerationClient === undefined
                   ? {}
                   : { imageGenerationClient: props.imageGenerationClient })}
