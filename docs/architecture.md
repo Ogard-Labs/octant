@@ -1117,6 +1117,16 @@ no per-package signature — so the design pins URL plus hash and reports
 honestly when they disagree. See
 [decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
 
+The Simulator pane attaches `serve-sim` for an already booted Simulator and
+keeps the desktop device helper when that stream is missing or produces no
+frame. The Android pane attaches `serve-avd` for an already booted
+`emulator-<port>` serial and keeps `adb` screencap and `adb shell input`
+otherwise. Boot still uses the emulator binary. The tools run in Electron
+main. The server reaches Android streaming through a loopback broker
+(`OCTANT_SERVE_AVD_BROKER_URL`, `OCTANT_SERVE_AVD_BROKER_TOKEN`) the same way
+it reaches the Simulator device helper. An agent must not launch
+Simulator.app, `serve-sim`, or `serve-avd`.
+
 ### Plugin boundaries and remaining extraction
 
 The approved design bounds a feature's reach through public, provider-neutral
