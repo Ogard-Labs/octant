@@ -96,18 +96,19 @@ describe("ComposerContextMeter", () => {
     },
   );
 
-  it("shows a circular used-versus-available meter with an accessible text label", () => {
+  it("shows a thin used-versus-available bar with its percentage and an accessible text label", () => {
     render(<Harness />);
     const button = screen.getByRole("button", { name: /Show context usage for Fixture thread/i });
     expect(button).toBeVisible();
     expect(button).toHaveAccessibleName(/104 \/ 1K \(10%\)/);
     expect(button).toHaveAccessibleName(/Next turn: Healthy/);
-    expect(button.querySelector(".composer-context-meter__ring")).not.toBeNull();
-    // The arc is measured on a path length of 100, so its dash is the share.
-    expect(button.querySelector(".composer-context-meter__used")).toHaveAttribute(
-      "stroke-dasharray",
-      "10.4 100",
+    expect(button.querySelector(".composer-context-meter__bar")).not.toBeNull();
+    expect(button.querySelector("svg")).toBeNull();
+    // The fill is as wide as the share of the track.
+    expect((button.querySelector(".composer-context-meter__used") as HTMLElement).style.width).toBe(
+      "10.4%",
     );
+    expect(button.querySelector(".composer-context-meter__percent")).toHaveTextContent("10%");
     expect(document.querySelector(".composer-context-meter")).not.toHaveAttribute("data-fill");
     expect(
       screen.getByText(/Fixture thread\. Last sent 104 \/ 1K \(10%\)\. Provider reported\./),
@@ -267,7 +268,7 @@ describe("ComposerContextMeter", () => {
     );
   });
 
-  it("fills the ring from the window the provider itself reported when no context plan exists", async () => {
+  it("fills the bar from the window the provider itself reported when no context plan exists", async () => {
     const user = userEvent.setup();
     render(
       <ComposerContextMeterProvider
@@ -302,7 +303,7 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
   });
 
-  it("fills the ring from the model's declared limit when the provider reported occupancy without a window", async () => {
+  it("fills the bar from the model's declared limit when the provider reported occupancy without a window", async () => {
     const user = userEvent.setup();
     render(
       <ComposerContextMeterProvider
@@ -330,7 +331,7 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("context limit declared for the selected model");
   });
 
-  it("fills the ring from the fullest account limit when no window is known at all", async () => {
+  it("fills the bar from the fullest account limit when no window is known at all", async () => {
     render(
       <ComposerContextMeterProvider
         fallback={{
@@ -354,11 +355,12 @@ describe("ComposerContextMeter", () => {
       </ComposerContextMeterProvider>,
     );
 
-    // The label names the figure so a screen reader is not told the ring is a
+    // The label names the figure so a screen reader is not told the bar is a
     // context share when it is the account's quota.
-    screen.getByRole("button", { name: /ring shows 91% of the 5-hour limit used/i });
+    screen.getByRole("button", { name: /bar shows 91% of the 5-hour limit used/i });
     const used = document.querySelector(".composer-context-meter__used");
-    expect(used).not.toBeNull();
+    expect((used as HTMLElement).style.width).toBe("91%");
+    expect(document.querySelector(".composer-context-meter__percent")).toHaveTextContent("91%");
   });
 
   it("keeps provider usage and account limits useful when no context plan exists", async () => {
@@ -402,12 +404,12 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent(/5-hour limitResets now91%/);
   });
 
-  it("moves the ring to its new share instead of snapping between renders", () => {
+  it("moves the bar to its new share instead of snapping between renders", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/context/context.css"), "utf8");
 
-    // The ring is the only place a reader watches the window fill, and a value
+    // The bar is the only place a reader watches the window fill, and a value
     // that jumps reads as a redraw rather than as consumption.
-    expect(styles).toMatch(/\.composer-context-meter__used \{[^}]*transition:\s*stroke-dasharray/);
+    expect(styles).toMatch(/\.composer-context-meter__used \{[^}]*transition:\s*width/);
     // Motion is a preference, not a fact about the data.
     expect(styles).toMatch(
       /@media \(prefers-reduced-motion: reduce\) \{\s*\.composer-context-meter__used \{\s*transition: none;/,
@@ -449,7 +451,7 @@ describe("ComposerContextMeter", () => {
     expect(meter.closest(".context-window-popover__limit")).toHaveAttribute("data-level", "near");
   });
 
-  it("marks the ring with a red dot when a provider limit runs low or is spent", () => {
+  it("marks the bar with an alert mark when a provider limit runs low or is spent", () => {
     render(
       <ComposerContextMeterProvider
         fallback={{
@@ -473,7 +475,7 @@ describe("ComposerContextMeter", () => {
     );
 
     // The status line that used to spell the limit out moved into the meter's
-    // panel, so the at-a-glance warning is a dot on the ring itself.
+    // panel, so the at-a-glance warning is a mark at the bar's end.
     const alert = document.querySelector(".composer-context-meter__alert");
     expect(alert).not.toBeNull();
     expect(
@@ -484,7 +486,7 @@ describe("ComposerContextMeter", () => {
     ).toBeVisible();
   });
 
-  it("turns the ring's dot from warning red to exhausted red as a limit spends out", () => {
+  it("moves the alert mark from warning to exhausted as a limit spends out", () => {
     const { rerender } = render(
       <ComposerContextMeterProvider
         fallback={{
@@ -523,7 +525,7 @@ describe("ComposerContextMeter", () => {
     ).toBe("exhausted");
   });
 
-  it("marks the ring as exhausted when the context snapshot's service quota is spent", () => {
+  it("marks the bar as exhausted when the context snapshot's service quota is spent", () => {
     const base = contextFixture();
     const snapshot = {
       ...base,
@@ -537,7 +539,7 @@ describe("ComposerContextMeter", () => {
     expect(screen.getByRole("button", { name: /A provider limit is exhausted.?$/i })).toBeVisible();
   });
 
-  it("draws no alert dot while every provider limit is allowed", () => {
+  it("draws no alert mark while every provider limit is allowed", () => {
     render(
       <ComposerContextMeterProvider
         fallback={{
@@ -611,7 +613,7 @@ describe("ComposerContextMeter", () => {
     expect(within(popover).getByLabelText("This thread")).toHaveTextContent("Input25,500Output38");
   });
 
-  it("turns the ring to the warning ink once most of the window is used", () => {
+  it("turns the bar to the warning ink once most of the window is used", () => {
     render(
       <ComposerContextMeterProvider
         fallback={{ contextWindow: 200_000, contextTokens: 170_000, limits: [] }}
@@ -624,10 +626,10 @@ describe("ComposerContextMeter", () => {
       </ComposerContextMeterProvider>,
     );
     expect(document.querySelector(".composer-context-meter")).toHaveAttribute("data-fill", "high");
-    expect(document.querySelector(".composer-context-meter__used")).toHaveAttribute(
-      "stroke-dasharray",
-      "85 100",
-    );
+    expect(
+      (document.querySelector(".composer-context-meter__used") as HTMLElement).style.width,
+    ).toBe("85%");
+    expect(document.querySelector(".composer-context-meter__percent")).toHaveTextContent("85%");
   });
 
   it("names provider windows by their length and says when they reset", async () => {

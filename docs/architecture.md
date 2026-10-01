@@ -704,21 +704,14 @@ flowchart LR
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
-- **Composer feature tips.** An empty follow-up composer in a Chat, Work, or
-  Code thread shows a short tip about a built-in feature instead of a fixed
-  placeholder. A start screen's composer asks in plain words instead ("Ask
-  anything…", "Describe the work…", "Describe the change…"): a first-time
-  person meeting "Tip: Press Enter to send" where a prompt belongs could not
-  tell what the box was for. A session-local
-  sequence advances when a composer mounts or its thread identity changes,
-  including returning to a thread and creating another draft. It stays steady
-  through typing and routine updates. Callers offer only mounted capabilities:
-  file and thread mentions, commands, Browser, Computer, and Code Plan mode.
-  Command-specific tips cover thread search, new threads, Settings, Zen mode,
-  and skills only when their commands are offered by the current composer.
-  Removing a capability replaces an ineligible tip. Active responses retain
-  their send-next-message placeholder. Tips use no timers, persisted history,
-  network calls, or live announcements; accessible input labels remain stable.
+- **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
+  Code thread says "Reply…" and nothing else: a rotating feature tip in the
+  place of a prompt read as noise to someone who already knew the feature and
+  said nothing to someone who did not. A start screen's composer asks in plain
+  words instead ("Ask anything…", "Describe the work…", "Describe the change…"),
+  because a first-time person has not started a conversation to reply to.
+  Active responses retain their send-next-message placeholder. Accessible input
+  labels remain stable.
 
 ## Providers
 
@@ -827,7 +820,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
 
 ### Context and usage accounting
 
-Context usage is a circular used-versus-available meter on
+Context usage is a thin used-versus-available bar, with its percentage, on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
 composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain

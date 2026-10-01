@@ -3,11 +3,15 @@
   flex: 0 0 auto;
 }
 
+/* A bar and its figure sit in one trigger, so the button grows to fit them
+   instead of holding a 28px square. Its height keeps the composer row's
+   control rhythm. */
 .composer-context-meter__button {
-  width: 28px;
+  width: auto;
   height: 28px;
   min-height: 0;
-  padding: 0;
+  gap: 8px;
+  padding: 0 8px;
   color: var(--octant-text-secondary);
 }
 
@@ -17,30 +21,29 @@
   color: var(--octant-text-primary);
 }
 
-.composer-context-meter__ring {
+/* The track is the whole window, so it stays a fixed faint step below the
+   fill in every theme: mixed from the foreground rather than painted at the
+   border ink, which disappeared against some grounds. */
+.composer-context-meter__bar {
   display: block;
-  width: 16px;
-  height: 16px;
-  overflow: visible;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
 }
 
-/* The track is the whole window, so it has to read as a ring on its own. At
-   the border ink it disappeared and a short arc looked like a spinner. Mixing
-   from the foreground keeps it a fixed step below the arc in every theme. */
-.composer-context-meter__track {
-  stroke: color-mix(in oklab, var(--octant-text-primary) 30%, transparent);
-  stroke-width: 2;
-}
-
-/* The arc wears the foreground ink rather than the button's secondary ink:
+/* The fill wears the foreground ink rather than the button's secondary ink:
    it is the figure, and the track is the ground. It moves to its new length
-   rather than jumping to it — a value that snaps between renders reads as a
+   rather than jumping to it; a value that snaps between renders reads as a
    redraw rather than as consumption. */
 .composer-context-meter__used {
-  stroke: var(--octant-text-primary);
-  stroke-width: 2;
-  stroke-linecap: round;
-  transition: stroke-dasharray var(--oct-motion-base) var(--oct-ease-motion);
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--octant-text-primary);
+  transition: width var(--oct-motion-base) var(--oct-ease-motion);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -49,22 +52,53 @@
   }
 }
 
-/* Past four fifths of the window the next long turn may not fit; the arc
+.composer-context-meter__percent {
+  min-width: 4ch;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: left;
+}
+
+/* Past four fifths of the window the next long turn may not fit; the fill
    takes the theme's warning ink, and the trigger's name carries the figure
    for anyone who cannot see the change. */
 .composer-context-meter[data-fill="high"] .composer-context-meter__used {
-  stroke: var(--oct-warn-fg);
+  background: var(--oct-warn-fg);
 }
 
-/* A provider usage limit is at warning or exhausted. The dot is the only
+/* A provider usage limit is at warning or exhausted. The mark is the only
    at-a-glance alert left in the composer row now that the status line lives
-   in the meter's panel; exhausted takes the red the line used to wear. */
+   in the meter's panel. In the default theme it is told apart by shape, not
+   hue: a hollow ring while the limit runs low, a solid dot once it is spent. */
 .composer-context-meter__alert {
-  fill: var(--octant-warning-text);
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--octant-text-primary);
+  border-radius: var(--oct-radius-pill);
 }
 
 .composer-context-meter[data-limit-alert="exhausted"] .composer-context-meter__alert {
-  fill: var(--octant-destructive);
+  background: var(--octant-text-primary);
+}
+
+:root[data-octant-style="vivid"]
+  .composer-context-meter[data-fill="high"]
+  .composer-context-meter__used {
+  background: var(--octant-palette-orange);
+}
+
+:root[data-octant-style="vivid"] .composer-context-meter__alert {
+  border-color: var(--octant-palette-orange);
+}
+
+:root[data-octant-style="vivid"]
+  .composer-context-meter[data-limit-alert="exhausted"]
+  .composer-context-meter__alert {
+  border-color: var(--octant-palette-red);
+  background: var(--octant-palette-red);
 }
 
 /* Position/anchoring comes from OctantPopover's floating positioner
@@ -592,8 +626,8 @@
 }
 
 @media (prefers-contrast: more) {
-  .composer-context-meter__track {
-    stroke: var(--octant-text-primary);
+  .composer-context-meter__bar {
+    background: color-mix(in oklab, var(--octant-text-primary) 30%, transparent);
   }
 
   .context-health-warning {

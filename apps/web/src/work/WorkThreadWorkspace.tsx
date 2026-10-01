@@ -1,4 +1,3 @@
-import { useComposerTip } from "../composer/useComposerTip";
 import {
   BrowserUseMention,
   ComputerUseMention,
@@ -552,14 +551,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
-  });
-  const tip = useComposerTip({
-    scopeKey: String(props.threadId),
-    files: props.fileMentionClient !== undefined,
-    threads: threadMentions.composer !== undefined,
-    commands: slash.commandIds,
-    browser: browser.available,
-    computer: computer.available,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -1787,7 +1778,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               if (creating || completionLocked) return;
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={turnRunning ? "Send the next message…" : tip}
+            placeholder={turnRunning ? "Send the next message…" : "Reply…"}
             ref={textareaRef}
             rows={4}
             value={prompt}

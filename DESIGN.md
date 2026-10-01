@@ -239,8 +239,9 @@ A Work or Code pane with no thread and no Project asks one centred question
 ("Pick a folder to work in"), says in one sentence what choosing a folder
 means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
-Start-screen composers ask in plain words ("Ask anything…") rather than
-showing a feature tip; tips belong to a thread's follow-up composer.
+Start-screen composers ask in plain words ("Ask anything…"); a thread's
+follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
+tip.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
@@ -915,10 +916,15 @@ skill collection shells remain open. The command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
-The context meter is a circular composer control, not a dock tab: a 16px
-gauge with a full faint track and a 2px round-capped arc filled clockwise from
-twelve o'clock by the used share, in the foreground ink (the theme's warning
-ink from 80%). It opens an opaque 320px popover: a header with the used and
+The context meter is a composer control, not a dock tab: a thin horizontal
+bar, 40px wide and 4px tall with rounded ends, whose faint track is the whole
+window and whose fill is the used share in the foreground ink (the theme's
+warning ink from 80%), followed by the percentage at the meta step. It is a bar
+and not a ring because a circle beside Send read as a loading spinner once a
+turn ended. A provider limit that runs low or is spent adds a small mark at the
+bar's end, a hollow ring and then a solid dot so the default theme needs no hue;
+the Vivid style tints it orange and red, and the fill orange at high use. It
+opens an opaque 320px popover: a header with the used and
 maximum figures and share, one 4px segmented bar whose empty track is the free
 space, a breakdown folded behind a chevron each time the popover opens, the
 provider's limits as a name, a reset countdown or weekday, a share, and a thin

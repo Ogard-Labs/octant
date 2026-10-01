@@ -63,7 +63,7 @@ material.
 
 ## Watching usage
 
-The active thread's composer shows a circular used-versus-available meter.
+The active thread's composer shows a thin used-versus-available bar with its percentage.
 Opening it — pointer, Enter, Space, or the configured keyboard shortcut —
 shows used tokens, the context-window maximum, the used percentage, free
 space, and only the categories the host actually measured. Estimated,

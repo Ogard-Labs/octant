@@ -1,5 +1,4 @@
 import type { ProviderModelOptionValues } from "@octant/contracts";
-import { useComposerTip } from "../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -476,15 +475,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft,
-  });
-  const tip = useComposerTip({
-    scopeKey: String(props.threadId),
-    files: true,
-    threads: threadMentions.composer !== undefined,
-    commands: slash.commandIds,
-    browser: browser.available,
-    computer: computer.available,
-    plan: true,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -1715,7 +1705,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={busy ? "Send the next message…" : tip}
+            placeholder={busy ? "Send the next message…" : "Reply…"}
             ref={textareaRef}
             rows={2}
             value={draft}

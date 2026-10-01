@@ -106,6 +106,20 @@ describe("ChatComposer", () => {
     expect(screen.getByRole("combobox", { name: "Model" })).toBeVisible();
   });
 
+  it("asks for a plain reply, and says the next message can be sent while a turn is running", () => {
+    const { rerender, props } = renderComposer();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute(
+      "placeholder",
+      "Reply…",
+    );
+
+    rerender(<ChatComposer {...props} isSending />);
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute(
+      "placeholder",
+      "Send the next message…",
+    );
+  });
+
   it("keeps its caller-owned multiline draft until the send succeeds", async () => {
     const user = userEvent.setup();
     const onDraftChange = vi.fn();
