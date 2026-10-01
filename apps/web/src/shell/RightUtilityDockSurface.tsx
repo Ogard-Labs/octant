@@ -37,6 +37,8 @@ export interface RightUtilityDockSurfaceProps {
   readonly onCloseTab: (tabId: string) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onSelectSurface: (tabId: string) => void;
+  /** What the dock shows above its tool launcher while no tool is chosen. */
+  readonly overview?: ReactNode;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly sideChat?: ReactNode;
@@ -111,7 +113,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       </header>
       <div className="dock-body right-utility-dock__content">
         {props.resolution.kind === "closed" ? (
-          <DockWorkMap onOpen={props.onOpenTab} surfaces={props.launchableSurfaces} />
+          <div className="dock-start">
+            {props.overview}
+            <DockWorkMap onOpen={props.onOpenTab} surfaces={props.launchableSurfaces} />
+          </div>
         ) : props.resolution.kind === "unavailable" ? (
           <ShellState
             message={unavailableMessage()}
