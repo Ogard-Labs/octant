@@ -1,4 +1,9 @@
-import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type {
+  ProjectAvailability,
+  ProjectColor,
+  ProjectId,
+  ProjectSummary,
+} from "@octant/contracts/projects";
 import type { ContextHealth } from "@octant/contracts/context";
 import {
   DEFAULT_SIDEBAR_ROW_PROPERTIES,
@@ -15,7 +20,6 @@ import {
   Code,
   Flag,
   Folder,
-  FolderOpen,
   FolderGit,
   FolderTree,
   History,
@@ -34,6 +38,12 @@ import {
 } from "lucide-react";
 import { groupProjectsForView, sortProjectsForView } from "@octant/domain";
 import { ContextHealthWarning } from "../context/ContextHealthWarning";
+import {
+  PROJECT_COLOR_MENU_ITEMS,
+  ProjectTile,
+  projectColorFromMenuValue,
+  projectColorMenuValue,
+} from "./ProjectTile";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
@@ -245,6 +255,8 @@ export interface ProjectSidebarSectionProps {
     readonly sequence: number;
   }>;
   readonly onArchive: (projectId: ProjectId) => void;
+  /** Absent when the host cannot accept a colour change, which hides the Colour choice. */
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onNewChatInProject?: (projectId: ProjectId) => void;
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
@@ -593,6 +605,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         hideWhenEmpty={hideEmptyProjects}
         label={label}
         onArchive={props.onArchive}
+        {...(props.onColorChange === undefined ? {} : { onColorChange: props.onColorChange })}
         onMove={props.onMove}
         onRestore={props.onRestore}
         {...(onNewThread === undefined ? {} : { newThreadVerb, onNewThreadInProject: onNewThread })}
@@ -853,6 +866,7 @@ function ProjectGroup(props: {
   readonly onAddProject?: () => void;
   readonly addProjectLabel?: "chat-project" | "folder";
   readonly onArchive: (projectId: ProjectId) => void;
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onRestore: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
@@ -980,7 +994,7 @@ function ProjectGroup(props: {
                 type="button"
                 variant="ghost"
               >
-                <ProjectFolderIcon expanded={showNested && expanded} project={project} />
+                <ProjectTile project={project} />
                 <span className="project-row__copy">
                   <span>{project.name}</span>
                   {unavailable ? <small>Relink required</small> : null}
@@ -1003,6 +1017,9 @@ function ProjectGroup(props: {
                 }
                 canMoveUp={(props.sort === undefined || props.sort === "manual") && index > 0}
                 onArchive={props.onArchive}
+                {...(props.onColorChange === undefined
+                  ? {}
+                  : { onColorChange: props.onColorChange })}
                 onMove={props.onMove}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
@@ -1101,28 +1118,12 @@ function ProjectStatusRollup(props: {
   );
 }
 
-function ProjectFolderIcon(props: {
-  readonly expanded: boolean;
-  readonly project: ProjectSummary;
-}) {
-  const Icon = props.expanded ? FolderOpen : props.project.type === "code" ? FolderGit : Folder;
-  return (
-    <span
-      aria-hidden="true"
-      className="project-row__folder-icon"
-      data-folder-state={props.expanded ? "open" : "closed"}
-      data-project-icon={props.project.type}
-    >
-      <Icon size={14} strokeWidth={1.65} />
-    </span>
-  );
-}
-
 function ProjectActionsMenu(props: {
   readonly canMoveDown: boolean;
   readonly canMoveUp: boolean;
   readonly nextProjectId?: ProjectId;
   readonly onArchive: (projectId: ProjectId) => void;
+  readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onOpen: (project: ProjectSummary) => void;
   readonly onReorder: (
@@ -1135,37 +1136,77 @@ function ProjectActionsMenu(props: {
   readonly previousProjectId?: ProjectId;
   readonly project: ProjectSummary;
 }) {
-  const items: ReadonlyArray<OctantMenuItem> = [
-    { label: "Open Project", value: "open" },
-    { label: props.project.pinned ? "Unpin Project" : "Pin Project", value: "pin" },
-    { disabled: !props.canMoveUp, label: "Move up", value: "up" },
-    { disabled: !props.canMoveDown, label: "Move down", value: "down" },
-    {
-      label: props.project.lifecycle === "archived" ? "Restore Project" : "Archive Project",
-      value: props.project.lifecycle === "archived" ? "restore" : "archive",
-    },
-  ];
+  const { project } = props;
+  const archived = project.lifecycle === "archived";
+  // An archived Project is read-only, so its colour is as fixed as its name.
+  const onColorChange = archived ? undefined : props.onColorChange;
   return (
-    <OctantMenu
-      items={items}
-      onValueChange={(value) => {
-        if (value === "open") props.onOpen(props.project);
-        if (value === "pin") props.onMove(props.project.id, !props.project.pinned);
-        if (value === "up") {
-          props.onReorder(props.project.id, props.project.pinned, props.previousProjectId);
-        }
-        if (value === "down") {
-          props.onReorder(props.project.id, props.project.pinned, undefined, props.nextProjectId);
-        }
-        if (value === "archive") props.onArchive(props.project.id);
-        if (value === "restore") props.onRestore(props.project.id);
-      }}
-      trigger={<MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />}
-      triggerClassName="project-row__action project-row__action--icon inline-flex items-center justify-center"
-      triggerLabel={`Project actions for ${props.project.name}`}
-      value=""
-      selectionMode="action"
-    />
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label={`Project actions for ${project.name}`}
+        className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
+      >
+        <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner className="z-50 outline-none window-no-drag">
+          <OctantMenuPopup className="window-no-drag">
+            <OctantMenuActionItem onClick={() => props.onOpen(project)}>
+              Open Project
+            </OctantMenuActionItem>
+            <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>
+              {project.pinned ? "Unpin Project" : "Pin Project"}
+            </OctantMenuActionItem>
+            <OctantMenuActionItem
+              disabled={!props.canMoveUp}
+              onClick={() => props.onReorder(project.id, project.pinned, props.previousProjectId)}
+            >
+              Move up
+            </OctantMenuActionItem>
+            <OctantMenuActionItem
+              disabled={!props.canMoveDown}
+              onClick={() =>
+                props.onReorder(project.id, project.pinned, undefined, props.nextProjectId)
+              }
+            >
+              Move down
+            </OctantMenuActionItem>
+            {onColorChange === undefined ? null : (
+              <OctantMenuSub>
+                <OctantMenuSubTrigger>Colour</OctantMenuSubTrigger>
+                <OctantMenuSubPopup>
+                  <OctantMenuRadioGroup
+                    onValueChange={(value) => {
+                      if (typeof value !== "string") return;
+                      const color = projectColorFromMenuValue(value);
+                      if (color !== undefined) onColorChange(project.id, color);
+                    }}
+                    value={projectColorMenuValue(project.color)}
+                  >
+                    {PROJECT_COLOR_MENU_ITEMS.map((item) => (
+                      <OctantMenuRadioItem closeOnClick key={item.value} value={item.value}>
+                        <span
+                          aria-hidden="true"
+                          className="flex size-4 items-center justify-center"
+                        >
+                          {item.icon}
+                        </span>
+                        {item.label}
+                      </OctantMenuRadioItem>
+                    ))}
+                  </OctantMenuRadioGroup>
+                </OctantMenuSubPopup>
+              </OctantMenuSub>
+            )}
+            <OctantMenuActionItem
+              onClick={() => (archived ? props.onRestore(project.id) : props.onArchive(project.id))}
+            >
+              {archived ? "Restore Project" : "Archive Project"}
+            </OctantMenuActionItem>
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
   );
 }
 

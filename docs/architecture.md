@@ -431,6 +431,16 @@ threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
+Every Project, in any mode, may carry one optional **colour**: a theme palette
+role (red, orange, yellow, green, teal, blue, purple, or pink) the person picks
+as the Project's identity. It lives on the Project record and is journaled as
+`project.color-changed@1`, so every client sees the same colour. Absent means no
+colour was picked and reads as a neutral mark; older Projects and events replay
+without it. `change-project-color` carries the role, or `null` to clear it, and
+follows the same rules as a rename: an archived Project refuses it, and a change
+that would leave the colour as it is journals nothing. The colour grants no
+authority and carries no status.
+
 A Work Project folder carries `AGENTS.md` (the person's standing brief, seeded
 once and never rewritten) and `STATUS.md` (where the work stands, with dated
 follow-ups and deadlines). Both are read into every Work turn ahead of the

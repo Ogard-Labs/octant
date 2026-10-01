@@ -123,18 +123,10 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(screen.queryByRole("navigation", { name: "Recent chats" })).not.toBeInTheDocument();
 
     const disclosure = screen.getByRole("button", { name: "Collapse Test" });
-    expect(disclosure.querySelector('[data-project-icon="chat"]')).toHaveAttribute(
-      "data-folder-state",
-      "open",
-    );
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     await user.click(disclosure);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
-    expect(disclosure.querySelector('[data-project-icon="chat"]')).toHaveAttribute(
-      "data-folder-state",
-      "closed",
-    );
     await user.click(disclosure);
     expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
 
@@ -2354,5 +2346,86 @@ describe("ProjectSidebarSection folded Project status", () => {
     await fold(user);
 
     expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
+  });
+});
+
+describe("ProjectSidebarSection colour", () => {
+  function renderWithColour(project: ProjectSummary, onColorChange = vi.fn()) {
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onColorChange={onColorChange}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[project]}
+      />,
+    );
+    return onColorChange;
+  }
+
+  it("shows the Project's first letter on a tile in its colour, and a neutral tile without one", () => {
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[{ ...chatProjectA, color: "teal" }, chatProjectB]}
+      />,
+    );
+
+    const colouredTile = screen
+      .getByRole("button", { name: /Collapse Test/ })
+      .querySelector(".project-tile");
+    expect(colouredTile).toHaveTextContent("T");
+    expect(colouredTile).toHaveAttribute("data-view-color", "teal");
+    const neutralTile = screen
+      .getByRole("button", { name: /Collapse Research/ })
+      .querySelector(".project-tile");
+    expect(neutralTile).toHaveTextContent("R");
+    expect(neutralTile).toHaveAttribute("data-project-color", "none");
+    expect(neutralTile).not.toHaveAttribute("data-view-color");
+  });
+
+  it("picks a colour and clears it from the row menu", async () => {
+    const user = userEvent.setup();
+    const onColorChange = renderWithColour({ ...chatProjectA, color: "red" });
+
+    async function chooseColour(name: string) {
+      screen.getByRole("button", { name: "Project actions for Test" }).focus();
+      await user.keyboard("{ArrowDown}");
+      (await screen.findByRole("menuitem", { name: "Colour" })).focus();
+      await user.keyboard("{ArrowRight}");
+      const choice = await screen.findByRole("menuitemradio", { name });
+      choice.focus();
+      return choice;
+    }
+
+    expect(await chooseColour("Red")).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{Escape}{Escape}");
+    await chooseColour("Green");
+    await user.keyboard(" ");
+    expect(onColorChange).toHaveBeenCalledWith(chatProjectA.id, "green");
+
+    await chooseColour("No colour");
+    await user.keyboard(" ");
+    expect(onColorChange).toHaveBeenLastCalledWith(chatProjectA.id, null);
+  });
+
+  it("offers no colour change on an archived Project", async () => {
+    const user = userEvent.setup();
+    renderWithColour({ ...chatProjectA, lifecycle: "archived" });
+
+    screen.getByRole("button", { name: "Project actions for Test" }).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("menuitem", { name: "Restore Project" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Colour" })).not.toBeInTheDocument();
   });
 });

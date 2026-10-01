@@ -833,7 +833,13 @@ are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
-being there. Provider identity remains at the leading edge. One fixed trailing
+being there. Provider identity remains at the leading edge. A Project row leads with a 20px
+rounded letter tile: the Project's first letter, white, on the colour the person
+picked from the theme palette, or a neutral tile when none is set. The same tile
+heads the Project overview, where it is the colour picker; the row's actions menu
+offers Colour with a No colour choice, and an archived Project cannot change it.
+The colour is identity, never status: it never stands in for a warning, a
+selection, or an activity mark. One fixed trailing
 status position shows a working spinner, an attention symbol, a clock when a
 snooze ends, or a neutral unread dot, in that priority order. Its accessible
 label and hover details retain overlapping states; a row never renders a

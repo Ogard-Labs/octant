@@ -5957,6 +5957,9 @@ function LaunchedShell(
                           unfiledLabel: "Recents" as const,
                         })}
                     onArchive={(projectId) => void projectController.setArchived(projectId, true)}
+                    onColorChange={(projectId, color) => {
+                      void projectController.setColor(projectId, color);
+                    }}
                     onMove={(projectId, pinned) => void projectController.move(projectId, pinned)}
                     {...(activeMode === "chat"
                       ? {
@@ -6509,6 +6512,7 @@ function LaunchedShell(
                     onPreviewResize={controller.previewSplitResize}
                     onRelinkProject={projectController.relink}
                     onRenameProject={projectController.rename}
+                    onProjectColorChange={projectController.setColor}
                     onProviderPolicyChange={projectController.setProviderPolicy}
                     onSplitPane={(paneId, orientation, placement) =>
                       void controller.splitPane(paneId, orientation, placement)

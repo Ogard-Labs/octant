@@ -24,6 +24,7 @@ import type {
 import type {
   ProjectAvailability,
   ProjectId,
+  ProjectColor,
   ProjectProviderPolicy,
   ProjectSummary,
 } from "@octant/contracts/projects";
@@ -352,6 +353,10 @@ export interface WorkspaceViewProps {
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
+  readonly onProjectColorChange?: (
+    projectId: ProjectId,
+    color: ProjectColor | null,
+  ) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
@@ -1924,6 +1929,9 @@ function renderNonCodeTab(
         providerInstances={props.providerController.instances ?? []}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
+        {...(props.onProjectColorChange === undefined
+          ? {}
+          : { onColorChange: props.onProjectColorChange })}
         project={project}
         canvasInventory={
           props.canvasClient !== undefined && props.onOpenCanvas !== undefined ? (
