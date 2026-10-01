@@ -415,6 +415,80 @@ describe("CodeThreadBoard", () => {
     expect(screen.getByText("2 active runs")).toBeVisible();
   });
 
+  it("shows what an executing thread is doing under its title and says nothing live for one that is not", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({
+          id: "01",
+          status: "in-progress",
+          title: "Reporting thread",
+          activitySummary: "Running the migration tests",
+        }),
+        card({ id: "02", status: "in-progress", title: "Silent thread" }),
+        card({
+          id: "03",
+          status: "waiting",
+          title: "Waiting thread",
+          activitySummary: "Paused on a review",
+        }),
+      ]),
+    );
+    render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByRole("button", { name: "Reporting thread" });
+    expect(cardFor("Reporting thread").querySelector(".board-card-live")).toHaveTextContent(
+      "Running the migration tests",
+    );
+    // The latest line is shown once: as the live line, not again in the facts.
+    expect(cardFor("Reporting thread").querySelector(".board-card-facts")).not.toHaveTextContent(
+      "Running the migration tests",
+    );
+    expect(cardFor("Silent thread").querySelector(".board-card-live")).toHaveTextContent(
+      "Working\u2026",
+    );
+    expect(cardFor("Waiting thread").querySelector(".board-card-live")).toBeNull();
+    expect(cardFor("Waiting thread")).toHaveTextContent("Paused on a review");
+  });
+
+  it("marks each column head by shape, and turns the In Progress mark only while a card is executing", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({ id: "01", status: "in-progress", title: "Running" }),
+        card({ id: "02", status: "done", title: "Finished" }),
+      ]),
+    );
+    const { unmount } = render(
+      <CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />,
+    );
+
+    const inProgress = await screen.findByRole("region", { name: "In progress (1)" });
+    expect(inProgress.querySelector(".board-status-mark")).toHaveAttribute(
+      "data-executing",
+      "true",
+    );
+    expect(inProgress.querySelector(".board-status-mark__spin")).not.toBeNull();
+    const ready = screen.getByRole("region", { name: "Ready (0)" });
+    expect(ready.querySelector(".board-status-mark__dot")).toHaveAttribute("data-fill", "hollow");
+    const waiting = screen.getByRole("region", { name: "Waiting (0)" });
+    expect(waiting.querySelector(".board-status-mark__dot")).toHaveAttribute("data-fill", "solid");
+    const done = screen.getByRole("region", { name: "Done (1)" });
+    expect(done.querySelector(".board-status-mark svg")).not.toBeNull();
+    unmount();
+
+    // An In Progress column with no executing card is a filled dot, not a
+    // mark that turns while nothing runs.
+    const idle = vi.fn(async () =>
+      view([{ ...card({ id: "03", status: "in-progress" }), executing: false }]),
+    );
+    render(<CodeThreadBoard loadBoard={idle} projects={projects} storage={memoryStorage()} />);
+    const idleColumn = await screen.findByRole("region", { name: "In progress (1)" });
+    expect(idleColumn.querySelector(".board-status-mark__spin")).toBeNull();
+    expect(idleColumn.querySelector(".board-status-mark__dot")).toHaveAttribute(
+      "data-fill",
+      "solid",
+    );
+  });
+
   it("keeps every column on an empty board with a quiet line instead of a raised card", async () => {
     const loadBoard = vi.fn(async () => view([]));
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
@@ -566,6 +640,7 @@ describe("CodeThreadBoard", () => {
       <CodeThreadBoard
         loadBoard={loadBoard}
         projects={projects}
+        providerKinds={new Map([["00000000-0000-4000-8000-0000000050fe", "codex"]])}
         providerLabels={new Map([["00000000-0000-4000-8000-0000000050fe", "Studio"]])}
         storage={memoryStorage()}
       />,
@@ -574,18 +649,22 @@ describe("CodeThreadBoard", () => {
     await screen.findByRole("button", { name: "Full card" });
     const article = cardFor("Full card");
     expect(article).toHaveTextContent("Fixing the failing lint rule");
-    // The card carries the Project as an eyebrow and one line under the
-    // title: what the thread waits on, who runs it, when it last moved. The
-    // checkout, branch, plan, and review facts stay on the list view.
+    // The card carries the Project as an eyebrow, one line of what the thread
+    // waits on, and a footer: who runs it, its branch and diff size, and when
+    // it last moved. The checkout, plan, and review facts stay on the list view.
     expect(article.querySelector(".board-card-eyebrow")).toHaveTextContent("Project A");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
     expect(facts).toHaveTextContent(/Project projection missing/);
-    expect(facts).toHaveTextContent("Studio");
-    expect(facts).toHaveTextContent(/\d+d ago/);
     expect(facts).not.toHaveTextContent("Current checkout");
-    expect(facts).not.toHaveTextContent("feature/board");
     expect(facts).not.toHaveTextContent("3 of 7 tasks");
+    const meta = article.querySelector(".board-card-meta");
+    if (meta === null) throw new Error("Expected the card footer");
+    expect(meta).toHaveTextContent("Studio");
+    expect(meta.querySelector(".provider-glyph")).toHaveAttribute("data-driver-kind", "codex");
+    expect(meta.querySelector(".board-card-meta__branch")).toHaveTextContent("feature/board");
+    expect(meta.querySelector(".board-card-meta__diff")).toHaveTextContent("+12\u22123");
+    expect(meta.querySelector(".board-card-meta__age")).toHaveTextContent(/\d+d ago/);
     expect(article.querySelector(".board-card-blocked")).toBeNull();
     expect(article.querySelector("details")).toBeNull();
   });
@@ -619,6 +698,21 @@ describe("CodeThreadBoard", () => {
     for (const column of columns) {
       expect(column.className).toContain("board-col");
     }
+  });
+
+  it("rests the columns in soft wells with the cards inside them", () => {
+    expect(octantCss).toMatch(/\.board\s*\{[^}]*gap:\s*var\(--oct-space-3\)/s);
+    expect(octantCss).toMatch(
+      /\.board-col\s*\{[^}]*padding:\s*var\(--oct-space-2\)[^}]*border:\s*1px solid var\(--oct-border-soft\)[^}]*border-radius:\s*var\(--oct-radius-md\)[^}]*background:\s*var\(--board-well\)/s,
+    );
+    expect(octantCss).toMatch(
+      /--board-well:\s*color-mix\(in oklab, var\(--octant-text-primary\) 3%, var\(--octant-workspace\)\)/,
+    );
+    // The head wears the well's paint so a sticky head is never a patch.
+    expect(octantCss).toMatch(/\.board-col-head\s*\{[^}]*background:\s*var\(--board-well\)/s);
+    expect(octantCss).toMatch(
+      /\.board-card\s*\{[^}]*padding:\s*var\(--oct-space-3\)[^}]*border-radius:\s*var\(--oct-radius-inset\)/s,
+    );
   });
 
   it("keeps the board body horizontally scrollable instead of overflowing the page", async () => {

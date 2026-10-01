@@ -11,6 +11,11 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ThreadBoardCardLive,
+  ThreadBoardCardMeta,
+  type ThreadBoardCardMetaProps,
+} from "../threadBoard/ThreadBoardCardParts";
 import { cardViewExtras, ThreadBoardBody } from "../threadBoard/ThreadBoardView";
 import {
   activityLabel,
@@ -71,6 +76,8 @@ export interface CodeThreadBoardProps {
   readonly unreadThreadIds?: ReadonlySet<string>;
   /** Display names for provider instances, keyed by instance id. */
   readonly providerLabels?: ReadonlyMap<string, string>;
+  /** Driver kinds for provider instances, keyed by instance id; picks the provider mark. */
+  readonly providerKinds?: ReadonlyMap<string, string>;
   /** Narrow view is a grouped list; wide view is compact columns. */
   readonly isNarrow?: boolean;
 }
@@ -461,6 +468,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
               ...(props.providerLabels === undefined
                 ? {}
                 : { providerLabels: props.providerLabels }),
+              ...(props.providerKinds === undefined ? {} : { providerKinds: props.providerKinds }),
               ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
               ...(props.onSelectPullRequest === undefined
                 ? {}
@@ -482,6 +490,7 @@ function CodeBoardCardView(props: {
   readonly unread: boolean;
   readonly projectName?: string;
   readonly providerLabel?: string;
+  readonly providerKind?: string;
   readonly onOpen?: (target: CodeThreadOpenTarget) => void;
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
@@ -528,14 +537,19 @@ function CodeBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      {/* A card says what the thread is doing now, who runs it, and when it
-          last moved; the checkout, branch, plan, and review facts live in the
-          list view and on the thread. Stacked on the card they made every
-          thread a wall of metadata with the same weight as its title. */}
+      {/* An executing thread says what it is doing under its title. */}
+      {props.layout === "card" && card.executing ? (
+        <ThreadBoardCardLive summary={card.childAgents.latestSummary} />
+      ) : null}
+      {/* A card says what the thread is waiting on or doing now; the footer
+          names who runs it, its branch and diff, and when it last moved. The
+          checkout, plan, and review facts live in the list view and on the
+          thread. Stacked on the card they made every thread a wall of
+          metadata with the same weight as its title. */}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
         {(props.layout === "list"
           ? cardFacts(card, props.projectName, props.providerLabel)
-          : cardSummary(card, props.providerLabel, waitingReason)
+          : cardSummary(card, waitingReason)
         ).map((fact) => (
           <span className={fact.className ?? "fact"} key={fact.key} title={fact.title ?? fact.text}>
             {fact.icon}
@@ -552,6 +566,9 @@ function CodeBoardCardView(props: {
           : { onSelect: props.onSelectPullRequest })}
         summaries={card.pullRequestSummaries}
       />
+      {props.layout === "card" ? (
+        <ThreadBoardCardMeta {...cardMeta(card, props.providerLabel, props.providerKind)} />
+      ) : null}
       {props.layout === "list" && waitingReason !== undefined ? (
         <span className="board-card-blocked" title={waitingReason}>
           {waitingReason}
@@ -586,15 +603,18 @@ function waitingReasonText(card: CodeBoardCard): string | undefined {
   return codeBoardStatusReasonLabel(card.statusReason);
 }
 
-/** The one line under a card title: activity, who runs it, when it last moved. */
+/**
+ * The line under a card title: what the thread waits on, its latest activity
+ * (an executing thread shows that as its live line instead), active runs, and
+ * failing checks.
+ */
 function cardSummary(
   card: CodeBoardCard,
-  providerLabel: string | undefined,
   waitingReason: string | undefined,
 ): ReadonlyArray<CardFact<ReactNode>> {
   const facts: CardFact<ReactNode>[] = [];
   if (waitingReason !== undefined) facts.push({ key: "waiting", text: waitingReason });
-  if (card.childAgents.latestSummary !== undefined) {
+  if (card.childAgents.latestSummary !== undefined && !card.executing) {
     facts.push({ key: "activity", text: card.childAgents.latestSummary });
   }
   if (card.childAgents.active > 0) {
@@ -606,15 +626,37 @@ function cardSummary(
   if (card.checks.state === "failing") {
     facts.push({ key: "checks", text: "Checks failing", className: "fact bad" });
   }
-  if (providerLabel !== undefined) facts.push({ key: "provider", text: providerLabel });
-  if (card.lastMeaningfulActivityAt !== null) {
-    facts.push({
-      key: "activity-at",
-      text: relativeTimeLabel(card.lastMeaningfulActivityAt),
-      title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
-    });
-  }
   return facts;
+}
+
+/** The card footer: provider, worktree branch, diff size, and age. */
+function cardMeta(
+  card: CodeBoardCard,
+  providerLabel: string | undefined,
+  providerKind: string | undefined,
+): ThreadBoardCardMetaProps {
+  const { worktree, changedFiles } = card;
+  return {
+    ...(providerLabel === undefined
+      ? {}
+      : { provider: { label: providerLabel, driverKind: providerKind ?? providerLabel } }),
+    ...(worktree.kind === "available" && worktree.head.kind === "branch"
+      ? { branch: worktree.head.name }
+      : {}),
+    // An unchanged tree has nothing to count; "+0 −0" would only be noise.
+    ...(changedFiles.kind === "observed" &&
+    (changedFiles.insertions > 0 || changedFiles.deletions > 0)
+      ? { diff: { insertions: changedFiles.insertions, deletions: changedFiles.deletions } }
+      : {}),
+    ...(card.lastMeaningfulActivityAt === null
+      ? {}
+      : {
+          age: {
+            label: relativeTimeLabel(card.lastMeaningfulActivityAt),
+            title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
+          },
+        }),
+  };
 }
 
 function cardFacts(

@@ -8,11 +8,11 @@
 .code-board .board-col-body {
   gap: var(--oct-space-2);
   max-height: 100%;
-  padding: var(--oct-space-2) 0;
+  padding: 0;
 }
 
 .code-board .board-card {
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-3);
   border: 1px solid var(--oct-border-soft);
   font-family: var(--oct-font-display);
 }
@@ -76,12 +76,14 @@
   font-size: var(--oct-text-xs);
 }
 
-/* Pull-request chips inside a card keep the compact facts grammar and
-   truncate so a long PR title never forces the card wider than its column. */
+/* A pull request inside a card is a small preview box: its title on the
+   first line behind the PR mark, then the repository, state, and checks
+   beneath it. Every line truncates so a long PR title never forces the card
+   wider than its column. */
 .board-card-pr-list {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -96,7 +98,7 @@
   padding: 0 var(--oct-space-1);
   border: 1px solid var(--oct-border-soft);
   border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
+  background: color-mix(in oklab, var(--octant-text-primary) 3%, transparent);
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -104,7 +106,15 @@
 }
 
 .board-card-pr {
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: var(--oct-space-2);
+  white-space: normal;
   text-align: left;
   cursor: pointer;
 }
@@ -115,13 +125,15 @@
 }
 
 .board-card-pr .icon {
+  grid-column: 1;
+  grid-row: 1;
   width: 12px;
   height: 12px;
-  flex: 0 0 auto;
 }
 
 .board-card-pr-title {
-  flex: 1 1 auto;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -129,8 +141,13 @@
 }
 
 .board-card-pr-meta {
-  flex: 0 0 auto;
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
   color: var(--oct-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .board-card-pr-more {
@@ -183,4 +200,151 @@ ul.board-col-body {
   .code-board .board-card-facts .fact {
     white-space: normal;
   }
+}
+
+/* Column head mark. The shapes differ (hollow ring, turning arc or filled dot,
+   filled dot, check) so the default theme tells the columns apart without a
+   hue; the Vivid style below tints them. The slot is 12px so the dot and the
+   check share one centre. */
+.board-status-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--oct-muted);
+}
+
+.board-status-mark[data-status="in-progress"] {
+  color: var(--oct-fg);
+}
+
+.board-status-mark[data-status="done"] {
+  color: var(--oct-fg-2);
+}
+
+.board-status-mark__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+}
+
+.board-status-mark__dot[data-fill="hollow"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.board-status-mark__spin,
+.board-card-live__spin {
+  animation: octant-spin var(--oct-motion-spin) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-status-mark__spin,
+  .board-card-live__spin {
+    animation: none;
+  }
+}
+
+:root[data-octant-style="vivid"] .board-status-mark[data-status="in-progress"] {
+  color: var(--octant-palette-orange);
+}
+
+:root[data-octant-style="vivid"] .board-status-mark[data-status="waiting"] {
+  color: var(--octant-palette-purple);
+}
+
+:root[data-octant-style="vivid"] .board-status-mark[data-status="done"] {
+  color: var(--octant-palette-green);
+}
+
+/* Card footer: provider mark, branch chip, diff size, and age at the end. */
+.board-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+}
+
+.board-card-meta__provider {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.board-card-meta__branch {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
+  font-family: var(--oct-font-mono);
+}
+
+.board-card-meta__branch .icon {
+  flex: 0 0 auto;
+}
+
+.board-card-meta__branch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-card-meta__diff {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--oct-space-1);
+  font-family: var(--oct-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The diff keeps the green and red roles it has everywhere else; the sign
+   carries the meaning when the ink does not. */
+.board-card-meta__added {
+  color: var(--oct-success-fg);
+}
+
+.board-card-meta__removed {
+  color: var(--oct-danger-fg);
+}
+
+.board-card-meta__age {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* What an executing thread is doing now, under its title, in the mono meta
+   voice so it reads as a log line rather than a label. */
+.board-card-live {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+}
+
+.board-card-live__spin {
+  flex: 0 0 auto;
+}
+
+.board-card-live__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

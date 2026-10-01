@@ -3,6 +3,7 @@ import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ReactNode } from "react";
+import { ThreadBoardStatusMark } from "./ThreadBoardCardParts";
 import { lastUsefulView, type ThreadBoardState } from "./threadBoardState";
 
 export interface ThreadBoardCardPresentation {
@@ -21,20 +22,24 @@ export function cardViewExtras<
   props: {
     readonly projectNames: ReadonlyMap<string, string>;
     readonly providerLabels?: ReadonlyMap<string, string>;
+    readonly providerKinds?: ReadonlyMap<string, string>;
     readonly onOpenThread?: (target: TOpenTarget) => void;
     readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   },
 ): {
   readonly projectName?: string;
   readonly providerLabel?: string;
+  readonly providerKind?: string;
   readonly onOpen?: (target: TOpenTarget) => void;
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 } {
   const projectName = props.projectNames.get(String(card.projectId));
   const providerLabel = props.providerLabels?.get(String(card.providerInstanceId));
+  const providerKind = props.providerKinds?.get(String(card.providerInstanceId));
   return {
     ...(projectName === undefined ? {} : { projectName }),
     ...(providerLabel === undefined ? {} : { providerLabel }),
+    ...(providerKind === undefined ? {} : { providerKind }),
     ...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread }),
     ...(props.onSelectPullRequest === undefined
       ? {}
@@ -43,7 +48,7 @@ export function cardViewExtras<
 }
 
 export interface ThreadBoardListViewProps<
-  TCard extends { readonly threadId: unknown },
+  TCard extends { readonly threadId: unknown; readonly executing?: boolean },
   TColumn extends {
     readonly key: string;
     readonly label: string;
@@ -56,7 +61,7 @@ export interface ThreadBoardListViewProps<
 }
 
 export function ThreadBoardListView<
-  TCard extends { readonly threadId: unknown },
+  TCard extends { readonly threadId: unknown; readonly executing?: boolean },
   TColumn extends {
     readonly key: string;
     readonly label: string;
@@ -74,7 +79,10 @@ export function ThreadBoardListView<
         >
           <header className="code-board__list-head">
             {column.status === undefined ? null : (
-              <span aria-hidden="true" className={`st st-${column.status}`} />
+              <ThreadBoardStatusMark
+                executing={column.cards.some((card) => card.executing === true)}
+                status={column.status}
+              />
             )}
             <h2 className="oct-section-label">{column.label}</h2>
             <span aria-hidden="true" className="count oct-meta">
@@ -102,7 +110,7 @@ export function ThreadBoardListView<
 }
 
 export interface ThreadBoardColumnViewProps<
-  TCard extends { readonly threadId: unknown },
+  TCard extends { readonly threadId: unknown; readonly executing?: boolean },
   TColumn extends {
     readonly key: string;
     readonly label: string;
@@ -115,7 +123,7 @@ export interface ThreadBoardColumnViewProps<
 }
 
 export function ThreadBoardColumnView<
-  TCard extends { readonly threadId: unknown },
+  TCard extends { readonly threadId: unknown; readonly executing?: boolean },
   TColumn extends {
     readonly key: string;
     readonly label: string;
@@ -139,7 +147,10 @@ export function ThreadBoardColumnView<
     >
       <header className="board-col-head">
         {column.status === undefined ? null : (
-          <span aria-hidden="true" className={`st st-${column.status}`} />
+          <ThreadBoardStatusMark
+            executing={column.cards.some((card) => card.executing === true)}
+            status={column.status}
+          />
         )}
         <h2 className="oct-section-label">{column.label}</h2>
         <span aria-hidden="true" className="count oct-meta">
@@ -167,7 +178,7 @@ export function ThreadBoardColumnView<
 }
 
 export interface ThreadBoardBodyProps<
-  TCard extends { readonly threadId: unknown },
+  TCard extends { readonly threadId: unknown; readonly executing?: boolean },
   TColumn extends {
     readonly key: string;
     readonly label: string;
@@ -199,7 +210,7 @@ export interface ThreadBoardBodyProps<
 }
 
 export function ThreadBoardBody<
-  TCard extends { readonly threadId: unknown },
+  TCard extends { readonly threadId: unknown; readonly executing?: boolean },
   TColumn extends {
     readonly key: string;
     readonly label: string;

@@ -5965,6 +5965,13 @@ function LaunchedShell(
                     ),
                   )
                 }
+                providerKinds={
+                  new Map(
+                    (activeMode === "work" ? workProviderGroups : codeProviderGroups).map(
+                      (group) => [String(group.instance.id), String(group.instance.driverKind)],
+                    ),
+                  )
+                }
                 onOpenCodeBoardThread={(target) => {
                   const thread = codeController.bootstrap?.threads.find(
                     (candidate) => String(candidate.id) === String(target.threadId),

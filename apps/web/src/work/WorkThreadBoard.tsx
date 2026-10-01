@@ -11,6 +11,11 @@ import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import { ChevronDown, Filter, Folder, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ThreadBoardCardLive,
+  ThreadBoardCardMeta,
+  type ThreadBoardCardMetaProps,
+} from "../threadBoard/ThreadBoardCardParts";
 import { cardViewExtras, ThreadBoardBody } from "../threadBoard/ThreadBoardView";
 import {
   activityLabel,
@@ -63,6 +68,8 @@ export interface WorkThreadBoardProps {
   readonly storage?: Pick<Storage, "getItem" | "setItem">;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
+  /** Driver kinds for provider instances, keyed by instance id; picks the provider mark. */
+  readonly providerKinds?: ReadonlyMap<string, string>;
   readonly isNarrow?: boolean;
 }
 
@@ -392,6 +399,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
               ...(props.providerLabels === undefined
                 ? {}
                 : { providerLabels: props.providerLabels }),
+              ...(props.providerKinds === undefined ? {} : { providerKinds: props.providerKinds }),
               ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
               ...(props.onSelectPullRequest === undefined
                 ? {}
@@ -413,6 +421,7 @@ function WorkBoardCardView(props: {
   readonly unread: boolean;
   readonly projectName?: string;
   readonly providerLabel?: string;
+  readonly providerKind?: string;
   readonly onOpen?: (target: WorkThreadOpenTarget) => void;
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
@@ -452,17 +461,19 @@ function WorkBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      {props.layout === "card" && card.childRuns.latestSummary !== undefined ? (
+      {props.layout === "card" && card.executing ? (
+        <ThreadBoardCardLive summary={card.childRuns.latestSummary} />
+      ) : props.layout === "card" && card.childRuns.latestSummary !== undefined ? (
         <span className="board-card-activity">{card.childRuns.latestSummary}</span>
       ) : null}
-      {/* A card says what the task is doing now, who runs it, and when it last
-          moved; the folder, model, delivery, and artifact facts live in the
-          list view and on the task. Stacked on the card they made every task a
-          wall of metadata with the same weight as its title. */}
+      {/* A card says what needs the person; the footer names who runs the task
+          and when it last moved. The folder, model, delivery, and artifact
+          facts live in the list view and on the task. Stacked on the card they
+          made every task a wall of metadata with the same weight as its title. */}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
         {(props.layout === "list"
           ? cardFacts(card, props.projectName, props.providerLabel)
-          : cardSummary(card, props.providerLabel, waitingReason)
+          : cardSummary(card, waitingReason)
         ).map((fact) => (
           <span className={fact.className ?? "fact"} key={fact.key} title={fact.title ?? fact.text}>
             {fact.icon}
@@ -479,6 +490,9 @@ function WorkBoardCardView(props: {
           : { onSelect: props.onSelectPullRequest })}
         summaries={card.pullRequestSummaries}
       />
+      {props.layout === "card" ? (
+        <ThreadBoardCardMeta {...cardMeta(card, props.providerLabel, props.providerKind)} />
+      ) : null}
       {props.layout === "list" && waitingReason !== undefined ? (
         <span className="board-card-blocked" title={waitingReason}>
           {waitingReason}
@@ -596,12 +610,11 @@ function cardFacts(
 }
 
 /**
- * The card face: what needs the person, who is running the task, and when it
- * last moved. Everything else waits in the list view's facts.
+ * The card face: what needs the person. Who runs the task and when it last
+ * moved sit in the footer; everything else waits in the list view's facts.
  */
 function cardSummary(
   card: WorkBoardCard,
-  providerLabel: string | undefined,
   waitingReason: string | undefined,
 ): ReadonlyArray<CardFact<ReactNode>> {
   const facts: CardFact<ReactNode>[] = [];
@@ -619,15 +632,28 @@ function cardSummary(
   if (card.followUp) facts.push({ key: "follow-up", text: "Follow-up", className: "fact warn" });
   if (card.recovery.kind === "recovering") facts.push({ key: "recovery", text: "Recovering" });
   if (card.goal.kind === "present") facts.push({ key: "goal", text: `Goal · ${card.goal.status}` });
-  if (providerLabel !== undefined) facts.push({ key: "provider", text: providerLabel });
-  if (card.lastMeaningfulActivityAt !== null) {
-    facts.push({
-      key: "activity-at",
-      text: relativeTimeLabel(card.lastMeaningfulActivityAt),
-      title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
-    });
-  }
   return facts;
+}
+
+/** The card footer: provider and age. A Work task has no branch or diff of its own. */
+function cardMeta(
+  card: WorkBoardCard,
+  providerLabel: string | undefined,
+  providerKind: string | undefined,
+): ThreadBoardCardMetaProps {
+  return {
+    ...(providerLabel === undefined
+      ? {}
+      : { provider: { label: providerLabel, driverKind: providerKind ?? providerLabel } }),
+    ...(card.lastMeaningfulActivityAt === null
+      ? {}
+      : {
+          age: {
+            label: relativeTimeLabel(card.lastMeaningfulActivityAt),
+            title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
+          },
+        }),
+  };
 }
 
 function cardDetailRows(

@@ -111,6 +111,8 @@ export interface WorkspaceRailLayersProps {
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
+  /** Driver kinds by provider instance id; the boards draw the provider mark from them. */
+  readonly providerKinds?: ReadonlyMap<string, string>;
   readonly archiveOpen?: boolean;
   readonly archiveChatClient?: ChatClient;
   readonly archiveEntries?: ReadonlyArray<ArchivedThreadEntry>;
@@ -261,6 +263,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.providerLabels === undefined
                 ? {}
                 : { providerLabels: props.providerLabels })}
+              {...(props.providerKinds === undefined ? {} : { providerKinds: props.providerKinds })}
             />
           </LazyRailSurface>
         </div>
@@ -283,6 +286,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.providerLabels === undefined
                 ? {}
                 : { providerLabels: props.providerLabels })}
+              {...(props.providerKinds === undefined ? {} : { providerKinds: props.providerKinds })}
             />
           </LazyRailSurface>
         </div>
