@@ -37,6 +37,15 @@ your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.
 **Increased contrast** always uses the Default style.
 
+### Style
+
+**Style** sits under the color scheme. **Default** keeps the app monochrome.
+**Vivid** adds colour where something has a name: the welcome greeting, the
+sidebar's count tiles, board columns, and each Project's colour. Vivid uses
+your preset's palette, so it changes with light and dark, and it never
+recolours a warning or an error. It looks best in the light theme.
+**Increased contrast** always uses the Default style.
+
 **Project view switcher** lives in **Settings → Code**. It chooses how the Code
 sidebar offers saved project views: a dropdown, or one icon button per view
 that shows the view name on hover. Each project view can be given its own icon
