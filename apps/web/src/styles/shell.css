@@ -262,7 +262,7 @@ html[data-octant-native-host="true"]
   box-sizing: border-box;
   padding: 0 var(--oct-space-1);
   border: 1px solid color-mix(in oklab, var(--oct-fg) 14%, transparent);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-pill);
   background: var(--octant-sidebar-opaque);
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);
@@ -277,7 +277,7 @@ html[data-octant-native-host="true"]
   height: 22px;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);
