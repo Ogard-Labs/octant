@@ -36,7 +36,7 @@ const FILLS = [
   { id: "tile", label: "Tile" },
 ] as const satisfies ReadonlyArray<{ id: ZenBackgroundFill; label: string }>;
 
-const GROUPS = ["landscape", "forest", "wood", "abstract"] as const;
+const GROUPS = ["gradient", "landscape", "forest", "wood", "abstract"] as const;
 
 /**
  * The badge under a tile is the one place a background says it moves, so a

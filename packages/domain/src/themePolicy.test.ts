@@ -254,6 +254,7 @@ describe("application background policy", () => {
     coversSidebar: false,
     backgroundUrl: null,
     backgroundStillUrl: null,
+    backgroundLightUrl: null,
     backgroundAnimated: false,
     effect: { kind: "none", cell: 3, levels: 8 },
   };
@@ -316,6 +317,18 @@ describe("application background policy", () => {
       backgroundUrl: "zen-backgrounds/perspective-dot-plane.jpg",
       backgroundStillUrl: "zen-backgrounds/perspective-dot-plane.jpg",
       backgroundAnimated: false,
+    });
+  });
+
+  it("hands a gradient its light-theme picture beside the dark one", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "builtin", presetId: "soft-glow" },
+    };
+    expect(resolveAppBackground(settings)).toMatchObject({
+      kind: "builtin",
+      backgroundUrl: "zen-backgrounds/soft-glow.jpg",
+      backgroundLightUrl: "zen-backgrounds/soft-glow-light.jpg",
     });
   });
 

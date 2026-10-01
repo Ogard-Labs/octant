@@ -131,6 +131,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
+          id: settingId("appearance.scheme.style"),
+          label: "Style",
+          scope: "app",
+          keywords: "style vivid colour color colourful default monochrome tiles accent",
+        },
+        {
           id: settingId("appearance.typography.ui.family"),
           label: "Interface font",
           scope: "app",

@@ -21,7 +21,9 @@ Read the relevant section rather than the entire document:
 
 Octant is a local-first desktop workspace for supervising Chat, Work, and Code
 threads, providers, Projects, agents, changes, and delivery. Its visual north
-star is a quiet graphite workbench:
+star is a calm graphite workbench that shows what is happening at a glance —
+counts, running work, and whose thing is whose — and turns vivid when a person
+asks for it (Settings › Appearance › Style):
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
@@ -36,14 +38,19 @@ star is a quiet graphite workbench:
   pane. A capable region with no selected tool shows a compact launcher; a pane
   with no valid tool exposes no dock toggle. Neither region fabricates a tab or
   repeats another pane's content.
-- Hierarchy comes from typography, spacing, hairline borders, and selection
-  fills. Colour is scarce and semantic.
+- Hierarchy comes from typography (size first, then weight), spacing, cards
+  for discrete objects, and selection fills. In the Default style the chrome is
+  monochrome; colour names identity (a Project, a provider, a count tile under
+  Vivid) and never stands in for status, which keeps its own warning, failure,
+  and diff roles.
 - Controls are familiar, compact, keyboard reachable, and honest about
   loading, stale, unavailable, permission, and error states.
 
-Avoid dashboard walls, decorative gradients, neon developer styling, permanent
-low-frequency controls, oversized setup cards, pill-shaped everything, and
-invented data. A feature that is not available must explain why and offer the
+Avoid dashboard walls (counts belong in a few tiles, not a grid of them),
+neon developer styling, permanent low-frequency controls, oversized setup
+cards, pill-shaped everything, and invented data. Gradients belong to the
+application ground, to a Vivid tile's face, and to a Project's letter tile;
+chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
 person's photo, shown plain or through one still print effect, behind the
@@ -58,10 +65,14 @@ but they do not own a second palette or visual language.
 
 ### Voice
 
-- **Crafted, not vibed.** Hierarchy comes from size and colour, not from
-  weight or capitals. One title per page. Section labels are sentence-case
-  and quiet. Nothing is uppercase except a monospace identifier that already
-  is. Nothing is bold except the page title.
+- **Crafted, not vibed.** Hierarchy comes from size, then weight, then
+  colour — never capitals. One title per page. Section labels are
+  sentence-case and quiet. Nothing is uppercase except a monospace identifier
+  that already is. Weights follow one ladder: 400 for reading text, 500 for
+  labels and controls, 600 for emphasis (section and card titles, counts, the
+  app's name), and 700 only for the page title and the welcome greeting,
+  through the title-only `--oct-weight-title` token the stylesheet check
+  refuses anywhere else.
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
 - **One sentence of help.** A subtitle or row description is one sentence
@@ -88,9 +99,9 @@ essential sits under 12px at the default.
 
 | Role          | Size | Weight | Colour          | Where                                                     |
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
-| Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
-| Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
-| Section label | 14   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
+| Hero          | 36   | 700    | primary         | Welcome question only (`oct-title--hero`)                 |
+| Title         | 28   | 700    | primary         | One per page (`oct-title`)                                |
+| Section label | 14   | 600    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
 | Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |
 | Detail        | 13   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
@@ -114,6 +125,16 @@ outlines and halos so selected and expanded fills carry the visible state cue
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
+Settings › Appearance › Style chooses how much of that palette the chrome
+uses. **Default** is the monochrome described above. **Vivid** lets the
+places that name something carry colour: the welcome greeting, the sidebar's
+count tiles, board column marks, and a Project's accent. Vivid draws every
+hue from the preset's palette roles (`--octant-palette-*`, read through the
+`--oct-vivid-*` aliases in `styles/vivid.css`), so it follows the light or
+dark theme and any tinted preset, and it never recolours a warning, a
+failure, or a diff. The root carries `data-octant-style`; increased contrast
+always publishes `default`. Vivid reads best in the light theme.
+
 ### Shapes and depth
 
 Radius has one number per role, defined once as `--oct-radius-*` in
@@ -124,8 +145,12 @@ a menu and the popover beside it share a corner. Welcome composers and
 dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
-(`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
-never cards.
+(`--octant-shadow-overlay`). A card is for a discrete object a person acts on
+as a whole: a count tile, a live running-thread card, an action tile, a board
+card, a provider, a Settings group of rows. Plain lists, empty states, and
+headers are never cards. A button shaped like a card asks the shared button
+recipe for its `bare` variant, which draws nothing, and the feature stylesheet
+owns its face; every other button keeps the recipe's paint.
 
 The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
@@ -250,7 +275,11 @@ supported. Existing thread selections remain authoritative.
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page (the default). Effect: the picture is shown as it is, pixelated, or
+plain page. A fresh install starts on Soft glow, one of three Gradient
+pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
+print, so the ground follows the window's scheme; the stylesheet swaps them
+by `data-octant-theme-mode`. A settings row written before the ground
+existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it: the drawn dot pattern and its pulse and wave motions read as

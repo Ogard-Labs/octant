@@ -1,5 +1,5 @@
 import type { ResolvedAppBackground } from "@octant/domain";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   decodePhoto,
   drawPrinted,
@@ -94,6 +94,18 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
 
   const builtinUrl =
     resolved.kind === "builtin" && printedBuiltinUrl === null ? resolved.backgroundUrl : null;
+  // Both pictures ride as custom properties and the stylesheet picks one by
+  // the window's resolved scheme, so a theme switch swaps the ground without
+  // a render. An inline background-image would outrank that choice.
+  const builtinStyle =
+    builtinUrl === null
+      ? undefined
+      : ({
+          "--app-backdrop-image": `url("${builtinUrl}")`,
+          ...(resolved.backgroundLightUrl === null
+            ? {}
+            : { "--app-backdrop-image-light": `url("${resolved.backgroundLightUrl}")` }),
+        } as CSSProperties);
 
   return (
     <div
@@ -107,7 +119,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           aria-hidden="true"
           className="app-backdrop__builtin"
           data-animated={resolved.backgroundAnimated ? "true" : "false"}
-          style={{ backgroundImage: `url("${builtinUrl}")` }}
+          style={builtinStyle}
         />
       )}
       {pictureSource === null ? null : (
