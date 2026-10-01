@@ -977,6 +977,11 @@ function LaunchedShell(
   >(new Map());
   const writtenDocumentsRef = useRef(writtenDocumentsByThread);
   writtenDocumentsRef.current = writtenDocumentsByThread;
+  // The current version of each Canvas a thread's cards last named, so an
+  // open dock Canvas reloads when a turn revises it.
+  const [canvasRevisionsByThread, setCanvasRevisionsByThread] = useState<
+    ReadonlyMap<ThreadUtilityDockKey, string>
+  >(new Map());
   /**
    * Document paths each thread's live turns reported on the previous pass, so
    * a path that disappears reads as the turn deleting it rather than as a
@@ -2164,10 +2169,19 @@ function LaunchedShell(
    * new writing, so reopening an old thread never raises the dock.
    */
   function noteCanvasReferences(
+    mode: OctantMode,
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ): void {
-    const key = threadUtilityDockKey("chat", threadId);
+    const key = threadUtilityDockKey(mode, threadId);
+    const revision = cards
+      .filter(isAuthorizedCanvasDocument)
+      .map((card) => String(card.versionId))
+      .sort()
+      .join(",");
+    setCanvasRevisionsByThread((current) =>
+      current.get(key) === revision ? current : new Map(current).set(key, revision),
+    );
     const documents = cards
       .filter(isAuthorizedCanvasDocument)
       .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));
@@ -2857,6 +2871,7 @@ function LaunchedShell(
     const writtenDocumentPath = writtenDocument?.kind === "file" ? writtenDocument.path : undefined;
     const writtenCanvasId =
       writtenDocument?.kind === "canvas" ? writtenDocument.canvasId : undefined;
+    const canvasRevision = canvasRevisionsByThread.get(dockThreadKey);
     return (
       <ThreadUtilityDockContent
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
@@ -2902,6 +2917,7 @@ function LaunchedShell(
         shipClient={shipClient}
         {...(writtenDocumentPath === undefined ? {} : { writtenDocumentPath })}
         {...(writtenCanvasId === undefined ? {} : { writtenCanvasId })}
+        {...(canvasRevision === undefined ? {} : { canvasRevision })}
         onOpenFile={(relativePath) => {
           if (dockThread.mode !== "code") return;
           void controller.openCodeSurface({

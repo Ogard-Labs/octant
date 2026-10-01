@@ -4413,6 +4413,20 @@ export function startOctantServer(
             uuid: randomUUID,
             clock: () => new Date().toISOString(),
           }),
+        canvas: ({ windowId, thread }) =>
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                mode: "code",
+                thread: {
+                  id: String(thread.id),
+                  projectId: String(thread.projectId),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                },
+                port: canvasAgentToolPort,
+              }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
@@ -6027,6 +6041,20 @@ export function startOctantServer(
               mode: "work",
               projectId: input.thread.projectId,
             });
+        const canvasTools =
+          !browserSupported || canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId: input.windowId,
+                mode: "work",
+                thread: {
+                  id: String(input.thread.id),
+                  projectId: String(input.thread.projectId),
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                },
+                port: canvasAgentToolPort,
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -6046,10 +6074,18 @@ export function startOctantServer(
           browser === undefined &&
           sideTaskTools === undefined &&
           agentsTools === undefined &&
-          computer === undefined
+          computer === undefined &&
+          canvasTools === undefined
         )
           return undefined;
-        return combineAppManagedToolSets(native, browser, computer, sideTaskTools, agentsTools);
+        return combineAppManagedToolSets(
+          native,
+          browser,
+          computer,
+          sideTaskTools,
+          agentsTools,
+          canvasTools,
+        );
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -7828,6 +7864,7 @@ export function startOctantServer(
       canvas: canvasService,
       uuid: randomUUID,
       hostId: LOCAL_HOST_ID,
+      resolveWorkspace: resolveCanvasWorkspace,
     };
     // Canvas sharing is local-only: a snapshot is served over the loopback
     // Canvas API to a principal this host authenticates, never uploaded or

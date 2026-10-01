@@ -12,6 +12,7 @@ import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contra
 import type { PickerGroup } from "@octant/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
@@ -488,7 +489,7 @@ describe("WorkThreadWorkspace", () => {
 
     render(
       <WorkThreadWorkspace
-        canvasClient={{} as never}
+        canvasClient={{ threadReferenceCards: async () => ({ cards: [] }) } as never}
         threadClient={threadClient}
         threadId={threadId}
         title="Draft brief"
@@ -497,6 +498,61 @@ describe("WorkThreadWorkspace", () => {
 
     await screen.findByLabelText("Bound provider and model");
     expect(screen.queryByRole("button", { name: "Canvas" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Canvas the task authored and offers to open it", async () => {
+    const user = userEvent.setup();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const card = {
+      schemaVersion: 1,
+      kind: "canvas-reference-card",
+      cardId: "20000000-0000-4000-8000-000000000001",
+      canvasId: "20000000-0000-4000-8000-000000000002",
+      versionId: "20000000-0000-4000-8000-000000000003",
+      title: "Launch plan",
+      scope: { hostId: "local", mode: "work", workspace: { kind: "work-root", projectId: null } },
+      originThreadId: threadId,
+      status: "ready",
+      authority: {
+        filesystem: false,
+        shell: false,
+        git: false,
+        network: false,
+        tools: true,
+        subagents: false,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+      },
+      actorId: "99999999-9999-4999-8999-999999999999",
+      providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      modelId: "octant-test-model",
+      createdAt: "2026-08-01T21:00:00.000Z",
+      actionCount: 0,
+    } as unknown as CanvasThreadReferenceCard;
+    const threadReferenceCards = vi.fn(async () => ({ cards: [card] }));
+    const onCanvasReferencesObserved = vi.fn();
+    const onOpenCanvas = vi.fn();
+
+    render(
+      <WorkThreadWorkspace
+        canvasClient={{ threadReferenceCards } as never}
+        onCanvasReferencesObserved={onCanvasReferencesObserved}
+        onOpenCanvas={onOpenCanvas}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Open Canvas" }));
+    expect(threadReferenceCards).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "work", threadId: String(threadId) }),
+    );
+    expect(onCanvasReferencesObserved).toHaveBeenCalledWith(String(threadId), [card]);
+    expect(onOpenCanvas).toHaveBeenCalledWith(card);
   });
 
   it("shows the files a turn changed instead of narrating them in prose", async () => {

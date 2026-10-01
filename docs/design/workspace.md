@@ -116,8 +116,12 @@ them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
-Chat-authored Canvas) in the dock once per document, never after the person
-closed its tab, and never by moving focus. Hand off (`POST
+Canvas the thread's agent authored in Chat, Work, or Code) in the dock once per
+document, never after the person closed its tab, and never by moving focus. An
+agent-authored Canvas belongs to the thread's own scope as the host resolves
+it: the active Chat Project, the Work thread's confined root, or the Code
+thread's checkout; a thread whose binding the host cannot resolve is refused
+rather than given an assumed scope. Hand off (`POST
 /api/threads/hand-off`) starts from the thread export cut, asks the thread's
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a

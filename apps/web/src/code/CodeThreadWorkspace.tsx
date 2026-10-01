@@ -59,6 +59,7 @@ import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -175,6 +176,11 @@ export interface CodeThreadWorkspaceProps {
   readonly onCreatePullRequest?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** The Canvas cards the host lists for this thread, each time they are read. */
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
   /**
    * Reach for the host's `#thread` mention surface. Absent on a host that does
    * not serve it, which keeps the picker closed rather than offering threads
@@ -621,6 +627,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
+  const settledReplyCount = messages.filter(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "completed" ||
+        message.status === "interrupted" ||
+        message.status === "failed"),
+  ).length;
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
       if (message.role !== "assistant" || message.operationId === undefined) return [];
@@ -1477,6 +1490,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           role="region"
           {...(pendingMessage === null ? {} : { trail: pendingMessage })}
         />
+      )}
+
+      {props.canvasClient === undefined || view === undefined ? null : (
+        <div className="thread-column">
+          <CanvasThreadReferenceCardList
+            client={props.canvasClient}
+            mode="code"
+            {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+            {...(props.onCanvasReferencesObserved === undefined
+              ? {}
+              : {
+                  onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+                    props.onCanvasReferencesObserved?.(String(props.threadId), cards),
+                })}
+            projectId={view.thread.projectId}
+            // A settled reply may have authored a Canvas; re-read the cards so
+            // the document appears without reopening the thread.
+            refreshKey={settledReplyCount}
+            threadId={props.threadId}
+          />
+        </div>
       )}
 
       {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}

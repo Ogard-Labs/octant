@@ -306,6 +306,11 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
+  /** Lets the model author a Canvas bound to this thread's checkout. */
+  readonly canvas?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
   /**
    * The agent-run tool set for this thread: the model petitions the server's
    * own run admission for a child run, scoped to this thread as the parent.
@@ -2010,6 +2015,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
         this.#options.agentMessages?.({ thread: active.thread }),
         this.#options.sideTasks?.({ thread: active.thread }),
+        this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
