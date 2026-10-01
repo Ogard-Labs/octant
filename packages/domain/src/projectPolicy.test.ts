@@ -13,6 +13,7 @@ import {
   ProjectPolicyRejected,
   changeCodeProjectAccess,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectColor,
   changeProjectLifecycle,
   compareProjectOrder,
   createProject,
@@ -204,6 +205,34 @@ describe("Project creation and lifecycle", () => {
     expect(original).toMatchObject({ name: "Old name", lifecycle: "active", version: 1 });
     expect(() => renameProject(original, "  ", updatedAt)).toThrow(ProjectPolicyRejected);
     expect(() => changeProjectLifecycle(original, "active", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+  });
+});
+
+describe("Project colour", () => {
+  it("sets a colour, then clears it so the Project reads as one that never had one", () => {
+    const original = makeProject(ids.work, "0/1", { type: "work" });
+    const coloured = changeProjectColor(original, "teal", updatedAt);
+    const cleared = changeProjectColor(coloured, null, updatedAt);
+
+    expect(coloured).toMatchObject({ color: "teal", type: "work", version: 2 });
+    expect(cleared).toMatchObject({ type: "work", version: 3 });
+    expect("color" in cleared).toBe(false);
+    expect(original.color).toBeUndefined();
+  });
+
+  it("refuses a colour change on an archived Project", () => {
+    const archived = makeProject(ids.code, "0/1", { type: "code", lifecycle: "archived" });
+
+    expect(() => changeProjectColor(archived, "red", updatedAt)).toThrow(ProjectPolicyRejected);
+  });
+
+  it("refuses a change that would leave the colour as it is", () => {
+    const coloured = changeProjectColor(makeProject(ids.chat, "0/1"), "blue", updatedAt);
+
+    expect(() => changeProjectColor(coloured, "blue", updatedAt)).toThrow(ProjectPolicyRejected);
+    expect(() => changeProjectColor(makeProject(ids.chat, "0/1"), null, updatedAt)).toThrow(
       ProjectPolicyRejected,
     );
   });

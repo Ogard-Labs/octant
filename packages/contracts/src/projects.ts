@@ -117,9 +117,28 @@ export const BindingRevision = Schema.Struct({
 }).annotations(strict);
 export type BindingRevision = typeof BindingRevision.Type;
 
+/**
+ * The identity colour a person picks for a Project: the eight roles the theme
+ * palette already defines, so a colour follows the active theme rather than
+ * carrying its own hex value.
+ */
+export const ProjectColor = Schema.Literal(
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "teal",
+  "blue",
+  "purple",
+  "pink",
+);
+export type ProjectColor = typeof ProjectColor.Type;
+
 const ProjectFields = {
   id: ProjectId,
   name: Schema.NonEmptyTrimmedString,
+  /** Absent means no colour was picked; older Projects and events never carried one. */
+  color: Schema.optional(ProjectColor),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,
@@ -370,6 +389,12 @@ export const ProjectCommand = Schema.Union(
     name: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-project-color"),
+    ...ProjectCommandFields,
+    /** `null` clears the colour. */
+    color: Schema.NullOr(ProjectColor),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("move-project"),
     ...ProjectCommandFields,
     pinned: Schema.Boolean,
@@ -426,6 +451,9 @@ export const ProjectCommandResult = Schema.Union(
     created: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("project-renamed"), project: Project }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("project-color-changed"), project: Project }).annotations(
+    strict,
+  ),
   Schema.Struct({ kind: Schema.Literal("project-moved"), project: Project }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-lifecycle-changed"),
@@ -538,6 +566,8 @@ export const ProjectCreated = Schema.Struct({ project: Project }).annotations(st
 export type ProjectCreated = typeof ProjectCreated.Type;
 export const ProjectRenamed = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectRenamed = typeof ProjectRenamed.Type;
+export const ProjectColorChanged = Schema.Struct({ project: Project }).annotations(strict);
+export type ProjectColorChanged = typeof ProjectColorChanged.Type;
 export const ProjectOrderChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectOrderChanged = typeof ProjectOrderChanged.Type;
 export const ProjectLifecycleChanged = Schema.Struct({ project: Project }).annotations(strict);
@@ -585,6 +615,7 @@ export type MemoryEntryTransferred = typeof MemoryEntryTransferred.Type;
 export const PROJECT_EVENT_NAMES = [
   "project.created@1",
   "project.renamed@1",
+  "project.color-changed@1",
   "project.order-changed@1",
   "project.lifecycle-changed@1",
   "project.binding-relinked@1",
@@ -617,6 +648,7 @@ export const decodeMemoryCommandResult = Schema.decodeUnknownSync(MemoryCommandR
 export const decodeProjectFailure = Schema.decodeUnknownSync(ProjectFailure);
 export const decodeProjectCreated = Schema.decodeUnknownSync(ProjectCreated);
 export const decodeProjectRenamed = Schema.decodeUnknownSync(ProjectRenamed);
+export const decodeProjectColorChanged = Schema.decodeUnknownSync(ProjectColorChanged);
 export const decodeProjectOrderChanged = Schema.decodeUnknownSync(ProjectOrderChanged);
 export const decodeProjectLifecycleChanged = Schema.decodeUnknownSync(ProjectLifecycleChanged);
 export const decodeProjectBindingRelinked = Schema.decodeUnknownSync(ProjectBindingRelinked);
