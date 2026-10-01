@@ -71,6 +71,10 @@ export function ThemeSettingsProvider(props: {
     root.dataset.octantIncreasedContrast = String(accessible.increasedContrast);
     root.dataset.octantReducedMotion = String(accessible.reducedMotion);
     root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
+    // Increased contrast keeps the monochrome chrome: colour as decoration is
+    // the first thing that setting exists to take away.
+    root.dataset.octantStyle =
+      accessible.increasedContrast || accessible.style === undefined ? "default" : accessible.style;
     root.style.colorScheme = resolved.mode;
     // The desktop owns the approval document; a window only reports the
     // palette it resolved, and only when it has the ordinary host bridge.
@@ -96,6 +100,7 @@ export function ThemeSettingsProvider(props: {
       delete root.dataset.octantIncreasedContrast;
       delete root.dataset.octantReducedMotion;
       delete root.dataset.octantReducedTransparency;
+      delete root.dataset.octantStyle;
       root.style.removeProperty("color-scheme");
     };
   }, [props.settings]);

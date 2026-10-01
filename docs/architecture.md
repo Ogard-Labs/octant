@@ -367,6 +367,31 @@ own harness gives Work no shell port. File writes inside the Project
 remain approval-gated in every driver. Work that needs a shell or Git is
 promoted to Code (below).
 
+Chat's missing filesystem and shell authority is withheld the same way, and
+more completely: a Chat session is acquired on its per-thread scratch
+directory, and nothing a provider asks for in Chat is anyone's to approve, so
+every approval request is declined at the agent. A provider sandbox that only
+blocks writes is not enough, because reads never escalate. Pi starts with no
+built-in tools. OpenCode and ACP agents launch confined with process exec and
+fork denied and the scratch directory read-only. Claude's gate keeps its reads
+inside the scratch directory, and its shell and edits ask and are declined.
+Codex threads get no execution environment (`environments: []` on the thread
+and on every turn), which removes its shell, `apply_patch`, and `view_image`;
+they also start and resume with the shell, image, plugin, and app features
+off, so a CLI that ignores `environments` still has no shell, and the user's
+own Codex plugins do not load. MCP servers from the user's Codex config run
+outside any environment (a `node_repl` server read another repository with
+none), and no setting turns them all off, so the driver reads the effective
+config and switches each named server off for the thread; a Chat thread whose
+servers cannot be listed does not start. Octant-managed tools (research,
+Canvas) are unaffected; they run on the host, not in the provider's
+environment.
+
+Provider-owned memory stays off in every mode. Octant's memory is scoped to a
+Project, and a provider's global memory reaches across all of them: Codex runs
+with `features.memories` off, which also keeps its memory folder out of its
+sandbox's readable roots, and Claude runs with no setting sources.
+
 Withholding the shell does not cut Work off from a person's integrations.
 Work is for files, browsers, and documents, and what separates it from Code
 is Git and the developer environment, not the tools a person plugs in. An MCP

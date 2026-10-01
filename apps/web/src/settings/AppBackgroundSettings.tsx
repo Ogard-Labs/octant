@@ -42,9 +42,10 @@ function choiceFor(kind: AppBackground["kind"]): Choice {
 const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp";
 const LIMITS = "PNG, JPEG, or WebP up to 8 MiB and 4096×4096";
 
-const CATALOG_GROUPS = ["landscape", "forest", "wood", "abstract"] as const;
+const CATALOG_GROUPS = ["gradient", "landscape", "forest", "wood", "abstract"] as const;
 
 const GROUP_TITLES: Readonly<Record<(typeof CATALOG_GROUPS)[number], string>> = {
+  gradient: "Gradient",
   landscape: "Landscape",
   forest: "Forest",
   wood: "Wood",

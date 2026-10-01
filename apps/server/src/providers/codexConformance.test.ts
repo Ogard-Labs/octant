@@ -32,6 +32,7 @@ describe("Codex provider conformance", () => {
       accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
       rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
       modelList: async () => ({ data: [model()], nextCursor: null }),
+      configRead: async () => ({ config: {} }),
       threadStart: async (input: CodexThreadStartInput) =>
         thread(`thread-${++startedThread}`, input.cwd),
       threadResume: async ({ threadId }) => {
@@ -213,6 +214,7 @@ function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {
     accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
     rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
     modelList: async () => ({ data: [model()], nextCursor: null }),
+    configRead: async () => ({ config: {} }),
     threadStart: async (input: CodexThreadStartInput) => thread(`thread-1`, input.cwd),
     threadResume: async ({ threadId }) => {
       if (threadId === "stale") throw new Error("private stale detail");

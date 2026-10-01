@@ -510,7 +510,7 @@ export type ZenHexColor = typeof ZenHexColor.Type;
 export interface ZenBuiltinBackgroundPreset {
   readonly id: ZenBuiltinBackgroundId;
   readonly title: string;
-  readonly group: "landscape" | "forest" | "wood" | "abstract";
+  readonly group: "gradient" | "landscape" | "forest" | "wood" | "abstract";
   readonly tone: "dark" | "light";
   readonly motion: "still" | "animated";
   /**
@@ -519,9 +519,42 @@ export interface ZenBuiltinBackgroundPreset {
    */
   readonly src: `zen-backgrounds/${string}`;
   readonly stillSrc?: `zen-backgrounds/${string}`;
+  /**
+   * The same picture for a light theme. The app ground follows the window's
+   * scheme, so one default works in both: a dark glow behind a light page is
+   * a black rectangle, and a pastel behind a dark one glares.
+   */
+  readonly lightSrc?: `zen-backgrounds/${string}`;
 }
 
 export const ZEN_BUILTIN_BACKGROUNDS = [
+  {
+    id: "soft-glow",
+    title: "Soft glow",
+    group: "gradient",
+    tone: "dark",
+    motion: "still",
+    src: "zen-backgrounds/soft-glow.jpg",
+    lightSrc: "zen-backgrounds/soft-glow-light.jpg",
+  },
+  {
+    id: "soft-graphite",
+    title: "Graphite",
+    group: "gradient",
+    tone: "dark",
+    motion: "still",
+    src: "zen-backgrounds/soft-graphite.jpg",
+    lightSrc: "zen-backgrounds/soft-graphite-light.jpg",
+  },
+  {
+    id: "soft-sunset",
+    title: "Sunset",
+    group: "gradient",
+    tone: "dark",
+    motion: "still",
+    src: "zen-backgrounds/soft-sunset.jpg",
+    lightSrc: "zen-backgrounds/soft-sunset-light.jpg",
+  },
   {
     id: "nordic-fjord-aurora",
     title: "Nordic fjord",
