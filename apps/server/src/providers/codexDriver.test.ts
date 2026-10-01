@@ -1248,9 +1248,17 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("switches Codex's shell off for a Work thread on start and again on every resume", async () => {
-    const shellOff = { "features.shell_tool": false, "features.unified_exec": false };
-    const f = fixture();
+  it("switches Codex's shell, plugins, apps, and user MCP servers off for a Work thread on start and again on every resume", async () => {
+    const workOff = {
+      "features.shell_tool": false,
+      "features.unified_exec": false,
+      "features.plugins": false,
+      "features.apps": false,
+      mcp_servers: { node_repl: { enabled: false } },
+    };
+    const f = fixture({
+      configRead: async () => ({ config: { mcp_servers: { node_repl: { command: "node" } } } }),
+    });
     const work = await acquireConnection(makeCodexDriver(f.options()), "work");
     await startSession(work.connection);
     await Effect.runPromise(
@@ -1261,20 +1269,26 @@ describe("Codex thread and turn lifecycle", () => {
       }),
     );
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
-      config: shellOff,
+      config: workOff,
     });
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty(
+      "environments",
+    );
     expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
       threadId: "thread-existing",
-      config: shellOff,
+      config: workOff,
     });
     await work.close();
 
-    const code = fixture();
+    const code = fixture({
+      configRead: async () => ({ config: { mcp_servers: { node_repl: { command: "node" } } } }),
+    });
     const coding = await acquireConnection(makeCodexDriver(code.options()), "code");
     await startSession(coding.connection);
     expect(code.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty(
       "config",
     );
+    expect(code.calls.some(({ method }) => method === "config/read")).toBe(false);
     await coding.close();
   });
 
@@ -1334,17 +1348,20 @@ describe("Codex thread and turn lifecycle", () => {
     await coding.close();
   });
 
-  it("refuses to start a Chat thread when Codex cannot list its MCP servers", async () => {
-    const f = fixture({
-      configRead: async () => {
-        throw new Error("config unreadable");
-      },
-    });
-    const chat = await acquireConnection(makeCodexDriver(f.options()), "chat");
-    await expect(startSession(chat.connection)).rejects.toThrow();
-    expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
-    await chat.close();
-  });
+  it.each(["chat", "work"] as const)(
+    "refuses to start a %s thread when Codex cannot list its MCP servers",
+    async (mode) => {
+      const f = fixture({
+        configRead: async () => {
+          throw new Error("config unreadable");
+        },
+      });
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      await expect(startSession(acquired.connection)).rejects.toThrow();
+      expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+      await acquired.close();
+    },
+  );
 
   it("resumes only Codex cursors that exist under the exact Project root", async () => {
     const f = fixture();

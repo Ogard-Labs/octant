@@ -355,7 +355,10 @@ shell tool. OpenCode's session rules deny `bash` and its `task` delegation.
 Codex threads start and resume with `features.shell_tool` and
 `features.unified_exec` off, because a Codex command that only reads runs under
 its read-only sandbox without escalating; a `command` or sandbox-widening `permissions` request that still
-arrives is declined at the agent. An ACP agent's `execute` permission request
+arrives is declined at the agent. A Codex Work thread also loads none of the
+user's own Codex plugins, apps, or MCP servers, switched off the same way as in
+Chat (below), because a user MCP server such as a Node REPL is a shell by
+another name. Code keeps them: Code already holds an approval-gated shell. An ACP agent's `execute` permission request
 is refused at the agent. The declared kind is all Octant sees of an ACP call,
 and `other` also covers Octant's own managed MCP tools, so an agent that labels
 a command `other` still reaches a person's approval rather than running unasked.
@@ -382,8 +385,8 @@ off, so a CLI that ignores `environments` still has no shell, and the user's
 own Codex plugins do not load. MCP servers from the user's Codex config run
 outside any environment (a `node_repl` server read another repository with
 none), and no setting turns them all off, so the driver reads the effective
-config and switches each named server off for the thread; a Chat thread whose
-servers cannot be listed does not start. Octant-managed tools (research,
+config and switches each named server off for the thread; a Chat or Work
+thread whose servers cannot be listed does not start. Octant-managed tools (research,
 Canvas) are unaffected; they run on the host, not in the provider's
 environment.
 

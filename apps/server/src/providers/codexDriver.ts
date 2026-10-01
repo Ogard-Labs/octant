@@ -114,10 +114,19 @@ export interface CodexThreadResumeInput {
  * the same request answered that it had no shell, while a patch edit still
  * raised `item/fileChange/requestApproval`. A thread does not keep these
  * overrides across `thread/resume`, so they are sent there too.
+ *
+ * The user's own Codex plugins, apps, and MCP servers are a shell by another
+ * name: measured against codex-cli 0.159.2, a `node_repl` server from
+ * `~/.codex/config.toml` ran `fs.readdir` outside the thread root through
+ * Codex's `exec` tool, with no environment and no approval. A Work thread
+ * loads none of them (see `codexThreadConfigWithoutUserMcp`). Code keeps
+ * them, because Code already holds an approval-gated shell.
  */
 const CODEX_WORK_CONFIG = {
   "features.shell_tool": false,
   "features.unified_exec": false,
+  "features.plugins": false,
+  "features.apps": false,
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -138,28 +147,27 @@ const CODEX_WORK_CONFIG = {
  * environment and no approval. No setting switches every configured server
  * off, and `mcp_servers = {}` merges into the user's table rather than
  * replacing it, so each server the effective config names is switched off by
- * name (see `codexChatThreadConfig`).
+ * name (see `codexThreadConfigWithoutUserMcp`).
  */
 const CODEX_CHAT_CONFIG = {
   ...CODEX_WORK_CONFIG,
   "features.view_image": false,
-  "features.plugins": false,
-  "features.apps": false,
 } as const satisfies CodexThreadConfig;
 
 /**
- * A Chat thread's overrides: `CODEX_CHAT_CONFIG` plus every MCP server in the
- * effective config at `cwd`, switched off by name. The names go in a nested
- * table rather than dotted keys, which would split a server named with a dot.
- * A Chat thread whose servers cannot be listed does not start.
+ * A Chat or Work thread's overrides: the mode's config plus every MCP server
+ * in the effective config at `cwd`, switched off by name. The names go in a
+ * nested table rather than dotted keys, which would split a server named with
+ * a dot. A thread whose servers cannot be listed does not start.
  */
-function codexChatThreadConfig(
+function codexThreadConfigWithoutUserMcp(
   client: CodexClientPort,
   cwd: string,
+  modeConfig: CodexThreadConfig,
 ): Effect.Effect<CodexThreadConfig, ProviderFailure> {
   return request(() => client.configRead({ cwd })).pipe(
     Effect.map((result) => ({
-      ...CODEX_CHAT_CONFIG,
+      ...modeConfig,
       mcp_servers: Object.fromEntries(
         Object.keys(result.config.mcp_servers ?? {}).map((name) => [
           name,
@@ -870,8 +878,10 @@ function makeConnection(
     let pendingLifecycleRegistrations = 0;
     const modeThreadConfig = (): Effect.Effect<CodexThreadConfig | undefined, ProviderFailure> =>
       mode === "chat"
-        ? codexChatThreadConfig(client, projectRoot)
-        : Effect.succeed(mode === "work" ? CODEX_WORK_CONFIG : undefined);
+        ? codexThreadConfigWithoutUserMcp(client, projectRoot, CODEX_CHAT_CONFIG)
+        : mode === "work"
+          ? codexThreadConfigWithoutUserMcp(client, projectRoot, CODEX_WORK_CONFIG)
+          : Effect.succeed(undefined);
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     const activate = (state: SessionState) => {
