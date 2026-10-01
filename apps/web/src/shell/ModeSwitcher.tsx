@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 
-const modeOrder: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
-const modeLabels: Record<OctantMode, string> = {
+export const modeOrder: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
+export const modeLabels: Readonly<Record<OctantMode, string>> = {
   chat: "Chat",
   work: "Work",
   code: "Code",
@@ -16,7 +16,7 @@ const modeDescriptions: Record<OctantMode, string> = {
   work: "Work with local files and documents",
   code: "Build, debug, and ship software",
 };
-const modeIcons: Record<OctantMode, LucideIcon> = {
+export const modeIcons: Readonly<Record<OctantMode, LucideIcon>> = {
   chat: MessageSquare,
   work: FolderOpen,
   code: CodeXml,

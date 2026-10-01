@@ -212,6 +212,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "sidebar search filter field icon always shown threads find",
         },
         {
+          id: settingId("sidebar-collapsed"),
+          label: "When collapsed",
+          scope: "app",
+          keywords: "sidebar collapse collapsed hide rail icons narrow hidden",
+        },
+        {
           id: settingId("mode-switcher"),
           label: "Mode switcher",
           scope: "app",

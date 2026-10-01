@@ -915,6 +915,48 @@ describe("ShellSidebar", () => {
     expect(screen.queryByRole("button", { name: "More destinations" })).not.toBeInTheDocument();
   });
 
+  it("collapses to an icon rail that keeps the modes, counts, and Projects in reach", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn();
+    const onSelectMode = vi.fn();
+    const openProject = vi.fn();
+    const actions = { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() };
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions }}
+        countTiles={{ running: 2, toReview: 0, doneToday: 1 }}
+        inboxCount={3}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={onSelectMode}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        rail={{
+          onExpand,
+          projects: [{ id: "p1", name: "octant", active: true, onOpen: openProject }],
+        }}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).toBeNull();
+    expect(within(rail).getByRole("button", { name: "Code" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await user.click(within(rail).getByRole("button", { name: "Chat" }));
+    expect(onSelectMode).toHaveBeenCalledWith("chat");
+    await user.click(within(rail).getByRole("button", { name: "Running, 2" }));
+    expect(actions["thread-board"]).toHaveBeenCalledOnce();
+    expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toHaveTextContent("3");
+    await user.click(within(rail).getByRole("button", { name: "octant" }));
+    expect(openProject).toHaveBeenCalledOnce();
+    await user.click(within(rail).getByRole("button", { name: "Show sidebar" }));
+    expect(onExpand).toHaveBeenCalledOnce();
+  });
+
   it("renders the rows in the customized order", () => {
     render(
       <ShellSidebar

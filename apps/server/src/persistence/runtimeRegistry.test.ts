@@ -767,6 +767,7 @@ describe("createPhase1RuntimeRegistries", () => {
           sidebarMoreEnabled: true,
           sidebarCountTiles: true,
           sidebarSearchPresentation: "icon",
+          sidebarCollapsedPresentation: "rail",
           environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
         },
       } as const;
@@ -1000,6 +1001,7 @@ function validSettingsPayload() {
       sidebarMoreEnabled: true,
       sidebarCountTiles: true,
       sidebarSearchPresentation: "icon",
+      sidebarCollapsedPresentation: "rail",
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     },
   } as const;

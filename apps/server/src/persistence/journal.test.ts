@@ -224,6 +224,7 @@ describe("Journal", () => {
         sidebarMoreEnabled: true,
         sidebarCountTiles: true,
         sidebarSearchPresentation: "icon",
+        sidebarCollapsedPresentation: "rail",
       },
     } as const;
 

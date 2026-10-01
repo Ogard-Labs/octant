@@ -169,6 +169,135 @@ html[data-octant-native-host="true"]
   grid-column: 1;
 }
 
+/* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
+   column and material, at a width that still clears the native traffic
+   lights, and the chrome and workspace return to the second column. */
+.shell.shell-frame.shell--sidebar-rail {
+  --octant-rendered-sidebar-width: var(--oct-sidebar-rail-w, 76px);
+  grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+}
+
+.shell--sidebar-rail.shell-frame > .window-chrome,
+.shell--sidebar-rail.shell-frame > .workspace-layer {
+  grid-column: 2;
+}
+
+.shell-frame > .sidebar-rail {
+  display: flex;
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--octant-sidebar-translucent);
+}
+
+.shell--material-opaque.shell-frame > .sidebar-rail {
+  background: var(--octant-sidebar-opaque);
+}
+
+.sidebar-rail__traffic-lights {
+  display: block;
+  flex: 0 0 var(--oct-title-rail-h);
+}
+
+.sidebar-rail__column {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--oct-space-2) 0 var(--oct-space-3);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar-rail__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-rail__button {
+  display: block;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.sidebar-rail__face {
+  --sidebar-rail-fill: transparent;
+  position: relative;
+  display: flex;
+  width: 40px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--oct-radius-sm);
+  background: var(--sidebar-rail-fill);
+  color: var(--oct-muted);
+}
+
+.sidebar-rail__button:hover .sidebar-rail__face,
+.sidebar-rail__button:focus-visible .sidebar-rail__face {
+  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  color: var(--oct-fg);
+}
+
+.sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
+  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  color: var(--oct-fg);
+}
+
+.sidebar-rail__badge {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  min-width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  padding: 0 var(--oct-space-1);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 14%, transparent);
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-sidebar-opaque);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  text-align: center;
+}
+
+.sidebar-rail__project {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.sidebar-rail__divider {
+  display: block;
+  width: 28px;
+  height: 1px;
+  flex: 0 0 auto;
+  margin: var(--oct-space-1) 0;
+  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+}
+
+.sidebar-rail__spacer {
+  display: block;
+  flex: 1 1 auto;
+}
+
 .window-chrome__leading {
   display: flex;
   flex: 0 0 auto;

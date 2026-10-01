@@ -61,6 +61,12 @@ the Board (the Activity feed in Chat), To review opens the Activity feed, and
 Done today opens the Completed shelf. Turn the tiles off in **Settings ›
 Sidebar › Count tiles** to get the plain Inbox and Board rows back.
 
+**Hide sidebar** shrinks the sidebar to a narrow rail of icons: the modes, the
+count tiles with their numbers, your Projects as letter tiles, the Activity
+feed, and Settings. Click **Show sidebar** at the top of the rail to bring it
+back. Choose **Hidden** in **Settings › Sidebar › When collapsed** to hide it
+completely instead.
+
 The switch beside the Project view picker chooses how threads are listed:
 **Projects** groups them under their Project, **Activity** lists them by
 recency.

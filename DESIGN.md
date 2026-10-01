@@ -636,8 +636,16 @@ focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
-rail clamp or drawer. The workspace sidebar supports resizing and may collapse
-completely while leaving Show sidebar and New thread in the native title rail.
+rail clamp or drawer. The workspace sidebar supports resizing. Hide sidebar
+collapses it to a 76px icon rail by default: Show sidebar, New thread, and
+Search at the top, then the modes, the count tiles as icons with their counts
+as badges, the remaining destination rows, up to six Project letter tiles with
+a Projects button for the rest, the Activity feed, and Settings at the foot.
+Every rail control names itself in its tooltip and accessible name. Settings ›
+Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
+completely and leaves Show sidebar and New thread in the native title rail.
+The rail never appears below the drawer breakpoint, where a collapsed sidebar
+is a closed drawer.
 The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.

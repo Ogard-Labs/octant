@@ -1007,6 +1007,14 @@ function LaunchedShell(
   const sidebarIsDrawer = useSidebarDrawerViewport();
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
   const presentedSidebarCollapsed = sidebarIsDrawer ? !sidebarDrawerOpen : sidebarCollapsed;
+  // The rail is a wide-window state: below the drawer breakpoint a collapsed
+  // sidebar is a closed drawer, and a strip of icons would only take width
+  // from the page it was hidden to make room for.
+  const sidebarRail =
+    !sidebarIsDrawer &&
+    !isNarrow &&
+    sidebarCollapsed &&
+    (presentedShellSettings ?? controller.settings)?.sidebarCollapsedPresentation !== "hidden";
   const setSidebarCollapsedPersistent = useCallback(
     (collapsed: boolean) => {
       sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
@@ -1018,6 +1026,15 @@ function LaunchedShell(
       writeSidebarCollapsed(globalThis, collapsed);
     },
     [sidebarIsDrawer],
+  );
+  // A count tile on the collapsed rail asks for a list the rail cannot show,
+  // so it expands the sidebar first; an open sidebar only switches its list.
+  const openSidebarList = useCallback(
+    (view: "activity" | "completed") => {
+      if (presentedSidebarCollapsed) setSidebarCollapsedPersistent(false);
+      requestSidebarList(view);
+    },
+    [presentedSidebarCollapsed, requestSidebarList, setSidebarCollapsedPersistent],
   );
   useLayoutEffect(() => {
     const label = sidebarToggleFocusRef.current;
@@ -5597,10 +5614,10 @@ function LaunchedShell(
             isNarrow={isNarrow}
             material={material}
             nativeTitlebarInset={hostReservesTitlebarInset}
-            {...(presentedSidebarCollapsed
+            {...(presentedSidebarCollapsed && !sidebarRail
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            {...(presentedSidebarCollapsed
+            {...(presentedSidebarCollapsed && !sidebarRail
               ? {
                   newThreadLabel: activeMode === "chat" ? "New chat" : "New task",
                   onNewThread: () => {
@@ -5626,6 +5643,7 @@ function LaunchedShell(
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={presentedSidebarCollapsed}
+        sidebarRail={sidebarRail}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
@@ -5728,11 +5746,27 @@ function LaunchedShell(
               // Chat has no board, so its Running tile opens the Activity feed,
               // where running threads lead.
               ...(activeMode === "chat"
-                ? { onOpenRunning: () => requestSidebarList("activity") }
+                ? { onOpenRunning: () => openSidebarList("activity") }
                 : {}),
-              onOpenReview: () => requestSidebarList("activity"),
-              onOpenDone: () => requestSidebarList("completed"),
+              onOpenReview: () => openSidebarList("activity"),
+              onOpenDone: () => openSidebarList("completed"),
             }}
+            {...(sidebarRail
+              ? {
+                  rail: {
+                    onExpand: () => setSidebarCollapsedPersistent(false),
+                    onOpenActivity: () => openSidebarList("activity"),
+                    projects: projectController.projects.map((project) => ({
+                      id: String(project.id),
+                      name: project.name,
+                      active:
+                        activeProjectId !== undefined &&
+                        String(activeProjectId) === String(project.id),
+                      onOpen: () => void openSelectedProject(project),
+                    })),
+                  },
+                }
+              : {})}
             threadFilter={{
               query: sidebarFilterQuery,
               onQueryChange: setSidebarFilterQuery,
@@ -6779,6 +6813,7 @@ function LaunchedShell(
             void openDraftInKnownProject(projectId, mode, name);
           }}
           searchOpen={searchOpen}
+          searchQuery={searchQuery}
           searchThreads={threadSearchThreads}
           searchProjects={threadSearchProjects}
           searchListing={threadSearchListing}

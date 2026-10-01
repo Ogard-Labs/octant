@@ -353,7 +353,7 @@ describe("App", () => {
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
 
-  it("hides the sidebar from its own control and brings it back from the window chrome", async () => {
+  it("collapses the sidebar to its icon rail and brings it back from the rail", async () => {
     const user = userEvent.setup();
     render(
       <App
@@ -371,6 +371,11 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Show sidebar" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
     expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
+    const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(within(rail).getByRole("button", { name: "New task" })).toBeVisible();
+    expect(within(rail).getByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
+    // The rail carries Show sidebar, so the window chrome does not offer a second one.
+    expect(screen.getAllByRole("button", { name: "Show sidebar" })).toHaveLength(1);
     expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBe("true");
     // The activated control is unmounted by its own state change, so focus
     // moves to the control that replaced it instead of the document body.

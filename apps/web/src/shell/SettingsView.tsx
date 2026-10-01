@@ -1789,6 +1789,29 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
               </OctantToggleGroup>
             </SettingRow>
           ) : null}
+          {isAvailable("sidebar-collapsed") ? (
+            <SettingRow
+              description="What Hide sidebar leaves: a narrow rail of icons, or nothing."
+              focused={focusedSetting === settingId("sidebar-collapsed")}
+              label="When collapsed"
+              scope="app"
+              settingId="sidebar-collapsed"
+            >
+              <OctantToggleGroup<ShellSettings["sidebarCollapsedPresentation"]>
+                aria-label="When collapsed"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) {
+                    props.onSettingsChange({ sidebarCollapsedPresentation: selected });
+                  }
+                }}
+                value={[props.settings.sidebarCollapsedPresentation]}
+              >
+                <OctantToggleGroupItem value="rail">Icon rail</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="hidden">Hidden</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </SettingRow>
+          ) : null}
           {isAvailable("mode-switcher") ? (
             <SettingRow
               focused={focusedSetting === settingId("mode-switcher")}
