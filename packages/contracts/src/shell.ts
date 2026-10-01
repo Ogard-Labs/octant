@@ -144,6 +144,10 @@ export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
 export const SidebarSearchPresentation = Schema.Literal("icon", "field");
 export type SidebarSearchPresentation = typeof SidebarSearchPresentation.Type;
 
+/** What a collapsed sidebar becomes: an icon rail, or hidden outright. */
+export const SidebarCollapsedPresentation = Schema.Literal("rail", "hidden");
+export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.Type;
+
 /**
  * A destination the sidebar can offer, named for what the person using the
  * shell wants rather than for the per-mode row that renders it: one
@@ -460,6 +464,14 @@ export const ShellSettings = Schema.Struct({
    */
   sidebarSearchPresentation: Schema.optionalWith(SidebarSearchPresentation, {
     default: () => "icon" as const,
+  }),
+  /**
+   * What Hide sidebar leaves behind: a narrow rail of icons, or nothing (the
+   * window chrome then offers Show sidebar). A store persisted before the
+   * rail shipped decodes to the rail.
+   */
+  sidebarCollapsedPresentation: Schema.optionalWith(SidebarCollapsedPresentation, {
+    default: () => "rail" as const,
   }),
   environmentPresentationByMode: Schema.optionalWith(EnvironmentPresentationByMode, {
     default: () => DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,

@@ -22,6 +22,7 @@ import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
+import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import { SidebarMore } from "./SidebarMore";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
@@ -117,6 +118,16 @@ export interface ShellSidebarProps {
     readonly onQueryChange: (query: string) => void;
     /** Enter hands the text to the command overlay, which searches every thread. */
     readonly onSearchEverywhere?: (query: string) => void;
+  };
+  /**
+   * Present while the sidebar is collapsed to its icon rail: the sidebar then
+   * draws the rail instead of the full column, from the same destinations,
+   * counts, and modes.
+   */
+  readonly rail?: {
+    readonly onExpand: () => void;
+    readonly projects: ReadonlyArray<SidebarRailProject>;
+    readonly onOpenActivity?: () => void;
   };
 }
 
@@ -258,6 +269,43 @@ export function ShellSidebar(props: ShellSidebarProps) {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
+  if (props.rail !== undefined) {
+    return (
+      <SidebarRail
+        activeMode={activeMode}
+        destinations={destinationRows.flatMap((id) => {
+          const action = navigationActions[id];
+          return id === "projects" || action === undefined
+            ? []
+            : [
+                {
+                  id,
+                  label: sidebarNavigationDescriptor(id).label,
+                  onSelect: action,
+                  active: props.activeDestination === id,
+                },
+              ];
+        })}
+        modes={modes}
+        nativeHost={props.nativeHost === true}
+        {...(newThread === undefined || newThreadLabel === undefined
+          ? {}
+          : { newThread: { label: newThreadLabel, onSelect: () => newThread() } })}
+        onExpand={props.rail.onExpand}
+        {...(props.rail.onOpenActivity === undefined
+          ? {}
+          : { onOpenActivity: props.rail.onOpenActivity })}
+        {...(navigationActions.projects === undefined
+          ? {}
+          : { onOpenProjects: navigationActions.projects })}
+        {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
+        onOpenSettings={() => props.onOpenSettings()}
+        onSelectMode={props.onSelectMode}
+        projects={props.rail.projects}
+        tiles={tiles}
+      />
+    );
+  }
   return (
     <aside
       aria-label="Octant sidebar"

@@ -195,6 +195,7 @@ describe("shell settings policy", () => {
       sidebarMoreEnabled: true,
       sidebarCountTiles: true,
       sidebarSearchPresentation: "icon",
+      sidebarCollapsedPresentation: "rail",
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,
