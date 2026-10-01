@@ -19,7 +19,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import { SettingsDisclosure } from "../settings/primitives";
+import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -691,16 +691,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       )}
       {view === "installed" ? (
         <>
-          <section
-            aria-labelledby="installed-extension-packages-heading"
+          <SettingsSection
+            actions={viewSwitch}
             className="extensions-settings__section"
+            title="Extension packages"
           >
-            <div className="settings-section-head">
-              <h3 className="setgroup-head" id="installed-extension-packages-heading">
-                Extension packages
-              </h3>
-              {viewSwitch}
-            </div>
             <div className="extensions-settings__body">
               {installedPackages.length === 0 ? (
                 <p className="extensions-settings__state" role="status">
@@ -765,15 +760,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </ul>
               )}
             </div>
-          </section>
+          </SettingsSection>
 
-          <section
-            aria-labelledby="standalone-skill-registry-heading"
-            className="extensions-settings__section"
-          >
-            <h3 className="setgroup-head" id="standalone-skill-registry-heading">
-              Standalone skills
-            </h3>
+          <SettingsSection className="extensions-settings__section" title="Standalone skills">
             <div className="extensions-settings__body">
               {standaloneSkills.length === 0 ? (
                 <p className="extensions-settings__state" role="status">
@@ -902,7 +891,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </>
               )}
             </div>
-          </section>
+          </SettingsSection>
 
           {snapshot.collisions.length > 0 ? (
             <SettingsDisclosure
@@ -932,16 +921,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         </>
       ) : (
         <>
-          <section
-            aria-labelledby="extension-catalog-heading"
+          <SettingsSection
+            actions={viewSwitch}
             className="extensions-settings__section"
+            title="Extension catalog"
           >
-            <div className="settings-section-head">
-              <h3 className="setgroup-head" id="extension-catalog-heading">
-                Extension catalog
-              </h3>
-              {viewSwitch}
-            </div>
             {!marketplaceFetchesEnabled ? (
               <p className="extensions-settings__state" role="status">
                 Marketplace fetches are off in Settings → Skills &amp; Extensions → Marketplace.
@@ -1250,15 +1234,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </div>
               ) : null}
             </div>
-          </section>
+          </SettingsSection>
 
-          <section
-            aria-labelledby="skill-marketplace-heading"
-            className="extensions-settings__section"
-          >
-            <h3 className="setgroup-head" id="skill-marketplace-heading">
-              Standalone skills
-            </h3>
+          <SettingsSection className="extensions-settings__section" title="Standalone skills">
             <div className="extensions-settings__body">
               <p className="extensions-settings__description">
                 Search skills.sh and npm packages that ship SKILL.md, preview, then install.
@@ -1410,7 +1388,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </ul>
               ) : null}
             </div>
-          </section>
+          </SettingsSection>
         </>
       )}
 
