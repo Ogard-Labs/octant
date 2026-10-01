@@ -3,6 +3,7 @@ import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "no
 import type { AddressInfo } from "node:net";
 import {
   CredentialPurgeFailure,
+  CredentialStoreFailure,
   type CredentialPurgeStore,
   type CredentialStore,
 } from "./credentialStore";
@@ -193,8 +194,8 @@ async function handleBrokerRequest(
     try {
       await store.set(decoded.providerInstanceId, decoded.credential);
       return Response.json({ stored: true });
-    } catch {
-      return failure("credential-operation-failed", 503);
+    } catch (error) {
+      return credentialStoreFailure(error);
     }
   }
 
@@ -211,9 +212,18 @@ async function handleBrokerRequest(
       return Response.json({ deleted: true });
     }
     return Response.json({ credential: await store.resolve(decoded.providerInstanceId) });
-  } catch {
-    return failure("credential-operation-failed", 503);
+  } catch (error) {
+    return credentialStoreFailure(error);
   }
+}
+
+function credentialStoreFailure(error: unknown): Response {
+  if (error instanceof CredentialStoreFailure) {
+    const status =
+      error.category === "missing" ? 404 : error.category === "unavailable" ? 503 : 500;
+    return failure(error.category, status);
+  }
+  return failure("failed", 503);
 }
 
 function isAuthorized(peerAddress: string, headers: Headers, token: string): boolean {

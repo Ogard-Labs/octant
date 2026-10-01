@@ -73,7 +73,15 @@ private func mapStatus(_ status: OSStatus) -> StableError {
     switch status {
     case errSecItemNotFound:
         return .missing
-    case errSecNotAvailable, errSecInteractionNotAllowed, errSecAuthFailed:
+    case errSecNotAvailable, errSecInteractionNotAllowed, errSecAuthFailed,
+         // A secret whose ACL needs a prompt comes back as dark wake when this
+         // process is not allowed to show one (measured: -25320 on
+         // SecItemCopyMatching with kSecReturnData). Deleting or replacing an
+         // item this process does not own is an invalid owner edit (-25244).
+         // A hardened helper missing the item's access-group entitlement is
+         // -34018. All three are "the store cannot complete this", not a
+         // missing account and not a generic failure.
+         errSecInDarkWake, errSecInvalidOwnerEdit, errSecMissingEntitlement:
         return .unavailable
     default:
         return .failed
@@ -273,6 +281,38 @@ private func providerCredentialAccount(providerInstanceId: String, storeScope: S
     "\(providerInstanceId):\(storeScope)"
 }
 
+private func readProviderAccountCredential(account: String) throws -> String? {
+    var query = providerAccountQuery(account: account)
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    query[kSecReturnData as String] = true
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    if status == errSecItemNotFound { return nil }
+    guard status == errSecSuccess else { throw mapStatus(status) }
+    guard var credentialData = result as? Data,
+          let credential = String(data: credentialData, encoding: .utf8)
+    else {
+        throw StableError.failed
+    }
+    result = nil
+    credentialData.resetBytes(in: 0..<credentialData.count)
+    return credential
+}
+
+private func providerAccountExists(account: String) throws -> Bool {
+    let status = SecItemCopyMatching(providerAccountQuery(account: account) as CFDictionary, nil)
+    if status == errSecItemNotFound { return false }
+    guard status == errSecSuccess else { throw mapStatus(status) }
+    return true
+}
+
+private func stampProviderAccountScope(account: String, storeScope: String) {
+    _ = SecItemUpdate(
+        providerAccountQuery(account: account) as CFDictionary,
+        [kSecAttrGeneric as String: Data(storeScope.utf8)] as CFDictionary
+    )
+}
+
 // A short-lived version of the scoped protocol used the raw provider UUID as
 // the account and placed scope only in kSecAttrGeneric. Migrate that exact
 // scoped record before creating the namespaced account, never scanning another
@@ -420,6 +460,23 @@ private func baseQuery(service: String, account: String, storeScope: String) -> 
         kSecAttrService as String: service,
         kSecAttrAccount as String: account,
         kSecAttrGeneric as String: Data(storeScope.utf8),
+        // A locked keychain must fail closed instead of blocking until the
+        // desktop kills the helper. The same context is used for purge.
+        kSecUseAuthenticationContext as String: nonInteractiveAuthenticationContext,
+    ]
+}
+
+// Generic-password uniqueness is service and account. Provider accounts are
+// already `providerInstanceId:storeScope`, so an item that was stored without
+// a matching kSecAttrGeneric is still this store's credential. Querying the
+// update or the read by that attribute misses it: Keychain Access shows the
+// entry, and set/resolve report it missing.
+private func providerAccountQuery(account: String) -> [String: Any] {
+    [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: providerService,
+        kSecAttrAccount as String: account,
+        kSecUseAuthenticationContext as String: nonInteractiveAuthenticationContext,
     ]
 }
 
@@ -776,8 +833,11 @@ case "set":
     let finalStatus: OSStatus
     if addStatus == errSecDuplicateItem {
         finalStatus = SecItemUpdate(
-            baseQuery(service: providerService, account: providerAccount, storeScope: storeScope) as CFDictionary,
-            [kSecValueData as String: credentialData] as CFDictionary
+            providerAccountQuery(account: providerAccount) as CFDictionary,
+            [
+                kSecValueData as String: credentialData,
+                kSecAttrGeneric as String: Data(storeScope.utf8),
+            ] as CFDictionary
         )
     } else {
         finalStatus = addStatus
@@ -785,6 +845,18 @@ case "set":
     addQuery.removeValue(forKey: kSecValueData as String)
     credentialData.resetBytes(in: 0..<credentialData.count)
     guard finalStatus == errSecSuccess else { fail(mapStatus(finalStatus)) }
+    // A successful add or update is not evidence the secret can be read back.
+    // Items this process does not own (for example a `security` CLI password
+    // at the same account) update or collide and then refuse the data read.
+    do {
+        guard try readProviderAccountCredential(account: providerAccount) == credential else {
+            fail(.unavailable)
+        }
+    } catch let error as StableError {
+        fail(error)
+    } catch {
+        fail(.failed)
+    }
     emit(["version": protocolVersion, "ok": true])
 
 case "has":
@@ -803,6 +875,10 @@ case "has":
     }
     if status == errSecItemNotFound {
         do {
+            if try providerAccountExists(account: providerAccount) {
+                stampProviderAccountScope(account: providerAccount, storeScope: storeScope)
+                emit(["version": protocolVersion, "ok": true, "present": true])
+            }
             if try legacyProviderCredentialIfPresent(providerInstanceId: account) != nil {
                 emit(["version": protocolVersion, "ok": true, "present": true])
             }
@@ -835,6 +911,10 @@ case "resolve":
     }
     if status == errSecItemNotFound {
         do {
+            if let credential = try readProviderAccountCredential(account: providerAccount) {
+                stampProviderAccountScope(account: providerAccount, storeScope: storeScope)
+                emit(["version": protocolVersion, "ok": true, "credential": credential])
+            }
             guard let legacy = try legacyProviderCredentialIfPresent(providerInstanceId: account) else {
                 fail(.missing)
             }
@@ -868,7 +948,12 @@ case "delete":
     } catch {
         fail(.failed)
     }
-    let status = SecItemDelete(baseQuery(service: providerService, account: providerAccount, storeScope: storeScope) as CFDictionary)
+    var status = SecItemDelete(
+        baseQuery(service: providerService, account: providerAccount, storeScope: storeScope) as CFDictionary
+    )
+    if status == errSecItemNotFound {
+        status = SecItemDelete(providerAccountQuery(account: providerAccount) as CFDictionary)
+    }
     guard status == errSecSuccess || status == errSecItemNotFound else { fail(mapStatus(status)) }
     emit(["version": protocolVersion, "ok": true])
 
