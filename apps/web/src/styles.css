@@ -1513,12 +1513,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project the thread works in. The title and the chips shrink together,
-   in proportion to their widths, and each chip is capped at 30% of the
-   handle. Shrinking the chips first (the earlier rule) left a long title
-   whole beside "octant…" and "m…", two chips that no longer named anything. */
+/* The Project the thread works in. Chips are short, so they keep their own
+   width and the title gives up room instead; a chip truncates only past 30%
+   of the handle. Shrinking the chips first, or in proportion to a long
+   title, left "octant…" and "m…", two chips that no longer named anything. */
 .workspace-pane__context {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 30%;
   overflow: hidden;
@@ -1534,10 +1534,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* The branch is its own chip beside the Project's, in the identifier face so
-   a branch name never reads as prose. It shrinks with the title and the
-   Project chip, under the same 30% cap. */
+   a branch name never reads as prose. It keeps its width like the Project
+   chip, under the same 30% cap. */
 .workspace-pane__branch {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 30%;
   overflow: hidden;
