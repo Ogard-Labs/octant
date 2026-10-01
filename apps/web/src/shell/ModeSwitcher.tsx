@@ -70,32 +70,35 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
       <div
         aria-label="Workspace mode"
         className="modeswitch window-no-drag"
+        data-oct-mode-count={modes.length}
         data-oct-modeswitch="icons"
         role="group"
       >
         <span className="mode-switcher__brand">Octant</span>
-        {modes.map((mode) => {
-          const ModeIcon = modeIcons[mode];
-          const active = activeMode === mode;
-          return (
-            <OctantButton
-              {...(active ? { "aria-current": "page" as const } : {})}
-              className="mode window-no-drag"
-              key={mode}
-              onClick={() => selectMode(mode)}
-              // The label is clipped to the accessible name in the icons
-              // presentation, so the tooltip carries it for sighted hovers.
-              title={modeLabels[mode]}
-              type="button"
-              variant="ghost"
-            >
-              <span aria-hidden="true" className="mode__icon-frame">
-                <ModeIcon className="icon" size={16} strokeWidth={1.5} />
-              </span>
-              <span className="mode-label">{modeLabels[mode]}</span>
-            </OctantButton>
-          );
-        })}
+        <span className="modeswitch__tray">
+          {modes.map((mode) => {
+            const ModeIcon = modeIcons[mode];
+            const active = activeMode === mode;
+            return (
+              <OctantButton
+                {...(active ? { "aria-current": "page" as const } : {})}
+                className="mode window-no-drag"
+                key={mode}
+                onClick={() => selectMode(mode)}
+                // The label is clipped to the accessible name in the icons
+                // presentation, so the tooltip carries it for sighted hovers.
+                title={modeLabels[mode]}
+                type="button"
+                variant="ghost"
+              >
+                <span aria-hidden="true" className="mode__icon-frame">
+                  <ModeIcon className="icon" size={16} strokeWidth={1.5} />
+                </span>
+                <span className="mode-label">{modeLabels[mode]}</span>
+              </OctantButton>
+            );
+          })}
+        </span>
       </div>
     ) : (
       <OctantMenu
