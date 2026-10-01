@@ -1807,7 +1807,7 @@ describe("CodeOperationService", () => {
 
   it("sends approved selected skill instructions to the Code provider", async () => {
     const fixture = providerTurnFixture({
-      resolveSelectedSkillContext: async () => ({
+      resolveSelectedExtensions: async () => ({
         kind: "resolved",
         context: [{ kind: "instructions", text: "Use the synthetic project review checklist." }],
       }),
@@ -1831,6 +1831,39 @@ describe("CodeOperationService", () => {
     });
   });
 
+  it("hands a selected MCP server's tools to the Code turn and resolves them in the turn's window", async () => {
+    const tools = {
+      definitions: [{ name: "notes_search", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: "framed notes" }),
+    };
+    const resolveSelectedExtensions = vi.fn(async () => ({
+      kind: "resolved" as const,
+      context: [],
+      tools,
+    }));
+    const fixture = providerTurnFixture({ resolveSelectedExtensions });
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      extensionSelections: [
+        {
+          kind: "plugin",
+          extensionId: "94000000-0000-4000-8000-000000000011",
+          packageId: "94000000-0000-4000-8000-000000000012",
+          componentId: "notes-server",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "notes" },
+        },
+      ],
+    });
+    expect(result.kind).toBe("provider-turn-state");
+    expect(resolveSelectedExtensions).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "code", windowId: ids.window }),
+    );
+    expect(fixture.turns.start.mock.calls[0]?.[0].extensionTools).toBe(tools);
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -1849,7 +1882,7 @@ describe("CodeOperationService", () => {
       kind: "operation-failed",
       failure: {
         category: "unavailable",
-        message: "Selected skill context is unavailable for Code on this host.",
+        message: "Selected extension is unavailable for Code on this host.",
       },
     });
     expect(fixture.turns.start).not.toHaveBeenCalled();
@@ -2213,7 +2246,7 @@ function providerTurnFixture(
       | "resolveThreadMentionContext"
       | "resolveForkHandoff"
       | "resolveProfileSkills"
-      | "resolveSelectedSkillContext"
+      | "resolveSelectedExtensions"
       | "attachments"
       | "supportsAttachments"
       | "git"

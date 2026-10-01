@@ -1,7 +1,7 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useCommandSkills } from "./useCommandSkills";
+import { useCommandExtensions, useCommandSkills } from "./useCommandSkills";
 
 function skillRecord(name: string, effective: boolean) {
   return {
@@ -24,8 +24,8 @@ describe("useCommandSkills", () => {
   it("offers a skill enabled after mount without an app reload", async () => {
     const snapshot = vi
       .fn()
-      .mockResolvedValueOnce({ skills: [skillRecord("Writing review", false)] })
-      .mockResolvedValue({ skills: [skillRecord("Writing review", true)] });
+      .mockResolvedValueOnce({ packages: [], skills: [skillRecord("Writing review", false)] })
+      .mockResolvedValue({ packages: [], skills: [skillRecord("Writing review", true)] });
     render(<Harness client={stubClient(snapshot as never)} />);
     await waitFor(() => expect(snapshot).toHaveBeenCalled());
 
@@ -37,8 +37,8 @@ describe("useCommandSkills", () => {
   it("stops offering a skill that was disabled after mount", async () => {
     const snapshot = vi
       .fn()
-      .mockResolvedValueOnce({ skills: [skillRecord("Writing review", true)] })
-      .mockResolvedValue({ skills: [skillRecord("Writing review", false)] });
+      .mockResolvedValueOnce({ packages: [], skills: [skillRecord("Writing review", true)] })
+      .mockResolvedValue({ packages: [], skills: [skillRecord("Writing review", false)] });
     render(<Harness client={stubClient(snapshot as never)} />);
     await waitFor(() =>
       expect(screen.getByLabelText("skills")).toHaveTextContent("Writing review"),
@@ -52,7 +52,10 @@ describe("useCommandSkills", () => {
     const originalVisibility = document.visibilityState;
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     try {
-      const snapshot = vi.fn(async () => ({ skills: [skillRecord("Writing review", true)] }));
+      const snapshot = vi.fn(async () => ({
+        packages: [],
+        skills: [skillRecord("Writing review", true)],
+      }));
       render(<Harness client={stubClient(snapshot as never)} refreshMs={0} />);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(snapshot).not.toHaveBeenCalled();
@@ -71,5 +74,43 @@ describe("useCommandSkills", () => {
         value: originalVisibility,
       });
     }
+  });
+
+  it("offers an enabled plugin MCP server by its exact plugin and component", async () => {
+    const snapshot = vi.fn(async () => ({
+      skills: [],
+      packages: [
+        {
+          slug: "notes-plugin",
+          displayName: "Notes",
+          components: [
+            {
+              component: { id: "mcp-notes", kind: "mcp-server", displayName: "notes" },
+              effectiveState: { kind: "effective" },
+            },
+            {
+              component: { id: "mcp-off", kind: "mcp-server", displayName: "off" },
+              effectiveState: { kind: "blocked", reason: "component-disabled" },
+            },
+          ],
+        },
+      ],
+    }));
+    function Servers() {
+      const { pluginServers } = useCommandExtensions(stubClient(snapshot as never), {
+        refreshMs: 10,
+      });
+      return (
+        <output aria-label="servers">
+          {pluginServers.map((server) => `${server.reference}|${server.pluginName}`).join(",")}
+        </output>
+      );
+    }
+    render(<Servers />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("servers")).toHaveTextContent("@notes-plugin/mcp-notes|Notes"),
+    );
+    expect(screen.getByLabelText("servers")).not.toHaveTextContent("mcp-off");
   });
 });

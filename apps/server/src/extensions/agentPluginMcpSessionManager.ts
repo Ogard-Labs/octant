@@ -10,7 +10,6 @@ import type {
 import {
   decodeProviderToolAnswer,
   decodeProviderToolDefinition,
-  type ChatThread,
   type ProviderToolDefinition,
   type WindowId,
 } from "@octant/contracts";
@@ -27,7 +26,7 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import type { ExtensionPackageStore } from "./extensionPackageStore";
-import type { ExtensionToolExecutionPort } from "./extensionChatResolver";
+import type { ExtensionToolExecutionPort, ExtensionToolThread } from "./extensionChatResolver";
 import type { ExtensionRuntimeStartInput, ExtensionSupervisor } from "./extensionSupervisor";
 
 export interface AgentPluginMcpSessionKey {
@@ -59,7 +58,7 @@ export interface AgentPluginMcpSessionManagerOptions {
   readonly baseEnv?: Readonly<Record<string, string>>;
   readonly authorizeToolCall?: (input: {
     readonly windowId?: WindowId;
-    readonly thread: ChatThread;
+    readonly thread: ExtensionToolThread;
     readonly packageId: string;
     readonly componentId: string;
     readonly providerToolName: string;
@@ -275,7 +274,7 @@ export class AgentPluginMcpSessionManager {
   }
 
   #taintToolResult(
-    threadId: ChatThread["id"],
+    threadId: ExtensionToolThread["id"],
     result: unknown,
   ): { readonly result: unknown; readonly isError?: boolean } {
     const record = this.#recordExternalContentIngestion;
@@ -684,8 +683,12 @@ function toolQualifiedName(
   toolName: string,
 ): string {
   const identity = `${authorityScopeKey(record.scope)}:${record.extensionId}:${record.packageId}:${record.componentId}:${toolName}`;
+  // Letters, digits, and underscores only: measured against codex-cli 0.159.2,
+  // a dynamic tool named `ext_mcp-notes_…` never reached the model while the
+  // same tool named `ext_mcp_notes_…` did, because Codex exposes tools to its
+  // code mode as identifiers and drops a name that cannot be one.
   const readable = `${record.componentId}_${toolName}`
-    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/[^A-Za-z0-9_]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 42);
   const digest = createHash("sha256").update(identity).digest("hex").slice(0, 16);

@@ -398,6 +398,15 @@ Project, and a provider's global memory reaches across all of them: Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
 sandbox's readable roots, and Claude runs with no setting sources.
 
+Withholding the shell does not cut Work off from a person's integrations.
+Work is for files, browsers, and documents, and what separates it from Code
+is Git and the developer environment, not the tools a person plugs in. An MCP
+server the person installed and enabled as an Octant plugin is selectable in
+Work and Code exactly as in Chat (see
+[Extensions and skills](#extensions-and-skills)). It runs in Octant's own
+supervised session rather than inside the provider, so the Work-mode launch
+confinement does not stop it, and every call it answers waits for a person.
+
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
 `<default folder>/Code` on first use, binds it as an ordinary Project marked
@@ -1041,6 +1050,15 @@ prompt, schema, tool, route, model, or capability.
   cache. A candidate that fails validation is not listed. Opening Settings does
   not fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
+- A selected MCP server component reaches Chat, Work, and Code turns through
+  the provider's app-managed tool transport. The host resolves the selection
+  against the thread's own mode scope, connects the supervised session for
+  that scope, offers only the selected tools, and refuses the turn when the
+  provider or model cannot carry Octant's tools. Every call waits for a
+  one-time approval in the turn's window, shown in the open thread. An MCP
+  server's launch command starts the server, not a shell the model holds, so
+  a stdio server is declared `mcp`, not `shell`, whichever package format
+  carried it.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
   depends on an optional extension. Computer use is destination-shaped: the

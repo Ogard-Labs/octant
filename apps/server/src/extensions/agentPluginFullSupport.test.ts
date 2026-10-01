@@ -649,6 +649,71 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
+  it("names a plugin's tools with identifier characters only, so Codex can offer them", async () => {
+    const manager = new AgentPluginMcpSessionManager({
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: { local: { type: "stdio", command: "./server" } },
+          }),
+      },
+      stdioSupervisor: {
+        startInteractive: async () => {
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          let pending = "";
+          stdin.setEncoding("utf8");
+          stdin.on("data", (chunk) => {
+            pending += String(chunk);
+            for (
+              let newline = pending.indexOf("\n");
+              newline >= 0;
+              newline = pending.indexOf("\n")
+            ) {
+              const line = pending.slice(0, newline);
+              pending = pending.slice(newline + 1);
+              const message = JSON.parse(line) as { id?: number; method?: string };
+              if (message.id === undefined) continue;
+              stdout.write(
+                `${JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: message.id,
+                  result:
+                    message.method === "tools/list"
+                      ? { tools: [{ name: "notes-lookup", inputSchema: { type: "object" } }] }
+                      : { ok: true },
+                })}\n`,
+              );
+            }
+          });
+          return {
+            receipt: { state: "ready" },
+            process: {
+              pid: 9003,
+              ready: Promise.resolve(),
+              wait: new Promise(() => undefined),
+              stop: async () => undefined,
+              cancel: async () => undefined,
+              stdin,
+              stdout,
+              once: () => undefined,
+            },
+          } as never;
+        },
+      },
+    });
+
+    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+
+    const names = manager.toolDefinitions().map((definition) => definition.name);
+    expect(names).toHaveLength(1);
+    expect(names[0]).toMatch(/^ext_mcp_local_notes_lookup_[0-9a-f]{16}$/);
+    await manager.drainAll();
+  });
+
   it("isolates MCP sessions and tool identities by activation authority scope", async () => {
     let starts = 0;
     const manager = new AgentPluginMcpSessionManager({

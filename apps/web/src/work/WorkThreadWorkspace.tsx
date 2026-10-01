@@ -101,6 +101,7 @@ import {
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import {
@@ -1634,6 +1635,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
       />
 
+      <ExtensionToolApprovalPrompt
+        className="thread-column"
+        client={props.extensionClient}
+        threadId={String(props.threadId)}
+        turnActive={turnRunning}
+      />
       {pendingBrowserApproval === undefined ? null : (
         <section
           aria-label="Browser origin approval"
