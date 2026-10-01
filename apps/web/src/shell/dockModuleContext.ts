@@ -74,4 +74,6 @@ export interface ThreadUtilityDockContentProps {
   readonly writtenDocumentPath?: string;
   /** The Canvas the thread most recently wrote or handed off. */
   readonly writtenCanvasId?: string;
+  /** Changes whenever a Canvas the thread references gains a new version. */
+  readonly canvasRevision?: string;
 }

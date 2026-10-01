@@ -74,6 +74,41 @@ describe("the dock Canvas tool", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("reloads the open Canvas when a turn revises it", async () => {
+    const threadReferenceCards = vi
+      .fn()
+      .mockResolvedValueOnce({ mode: "chat", threadId, projectId, cards: [card()] })
+      .mockResolvedValue({
+        mode: "chat",
+        threadId,
+        projectId,
+        cards: [card({ versionId: "20000000-0000-4000-8000-000000000004", title: "Revised" })],
+      });
+    const client = { threadReferenceCards } as never;
+    const { rerender } = render(
+      <DockCanvasTool
+        client={client}
+        mode="code"
+        projectId={projectId as never}
+        revision="v1"
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByText(`canvas:${canvasId}:Quarterly summary`)).toBeVisible();
+
+    rerender(
+      <DockCanvasTool
+        client={client}
+        mode="code"
+        projectId={projectId as never}
+        revision="v2"
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByText(`canvas:${canvasId}:Revised`)).toBeVisible();
+    expect(threadReferenceCards).toHaveBeenCalledTimes(2);
+  });
+
   it("lists authorized documents when the thread owns more than one", async () => {
     const user = userEvent.setup();
     const secondId = "20000000-0000-4000-8000-000000000009";
