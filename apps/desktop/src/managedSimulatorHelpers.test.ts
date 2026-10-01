@@ -239,4 +239,87 @@ describe("managed simulator streams", () => {
       helpers.dispose();
     }
   });
+
+  it("waits for serve-sim to report a screen size before using the stream", async () => {
+    const native = nativeHelpers();
+    let asked = 0;
+    const fetchLate: typeof fetch = async (input) => {
+      if (String(input).endsWith("/config")) {
+        asked += 1;
+        return new Response(
+          JSON.stringify(asked < 3 ? { width: 0, height: 0 } : { width: 1206, height: 2622 }),
+        );
+      }
+      return fetchStream(input);
+    };
+    const helpers = createManagedSimulatorHelpers(native, tools(), { fetch: fetchLate });
+    try {
+      await expect(helpers.send(udid, { op: "hello" }, 4_000)).resolves.toEqual({
+        status: "delivered",
+        screen: { width: 1206, height: 2622 },
+      });
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("keys plain text through the native helper, not serve-sim", async () => {
+    const native = nativeHelpers();
+    const managed = tools();
+    const copyToPasteboard = vi.fn(async () => true);
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      copyToPasteboard,
+    });
+    try {
+      await expect(helpers.send(udid, { op: "text", text: "Hello 42" }, 2_000)).resolves.toEqual({
+        status: "delivered",
+      });
+      expect(native.send).toHaveBeenCalledWith(
+        udid,
+        { op: "text", text: "Hello 42" },
+        2_000,
+        undefined,
+      );
+      expect(copyToPasteboard).not.toHaveBeenCalled();
+      expect(managed.commands.some((args) => args[0] === "type")).toBe(false);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("pastes punctuation and non-Latin text through the Simulator pasteboard", async () => {
+    const native = nativeHelpers();
+    const copyToPasteboard = vi.fn(async () => true);
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      copyToPasteboard,
+    });
+    try {
+      await expect(
+        helpers.send(udid, { op: "text", text: "héllo, wörld! 日本" }, 2_000),
+      ).resolves.toEqual({ status: "delivered" });
+      expect(copyToPasteboard).toHaveBeenCalledWith(udid, "héllo, wörld! 日本", expect.anything());
+      expect(native.send).toHaveBeenCalledOnce();
+      expect(native.send.mock.calls[0]?.[1]).toEqual({ op: "key", usage: 25, modifiers: [227] });
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("presses nothing when the pasteboard cannot be set", async () => {
+    const native = nativeHelpers();
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      copyToPasteboard: async () => false,
+    });
+    try {
+      const reply = await helpers.send(udid, { op: "text", text: "a.b" }, 2_000);
+      expect(reply.status).toBe("unavailable");
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
 });

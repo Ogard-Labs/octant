@@ -14,6 +14,11 @@ import type {
 const SIMULATOR_ID = /^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/;
 const READY_MS = 8_000;
 const FIRST_FRAME_MS = 5_000;
+const CONFIG_POLL_MS = 200;
+/** What the device helper types as key positions; it checks the guest layout first. */
+const KEY_TYPED_TEXT = /^[A-Za-z0-9 \n]+$/;
+/** HID usage of V, and of the left Command modifier. */
+const PASTE_KEY = { usage: 25, modifiers: [227] } as const;
 
 /** `aborted` can flip during an await, so this read stays outside control-flow narrowing. */
 function actionWasCancelled(signal: AbortSignal | undefined): boolean {
@@ -51,6 +56,8 @@ export interface ManagedSimulatorHelpersOptions {
   readonly fetch?: typeof fetch;
   readonly readyMs?: number;
   readonly firstFrameMs?: number;
+  /** Puts text on the Simulator's pasteboard; resolves whether it did. */
+  readonly copyToPasteboard?: (udid: string, text: string, signal: AbortSignal) => Promise<boolean>;
 }
 
 interface StreamSession {
@@ -100,6 +107,7 @@ export function createManagedSimulatorHelpers(
   const fetchImpl = options.fetch ?? fetch;
   const readyMs = options.readyMs ?? READY_MS;
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
+  const copyToPasteboard = options.copyToPasteboard ?? simctlPasteboardCopy;
   const sessions = new Map<string, Promise<StreamSession | undefined>>();
   const live = new Set<ChildProcess>();
   let disposed = false;
@@ -269,6 +277,39 @@ export function createManagedSimulatorHelpers(
     return { status: "delivered" };
   }
 
+  /**
+   * serve-sim types US key positions without reading the guest layout, so text
+   * never goes to it. Text the device helper can key goes there; punctuation
+   * and non-Latin text is pasted through the Simulator pasteboard.
+   */
+  async function typeText(
+    udid: string,
+    text: string,
+    timeoutMs: number,
+    cancelled: AbortSignal | undefined,
+  ): Promise<DeviceHelperReply> {
+    if (KEY_TYPED_TEXT.test(text)) {
+      return native.send(udid, { op: "text", text }, timeoutMs, cancelled);
+    }
+    const startedAt = Date.now();
+    const signal =
+      cancelled === undefined
+        ? AbortSignal.timeout(timeoutMs)
+        : AbortSignal.any([cancelled, AbortSignal.timeout(timeoutMs)]);
+    const copied = await copyToPasteboard(udid, text, signal);
+    if (actionWasCancelled(cancelled)) {
+      return { status: "unavailable", message: "The action was cancelled." };
+    }
+    if (!copied) {
+      return { status: "unavailable", message: "The Simulator pasteboard could not be set." };
+    }
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) {
+      return { status: "unavailable", message: "Setting the Simulator pasteboard used the time." };
+    }
+    return native.send(udid, { op: "key", ...PASTE_KEY }, remainingMs, cancelled);
+  }
+
   async function ensureFrames(session: StreamSession): Promise<void> {
     if (session.reading || session.closed) return;
     session.reading = true;
@@ -342,6 +383,7 @@ export function createManagedSimulatorHelpers(
         };
       }
       if (request.op === "key") return native.send(simulatorId, request, timeoutMs, cancelled);
+      if (request.op === "text") return typeText(simulatorId, request.text, timeoutMs, cancelled);
       const session = await sessionFor(simulatorId);
       if (actionWasCancelled(cancelled)) {
         return { status: "unavailable", message: "The action was cancelled." };
@@ -423,9 +465,6 @@ function controlCommands(
   const device = ["-d", udid] as const;
   if (request.op === "tap") {
     return [{ kind: "args", args: ["tap", String(request.x), String(request.y), ...device] }];
-  }
-  if (request.op === "text") {
-    return [{ kind: "args", args: ["type", request.text, ...device] }];
   }
   if (request.op === "button") {
     // serve-sim names the sleep/wake control `power`.
@@ -509,26 +548,62 @@ async function readScreen(
   signal: AbortSignal,
 ): Promise<{ readonly width: number; readonly height: number } | undefined> {
   const configUrl = endpoint.streamUrl.replace(/\/stream\.mjpeg$/, "/config");
+  // serve-sim answers 0×0 until its capture has seen the display.
+  while (!signal.aborted) {
+    const screen = await readConfig(fetchImpl, configUrl, signal);
+    if (screen === "error") return undefined;
+    if (screen !== "pending") return screen;
+    await delay(CONFIG_POLL_MS, signal);
+  }
+  return undefined;
+}
+
+async function readConfig(
+  fetchImpl: typeof fetch,
+  configUrl: string,
+  signal: AbortSignal,
+): Promise<{ readonly width: number; readonly height: number } | "pending" | "error"> {
   let response: Response;
   try {
     response = await fetchImpl(configUrl, { redirect: "error", credentials: "omit", signal });
   } catch {
-    return undefined;
+    return "error";
   }
-  if (!response.ok) return undefined;
+  if (!response.ok) return "error";
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    return undefined;
+    return "error";
   }
-  if (!isRecord(body)) return undefined;
+  if (!isRecord(body)) return "error";
   const width = body.width;
   const height = body.height;
-  if (typeof width !== "number" || typeof height !== "number") return undefined;
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return undefined;
-  if (width <= 0 || height <= 0 || width > 20_000 || height > 20_000) return undefined;
+  if (typeof width !== "number" || typeof height !== "number") return "error";
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return "error";
+  if (width === 0 && height === 0) return "pending";
+  if (width <= 0 || height <= 0 || width > 20_000 || height > 20_000) return "error";
   return { width, height };
+}
+
+/** `xcrun simctl pbcopy` reads the text from stdin, so it never reaches argv. */
+function simctlPasteboardCopy(udid: string, text: string, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawnProcess("xcrun", ["simctl", "pbcopy", udid], {
+        stdio: ["pipe", "ignore", "ignore"],
+        signal,
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
+    child.once("error", () => resolve(false));
+    child.once("exit", (code) => resolve(code === 0));
+    child.stdin?.once("error", () => undefined);
+    child.stdin?.end(text);
+  });
 }
 
 function readEndpoint(

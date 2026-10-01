@@ -32,6 +32,8 @@ export type DeviceHelperRequest =
   | { readonly op: "stream-stop" }
   | { readonly op: "text"; readonly text: string }
   | { readonly op: "key"; readonly key: string }
+  /** A raw HID keyboard usage with modifier usages (224–231) held around it. */
+  | { readonly op: "key"; readonly usage: number; readonly modifiers: ReadonlyArray<number> }
   | { readonly op: "button"; readonly button: "home" | "lock" };
 
 export type DeviceHelperReply =
