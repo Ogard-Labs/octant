@@ -261,7 +261,7 @@
   color: var(--octant-text-primary);
   background: var(--oct-settings-tile-fill);
   border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-tile);
+  border-radius: var(--oct-radius-inset);
 }
 
 .settings-view__header-text {

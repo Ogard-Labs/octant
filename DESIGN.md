@@ -127,7 +127,7 @@ always publishes `default`. Vivid reads best in the light theme.
 ### Shapes and depth
 
 Radius has one number per role, defined once as `--oct-radius-*` in
-`octant.css`: a compact control is 8px, a control or a row 10px, a Settings page's icon tile 12px (`--oct-radius-tile`), a card, panel,
+`octant.css`: a compact control is 8px, a control or a row 10px, an object resting inside a card or well, such as a Settings page's icon tile, 12px (`--oct-radius-inset`), a card, panel,
 menu, or popover 16px. The recipes reach the same numbers through `--radius`,
 whose `lg` step is the control and whose `xl` step lands on the card's 16px, so
 a menu and the popover beside it share a corner. Welcome composers and
