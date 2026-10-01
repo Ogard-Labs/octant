@@ -415,12 +415,17 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       ? projectCandidates
       : sortProjectsForView(projectCandidates, currentFilters.sorting, timeFilteredThreads ?? []);
   const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
+  // A thread filed in no Project (a Chat started without one, a Code thread
+  // in the default folder) belongs to no view but All Projects, which keeps it
+  // under Recents rather than hiding it because no Project names it.
+  const allProjectsView = projectViewState?.activeViewId === ALL_CODE_PROJECTS_VIEW_ID;
   const viewScopedThreads =
     currentFilters === undefined || timeFilteredThreads === undefined
       ? timeFilteredThreads
-      : timeFilteredThreads.filter(
-          (thread) =>
-            thread.projectId !== undefined && visibleProjectIds.has(String(thread.projectId)),
+      : timeFilteredThreads.filter((thread) =>
+          thread.projectId === undefined
+            ? allProjectsView
+            : visibleProjectIds.has(String(thread.projectId)),
         );
   const threads =
     viewScopedThreads === undefined || !searching

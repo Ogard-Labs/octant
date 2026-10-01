@@ -3176,10 +3176,10 @@ describe("App", () => {
       "Keep my unsent draft",
     );
     await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
     expect(screen.queryByDisplayValue("Keep my unsent draft")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New chat" }));
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
@@ -3868,10 +3868,10 @@ describe("App", () => {
     // A mode switch is a navigation away from the Projects page, so the page
     // must not keep sitting over the workspace it belongs to.
     await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
     expect(screen.queryByRole("searchbox", { name: "Search Projects" })).toBeNull();
     expect(document.querySelector(".projects-page-layer")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);

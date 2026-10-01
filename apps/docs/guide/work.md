@@ -6,6 +6,11 @@ description: Work mode binds one OS-confined folder for local knowledge work wit
 
 Work is local knowledge work for documents, presentations, spreadsheets, reports, PDFs, images, and artifacts. Each Work Project binds exactly one OS-confined project root selected through the native directory picker.
 
+The **Work** mode also holds your chats. Above its composer, **Chat** starts a
+conversation with no file access, and **In a folder** starts work in one folder
+you choose. Both kinds of thread show in the same sidebar list, and each keeps
+the kind it started as.
+
 ## Work Projects
 
 Create a Work Project from the sidebar:

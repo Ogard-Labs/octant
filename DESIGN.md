@@ -804,9 +804,13 @@ keeps its own dither in Settings. Escape closes the open panel and only leaves
 Zen when none is open. Pinning shows no notice: the card that arrives says the
 same thing, and the notice landed on top of it.
 
-The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
-available as a labeled selector, compact list, or icon presentation according
-to the user's setting. Code and Work keep separate Project View sets. The
+The app has three server-enforced modes—Chat, Work, and Code—shown as two:
+**Work**, which lists Chat and Work threads together and whose new-thread
+composer opens with a Chat / In a folder switch in its context tray, and
+**Code**. Work reopens on the kind last used. Mode switching is available as a
+labeled selector, compact list, or icon presentation according to the user's
+setting; with two modes the icon presentation shows the labels instead of
+icons in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
 compact thread list. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the

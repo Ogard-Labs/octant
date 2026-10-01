@@ -112,7 +112,6 @@ import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
-import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   enforceSidebarBackgroundAccessibility,
@@ -144,6 +143,16 @@ import "./styles/environment.css";
 import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
+import { mergeThreadRowActions } from "./projects/mergeThreadRowActions";
+import { WorkKindChoiceContext, type WorkKindChoice } from "./shell/WorkKindSwitch";
+import {
+  enabledWorkKinds,
+  readPreferredWorkKind,
+  resolveWorkKind,
+  writePreferredWorkKind,
+  type VisibleMode,
+  type WorkKind,
+} from "./shell/workKind";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   resolveSidebarDestinationContributions,
@@ -909,6 +918,9 @@ function LaunchedShell(
   const [searchQuery, setSearchQuery] = useState("");
   // The sidebar's in-place filter is its own query: the command overlay
   // searches every thread, while this one only narrows the rows in view.
+  const [preferredWorkKind, setPreferredWorkKind] = useState<WorkKind | undefined>(() =>
+    readPreferredWorkKind(globalThis.localStorage),
+  );
   const [sidebarFilterQuery, setSidebarFilterQuery] = useState("");
   const [sidebarListRequest, setSidebarListRequest] = useState<{
     readonly view: "activity" | "completed";
@@ -1121,6 +1133,15 @@ function LaunchedShell(
     | undefined
   >(undefined);
   const activeMode = controller.workspace?.activeMode ?? "chat";
+  // Opening a Chat or Work thread from anywhere also counts as using that kind.
+  useEffect(() => {
+    if (activeMode === "code") return;
+    setPreferredWorkKind((current) => {
+      if (current === activeMode) return current;
+      writePreferredWorkKind(activeMode, globalThis.localStorage);
+      return activeMode;
+    });
+  }, [activeMode]);
   // The window's context — composer targets, thread controllers, and the right
   // utility dock — resolves against the active pane's surface. Activating a
   // pane (opening into it, clicking into it, focusing it) re-targets them all
@@ -3490,17 +3511,26 @@ function LaunchedShell(
   const sidebarTileCounts = useMemo(
     () =>
       countSidebarTiles(
-        activeMode === "chat"
-          ? chatController.status === "ready"
-            ? navigationModel.markedChatNavigation
-            : []
-          : activeMode === "code"
-            ? navigationModel.codeProjectThreads
-            : navigationModel.workProjectThreads,
+        activeMode === "code"
+          ? navigationModel.codeProjectThreads
+          : // Work counts its Chat and Work threads together, as its list shows them.
+            [
+              ...(chatController.status === "ready" ? navigationModel.markedChatNavigation : []),
+              ...navigationModel.workProjectThreads,
+            ],
         minuteNow,
       ),
     [activeMode, chatController.status, minuteNow, navigationModel],
   );
+
+  const workKindChoice: WorkKindChoice | undefined =
+    activeMode === "code" || controller.settings === undefined
+      ? undefined
+      : {
+          kind: activeMode,
+          kinds: enabledWorkKinds(enabledModes(controller.settings)),
+          onSwitch: switchWorkKind,
+        };
 
   useMenuBarTasks({
     bridge: props.hostBridge,
@@ -4299,6 +4329,28 @@ function LaunchedShell(
     setArchiveOpen(true);
   }
 
+  // Chat and Work show as one Work mode. Which kind it opens on is the one the
+  // person used last, so leaving for Code and coming back lands where they were.
+  function handleSelectVisibleMode(mode: VisibleMode) {
+    if (mode === "code") {
+      handleSelectMode("code");
+      return;
+    }
+    if (controller.settings === undefined) return;
+    const kind = resolveWorkKind(preferredWorkKind, enabledModes(controller.settings));
+    if (kind !== undefined) handleSelectMode(kind);
+  }
+
+  // The Work composer's Chat / In a folder choice. It switches which draft is
+  // on screen; it never converts a thread, because a draft has no thread yet.
+  function switchWorkKind(kind: WorkKind) {
+    if (kind === activeMode) return;
+    setPreferredWorkKind(kind);
+    writePreferredWorkKind(kind, globalThis.localStorage);
+    handleSelectMode(kind);
+    void controller.openDraftThread(kind);
+  }
+
   function handleSelectMode(mode: OctantMode) {
     markInteraction("renderer", "mode-switch-requested");
     markInteractionAfterPaint("mode-switch");
@@ -4321,6 +4373,33 @@ function LaunchedShell(
       void controller.openDraftThread(mode);
     }
   }
+
+  // Work lists Chat and Work threads and Projects together. Each row keeps its
+  // own kind: selecting it opens it in its own mode, and its menu reaches its
+  // own kind's commands.
+  const workSide = activeMode === "chat" || activeMode === "work";
+  const workSideProjects = projectController.allProjects.filter(
+    (project) =>
+      (project.type === "chat" || project.type === "work") && project.lifecycle === "active",
+  );
+  const workSideArchivedProjects = projectController.allProjects.filter(
+    (project) =>
+      (project.type === "chat" || project.type === "work") && project.lifecycle !== "active",
+  );
+  const workSideChatThreads =
+    chatController.status === "ready" ? navigationModel.markedChatNavigation : [];
+  const workSideChatThreadIds = new Set(workSideChatThreads.map((thread) => thread.threadId));
+  const workSideThreads = [
+    ...workSideChatThreads,
+    ...navigationModel.workProjectThreads.map(navigationModel.withProviderMark),
+  ];
+  const selectWorkSideThread = (threadId: string) =>
+    workSideChatThreadIds.has(threadId) ? selectChatThread(threadId) : selectWorkThread(threadId);
+  const workSideRowActions = mergeThreadRowActions(
+    (threadId) => workSideChatThreadIds.has(threadId),
+    chatThreadRowActions,
+    workThreadRowActions,
+  );
 
   const pluginSidebarDestinationActionContext: SidebarDestinationActionContext = {
     closeOverlays: closeWorkspaceReaders,
@@ -5754,7 +5833,7 @@ function LaunchedShell(
             onOpenSettings={(deepLink) => void controller.openSettings(deepLink)}
             onOpenZen={() => void zen.enterZen()}
             onRetryChat={() => void chatController.retry()}
-            onSelectMode={handleSelectMode}
+            onSelectMode={handleSelectVisibleMode}
             {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
             inboxCount={inboxCount}
             countTiles={{
@@ -5772,14 +5851,16 @@ function LaunchedShell(
                   rail: {
                     onExpand: () => setSidebarCollapsedPersistent(false),
                     onOpenActivity: () => openSidebarList("activity"),
-                    projects: projectController.projects.map((project) => ({
-                      id: String(project.id),
-                      name: project.name,
-                      active:
-                        activeProjectId !== undefined &&
-                        String(activeProjectId) === String(project.id),
-                      onOpen: () => void openSelectedProject(project),
-                    })),
+                    projects: (workSide ? workSideProjects : projectController.projects).map(
+                      (project) => ({
+                        id: String(project.id),
+                        name: project.name,
+                        active:
+                          activeProjectId !== undefined &&
+                          String(activeProjectId) === String(project.id),
+                        onOpen: () => void openSelectedProject(project),
+                      }),
+                    ),
                   },
                 }
               : {})}
@@ -5812,24 +5893,19 @@ function LaunchedShell(
                   </div>
                 ) : (
                   <ProjectSidebarSection
-                    {...(activeMode === "code" || activeMode === "work"
-                      ? {
-                          projectViewsEnabled: true,
-                          projectViewsMode: activeMode,
-                          projectViewSwitcherPresentation: (
-                            presentedShellSettings ?? controller.settings
-                          ).projectViewSwitcherPresentation,
-                          onProjectViewSwitcherPresentationChange: (
-                            presentation: ProjectViewSwitcherPresentation,
-                          ) =>
-                            void controller.updateSettings({
-                              projectViewSwitcherPresentation: presentation,
-                            }),
-                          projectViewEnvironmentOptions:
-                            projectViewEnvironmentOptionsFromHosts(hosts),
-                        }
-                      : {})}
-                    activityMode={activeMode}
+                    projectViewsEnabled
+                    projectViewsMode={activeMode === "code" ? "code" : "work"}
+                    projectViewSwitcherPresentation={
+                      (presentedShellSettings ?? controller.settings)
+                        .projectViewSwitcherPresentation
+                    }
+                    onProjectViewSwitcherPresentationChange={(presentation) =>
+                      void controller.updateSettings({
+                        projectViewSwitcherPresentation: presentation,
+                      })
+                    }
+                    projectViewEnvironmentOptions={projectViewEnvironmentOptionsFromHosts(hosts)}
+                    activityMode={activeMode === "code" ? "code" : "work"}
                     {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
                     {...(sidebarListRequest === undefined
                       ? {}
@@ -5864,18 +5940,18 @@ function LaunchedShell(
                     {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
                       ? {}
                       : { openThreadIds: openSidebarThreadIds })}
-                    archivedProjects={projectController.archivedProjects}
+                    archivedProjects={
+                      workSide ? workSideArchivedProjects : projectController.archivedProjects
+                    }
                     availabilityByProject={projectController.availabilityByProject}
                     contextHealthByProject={contextHealthByProject}
                     onOpenContextHealth={(projectId) => void openProjectContextHealth(projectId)}
-                    {...(activeMode === "chat"
-                      ? chatController.status === "ready"
-                        ? {
-                            addProjectLabel: "chat-project" as const,
-                            onAddProject: () => openProjectCreate(),
-                            unfiledLabel: "Chats" as const,
-                          }
-                        : { unfiledLabel: "Chats" as const }
+                    {...(activeMode === "chat" && chatController.status === "ready"
+                      ? {
+                          addProjectLabel: "chat-project" as const,
+                          onAddProject: () => openProjectCreate(),
+                          unfiledLabel: "Recents" as const,
+                        }
                       : {
                           onAddProject: () => openProjectCreate(),
                           unfiledLabel: "Recents" as const,
@@ -5909,11 +5985,11 @@ function LaunchedShell(
                     }
                     onRestore={(projectId) => void projectController.setArchived(projectId, false)}
                     onProjectOpen={openSelectedProject}
-                    {...(activeMode === "chat" && chatController.status === "ready"
+                    {...(workSide
                       ? {
-                          onSelectThread: selectChatThread,
-                          threadActions: chatThreadRowActions,
-                          threads: markedChatNavigation,
+                          onSelectThread: selectWorkSideThread,
+                          threadActions: workSideRowActions,
+                          threads: workSideThreads,
                         }
                       : activeMode === "code"
                         ? {
@@ -5946,7 +6022,7 @@ function LaunchedShell(
                             : { threadErrorMessage: projectThreadsAccess.errorMessage }),
                           onRetryThreads: () => projectThreadsAccess.onRetry?.(),
                         })}
-                    projects={projectController.projects}
+                    projects={workSide ? workSideProjects : projectController.projects}
                   />
                 )}
               </>
@@ -7006,7 +7082,9 @@ function LaunchedShell(
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
                     <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                      {shell}
+                      <WorkKindChoiceContext.Provider value={workKindChoice}>
+                        {shell}
+                      </WorkKindChoiceContext.Provider>
                     </MarkdownLinkActionsContext.Provider>
                   </StreamRepliesContext.Provider>
                 </NewTaskDraftsContext.Provider>

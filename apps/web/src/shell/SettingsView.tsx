@@ -1320,7 +1320,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
-            description="Show Chat in the mode switcher. Existing threads stay stored when hidden."
+            description="Offer Chat in Work's composer: answers without touching your files. Existing threads stay stored when hidden."
             focused={focusedSetting === settingId("enable-chat")}
             label="Chat"
             scope="app"
@@ -1333,9 +1333,9 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Show Work in the mode switcher. Existing threads stay stored when hidden."
+            description="Offer In a folder in Work's composer: reads and edits one folder you choose. Existing threads stay stored when hidden."
             focused={focusedSetting === settingId("enable-work")}
-            label="Work"
+            label="Work in a folder"
             scope="app"
             settingId="enable-work"
           >

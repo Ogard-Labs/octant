@@ -4028,6 +4028,45 @@ input.switch:checked::after {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* Work and Code: with Chat folded into Work the switcher has two choices,
+   and two icons alone asked a reader to learn which glyph meant which. With
+   two, the labels replace the icons in a faint tray, so the header reads
+   "Octant  [Work | Code]" as the approved sidebar does. Three or more keep
+   the bare icons above. */
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode-switcher__brand {
+  flex: 1 0 auto;
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+}
+.modeswitch__tray {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode {
+  width: auto;
+  height: 26px;
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
+}
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode-label {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+  font-size: var(--oct-text-xs);
+}
+/* Labels alone: the words already say which is which, and the icons cost
+   the brand its room in a sidebar at its default width. */
+.modeswitch[data-oct-modeswitch="icons"][data-oct-mode-count="2"] .mode__icon-frame {
+  display: none;
+}
+
 /* Three 30px buttons need 98px and a compact sidebar is 52. It is already
    a vertical icon rail, so the switcher turns to match rather than
    overflowing it. Keyed to data-compact rather than to a width, because

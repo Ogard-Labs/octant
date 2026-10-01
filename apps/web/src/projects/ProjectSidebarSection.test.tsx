@@ -493,6 +493,36 @@ describe("ProjectSidebarSection archive", () => {
   });
 });
 
+describe("ProjectSidebarSection threads filed in no Project", () => {
+  it("keeps a Chat started without a Project under Recents in the All Projects view", () => {
+    window.localStorage.clear();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projectViewsMode="work"
+        projects={[chatProjectA]}
+        threads={[
+          { projectId: String(chatProjectA.id), threadId: "thread-a", title: "Planning" },
+          { threadId: "thread-loose", title: "Quick question" },
+        ]}
+        unfiledLabel="Recents"
+      />,
+    );
+
+    const recents = screen.getByRole("region", { name: "Recents" });
+    expect(within(recents).getByRole("button", { name: /Quick question/ })).toBeVisible();
+    window.localStorage.clear();
+  });
+});
+
 describe("ProjectSidebarSection activity view", () => {
   it("toggles a recency inbox that keeps Project attribution and attention glyphs", async () => {
     const user = userEvent.setup();

@@ -81,6 +81,7 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
 import type { OctantHostBridge } from "./hostBridge";
+import { WorkKindSwitch } from "./WorkKindSwitch";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -976,6 +977,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
           <div className="composer-tray composer-tray--above" aria-label="Thread context">
+            {props.mode === "chat" ? <WorkKindSwitch /> : null}
             <DraftContextStrip
               mode={props.mode}
               {...hostSelectorBinding}
