@@ -53,7 +53,11 @@ driver's GitHub channel kept for binaries only.
   "Device tools" Settings section.
 
 Phase one ships the channel, the vendored tools, updates, and the Settings
-surface; pane adoption lands as follow-ups.
+surface. The Simulator pane attaches serve-sim for a booted Simulator and
+keeps the native device helper when that stream is absent. The Android pane
+attaches serve-avd for an already booted emulator serial and keeps adb
+screencap and input otherwise. Boot still uses the emulator binary. Neither
+pane starts a tool in a way that boots a device.
 
 ## Consequences
 

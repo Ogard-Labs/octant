@@ -78,28 +78,34 @@ does not shut down, erase, or transfer the destination.
 
 An agent's `octant_apple` `boot`, `run`, or `open` opens that pane beside the
 transcript. `open` boots a shut-down destination and otherwise only shows the
-pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim: the
-in-app pane is the live device. The pane opens once per request; a tab you
+pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim. The
+in-app pane is the live device. It attaches the managed serve-sim stream for
+a booted Simulator and falls back to the desktop device helper when that
+stream is missing. The pane opens once per request; a tab you
 closed stays closed until the agent asks again.
 
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
 requests, and the Octant desktop app delivers them to the Simulator through a
-small native helper it ships. Nothing comes to the foreground and no macOS
-Accessibility permission is needed. Without that helper, tap, swipe, typing,
-and keys are unavailable — Octant does not launch or script Simulator.app to
-deliver them. A tap lands on the point you click on the
+small native helper it ships, or through the managed serve-sim stream when
+that stream is attached. Nothing comes to the foreground and no macOS
+Accessibility permission is needed. Keys and typing need the helper. Tap,
+swipe, Home, and Lock use the managed stream when it is attached and the
+helper otherwise. Octant does not launch or
+script Simulator.app to deliver them. A tap lands on the point you click on the
 captured screen. On an approval-gated thread, **Allow input** is the one
 confirmation that opens that Simulator; clicks, typing, Home, and Lock never
 raise a dialog. That grant covers input for fifteen minutes after each
-input. **Type** sends letters, digits, spaces, and new lines; text
-with any other character is refused whole rather than typed wrong, because a
-Simulator maps key positions with its own keyboard language. For the same
-reason typing works on a Simulator whose keyboard language uses a QWERTY
-layout — English, the Nordic languages, Dutch, Spanish, Portuguese — and is
-refused on others, such as French or German, with
-`keyboard-layout-unsupported` in the evidence. **Return**,
+input. **Type** keys letters, digits, spaces, and new lines, because a
+Simulator maps key positions with its own keyboard language. Keyed typing
+works on a Simulator whose keyboard language uses a QWERTY layout — English,
+the Nordic languages, Dutch, Spanish, Portuguese — and is refused on others,
+such as French or German, with `keyboard-layout-unsupported` in the evidence.
+Text with punctuation or non-Latin characters is placed on that Simulator's
+pasteboard with `simctl pbcopy` and pasted with Command-V, so it replaces
+whatever the Simulator pasteboard held, and iOS may ask in the Simulator to
+**Allow Paste**. **Return**,
 **Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
 later. When the host cannot deliver an input action, the evidence names the
 host's refusal rather than reading as interrupted. Remote, Linux, and

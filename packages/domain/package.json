@@ -44,6 +44,7 @@
     "./execution-capsule-policy": "./src/executionCapsulePolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",
     "./thread-completion-policy": "./src/threadCompletionPolicy.ts",
+    "./managed-device-stream": "./src/managedDeviceStream.ts",
     "./memory-policy": "./src/memoryPolicy.ts",
     "./mode-policy": "./src/modePolicy.ts",
     "./multi-model-pool-policy": "./src/multiModelPoolPolicy.ts",

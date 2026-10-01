@@ -673,6 +673,7 @@ import {
 } from "./android/androidToolchainService";
 import { AndroidRuntimeStore } from "./android/androidRuntimeStore";
 import { spawnDetachedProcess } from "./android/spawnDetachedProcess";
+import { serveAvdFromEnvironment } from "./android/serveAvdBrokerClient";
 import { createAndroidToolchainRouteHandler } from "./androidToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
@@ -4804,9 +4805,11 @@ export function startOctantServer(
       allowSimulatorControl: true,
     });
     yield* Effect.promise(() => androidProcess.reconcile());
+    const serveAvd = serveAvdFromEnvironment(process.env);
     const androidToolchainService = new AndroidToolchainService({
       execute: (input, signal) => androidProcess.execute(input, signal),
       spawnDetached: spawnDetachedProcess,
+      ...(serveAvd === undefined ? {} : { serveAvd }),
       observeEmulators: (emulators) =>
         androidInputGrants.closeUnlessBooted(
           emulators.map((emulator) => ({
