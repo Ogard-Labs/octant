@@ -3145,11 +3145,13 @@ textarea.settings-view__text-input {
   font-weight: var(--oct-weight-medium);
 }
 
-/* Lists of reported items inside a card: rows take the card's inset, and the
-   hairline comes from the card rather than from each item. */
+/* Lists of reported items inside a card: the hairline comes from the card
+   rather than from each item. */
 .settings-view :is(.host-settings__capabilities, .github-settings__capabilities) > li {
-  padding-inline: var(--oct-space-4);
+  min-height: 52px;
+  padding: var(--oct-space-3) var(--oct-space-4);
   border-top: 0;
+  border-bottom: 0;
 }
 
 .settings-view .federated-hosts-lifecycle__list > .setrow {
