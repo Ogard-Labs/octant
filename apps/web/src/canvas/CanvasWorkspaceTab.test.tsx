@@ -612,6 +612,31 @@ describe("CanvasWorkspaceTab", () => {
     expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
   });
 
+  it("moves focus into the comments drawer so Escape closes it and returns to the marker", async () => {
+    const comments = vi.fn(async () => ({
+      kind: "ready" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 3,
+      threads: [],
+    }));
+    const client = createCanvasClient(readyVersion, undefined, {
+      comments,
+      comment: vi.fn(),
+    } as unknown as Partial<CanvasClient>);
+
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    const marker = await screen.findByRole("button", { name: "Comment on Q3 Overview" });
+    marker.focus();
+    fireEvent.click(marker);
+    const close = screen.getByRole("button", { name: "Close comments" });
+    await waitFor(() => expect(close).toHaveFocus());
+
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+    expect(marker).toHaveFocus();
+  });
+
   it("compares the selected version with the one before it, block by block", async () => {
     const olderVersionId = "45454545-4545-4545-8545-454545454545";
     const blocks = canvasFixture.blocks;

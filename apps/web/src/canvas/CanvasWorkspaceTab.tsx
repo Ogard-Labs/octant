@@ -98,6 +98,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // refresh/cancel race. Without it, attach and share could target a version
   // the user no longer has selected.
   const loadToken = useRef(0);
+  const commentsReturnFocus = useRef<HTMLElement | null>(null);
+  const closeCommentsButton = useRef<HTMLButtonElement | null>(null);
 
   const loadCanvas = useCallback(
     async (versionId?: string) => {
@@ -183,6 +185,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     }
   }, [props.client, props.tab.canvasId]);
 
+  useEffect(() => {
+    if (commentsOpen) closeCommentsButton.current?.focus();
+  }, [commentsOpen, focusedBlockId]);
   useEffect(() => {
     let alive = true;
     if (props.client === undefined) {
@@ -473,8 +478,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   ];
 
   const openCommentsOn = (blockId: string | undefined) => {
+    commentsReturnFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFocusedBlockId(blockId);
     setCommentsOpen(true);
+  };
+  const closeComments = () => {
+    setCommentsOpen(false);
+    commentsReturnFocus.current?.focus();
+    commentsReturnFocus.current = null;
   };
 
   const openCompare = async () => {
@@ -560,7 +572,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             aria-label={
               openThreads.length === 0 ? "Comments" : `Comments, ${String(openThreads.length)} open`
             }
-            onClick={() => (commentsOpen ? setCommentsOpen(false) : openCommentsOn(undefined))}
+            onClick={() => (commentsOpen ? closeComments() : openCommentsOn(undefined))}
             size="sm"
             type="button"
             variant={commentsOpen ? "secondary" : "ghost"}
@@ -600,14 +612,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             className="canvas-workspace-tab__drawer"
             hidden={!commentsOpen}
             onKeyDown={(event) => {
-              if (event.key === "Escape") setCommentsOpen(false);
+              if (event.key === "Escape") closeComments();
             }}
           >
             <div className="canvas-workspace-tab__drawer-header">
               <h2>Comments</h2>
               <OctantButton
                 aria-label="Close comments"
-                onClick={() => setCommentsOpen(false)}
+                onClick={closeComments}
+                ref={closeCommentsButton}
                 size="icon"
                 type="button"
                 variant="ghost"

@@ -441,6 +441,7 @@ describe("createCanvasAgentTools", () => {
       expect(description).toContain("deliver it as a Canvas rather than as a long reply");
       expect(description).toContain("design or mockup, diagram, report, review, audit");
       expect(description).toContain("Keep short answers");
+      expect(description).toContain("Text renders as plain text, not Markdown");
       expect(description).toContain(
         "revise the thread's existing Canvas instead of creating another",
       );
