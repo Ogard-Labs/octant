@@ -592,6 +592,8 @@ function simctlPasteboardCopy(udid: string, text: string, signal: AbortSignal): 
     let child: ChildProcess;
     try {
       child = spawnProcess("xcrun", ["simctl", "pbcopy", udid], {
+        // pbcopy decodes stdin with the locale; a GUI app's environment often has none.
+        env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
         stdio: ["pipe", "ignore", "ignore"],
         signal,
       });

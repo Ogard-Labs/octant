@@ -104,7 +104,8 @@ the Nordic languages, Dutch, Spanish, Portuguese — and is refused on others,
 such as French or German, with `keyboard-layout-unsupported` in the evidence.
 Text with punctuation or non-Latin characters is placed on that Simulator's
 pasteboard with `simctl pbcopy` and pasted with Command-V, so it replaces
-whatever the Simulator pasteboard held. **Return**,
+whatever the Simulator pasteboard held, and iOS may ask in the Simulator to
+**Allow Paste**. **Return**,
 **Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
 later. When the host cannot deliver an input action, the evidence names the
 host's refusal rather than reading as interrupted. Remote, Linux, and
