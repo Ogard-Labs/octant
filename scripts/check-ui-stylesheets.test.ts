@@ -320,9 +320,11 @@ describe("UI stylesheet check", () => {
   it("lets a feature paint a button it asked for in the bare variant", () => {
     const primitives = collectPrimitiveClasses({
       "Tile.tsx": '<OctantButton className="tile" variant="bare">x</OctantButton>',
+      "Card.tsx": "<OctantButton className=\"card\" variant={'bare'}>x</OctantButton>",
       "Row.tsx": '<OctantButton className="row" variant="ghost">x</OctantButton>',
     });
     expect(primitives.has("tile")).toBe(false);
+    expect(primitives.has("card")).toBe(false);
     expect(primitives.get("row")).toBe("OctantButton");
   });
 

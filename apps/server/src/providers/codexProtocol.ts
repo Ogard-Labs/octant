@@ -113,6 +113,30 @@ export type CodexThreadResult = typeof ThreadResult.Type;
 export const decodeThreadStartResult = decode(ThreadResult);
 export const decodeThreadResumeResult = decode(ThreadResult);
 
+/**
+ * Of the effective config only the configured MCP server names are read: a
+ * Chat thread switches each one off by name.
+ */
+const ConfigReadResult = Schema.Struct({
+  config: Schema.Struct({
+    mcp_servers: Schema.optionalWith(Schema.Record({ key: Schema.String, value: Schema.Unknown }), {
+      nullable: true,
+    }),
+  }),
+});
+export type CodexConfigReadResult = typeof ConfigReadResult.Type;
+/**
+ * A server named `__proto__` decodes out of the record without an error, so a
+ * Chat thread would leave it running. Such a config is refused instead.
+ */
+export const decodeConfigReadResult = (value: unknown): CodexConfigReadResult => {
+  const servers = isRecord(value) && isRecord(value.config) ? value.config.mcp_servers : undefined;
+  if (isRecord(servers) && hasOwn(servers, "__proto__")) {
+    throw new TypeError("Codex config names an MCP server Octant cannot switch off.");
+  }
+  return decode(ConfigReadResult)(value);
+};
+
 const TurnStartResult = Schema.Struct({ turn: TurnReference });
 export type CodexTurnResult = typeof TurnStartResult.Type;
 export const decodeTurnStartResult = decode(TurnStartResult);
