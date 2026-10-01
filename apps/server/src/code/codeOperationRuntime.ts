@@ -373,7 +373,7 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
-  readonly resolveSelectedSkillContext?: CodeOperationServiceOptions["resolveSelectedSkillContext"];
+  readonly resolveSelectedExtensions?: CodeOperationServiceOptions["resolveSelectedExtensions"];
   /**
    * Where a curated scaffold runs. Absent on a host that offers none, which
    * refuses the operation rather than running a generator nobody configured.
@@ -711,9 +711,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),
-    ...(options.resolveSelectedSkillContext === undefined
+    ...(options.resolveSelectedExtensions === undefined
       ? {}
-      : { resolveSelectedSkillContext: options.resolveSelectedSkillContext }),
+      : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.resolveProfileSkills === undefined
       ? {}
       : { resolveProfileSkills: options.resolveProfileSkills }),
@@ -1390,6 +1390,8 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
 
 interface ActiveTurn {
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
+  /** The selected MCP servers' tools, resolved when the turn was accepted. */
+  readonly extensionTools?: AppManagedToolSet;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -1600,6 +1602,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
+      ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -2032,7 +2035,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
       );
     }
-    return sets.length === 0 ? undefined : combineAppManagedToolSets(...sets);
+    sets.push(active.extensionTools);
+    return sets.every((set) => set === undefined) ? undefined : combineAppManagedToolSets(...sets);
   }
 
   #owned(thread: CodeThread, checkoutRoot: string): ActiveTurn | undefined {

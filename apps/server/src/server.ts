@@ -1,6 +1,6 @@
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
-import { createSelectedSkillContextResolver } from "./extensions/selectedSkillContext";
+import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
 import {
   createDesktopComputerUsePort,
   type DesktopComputerUsePort,
@@ -3487,7 +3487,7 @@ export function startOctantServer(
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
     });
-    const resolveSelectedSkillContext = createSelectedSkillContextResolver({
+    const resolveSelectedExtensions = createSelectedExtensionResolver({
       snapshot: async () => {
         await standaloneSkillService.reconcile();
         return extensionApiService.snapshot();
@@ -3500,7 +3500,25 @@ export function startOctantServer(
           ? undefined
           : Schema.decodeUnknownSync(ExtensionProviderFamily)(instance.driverKind);
       },
-      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore),
+      reconcileEffectiveState: async (effective) => {
+        await agentPluginMcpSessionManager.reconcile(effective);
+        return agentPluginMcpSessionManager.projectEffectiveState(effective);
+      },
+      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore, {
+        mcpToolsForComponent: ({ packageId, componentId, scope }) =>
+          agentPluginMcpSessionManager.toolDefinitionsFor(packageId, componentId, scope),
+      }),
+      toolExecution:
+        options.extensionToolExecution ?? agentPluginMcpSessionManager.createToolExecutionPort(),
+      carriesAppManagedTools: (thread) => {
+        const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+        return (
+          observed?.capabilities.appManagedTools === "supported" ||
+          observed?.verifiedToolModelIds?.some(
+            (candidate) => String(candidate) === String(thread.modelId),
+          ) === true
+        );
+      },
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     const extensionRoutes = createExtensionRouteHandler({
@@ -4051,7 +4069,7 @@ export function startOctantServer(
       codeOperationRuntime = createCodeOperationRuntime({
         gitMutationPort,
         agentRuns: agentRunPersistence,
-        resolveSelectedSkillContext,
+        resolveSelectedExtensions,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(
             decodeComputerUseOwner({
@@ -5942,7 +5960,7 @@ export function startOctantServer(
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
-      resolveSelectedSkillContext,
+      resolveSelectedExtensions,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       onRequestSettled: (input, release) =>

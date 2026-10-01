@@ -1,7 +1,7 @@
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { observeWorkContext } from "./workContextInspection";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
-import type { SelectedSkillContextResolver } from "../extensions/selectedSkillContext";
+import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import {
   ActorId,
   CorrelationId,
@@ -50,7 +50,7 @@ import {
   validateBrowserUseSelection,
 } from "@octant/plugin-host/browser-use";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -133,7 +133,7 @@ export class WorkTurnServiceError extends Error {
 }
 
 export interface WorkTurnServiceDependencies {
-  readonly resolveSelectedSkillContext?: SelectedSkillContextResolver;
+  readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
@@ -309,7 +309,7 @@ export class WorkTurnService {
     string,
     { readonly requestId: string; readonly access: WorkAccess }
   >();
-  readonly #resolveSelectedSkillContext: SelectedSkillContextResolver | undefined;
+  readonly #resolveSelectedExtensions: SelectedExtensionResolver | undefined;
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
   readonly #projects: WorkTurnServiceDependencies["projects"];
@@ -351,7 +351,7 @@ export class WorkTurnService {
 
   constructor(dependencies: WorkTurnServiceDependencies) {
     this.#contextHarness = dependencies.contextHarness;
-    this.#resolveSelectedSkillContext = dependencies.resolveSelectedSkillContext;
+    this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
     this.#persistence = dependencies.persistence;
     this.#threads = dependencies.threads;
     this.#projects = dependencies.projects;
@@ -565,20 +565,25 @@ export class WorkTurnService {
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
+    let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0) {
       const resolved =
         thread === undefined
           ? undefined
-          : await this.#resolveSelectedSkillContext?.({ mode: "work", thread, selections }).catch(
-              () => undefined,
-            );
+          : await this.#resolveSelectedExtensions?.({
+              mode: "work",
+              thread,
+              selections,
+              windowId: authenticatedWindowId,
+            }).catch(() => undefined);
       if (resolved === undefined || resolved.kind === "unavailable") {
         throw this.#failure(
           "unavailable",
-          resolved?.message ?? "Selected skill context is unavailable for Work on this host.",
+          resolved?.message ?? "Selected extension is unavailable for Work on this host.",
         );
       }
       skillContext = resolved.context;
+      extensionTools = resolved.tools;
     }
     const acceptedAt = decodeTimestamp(this.#clock());
     const nativeConversation = driver.conversationOwnership === "provider";
@@ -783,6 +788,7 @@ export class WorkTurnService {
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
+      ...(extensionTools === undefined ? {} : { extensionTools }),
       signal: controller.signal,
     }).finally(() => {
       if (
@@ -935,6 +941,8 @@ export class WorkTurnService {
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
+    /** The selected MCP servers' tools, resolved when the turn was accepted. */
+    readonly extensionTools?: AppManagedToolSet;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
@@ -947,7 +955,7 @@ export class WorkTurnService {
     // the only way the host learns what a turn produced.
     const observation = this.#turnFileObserver?.observe(input.projectRoot);
 
-    const appManagedTools =
+    const hostTools =
       input.thread === undefined
         ? undefined
         : this.#resolveAppManagedTools?.({
@@ -958,6 +966,10 @@ export class WorkTurnService {
               ? {}
               : { computerUseSelection: input.command.computerUseSelection }),
           });
+    const appManagedTools =
+      input.extensionTools === undefined
+        ? hostTools
+        : combineAppManagedToolSets(hostTools, input.extensionTools);
     if (
       input.command.computerUseSelection !== undefined &&
       !appManagedTools?.definitions.some((definition) => definition.name === "octant_computer")
