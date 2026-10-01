@@ -217,19 +217,62 @@ describe("SplitWorkspace", () => {
         {...splitCallbacks()}
         environmentNames={new Map([[hostId, "Studio devbox"]])}
         layout={layout}
-        paneFactsByThreadId={new Map([[threadId, { path: "Octant/fix/remote" }]])}
+        paneFactsByThreadId={new Map([[threadId, { projectName: "Octant", branch: "fix/remote" }]])}
         renderSurface={(tab) => tab.title}
       />,
     );
 
     expect(screen.getByRole("img", { name: "Runs on Studio devbox" })).toBeVisible();
     expect(screen.queryByRole("img", { name: "Runs on this computer" })).not.toBeInTheDocument();
-    expect(screen.getByText("Octant/fix/remote")).toBeVisible();
+    // The Project and the branch are two chips, so each can be read and
+    // truncated on its own.
+    expect(screen.getByText("Octant")).toBeVisible();
+    expect(screen.getByText("fix/remote")).toHaveClass("workspace-pane__branch");
 
     rerender(
       <SplitWorkspace {...splitCallbacks()} layout={layout} renderSurface={(tab) => tab.title} />,
     );
     expect(screen.getByRole("img", { name: "Runs on a remote host" })).toBeVisible();
+  });
+
+  it("says Running beside the title of a thread whose turn is executing, and nothing else", () => {
+    const threadId = "00000000-0000-4000-8000-000000000614";
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "code-overview",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        threadId,
+        title: "Faster issue validation",
+      },
+    });
+    const { rerender } = render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={(surface) => surface.title}
+        runningThreadIds={new Set([threadId])}
+      />,
+    );
+
+    const handle = screen.getByTitle("Drag to move or split");
+    expect(within(handle).getByText("Running")).toBeVisible();
+    // The host says a turn is executing but not when it began, so the pill
+    // claims no elapsed time.
+    expect(within(handle).getByText("Running")).not.toHaveTextContent(/\d/);
+
+    rerender(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={(surface) => surface.title}
+        runningThreadIds={new Set()}
+      />,
+    );
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
   });
 
   it("claims no environment for a surface that is not a thread", () => {

@@ -86,6 +86,11 @@ export interface SplitWorkspaceProps {
    */
   readonly paneFactsByThreadId?: ReadonlyMap<string, PaneFacts>;
   /**
+   * The threads the host projects as executing right now. A pane whose thread
+   * is in the set says so beside its title; absent means nothing is claimed.
+   */
+  readonly runningThreadIds?: ReadonlySet<string>;
+  /**
    * Selects a pull request named on a pane tab for the dock's Review pane.
    * Without it the chip is a mark with nowhere to go.
    */
@@ -98,7 +103,10 @@ export interface SplitWorkspaceProps {
 export interface PaneFacts {
   /** The pull request the thread carries, with the identity that opens it. */
   readonly pullRequest?: ThreadBoardPullRequestSummary;
-  readonly path?: string;
+  /** The Project the thread works in, as its own chip. */
+  readonly projectName?: string;
+  /** Code only: the branch the thread's checkout is on, as its own chip. */
+  readonly branch?: string;
 }
 
 interface WorkspaceNodeProps extends SplitWorkspaceProps {
@@ -395,7 +403,14 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
   const pullRequest = facts?.pullRequest;
   const selectPullRequest = props.onSelectPullRequest;
-  const path = "threadId" in surface ? (facts?.path ?? props.contextLabel) : undefined;
+  const projectName =
+    "threadId" in surface ? (facts?.projectName ?? props.contextLabel) : undefined;
+  const branch = "threadId" in surface ? facts?.branch : undefined;
+  const running =
+    environment !== undefined &&
+    "threadId" in surface &&
+    surface.threadId !== undefined &&
+    props.runningThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   const title = workspaceSurfaceTitle(surface);
   const activateUnlessClosing = (target: EventTarget | null) => {
@@ -462,14 +477,27 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 )}
                 {showTabs ? null : <span className="workspace-pane__title">{title}</span>}
-                {path === undefined ? null : (
+                {projectName === undefined ? null : (
                   // Tabs replace the redundant title text, but the Project
                   // chip names the pane's execution context rather than the
                   // active tab, so it stays even when content tabs are open.
-                  <span className="workspace-pane__context" title={path}>
-                    {path}
+                  <span className="workspace-pane__context" title={projectName}>
+                    {projectName}
                   </span>
                 )}
+                {branch === undefined ? null : (
+                  <span className="workspace-pane__branch" title={branch}>
+                    {branch}
+                  </span>
+                )}
+                {running ? (
+                  // The host reports that a turn is executing, not when it
+                  // began, so the pill names the state and no elapsed time.
+                  <span className="workspace-pane__status">
+                    <span aria-hidden="true" className="spinner spinner-sm" />
+                    Running
+                  </span>
+                ) : null}
               </span>
               {showTabs ? (
                 <OctantTabs
