@@ -256,6 +256,13 @@ function isAtLeastRelease(version: string, floor: readonly [number, number, numb
  * `agents.enabled` in turn. Before 0.145.0 the feature flags alone decided,
  * and `[agents]` was a table of role definitions there, so `agents.enabled`
  * would parse as a role and refuse the whole config.
+ *
+ * Codex's own memories stay off for the same reason Claude runs with no
+ * setting sources: memory is Octant's, scoped to a Project. With the feature
+ * on, codex-cli 0.159.2 put the user's global memory summary into every
+ * thread's instructions, told the model to search `~/.codex/memories`, and
+ * added that folder to the sandbox's readable roots, so a memory from any
+ * other workspace reached every Octant thread in every mode.
  */
 export function codexAppServerArgs(version: string): readonly string[] {
   return [
@@ -266,6 +273,8 @@ export function codexAppServerArgs(version: string): readonly string[] {
     "features.multi_agent=false",
     "-c",
     "features.multi_agent_v2=false",
+    "-c",
+    "features.memories=false",
     ...(isAtLeastRelease(version, [0, 145, 0]) ? ["-c", "agents.enabled=false"] : []),
   ];
 }
