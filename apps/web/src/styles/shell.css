@@ -831,7 +831,7 @@ html[data-octant-native-host="true"]
 .sidebar-tile__count {
   font-size: var(--oct-text-xl);
   font-variant-numeric: tabular-nums;
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1;
 }

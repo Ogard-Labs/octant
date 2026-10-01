@@ -1,4 +1,4 @@
-import type { ThemeSettings } from "@octant/contracts/theme";
+import type { ThemeSettings, ThemeStyle } from "@octant/contracts/theme";
 import { THEME_PRESETS } from "@octant/theme";
 import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
@@ -8,6 +8,7 @@ import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { SettingRow, SettingsDisclosure } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
@@ -144,6 +145,26 @@ export function ThemeAppearanceEditor(props: {
                 .map((preset) => ({ id: preset.id, label: preset.displayName }))}
               value={draft.darkPresetId ?? "system"}
             />
+          </SettingRow>
+          <SettingRow
+            description="Default keeps the chrome monochrome. Vivid colours tiles, board marks, and Project accents."
+            focused={focusedSetting === "appearance.scheme.style"}
+            label="Style"
+            scope="app"
+            settingId="appearance.scheme.style"
+          >
+            <OctantToggleGroup<ThemeStyle>
+              aria-label="Style"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected === undefined || selected === (draft.style ?? "default")) return;
+                void theme.applyPatch({ style: selected });
+              }}
+              value={[draft.style ?? "default"]}
+            >
+              <OctantToggleGroupItem value="default">Default</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="vivid">Vivid</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         </div>
       </section>
