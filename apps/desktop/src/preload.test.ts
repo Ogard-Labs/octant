@@ -124,6 +124,7 @@ describe("desktop preload bridge", () => {
       sidebarVibrancySupported: true,
       liveBrowserSupported: true,
       liveSimulatorFrameSupported: true,
+      liveAndroidFrameSupported: true,
     });
     const bridge = createHostBridge(
       { invoke, on: vi.fn(), removeListener: vi.fn() },
@@ -131,6 +132,7 @@ describe("desktop preload bridge", () => {
     );
 
     await expect(bridge.getHostCapabilities?.()).resolves.toEqual({
+      liveAndroidFrameSupported: true,
       liveBrowserSupported: true,
       liveSimulatorFrameSupported: true,
       sidebarVibrancySupported: true,

@@ -85,6 +85,7 @@ export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
   readonly liveSimulatorFrameSupported: boolean;
+  readonly liveAndroidFrameSupported: boolean;
 }
 
 export type CodeOperationApprovalAnchor =
@@ -682,7 +683,8 @@ export function createHostBridge(
         !isRecord(value) ||
         typeof value.sidebarVibrancySupported !== "boolean" ||
         typeof value.liveBrowserSupported !== "boolean" ||
-        typeof value.liveSimulatorFrameSupported !== "boolean"
+        typeof value.liveSimulatorFrameSupported !== "boolean" ||
+        typeof value.liveAndroidFrameSupported !== "boolean"
       ) {
         throw new Error("Octant received invalid host capabilities.");
       }
@@ -690,6 +692,7 @@ export function createHostBridge(
         sidebarVibrancySupported: value.sidebarVibrancySupported,
         liveBrowserSupported: value.liveBrowserSupported,
         liveSimulatorFrameSupported: value.liveSimulatorFrameSupported,
+        liveAndroidFrameSupported: value.liveAndroidFrameSupported,
       });
     },
     // Mirrors the window this host actually creates: `resolveWindowPresentation`

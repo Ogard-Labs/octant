@@ -402,11 +402,15 @@ export function resolveDesktopHostCapabilities(
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
   readonly liveSimulatorFrameSupported: boolean;
+  readonly liveAndroidFrameSupported: boolean;
 } {
   return {
     sidebarVibrancySupported: platform === "darwin",
     liveBrowserSupported,
     liveSimulatorFrameSupported: platform === "darwin",
+    // The Android emulator is reached over adb on every desktop host, unlike
+    // the Simulator frame, which needs the macOS native helper.
+    liveAndroidFrameSupported: true,
   };
 }
 
