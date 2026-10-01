@@ -78,18 +78,21 @@ does not shut down, erase, or transfer the destination.
 
 An agent's `octant_apple` `boot`, `run`, or `open` opens that pane beside the
 transcript. `open` boots a shut-down destination and otherwise only shows the
-pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim: the
-in-app pane is the live device. The pane opens once per request; a tab you
+pane. Do not launch Simulator.app, `open -a Simulator`, or serve-sim. The
+in-app pane is the live device. It attaches the managed serve-sim stream for
+a booted Simulator and falls back to the desktop device helper when that
+stream is missing. The pane opens once per request; a tab you
 closed stays closed until the agent asks again.
 
 Orientation, accessibility hierarchy, and recording are not part of this
 surface yet. Typed input, tap, and hardware keys ride the same workbench
 control channel as Boot and Capture screen: the renderer posts structured
 requests, and the Octant desktop app delivers them to the Simulator through a
-small native helper it ships. Nothing comes to the foreground and no macOS
-Accessibility permission is needed. Without that helper, tap, swipe, typing,
-and keys are unavailable — Octant does not launch or script Simulator.app to
-deliver them. A tap lands on the point you click on the
+small native helper it ships, or through the managed serve-sim stream when
+that stream is attached. Nothing comes to the foreground and no macOS
+Accessibility permission is needed. Keys need the helper. Tap, swipe, and
+typing need the helper or the managed stream. Octant does not launch or
+script Simulator.app to deliver them. A tap lands on the point you click on the
 captured screen. On an approval-gated thread, **Allow input** is the one
 confirmation that opens that Simulator; clicks, typing, Home, and Lock never
 raise a dialog. That grant covers input for fifteen minutes after each

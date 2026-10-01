@@ -28,6 +28,8 @@ interface ServerSpawnSpecOptions {
   readonly computerUseBrokerUrl?: string;
   readonly simulatorDeviceBrokerToken?: string;
   readonly simulatorDeviceBrokerUrl?: string;
+  readonly serveAvdBrokerToken?: string;
+  readonly serveAvdBrokerUrl?: string;
   readonly codeFileHelperPath?: string;
   readonly credentialBrokerToken?: string;
   readonly credentialBrokerUrl?: string;
@@ -75,6 +77,8 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   delete inherited.OCTANT_COMPUTER_USE_BROKER_TOKEN;
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_URL;
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN;
+  delete inherited.OCTANT_SERVE_AVD_BROKER_URL;
+  delete inherited.OCTANT_SERVE_AVD_BROKER_TOKEN;
   const env = {
     ...inherited,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
@@ -91,6 +95,12 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       : {
           OCTANT_SIMULATOR_DEVICE_BROKER_URL: options.simulatorDeviceBrokerUrl,
           OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN: options.simulatorDeviceBrokerToken,
+        }),
+    ...(options.serveAvdBrokerUrl === undefined || options.serveAvdBrokerToken === undefined
+      ? {}
+      : {
+          OCTANT_SERVE_AVD_BROKER_URL: options.serveAvdBrokerUrl,
+          OCTANT_SERVE_AVD_BROKER_TOKEN: options.serveAvdBrokerToken,
         }),
     ...(options.codeFileHelperPath === undefined
       ? {}

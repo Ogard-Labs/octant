@@ -1,4 +1,5 @@
 import type { AndroidToolchainClient } from "@octant/client-runtime/android-toolchain-client";
+import { androidFrameMediaType } from "./androidFrameMediaType";
 import type { AndroidScreenStreamRequest } from "@octant/contracts/android-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -157,7 +158,7 @@ export function useAndroidEmulatorLiveScreen(options: {
 }
 
 async function decodePng(png: Uint8Array): Promise<DecodedFrame> {
-  return createImageBitmap(new Blob([png.slice()], { type: "image/png" }));
+  return createImageBitmap(new Blob([png.slice()], { type: androidFrameMediaType(png) }));
 }
 
 function paint(canvas: HTMLCanvasElement, frame: DecodedFrame): void {
