@@ -12,9 +12,11 @@ import {
   type ProviderContextBlock,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ThreadGoal,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ContextHarnessService } from "../context/contextHarnessService";
+import { nativeHarnessGoalContext } from "./nativeHarnessGoal";
 import { nativeHarnessInstructions } from "./nativeHarnessInstructions";
 import type { NativeHarnessRouter } from "./nativeHarnessRouter";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -48,6 +50,8 @@ export interface NativeHarnessTurnObserverOptions {
   readonly hostId: string;
   readonly scratchRoot: string;
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
+  /** The thread's goal, put in front of every turn while it is open. */
+  readonly readGoal?: (threadId: string) => ThreadGoal | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -81,8 +85,12 @@ export class NativeHarnessTurnObserver {
     if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return [];
     const redirect = this.#redirects.get(scope.threadId);
     this.#redirects.delete(scope.threadId);
+    const goal = this.#goalContext(scope.threadId);
     return [
       ...nativeHarnessInstructions(scope.mode),
+      // Per-turn content, after the stable instructions, so the goal's
+      // changing statuses never move the cached prefix.
+      ...(goal === undefined ? [] : [{ kind: "work-item" as const, text: goal }]),
       ...(redirect === undefined
         ? []
         : [
@@ -294,6 +302,16 @@ export class NativeHarnessTurnObserver {
       }
     } catch {
       // An answer the schema refuses is not an intervention.
+    }
+  }
+
+  #goalContext(threadId: string): string | undefined {
+    try {
+      const goal = this.#options.readGoal?.(threadId);
+      return goal === undefined ? undefined : nativeHarnessGoalContext(goal);
+    } catch {
+      // A goal that cannot be read leaves the turn without it rather than failing the turn.
+      return undefined;
     }
   }
 

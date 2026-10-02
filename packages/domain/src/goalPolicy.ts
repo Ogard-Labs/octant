@@ -3,6 +3,8 @@ import type {
   ThreadGoal,
   ThreadGoalBudget,
   ThreadGoalCommand,
+  ThreadGoalCriterion,
+  ThreadGoalCriterionDraft,
   ThreadGoalEvidenceRef,
   ThreadGoalHistoryEntry,
   ThreadGoalUsage,
@@ -35,6 +37,7 @@ export type GoalPolicyRejectionCode =
   | "goal-not-paused"
   | "goal-already-complete"
   | "invalid-budget"
+  | "criterion-not-found"
   | "version-conflict";
 
 export class GoalPolicyRejection extends Error {
@@ -92,6 +95,41 @@ function isBudgetExhausted(budget: ThreadGoalBudget, usage: ThreadGoalUsage): bo
   return false;
 }
 
+/**
+ * Criteria from drafts, numbered in order. A criterion whose text and check
+ * are unchanged from the previous set keeps its status and evidence, so a
+ * revision that only adds a criterion does not throw away checks that passed.
+ */
+function criteriaFrom(
+  drafts: ReadonlyArray<ThreadGoalCriterionDraft>,
+  previous: ReadonlyArray<ThreadGoalCriterion>,
+): ReadonlyArray<ThreadGoalCriterion> {
+  // Each earlier criterion lends its status to one draft at most: two
+  // identical drafts must not both inherit the single check that passed.
+  const unclaimed = [...previous];
+  return drafts.map((draft, index) => {
+    const text = draft.text.trim();
+    const check = draft.check?.trim();
+    const claimed = unclaimed.findIndex(
+      (criterion) => criterion.text === text && criterion.check === check,
+    );
+    const kept = claimed === -1 ? undefined : unclaimed.splice(claimed, 1)[0];
+    return {
+      id: `c${index + 1}`,
+      text,
+      ...(check === undefined ? {} : { check }),
+      status: kept?.status ?? "unmet",
+      ...(kept?.evidence === undefined ? {} : { evidence: kept.evidence }),
+    };
+  });
+}
+
+/** Whether a goal with criteria has every one of them met by an observed check. */
+export function threadGoalCriteriaMet(goal: ThreadGoal): boolean {
+  const criteria = goal.criteria ?? [];
+  return criteria.length > 0 && criteria.every((criterion) => criterion.status === "met");
+}
+
 function assertVersion(goal: ThreadGoal | null, expectedVersion: number): void {
   const current = goal?.version ?? 0;
   if (current !== expectedVersion) {
@@ -120,6 +158,7 @@ export function applyThreadGoalCommand(
         budget,
         usage: emptyUsage(),
         evidence: [],
+        ...(command.criteria === undefined ? {} : { criteria: criteriaFrom(command.criteria, []) }),
         createdAt: now,
         updatedAt: now,
         version: nextVersion(command.expectedVersion),
@@ -194,6 +233,9 @@ export function applyThreadGoalCommand(
         revisionId: command.revisionId,
         objective: command.objective.trim(),
         budget,
+        ...(command.criteria === undefined
+          ? {}
+          : { criteria: criteriaFrom(command.criteria, current.criteria ?? []) }),
         status,
         updatedAt: now,
         version: nextVersion(command.expectedVersion),
@@ -237,6 +279,31 @@ export function applyThreadGoalCommand(
           recordedAt: now,
         }),
       };
+    }
+    case "record-thread-goal-check": {
+      const current = aggregate.goal;
+      if (current === null || current.id !== command.goalId) {
+        reject("goal-not-found", "Goal was not found for this thread.");
+      }
+      assertVersion(current, command.expectedVersion);
+      if (current.status === "complete")
+        reject("goal-already-complete", "Goal is already complete.");
+      const criteria = current.criteria ?? [];
+      if (!criteria.some((criterion) => criterion.id === command.criterionId)) {
+        reject("criterion-not-found", "The Goal has no such criterion.");
+      }
+      const goal: ThreadGoal = {
+        ...current,
+        criteria: criteria.map((criterion) =>
+          criterion.id === command.criterionId
+            ? { ...criterion, status: command.outcome, evidence: command.evidence }
+            : criterion,
+        ),
+        evidence: [...current.evidence, command.evidence].slice(-64),
+        updatedAt: now,
+        version: nextVersion(command.expectedVersion),
+      };
+      return { goal, history: aggregate.history };
     }
     case "record-thread-goal-usage": {
       const current = aggregate.goal;

@@ -19,11 +19,13 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
+import type { GoalService } from "../goal/goalService";
 import type { PlanService } from "../plan/planService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -40,6 +42,8 @@ export interface NativeHarnessCompositionOptions {
   /** Whether a provider instance is one the harness drives; others get no harness tools. */
   readonly isHarnessProvider: (providerInstanceId: ProviderInstanceId) => boolean;
   readonly plans?: Pick<PlanService, "read" | "execute">;
+  /** The thread goal a lead reads and checks; absent on a host without goals. */
+  readonly goals?: Pick<GoalService, "read" | "execute">;
   /** Code only: the sandboxed shell. */
   readonly shell?: NativeHarnessShellPort;
   /**
@@ -133,6 +137,11 @@ export function createNativeHarnessComposition(
       ? {}
       : {
           todo: createNativeHarnessTodoPort({ plans: options.plans, threadId, uuid: options.uuid }),
+        }),
+    ...(options.goals === undefined
+      ? {}
+      : {
+          goal: createNativeHarnessGoalPort({ goals: options.goals, threadId, uuid: options.uuid }),
         }),
   });
   const compose = (input: {
