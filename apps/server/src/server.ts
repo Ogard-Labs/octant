@@ -347,6 +347,7 @@ import {
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
+import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
 import { agentResultDeliveryPrompt } from "./agentRun/agentResultDeliveryPrompt";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
@@ -1941,6 +1942,7 @@ export function startOctantServer(
           getById: (childRunId) => agentRunPersistence.getById(childRunId),
           readAdmittedContext: (input) =>
             readAgentRunAdmittedContext(persistence.connection, input),
+          readResultText: (dependencyId) => agentRunPersistence.resultText(dependencyId),
         }),
         uuid: randomUUID,
         scratchRoot: (run) => {
@@ -6794,6 +6796,16 @@ export function startOctantServer(
       }),
     );
     agentResultDeliveryService.start();
+    const agentRunDependencyScheduler = new AgentRunDependencyScheduler({
+      agentRuns: agentRunPersistence,
+      orchestration: agentRunOrchestration,
+      onError: (message, error) => console.error(`[agent-run-dependencies] ${message}`, error),
+    });
+    const unsubscribeAgentRunDependencies = persistence.journal.subscribeCommitted((append) =>
+      agentRunDependencyScheduler.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeAgentRunDependencies()));
+    agentRunDependencyScheduler.start();
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
       localHostDisplayName: localHostDisplayName(),

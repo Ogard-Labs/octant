@@ -1,4 +1,5 @@
 import {
+  AGENT_RUN_TERMINAL_STATUSES,
   decodeAgentRunControlRequest,
   type AgentRunControlRequest,
   type AgentRunParentThreadId,
@@ -32,6 +33,26 @@ export interface NativeHarnessDelegatePortOptions {
   readonly router: Pick<NativeHarnessRouter, "resolve">;
   readonly sessions: Pick<NativeHarnessSessionStore, "ensure" | "recordRouteDecision">;
   readonly uuid: () => string;
+  /** Injectable so tests drive `wait` without real time passing. */
+  readonly now?: () => number;
+  readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+const WAIT_POLL_MS = 250;
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set(AGENT_RUN_TERMINAL_STATUSES);
+
+function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 /**
@@ -53,6 +74,19 @@ export function createNativeHarnessDelegatePort(
   },
 ): NativeHarnessDelegatePort {
   const parentThreadId = scope.parentThreadId as AgentRunParentThreadId;
+  const children = (): ReadonlyArray<NativeHarnessDelegateChild> =>
+    options.persistence.parentSummary(parentThreadId).map((entry) => {
+      const run = options.persistence.getById(entry.runId);
+      return {
+        runId: String(entry.runId),
+        role: entry.role,
+        task: entry.task,
+        lifecycleStatus: entry.lifecycleStatus,
+        resultAvailable: entry.result !== undefined,
+        ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
+        ...(run?.recoveryReason === undefined ? {} : { reason: run.recoveryReason }),
+      };
+    });
   return {
     start: async (input): Promise<NativeHarnessDelegateStart> => {
       // The settings store never reports Ask (it reads a stored Ask as Off),
@@ -72,6 +106,9 @@ export function createNativeHarnessDelegatePort(
           role: input.role,
           task: input.task,
           ...(input.includeParentContext ? { includeParentContext: true } : {}),
+          ...(input.after === undefined || input.after.length === 0
+            ? {}
+            : { dependsOn: input.after }),
         });
       } catch {
         return { status: "refused", reason: "invalid-delegation" };
@@ -133,14 +170,23 @@ export function createNativeHarnessDelegatePort(
       }
       return { status: "accepted", runId: String(run.id), lifecycleStatus: run.lifecycleStatus };
     },
-    status: async (): Promise<ReadonlyArray<NativeHarnessDelegateChild>> =>
-      options.persistence.parentSummary(parentThreadId).map((entry) => ({
-        runId: String(entry.runId),
-        role: entry.role,
-        task: entry.task,
-        lifecycleStatus: entry.lifecycleStatus,
-        resultAvailable: entry.result !== undefined,
-      })),
+    status: async (): Promise<ReadonlyArray<NativeHarnessDelegateChild>> => children(),
+    wait: async ({ runIds, timeoutMs, signal }) => {
+      const wanted = runIds === undefined ? undefined : new Set(runIds);
+      const deadline = (options.now ?? Date.now)() + timeoutMs;
+      const sleep = options.sleep ?? defaultSleep;
+      for (;;) {
+        const watched = children().filter(
+          (child) => wanted === undefined || wanted.has(child.runId),
+        );
+        const finished = watched.every((child) => TERMINAL_STATUSES.has(child.lifecycleStatus));
+        const remaining = deadline - (options.now ?? Date.now)();
+        if (finished || remaining <= 0 || signal?.aborted === true) {
+          return { finished, children: watched };
+        }
+        await sleep(Math.min(WAIT_POLL_MS, remaining), signal);
+      }
+    },
     collect: async (runId): Promise<NativeHarnessDelegateCollect> => {
       const run = options.persistence.getById(runId as never);
       if (run === undefined || String(run.parentThreadId) !== scope.parentThreadId) {

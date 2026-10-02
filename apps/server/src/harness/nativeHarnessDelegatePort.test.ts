@@ -12,7 +12,15 @@ const scope = {
   } as never,
 };
 
-function port(posture: "off" | "automatic", admitted: unknown[] = []) {
+function port(
+  posture: "off" | "automatic",
+  admitted: unknown[] = [],
+  overrides: {
+    readonly persistence?: Parameters<typeof createNativeHarnessDelegatePort>[0]["persistence"];
+    readonly now?: () => number;
+    readonly sleep?: (ms: number) => Promise<void>;
+  } = {},
+) {
   return createNativeHarnessDelegatePort(
     {
       admission: {
@@ -44,11 +52,13 @@ function port(posture: "off" | "automatic", admitted: unknown[] = []) {
           throw new Error("start must not run");
         },
       },
-      persistence: {
+      persistence: overrides.persistence ?? {
         parentSummary: () => [],
         resultText: () => undefined,
         getById: () => undefined,
       },
+      ...(overrides.now === undefined ? {} : { now: overrides.now }),
+      ...(overrides.sleep === undefined ? {} : { sleep: overrides.sleep }),
       router: { resolve: () => ({ kind: "unroutable" }) as never },
       sessions: { ensure: () => ({}) as never, recordRouteDecision: () => undefined },
       uuid: () => "00000000-0000-4000-8000-000000000098",
@@ -85,6 +95,47 @@ describe("native harness delegate port", () => {
     expect(await subject.collect("00000000-0000-4000-8000-000000000050")).toEqual({
       status: "refused",
       reason: "run-not-found",
+    });
+  });
+
+  it("waits until the named children finished, and says where they stand when time runs out", async () => {
+    const first = "00000000-0000-4000-8000-000000000061";
+    const joined = "00000000-0000-4000-8000-000000000062";
+    const statuses: Record<string, string> = { [first]: "running", [joined]: "waiting" };
+    let clock = 0;
+    const subject = port("automatic", [], {
+      persistence: {
+        parentSummary: () =>
+          [first, joined].map((runId) => ({
+            runId,
+            role: "research",
+            task: "Look",
+            lifecycleStatus: statuses[runId],
+          })) as never,
+        resultText: () => undefined,
+        getById: (runId) =>
+          (String(runId) === joined
+            ? { dependsOn: [first], recoveryReason: "waiting-on-dependencies" }
+            : {}) as never,
+      },
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+        // The dependency finishes after the first poll; the joined run never does here.
+        statuses[first] = "completed";
+      },
+    });
+
+    const firstOnly = await subject.wait({ runIds: [first], timeoutMs: 10_000 });
+    expect(firstOnly.finished).toBe(true);
+    expect(firstOnly.children.map((child) => child.runId)).toEqual([first]);
+
+    const everything = await subject.wait({ timeoutMs: 1_000 });
+    expect(everything.finished).toBe(false);
+    expect(everything.children.find((child) => child.runId === joined)).toMatchObject({
+      lifecycleStatus: "waiting",
+      after: [first],
+      reason: "waiting-on-dependencies",
     });
   });
 });
