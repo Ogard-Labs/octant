@@ -362,8 +362,16 @@ follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotatin
 tip.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
-grouping, search, Favorites, and Recent. Its reasoning control shows the full track,
-discrete stops, and filled range. Explicit model and reasoning choices are remembered
+grouping, search, Favorites, and Recent. Source tabs are marks alone and name
+themselves in a tooltip. The chosen model carries a check, not a filled row;
+a row's star shows on hover, on focus, or once it is on; and a provider mark leads
+each row only in a list mixed from several providers. Choosing a model keeps the menu open, since the
+reasoning level beneath is often the next choice. Its reasoning control shows
+the full track, discrete stops, and filled range, with the reading ("Reasoning
+High") and reset above, and Faster and Smarter at the track's two ends. The fill
+is a dot grain that grows denser, brighter, and more purple, with a soft glow,
+the higher the level; a chosen level shows at once and never snaps back while
+it saves. Explicit model and reasoning choices are remembered
 locally for new threads; reasoning is keyed by provider/model and restored only while
 supported. Existing thread selections remain authoritative.
 

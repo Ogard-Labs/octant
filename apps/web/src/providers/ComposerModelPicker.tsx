@@ -5,7 +5,7 @@ import type {
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs } from "@octant/domain";
-import { ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
+import { Check, ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   modelFavoriteKey,
@@ -18,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSlider } from "../ui/base/OctantSlider";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { rememberModelChoice } from "./modelChoiceMemory";
 import { readRecentModels, rememberModel } from "./modelRecents";
 import { ProviderGlyph } from "./ProviderGlyph";
@@ -319,31 +320,38 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             rememberModel(group.instance.id, modelId);
             if (props.rememberChoice !== false)
               rememberModelChoice({ providerInstanceId: group.instance.id, modelId });
+            // The menu stays open: the next thing a person often does is set
+            // the reasoning level for the model they just chose.
             props.onSelect({ providerInstanceId: group.instance.id, modelId });
-            setOpen(false);
           }}
           role="option"
           title={picker.unavailableReason}
           type="button"
           variant="ghost"
         >
+          {/* A list mixed from several providers (Favorites, Recent, a search)
+              leads each row with its provider's mark; one provider's own list
+              would only repeat the same mark down the column. */}
+          {searching || favoritesActive || recentActive ? (
+            <ProviderGlyph
+              className="composer-model-picker__model-glyph"
+              displayName={group.instance.displayName}
+              driverKind={group.instance.driverKind}
+              size={16}
+            />
+          ) : null}
           <span className="composer-model-picker__model-copy">
             <span className="composer-model-picker__model-name">{picker.model.displayName}</span>
             {detail === "" ? null : (
-              <span className="composer-model-picker__model-detail">
-                <ProviderGlyph
-                  displayName={group.instance.displayName}
-                  driverKind={group.instance.driverKind}
-                  size={12}
-                />
-                {detail}
-              </span>
+              <span className="composer-model-picker__model-detail">{detail}</span>
             )}
           </span>
           {unavailable ? (
             <OctantBadge className="composer-model-picker__model-badge" variant="secondary">
               {compactUnavailableLabel(picker.unavailableReason)}
             </OctantBadge>
+          ) : selected ? (
+            <Check aria-hidden="true" className="composer-model-picker__model-check" size={16} />
           ) : null}
         </OctantButton>
         <OctantButton
@@ -373,36 +381,36 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     const active = !searching && group.instance.id === activeRailId;
     const status = readinessStatus(group.readiness);
     return (
-      <OctantButton
-        aria-label={group.instance.displayName}
-        aria-selected={active}
-        className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
-        key={String(group.instance.id)}
-        onClick={() => {
-          setQuery("");
-          setCatalogFilter(undefined);
-          setActiveRailId(group.instance.id);
-        }}
-        role="option"
-        title={group.instance.displayName}
-        type="button"
-        variant="ghost"
-      >
-        <ProviderGlyph
-          displayName={group.instance.displayName}
-          driverKind={group.instance.driverKind}
-          size={20}
-        />
-        <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
-        {status === undefined ? null : (
-          <span
-            className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
-            title={status}
-          >
-            <span className="sr-only">{status}</span>
-          </span>
-        )}
-      </OctantButton>
+      <OctantTooltip key={String(group.instance.id)} label={group.instance.displayName}>
+        <OctantButton
+          aria-label={group.instance.displayName}
+          aria-selected={active}
+          className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
+          onClick={() => {
+            setQuery("");
+            setCatalogFilter(undefined);
+            setActiveRailId(group.instance.id);
+          }}
+          role="option"
+          type="button"
+          variant="ghost"
+        >
+          <ProviderGlyph
+            displayName={group.instance.displayName}
+            driverKind={group.instance.driverKind}
+            size={20}
+          />
+          <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
+          {status === undefined ? null : (
+            <span
+              className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
+              title={status}
+            >
+              <span className="sr-only">{status}</span>
+            </span>
+          )}
+        </OctantButton>
+      </OctantTooltip>
     );
   }
 
@@ -410,32 +418,32 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     const active = octantActive;
     const worst = harnessGroups.map((group) => readinessStatus(group.readiness)).find(Boolean);
     return (
-      <OctantButton
-        aria-label="Octant"
-        aria-selected={active}
-        className={`composer-model-picker__rail-item composer-model-picker__rail-item--octant${active ? " composer-model-picker__rail-item--active" : ""}`}
-        key={OCTANT_RAIL_ID}
-        onClick={() => {
-          setQuery("");
-          setCatalogFilter(undefined);
-          setActiveRailId(OCTANT_RAIL_ID);
-        }}
-        role="option"
-        title="Octant — native harness"
-        type="button"
-        variant="ghost"
-      >
-        <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={20} />
-        <span className="composer-model-picker__rail-label">Octant</span>
-        {worst === undefined ? null : (
-          <span
-            className="composer-model-picker__rail-status composer-model-picker__rail-status--degraded"
-            title={worst}
-          >
-            <span className="sr-only">{worst}</span>
-          </span>
-        )}
-      </OctantButton>
+      <OctantTooltip key={OCTANT_RAIL_ID} label="Octant — native harness">
+        <OctantButton
+          aria-label="Octant"
+          aria-selected={active}
+          className={`composer-model-picker__rail-item composer-model-picker__rail-item--octant${active ? " composer-model-picker__rail-item--active" : ""}`}
+          onClick={() => {
+            setQuery("");
+            setCatalogFilter(undefined);
+            setActiveRailId(OCTANT_RAIL_ID);
+          }}
+          role="option"
+          type="button"
+          variant="ghost"
+        >
+          <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={20} />
+          <span className="composer-model-picker__rail-label">Octant</span>
+          {worst === undefined ? null : (
+            <span
+              className="composer-model-picker__rail-status composer-model-picker__rail-status--degraded"
+              title={worst}
+            >
+              <span className="sr-only">{worst}</span>
+            </span>
+          )}
+        </OctantButton>
+      </OctantTooltip>
     );
   }
 
@@ -476,40 +484,42 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           className="composer-model-picker__rail"
           role="listbox"
         >
-          <OctantButton
-            aria-label="Favorites"
-            aria-selected={favoritesActive}
-            className={`composer-model-picker__rail-item composer-model-picker__rail-item--favorites${favoritesActive ? " composer-model-picker__rail-item--active" : ""}`}
-            onClick={() => {
-              setQuery("");
-              setCatalogFilter(undefined);
-              setActiveRailId(FAVORITES_RAIL_ID);
-            }}
-            role="option"
-            title="Favorites"
-            type="button"
-            variant="ghost"
-          >
-            <Star aria-hidden="true" fill="currentColor" size={20} strokeWidth={1.75} />
-            <span className="composer-model-picker__rail-label">Favorites</span>
-          </OctantButton>
-          <OctantButton
-            aria-label="Recent"
-            aria-selected={recentActive}
-            className={`composer-model-picker__rail-item${recentActive ? " composer-model-picker__rail-item--active" : ""}`}
-            onClick={() => {
-              setQuery("");
-              setCatalogFilter(undefined);
-              setActiveRailId(RECENT_RAIL_ID);
-            }}
-            role="option"
-            title="Recent"
-            type="button"
-            variant="ghost"
-          >
-            <Clock aria-hidden="true" size={20} />
-            <span className="composer-model-picker__rail-label">Recent</span>
-          </OctantButton>
+          <OctantTooltip label="Favorites">
+            <OctantButton
+              aria-label="Favorites"
+              aria-selected={favoritesActive}
+              className={`composer-model-picker__rail-item composer-model-picker__rail-item--favorites${favoritesActive ? " composer-model-picker__rail-item--active" : ""}`}
+              onClick={() => {
+                setQuery("");
+                setCatalogFilter(undefined);
+                setActiveRailId(FAVORITES_RAIL_ID);
+              }}
+              role="option"
+              type="button"
+              variant="ghost"
+            >
+              <Star aria-hidden="true" fill="currentColor" size={20} strokeWidth={1.75} />
+              <span className="composer-model-picker__rail-label">Favorites</span>
+            </OctantButton>
+          </OctantTooltip>
+          <OctantTooltip label="Recent">
+            <OctantButton
+              aria-label="Recent"
+              aria-selected={recentActive}
+              className={`composer-model-picker__rail-item${recentActive ? " composer-model-picker__rail-item--active" : ""}`}
+              onClick={() => {
+                setQuery("");
+                setCatalogFilter(undefined);
+                setActiveRailId(RECENT_RAIL_ID);
+              }}
+              role="option"
+              type="button"
+              variant="ghost"
+            >
+              <Clock aria-hidden="true" size={20} />
+              <span className="composer-model-picker__rail-label">Recent</span>
+            </OctantButton>
+          </OctantTooltip>
           {railGroups.flatMap((group, index) => {
             const entries = [];
             if (
@@ -525,16 +535,17 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             ? renderOctantRailItem()
             : null}
           {props.onOpenSettings === undefined ? null : (
-            <OctantButton
-              aria-label="Provider settings"
-              title="Provider settings"
-              className="composer-model-picker__rail-item"
-              onClick={props.onOpenSettings}
-              variant="ghost"
-              type="button"
-            >
-              <Plus aria-hidden="true" size={20} />
-            </OctantButton>
+            <OctantTooltip label="Provider settings">
+              <OctantButton
+                aria-label="Provider settings"
+                className="composer-model-picker__rail-item"
+                onClick={props.onOpenSettings}
+                variant="ghost"
+                type="button"
+              >
+                <Plus aria-hidden="true" size={20} />
+              </OctantButton>
+            </OctantTooltip>
           )}
         </div>
         <div className="composer-model-picker__pane">
@@ -723,11 +734,26 @@ function LevelSlider(props: {
   readonly onIndexChange: (index: number) => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | undefined>();
-  const index = dragIndex ?? props.index;
+  // The chosen level shows at once. The thread's saved level comes back over a
+  // round trip; reading only that made the knob snap back to the old stop
+  // after every click and then jump forward, which felt like a slow web page.
+  const [pendingIndex, setPendingIndex] = useState<number | undefined>();
+  useEffect(() => setPendingIndex(undefined), [props.index]);
+  const index = dragIndex ?? pendingIndex ?? props.index;
+  function commit(next: number) {
+    setPendingIndex(next);
+    props.onIndexChange(next);
+  }
   const label = props.labels[index] ?? "Default";
   const stopCount = props.labels.length;
+  const intensity = stopCount <= 1 ? 0 : index / (stopCount - 1);
   return (
-    <div className="composer-model-picker__level">
+    <div
+      className="composer-model-picker__level"
+      // The higher the level, the denser and brighter the fill: the control
+      // says how much thinking was asked for before the label is read.
+      style={{ "--composer-model-picker-intensity": intensity } as CSSProperties}
+    >
       <div className="composer-model-picker__level-reading">
         <span className="composer-model-picker__level-label">{props.displayName}</span>
         <strong className="composer-model-picker__level-value">{label}</strong>
@@ -735,7 +761,7 @@ function LevelSlider(props: {
           aria-label="Reset reasoning to provider default"
           title="Reset reasoning to provider default"
           disabled={props.disabled || index === 0}
-          onClick={() => props.onIndexChange(0)}
+          onClick={() => commit(0)}
           size="icon"
           variant="ghost"
           type="button"
@@ -743,54 +769,62 @@ function LevelSlider(props: {
           <RotateCcw aria-hidden="true" size={14} />
         </OctantButton>
       </div>
-      <div className="composer-model-picker__level-control">
-        <div aria-hidden="true" className="composer-model-picker__level-track">
-          <span
-            className="composer-model-picker__level-fill"
-            style={
-              {
-                "--composer-model-picker-level-fill": `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%`,
-              } as CSSProperties
-            }
+      <div className="composer-model-picker__level-row">
+        <span aria-hidden="true" className="composer-model-picker__level-end">
+          Faster
+        </span>
+        <div className="composer-model-picker__level-control">
+          <div aria-hidden="true" className="composer-model-picker__level-track">
+            <span
+              className="composer-model-picker__level-fill"
+              style={
+                {
+                  "--composer-model-picker-level-fill": `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%`,
+                } as CSSProperties
+              }
+            />
+            <span className="composer-model-picker__level-stops">
+              {props.labels.map((stop, position) => (
+                <span key={`${position}:${stop}`} title={stop} />
+              ))}
+            </span>
+          </div>
+          <OctantSlider
+            className="composer-model-picker__reasoning-slider"
+            aria-label={`${props.displayName} level`}
+            aria-valuemax={stopCount - 1}
+            aria-valuemin={0}
+            aria-valuenow={index}
+            aria-valuetext={label}
+            disabled={props.disabled}
+            min={0}
+            max={stopCount - 1}
+            step={1}
+            value={index}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              setDragIndex(props.index);
+            }}
+            onLostPointerCapture={() => setDragIndex(undefined)}
+            onPointerCancel={() => setDragIndex(undefined)}
+            onPointerUp={(event) => {
+              const next = event.currentTarget.valueAsNumber;
+              setDragIndex(undefined);
+              commit(next);
+            }}
+            onChange={(event) => {
+              const next = event.currentTarget.valueAsNumber;
+              // Existing threads persist through versioned commands. Preview the
+              // drag locally and send its final value once, rather than racing a
+              // command for every intermediate stop against the same version.
+              if (dragIndex !== undefined) setDragIndex(next);
+              else commit(next);
+            }}
           />
-          <span className="composer-model-picker__level-stops">
-            {props.labels.map((stop, position) => (
-              <span key={`${position}:${stop}`} title={stop} />
-            ))}
-          </span>
         </div>
-        <OctantSlider
-          className="composer-model-picker__reasoning-slider"
-          aria-label={`${props.displayName} level`}
-          aria-valuemax={stopCount - 1}
-          aria-valuemin={0}
-          aria-valuenow={index}
-          aria-valuetext={label}
-          disabled={props.disabled}
-          min={0}
-          max={stopCount - 1}
-          step={1}
-          value={index}
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            setDragIndex(props.index);
-          }}
-          onLostPointerCapture={() => setDragIndex(undefined)}
-          onPointerCancel={() => setDragIndex(undefined)}
-          onPointerUp={(event) => {
-            const next = event.currentTarget.valueAsNumber;
-            setDragIndex(undefined);
-            props.onIndexChange(next);
-          }}
-          onChange={(event) => {
-            const next = event.currentTarget.valueAsNumber;
-            // Existing threads persist through versioned commands. Preview the
-            // drag locally and send its final value once, rather than racing a
-            // command for every intermediate stop against the same version.
-            if (dragIndex !== undefined) setDragIndex(next);
-            else props.onIndexChange(next);
-          }}
-        />
+        <span aria-hidden="true" className="composer-model-picker__level-end">
+          Smarter
+        </span>
       </div>
     </div>
   );
