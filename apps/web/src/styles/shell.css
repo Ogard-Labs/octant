@@ -3484,7 +3484,8 @@ form > .work-composer-adapter__attachments {
   gap: var(--oct-space-2);
 }
 
-/* The prompts are one compact row of chips, the same as Chat's starters: the
+/* The prompts are one compact row of chips, the same as Work's starters (both
+   are StartSuggestionChip, so the chip itself is not styled here): the
    label says what it is, and the prompt it fills in rides as the chip's
    tooltip and description. Five full cards had pushed Running now below the
    fold. */
@@ -3495,17 +3496,6 @@ form > .work-composer-adapter__attachments {
   gap: var(--oct-space-2);
   width: min(100%, 704px);
   margin: var(--oct-space-6) auto 0;
-}
-
-.code-home__suggestions > button {
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-}
-
-.code-home__suggestions > button:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: transparent;
 }
 
 .draft-thread__intent-cards > button {

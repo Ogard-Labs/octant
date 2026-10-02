@@ -35,17 +35,6 @@
   gap: 8px;
 }
 
-.chat-welcome__suggestions button {
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-}
-
-.chat-welcome__suggestions button:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: transparent;
-}
-
 .chat-welcome__retry {
   align-self: center;
 }
@@ -914,10 +903,6 @@
 
   .chat-welcome__suggestions {
     gap: 5px;
-  }
-
-  .chat-welcome__suggestions button {
-    padding-inline: 9px;
   }
 
   .thread-work-shelf {

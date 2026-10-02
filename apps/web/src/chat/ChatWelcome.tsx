@@ -21,6 +21,7 @@ import {
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { StartSuggestionChip } from "../composer/StartSuggestionChip";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -266,20 +267,17 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             {starterIdeas.map((idea) => {
               const Icon = idea.icon;
               return (
-                <OctantButton
+                <StartSuggestionChip
                   disabled={!ready || props.creating}
                   key={idea.label}
                   onClick={() => {
                     setPrompt(idea.prompt);
                     textareaRef.current?.focus();
                   }}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
                 >
                   <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
                   {idea.label}
-                </OctantButton>
+                </StartSuggestionChip>
               );
             })}
           </div>

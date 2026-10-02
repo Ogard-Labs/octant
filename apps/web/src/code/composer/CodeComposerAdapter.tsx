@@ -20,6 +20,7 @@ import {
   useComposerSlashCommands,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
+import { StartSuggestionChip } from "../../composer/StartSuggestionChip";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import {
@@ -937,22 +938,19 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         trimmed !== "" ? null : (
           <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
             {props.suggestions.map((suggestion) => (
-              <OctantButton
+              <StartSuggestionChip
                 aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
                 aria-label={suggestion.label}
                 disabled={props.creating}
                 key={suggestion.id}
                 onClick={() => applySuggestion(suggestion)}
-                size="sm"
                 title={suggestion.prompt}
-                type="button"
-                variant="ghost"
               >
                 {suggestion.label}
                 <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
                   {suggestion.prompt}
                 </span>
-              </OctantButton>
+              </StartSuggestionChip>
             ))}
           </div>
         )}
