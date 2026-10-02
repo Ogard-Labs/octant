@@ -27,7 +27,11 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
-import { pickerGroupCarriesAppManagedTools, type PickerGroup } from "@octant/domain";
+import {
+  pickerGroupCarriesAppManagedTools,
+  startedConversationPickerGroups,
+  type PickerGroup,
+} from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -1908,7 +1912,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={providerChanging || creating || completionLocked}
-                    groups={props.providerGroups ?? []}
+                    // Once a turn completed, the thread's history lives with
+                    // its provider kind; offering a move the host refuses led
+                    // straight to a stuck thread.
+                    groups={
+                      turns.some((turn) => turn.status === "completed")
+                        ? startedConversationPickerGroups(props.providerGroups ?? [], {
+                            providerInstanceId: thread.providerInstanceId,
+                            modelId: thread.modelId,
+                          })
+                        : (props.providerGroups ?? [])
+                    }
                     {...(thread.modelOptionValues === undefined
                       ? {}
                       : { modelOptionValues: thread.modelOptionValues })}

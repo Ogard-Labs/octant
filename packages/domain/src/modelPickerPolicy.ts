@@ -13,7 +13,11 @@ import {
   orderProviderModels,
   resolveCapabilitySupport,
 } from "./modelCatalogPolicy";
-import { isImageProfileDriverKind, isNativeHarnessDriverKind } from "./providerPolicy";
+import {
+  isImageProfileDriverKind,
+  isNativeHarnessDriverKind,
+  providerKeepsConversation,
+} from "./providerPolicy";
 
 const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   codex: "Codex CLI",
@@ -624,6 +628,27 @@ export function startedThreadPickerGroups(
     }))
     .filter((section) => section.models.length > 0);
   return [{ ...group, sections }];
+}
+
+/**
+ * The choices a started Chat or Work thread can take. A provider that keeps
+ * the conversation itself binds the thread the way Code is bound; a thread
+ * whose history the host holds may move to any provider whose history the
+ * host also holds, but never into a provider-kept session, which the host
+ * refuses rather than silently start a second conversation.
+ */
+export function startedConversationPickerGroups(
+  groups: ReadonlyArray<PickerGroup>,
+  selection: ModelPickerSelection,
+): ReadonlyArray<PickerGroup> {
+  const current = groups.find(
+    (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
+  );
+  if (current === undefined) return groups;
+  if (providerKeepsConversation(current.instance.driverKind)) {
+    return startedThreadPickerGroups(groups, selection);
+  }
+  return groups.filter((group) => !providerKeepsConversation(group.instance.driverKind));
 }
 
 export function filterModelPickerGroups(

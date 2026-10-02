@@ -21,7 +21,7 @@ import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
-import type { PickerGroup } from "@octant/domain";
+import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState } from "react";
 import { useSteeredSend } from "../composer/useSteeredSend";
@@ -1306,7 +1306,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         {...(props.providerGroups === undefined
           ? {}
           : {
-              providerGroups: props.providerGroups,
+              // A completed turn ties the thread to its provider kind; see
+              // startedConversationPickerGroups for which moves stay open.
+              providerGroups: view.turns.some((turn) =>
+                turn.attempts.some((attempt) => attempt.outcome === "completed"),
+              )
+                ? startedConversationPickerGroups(props.providerGroups, {
+                    providerInstanceId: view.thread.providerInstanceId,
+                    modelId: view.thread.modelId,
+                  })
+                : props.providerGroups,
               selectedProviderInstanceId: view.thread.providerInstanceId,
               selectedModelId: view.thread.modelId,
               onSelectModel: (selection: {
