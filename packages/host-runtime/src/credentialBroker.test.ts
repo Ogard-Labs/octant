@@ -240,10 +240,41 @@ describe("startCredentialBroker", () => {
       const output = await response.text();
 
       expect(response.status).toBe(503);
+      expect(JSON.parse(output)).toEqual({ error: "failed" });
       expect(output).not.toContain(privateFailure);
       expect(output).not.toContain(credential);
     } finally {
       await broker.close();
+    }
+  });
+
+  it("returns the credential store's own category for a missing or unreadable secret", async () => {
+    const missing = await startCredentialBroker({
+      ...memoryStore(),
+      resolve: async () => {
+        throw new CredentialStoreFailure("missing");
+      },
+    });
+    const unreadable = await startCredentialBroker({
+      ...memoryStore(),
+      resolve: async () => {
+        throw new CredentialStoreFailure("unavailable");
+      },
+    });
+    try {
+      const missingResponse = await missing.fetchForTest(
+        brokerRequest(missing.url, missing.token, "/v1/credentials/resolve"),
+      );
+      const unreadableResponse = await unreadable.fetchForTest(
+        brokerRequest(unreadable.url, unreadable.token, "/v1/credentials/resolve"),
+      );
+      expect(missingResponse.status).toBe(404);
+      expect(await missingResponse.json()).toEqual({ error: "missing" });
+      expect(unreadableResponse.status).toBe(503);
+      expect(await unreadableResponse.json()).toEqual({ error: "unavailable" });
+    } finally {
+      await missing.close();
+      await unreadable.close();
     }
   });
 

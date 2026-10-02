@@ -45,7 +45,7 @@ export function makeCredentialBrokerClient(
     } catch {
       throw brokerFailure();
     }
-    if (!response.ok) throw brokerFailure();
+    if (!response.ok) throw await refusedCredential(response);
     try {
       return (await response.json()) as unknown;
     } catch {
@@ -288,4 +288,33 @@ function hasExactKeys(
 
 function brokerFailure(): Error {
   return new Error("Octant credential resolution failed.");
+}
+
+// A credential-store refusal is the provider's authentication state. A transport
+// or decode failure stays the generic broker error so a down broker is not
+// reported as a missing key, and a missing key is not reported as the provider
+// service itself being down.
+async function refusedCredential(response: Response): Promise<never> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw brokerFailure();
+  }
+  if (!isRecord(body) || typeof body.error !== "string" || Object.keys(body).length !== 1) {
+    throw brokerFailure();
+  }
+  if (body.error === "missing") {
+    throw {
+      category: "unauthenticated",
+      message: "The provider credential is missing or unavailable.",
+    };
+  }
+  if (body.error === "unavailable" || body.error === "failed" || body.error === "invalid") {
+    throw {
+      category: "unavailable",
+      message: "The provider credential store is unavailable.",
+    };
+  }
+  throw brokerFailure();
 }

@@ -34,11 +34,6 @@ const UI_FONTS: ReadonlyArray<FontOption> = [
   },
   { label: "System interface", family: SYSTEM_UI_FAMILY },
   { label: "SF Pro", family: "'SF Pro Text', -apple-system, system-ui, sans-serif" },
-  {
-    label: "Inter Variable",
-    family:
-      "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-  },
   { label: "Inter", family: "Inter, system-ui, sans-serif" },
   { label: "Geist", family: "Geist, system-ui, sans-serif" },
   { label: "Helvetica Neue", family: "'Helvetica Neue', Helvetica, Arial, sans-serif" },
@@ -51,13 +46,12 @@ const MONO_FONTS: ReadonlyArray<FontOption> = [
   {
     label: "Octant monospace",
     family:
-      "'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
+      "'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
   },
   { label: "JetBrains Mono", family: "'JetBrains Mono', ui-monospace, monospace" },
   { label: "SF Mono", family: "'SF Mono', ui-monospace, monospace" },
   { label: "Menlo", family: "Menlo, ui-monospace, monospace" },
   { label: "Monaco", family: "Monaco, ui-monospace, monospace" },
-  { label: "Geist Mono", family: "'Geist Mono', ui-monospace, monospace" },
   { label: "Fira Code", family: "'Fira Code', ui-monospace, monospace" },
   { label: "Source Code Pro", family: "'Source Code Pro', ui-monospace, monospace" },
   { label: "Cascadia Code", family: "'Cascadia Code', ui-monospace, monospace" },
