@@ -6,9 +6,10 @@ import {
   remoteRotateDeviceKey,
   remoteSignOut,
 } from "@octant/client-runtime";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { useRemoteSession } from "./useRemoteSession";
 
 export interface RemoteDeviceSelfPanelProps {
@@ -37,7 +38,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
   const state = useRemoteSession(props.bridge);
   const alive = useRef(true);
   const focusReturnRef = useRef<HTMLButtonElement>(null);
-  const rotateConfirmId = useId();
+  const rotateButtonRef = useRef<HTMLButtonElement>(null);
   const [metadata, setMetadata] =
     useState<Awaited<ReturnType<typeof fetchRemoteOwnDeviceMetadata>>>();
   const [confirmingRotate, setConfirmingRotate] = useState(false);
@@ -74,6 +75,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
     action: () => Promise<unknown>,
     onComplete: (warning?: string) => void,
     successMessage?: string,
+    focusOnFailure?: RefObject<HTMLButtonElement | null>,
   ): Promise<void> => {
     setStatusAssertive(false);
     setStatus("");
@@ -94,7 +96,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
       } else {
         setStatus(`${label} failed.`);
       }
-      focusReturnRef.current?.focus();
+      (focusOnFailure ?? focusReturnRef).current?.focus();
     }
   };
 
@@ -148,10 +150,11 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
           Sign out
         </OctantButton>
         <OctantButton
-          aria-controls={rotateConfirmId}
           aria-expanded={confirmingRotate}
+          aria-haspopup="dialog"
           disabled={!ready}
           onClick={() => setConfirmingRotate(true)}
+          ref={rotateButtonRef}
           type="button"
           variant="secondary"
         >
@@ -173,43 +176,28 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
         </OctantButton>
       </div>
       {confirmingRotate && ready ? (
-        <div
-          aria-label="Confirm device key rotation"
-          className="remote-shell__device-confirm"
-          id={rotateConfirmId}
-          role="group"
+        <OctantConfirmDialog
+          cancelLabel="Keep current key"
+          confirmLabel="Rotate key"
+          destructive
+          onCancel={() => setConfirmingRotate(false)}
+          onConfirm={() => {
+            setConfirmingRotate(false);
+            void runAction(
+              ROTATE_LABEL,
+              () => remoteRotateDeviceKey({ bridge: props.bridge }),
+              () => setMetadata(undefined),
+              ROTATE_SUCCESS,
+              rotateButtonRef,
+            );
+          }}
+          restoreFocus={rotateButtonRef}
+          title="Confirm device key rotation"
         >
-          <p>
-            Replace this browser&apos;s device key? The current key stops working immediately and
-            cannot be restored. Use this if the current key may be compromised.
-          </p>
-          <p className="remote-shell__device-muted">
-            Only this browser is affected. It stays paired, but this session ends and you must
-            reconnect.
-          </p>
-          <div className="remote-shell__device-actions">
-            <OctantButton
-              onClick={() => {
-                setConfirmingRotate(false);
-                void runAction(
-                  ROTATE_LABEL,
-                  () => remoteRotateDeviceKey({ bridge: props.bridge }),
-                  // The metadata on screen describes the superseded generation
-                  // and no session remains to refresh it.
-                  () => setMetadata(undefined),
-                  ROTATE_SUCCESS,
-                );
-              }}
-              type="button"
-              variant="destructive"
-            >
-              Rotate key
-            </OctantButton>
-            <OctantButton onClick={() => setConfirmingRotate(false)} type="button" variant="ghost">
-              Keep current key
-            </OctantButton>
-          </div>
-        </div>
+          Replace this browser&apos;s device key? The current key stops working immediately and
+          cannot be restored. Use this if the current key may be compromised. Only this browser is
+          affected. It stays paired, but this session ends and you must reconnect.
+        </OctantConfirmDialog>
       ) : null}
       {status === "" ? null : (
         <OctantAlert tone={statusAssertive ? "warning" : "success"}>{status}</OctantAlert>

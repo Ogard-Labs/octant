@@ -187,12 +187,14 @@
   --oct-section-y-desktop: 80px;
   --oct-section-y-tablet: 48px;
   --oct-section-y-phone: 32px;
-  --oct-radius-sm: 10px;
-  --oct-radius-md: 16px;
-  /* An object resting inside a 16px well: a board card in its column. One
+  /* A tighter scale than the first desktop one (10/16/20), which read as
+     soft and toy-like next to the dense text it framed. */
+  --oct-radius-sm: 8px;
+  --oct-radius-md: 12px;
+  /* An object resting inside a 12px well: a board card in its column. One
      step under the well keeps the gap between the two corners even. */
-  --oct-radius-inset: 12px;
-  --oct-radius-lg: 20px;
+  --oct-radius-inset: 8px;
+  --oct-radius-lg: 14px;
   --oct-radius-pill: 9999px;
 
   --oct-motion-fast: 150ms;
