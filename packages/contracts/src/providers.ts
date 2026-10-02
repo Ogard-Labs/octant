@@ -1067,6 +1067,14 @@ export const ProviderCapabilities = Schema.Struct({
    * connection, independently of the app-managed tool bridge.
    */
   acpClientCapabilities: Schema.optional(ProviderCapabilitySupport),
+  /**
+   * The driver can carry an existing native session on to another model of
+   * the same provider instance: a resumed session takes the thread's current
+   * model, and the conversation the provider holds continues. Absent reads as
+   * unsupported, so a host keeps refusing a turn whose model differs from the
+   * one its session was opened with rather than discarding that conversation.
+   */
+  modelSwitch: Schema.optional(ProviderCapabilitySupport),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
 }).annotations(strict);

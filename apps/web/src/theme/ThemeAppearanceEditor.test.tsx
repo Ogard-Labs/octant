@@ -136,7 +136,7 @@ describe("ThemeAppearanceEditor", () => {
       <ThemeAppearanceEditor controller={{ ...controller(), settings: saved, draft: saved }} />,
     );
 
-    expect(screen.getByLabelText("Interface font")).toHaveValue("Octant interface");
+    expect(screen.getByLabelText("Interface font")).toHaveValue("Geist");
   });
 
   it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {

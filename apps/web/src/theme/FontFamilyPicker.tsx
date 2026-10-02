@@ -26,16 +26,20 @@ interface FontOption {
   readonly label: string;
 }
 
+// The default entries name the face they bundle. They used to read "Octant
+// interface" and "Octant monospace", which looked like a separate house face
+// was still the default after Geist replaced it, and a second "Geist" entry
+// named a family Octant does not bundle, so choosing it fell back to the
+// system face.
 const UI_FONTS: ReadonlyArray<FontOption> = [
   {
-    label: "Octant interface",
+    label: "Geist",
     family:
       "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
   },
   { label: "System interface", family: SYSTEM_UI_FAMILY },
   { label: "SF Pro", family: "'SF Pro Text', -apple-system, system-ui, sans-serif" },
   { label: "Inter", family: "Inter, system-ui, sans-serif" },
-  { label: "Geist", family: "Geist, system-ui, sans-serif" },
   { label: "Helvetica Neue", family: "'Helvetica Neue', Helvetica, Arial, sans-serif" },
   { label: "Segoe UI", family: "'Segoe UI', system-ui, sans-serif" },
   { label: "Roboto", family: "Roboto, system-ui, sans-serif" },
@@ -44,7 +48,7 @@ const UI_FONTS: ReadonlyArray<FontOption> = [
 
 const MONO_FONTS: ReadonlyArray<FontOption> = [
   {
-    label: "Octant monospace",
+    label: "Geist Mono",
     family:
       "'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
   },
