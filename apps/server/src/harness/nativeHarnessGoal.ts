@@ -87,11 +87,26 @@ export function createNativeHarnessGoalPort(options: {
       // recorded on the goal: that is the evidence completion requires
       // (decision 0025), so the goal completes here rather than waiting for a
       // model to claim it is done.
-      return run({
+      const completion = await run({
         kind: "complete-thread-goal",
         expectedVersion: checked.goal.version,
         goalId: checked.goal.id,
       });
+      if (completion.status === "recorded") return completion;
+      // The check is already recorded; only completion lost a race (a person
+      // touched the goal in between). Try once more against what is there
+      // now, and otherwise report the check that did happen rather than an
+      // error that would send the lead to re-run it.
+      const latest = read();
+      if (latest !== undefined && latest.status !== "complete" && threadGoalCriteriaMet(latest)) {
+        const retried = await run({
+          kind: "complete-thread-goal",
+          expectedVersion: latest.version,
+          goalId: latest.id,
+        });
+        if (retried.status === "recorded") return retried;
+      }
+      return latest === undefined ? checked : { status: "recorded", goal: latest };
     },
   };
 }

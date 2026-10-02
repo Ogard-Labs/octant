@@ -313,6 +313,30 @@ describe("thread goal policy", () => {
       expect(() => decodeThreadGoalUpdated(revised)).not.toThrow();
     });
 
+    it("lends one passed check to only one of two identical revised criteria", () => {
+      const passed = check(created(), "c1", "met");
+      const revised = applyThreadGoalCommand(
+        passed,
+        {
+          kind: "revise-thread-goal",
+          threadId: ids.thread,
+          expectedVersion: (passed.goal?.version ?? 0) as AggregateVersion,
+          goalId: ids.goal,
+          revisionId: ids.revision2,
+          objective: "Ship the parser",
+          criteria: [
+            { text: "Tests pass", check: "bun run test" },
+            { text: "Tests pass", check: "bun run test" },
+          ],
+        },
+        later,
+      );
+      expect(revised.goal?.criteria?.map((criterion) => criterion.status)).toEqual([
+        "met",
+        "unmet",
+      ]);
+    });
+
     it("refuses a check for a criterion the goal does not have", () => {
       expect(() => check(created(), "c9", "met")).toThrow(GoalPolicyRejection);
     });

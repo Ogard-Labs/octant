@@ -361,6 +361,58 @@ describe("native harness tools", () => {
       expect(replaced.result).toMatchObject({ error: "criteria-already-set" });
     });
 
+    it("runs nothing when the check was changed while it waited for approval", async () => {
+      let goals: GoalService | undefined;
+      const {
+        tools,
+        commands,
+        goals: created,
+      } = await goalFixture({
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+        exitCodes: { "bun run test parser": 0, true: 0 },
+        facts: { executionPolicy: "approval-gated", approvalSatisfied: false },
+        approvals: async () => {
+          // Someone swaps the criterion's command while the approval is open.
+          const goal = goals?.read(threadId).goal;
+          if (goal !== null && goal !== undefined) {
+            await goals?.execute({
+              kind: "revise-thread-goal",
+              threadId,
+              expectedVersion: goal.version,
+              goalId: goal.id,
+              revisionId: "00000000-0000-4000-8000-000000000399",
+              objective: goal.objective,
+              criteria: [{ text: "Parser tests pass", check: "true" }],
+            });
+          }
+          return "approved";
+        },
+      });
+      goals = created;
+      expect((await call(tools, "goal-check", { criterionId: "c1" })).result).toMatchObject({
+        error: "criterion-changed",
+      });
+      expect(commands).toEqual([]);
+    });
+
+    it("completes the goal on a second try when the first completion lost a race", async () => {
+      const { goals, tools } = await goalFixture({
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+        exitCodes: { "bun run test parser": 0 },
+      });
+      const execute = goals.execute.bind(goals);
+      let refusedOnce = false;
+      goals.execute = async (input) => {
+        if ((input as { kind?: string }).kind === "complete-thread-goal" && !refusedOnce) {
+          refusedOnce = true;
+          throw new Error("Goal version conflict; reload and retry.");
+        }
+        return execute(input);
+      };
+      const checked = await call(tools, "goal-check", { criterionId: "c1" });
+      expect(checked.result).toMatchObject({ outcome: "met", goal: { status: "complete" } });
+    });
+
     it("asks before a check exactly as before a shell command, naming the command it will run", async () => {
       const asked: string[] = [];
       const { tools, commands } = await goalFixture({

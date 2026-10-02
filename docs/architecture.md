@@ -954,7 +954,9 @@ native harness in `apps/server/src/harness`:
   tool reads it and lets the lead write criteria once, only while the goal has
   none; a person revises them afterwards. `goal-check` (Code, policed exactly
   as `bash`, approval naming the command) runs a criterion's own check — the
-  command comes from the goal, never the call — and records the observed
+  command comes from the goal, never the call, is at most 200 characters so
+  the approval shows it whole, and is fixed when approval is asked; a check
+  changed while the approval was open runs nothing — and records the observed
   outcome with `record-thread-goal-check` as `test` evidence, met only on a
   zero exit. When the last criterion is met the goal completes on that
   evidence (0025); a model saying it is done completes nothing. A goal loop

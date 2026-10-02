@@ -104,10 +104,16 @@ function criteriaFrom(
   drafts: ReadonlyArray<ThreadGoalCriterionDraft>,
   previous: ReadonlyArray<ThreadGoalCriterion>,
 ): ReadonlyArray<ThreadGoalCriterion> {
+  // Each earlier criterion lends its status to one draft at most: two
+  // identical drafts must not both inherit the single check that passed.
+  const unclaimed = [...previous];
   return drafts.map((draft, index) => {
     const text = draft.text.trim();
     const check = draft.check?.trim();
-    const kept = previous.find((criterion) => criterion.text === text && criterion.check === check);
+    const claimed = unclaimed.findIndex(
+      (criterion) => criterion.text === text && criterion.check === check,
+    );
+    const kept = claimed === -1 ? undefined : unclaimed.splice(claimed, 1)[0];
     return {
       id: `c${index + 1}`,
       text,

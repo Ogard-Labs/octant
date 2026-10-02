@@ -267,6 +267,12 @@ export function createNativeHarnessTools(
     const authority = options.resolveAuthority();
     if (authority === undefined) return refused("tool-authority-stale");
     const capabilityId = nativeHarnessToolCapabilityId(name);
+    // The command a person approves is fixed here, before any wait, and is
+    // the only one the check may run.
+    const approvedCheck =
+      name === "goal-check"
+        ? criterionCheck(args as NativeHarnessGoalCheckArguments, options.ports.goal)
+        : undefined;
     let request: ToolActionRequest;
     try {
       request = decodeRequest({
@@ -278,7 +284,7 @@ export function createNativeHarnessTools(
         // on the goal rather than in the call.
         intent:
           name === "goal-check"
-            ? goalCheckIntent(args as NativeHarnessGoalCheckArguments, options.ports.goal)
+            ? `goal-check: ${approvedCheck ?? (args as NativeHarnessGoalCheckArguments).criterionId}`
             : intentFor(name, args),
         approval: { kind: "not-required" },
       });
@@ -319,7 +325,15 @@ export function createNativeHarnessTools(
     }
     let outcome;
     try {
-      outcome = await execute(name, args, options.ports, signal);
+      outcome =
+        name === "goal-check"
+          ? await checkGoalCriterion(
+              (args as NativeHarnessGoalCheckArguments).criterionId,
+              approvedCheck,
+              options.ports,
+              signal,
+            )
+          : await execute(name, args, options.ports, signal);
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
     }
@@ -521,10 +535,10 @@ async function execute(
         ? ok(nativeHarnessGoalSummary(changed.goal))
         : refused(changed.reason, changed.message);
     }
-    case "goal-check": {
-      const input = args as NativeHarnessGoalCheckArguments;
-      return checkGoalCriterion(input.criterionId, ports, signal);
-    }
+    case "goal-check":
+      // Runs through `checkGoalCriterion` with the command fixed before
+      // approval; reaching here would mean a check with nothing approved.
+      return refused("tool-unavailable");
   }
 }
 
@@ -535,6 +549,7 @@ async function execute(
  */
 async function checkGoalCriterion(
   criterionId: string,
+  approvedCheck: string | undefined,
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
 ): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
@@ -553,6 +568,12 @@ async function checkGoalCriterion(
     return refused(
       "needs-person",
       `${criterionId} has no check command, so a person confirms it. Ask them with ask-user if it matters now.`,
+    );
+  }
+  if (criterion.check !== approvedCheck) {
+    return refused(
+      "criterion-changed",
+      `${criterionId}'s check changed while it waited for approval; nothing ran. Read the goal and check it again.`,
     );
   }
   const run = await shell.run({
@@ -589,15 +610,11 @@ async function checkGoalCriterion(
   });
 }
 
-function goalCheckIntent(
+function criterionCheck(
   args: NativeHarnessGoalCheckArguments,
   goal: NativeHarnessGoalPort | undefined,
-): string {
-  const check = goal
-    ?.read()
-    ?.criteria?.find((criterion) => criterion.id === args.criterionId)?.check;
-  const text = check === undefined ? `goal-check: ${args.criterionId}` : `goal-check: ${check}`;
-  return text.length > 2_048 ? text.slice(0, 2_048) : text;
+): string | undefined {
+  return goal?.read()?.criteria?.find((criterion) => criterion.id === args.criterionId)?.check;
 }
 
 /**

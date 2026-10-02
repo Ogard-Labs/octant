@@ -40,7 +40,8 @@ it — `bun run test parser` exits zero, for example. If the goal has no
 criteria yet, the model writes them once with the `goal` tool before it
 starts; after that only you change them. In a Code thread the model runs a
 criterion's own check with `goal-check`. That asks for approval exactly as a
-shell command does, and the approval shows the command. A criterion without a
+shell command does, and the approval shows the whole command (a check command
+is at most 200 characters; put a longer one in a script). A criterion without a
 check command is one you confirm.
 
 The goal completes only when every criterion's check has passed — never
