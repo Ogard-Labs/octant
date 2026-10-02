@@ -2171,6 +2171,15 @@ describe("provider registry contracts", () => {
         capabilities: { ...observed.capabilities, acpClientCapabilities: "supported" },
       }),
     ).toMatchObject({ capabilities: { acpClientCapabilities: "supported" } });
+    // A driver that never mentions model switching still decodes; the host
+    // reads the missing field as unsupported.
+    expect(decodeProviderObservedState(observed).capabilities.modelSwitch).toBeUndefined();
+    expect(
+      decodeProviderObservedState({
+        ...observed,
+        capabilities: { ...observed.capabilities, modelSwitch: "supported" },
+      }),
+    ).toMatchObject({ capabilities: { modelSwitch: "supported" } });
     expect(() =>
       decodeProviderObservedState({ ...observed, rawDiagnostics: { port: 1234 } }),
     ).toThrow();
