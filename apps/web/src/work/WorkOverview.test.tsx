@@ -298,7 +298,7 @@ describe("WorkOverview", () => {
     await user.click(within(composer).getByRole("button", { name: "Provider and model" }));
     await user.click(await screen.findByRole("option", { name: "Model One" }));
     expect(onSelectProvider).toHaveBeenCalledWith({ providerInstanceId: instanceId, modelId });
-    await user.click(within(composer).getByRole("button", { name: "Provider and model" }));
+    // The menu stays open after a model is chosen, so the level is right there.
     const level = screen.getByRole("slider", { name: "Effort level" });
     fireEvent.change(level, { target: { value: level.getAttribute("max") } });
     await user.keyboard("{Escape}");
