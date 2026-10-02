@@ -1015,9 +1015,7 @@ export function createCodeOperationRuntime(
               }),
             );
           }
-          if (spendAdmission.reservedTokens > 0) {
-            spendReservations.set(String(thread.id), spendReservationId);
-          }
+          spendReservations.set(String(thread.id), spendReservationId);
         }
         turns.noteStart(command);
       }

@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { SpendCeilingClient } from "@octant/client-runtime/spend-ceiling-client";
+import { spendCeilingLimits, spendCeilingRemainingPhrases } from "./spendCeilingLimits";
 import { useEffect, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -152,12 +153,12 @@ function isThreadType(value: string): value is SpendCeilingThreadType {
 
 function displayedSpendRemaining(
   snapshot: SpendCeilingSnapshot | undefined,
-): SpendCeilingSnapshot["threadRemaining"] {
-  const thread = snapshot?.threadRemaining;
-  const project = snapshot?.projectRemaining;
-  if (thread === undefined) return project;
-  if (project === undefined) return thread;
-  return thread.remainingTokens <= project.remainingTokens ? thread : project;
+): ReadonlyArray<string> | undefined {
+  const remainings = [snapshot?.threadRemaining, snapshot?.projectRemaining].filter(
+    (remaining) => remaining !== undefined,
+  );
+  if (remainings.length === 0) return undefined;
+  return spendCeilingRemainingPhrases(remainings);
 }
 
 function SpendCeilingControls(props: {
@@ -169,6 +170,8 @@ function SpendCeilingControls(props: {
   const threadType = isThreadType(props.subjectType) ? props.subjectType : undefined;
   const [snapshot, setSnapshot] = useState<SpendCeilingSnapshot | undefined>(undefined);
   const [budget, setBudget] = useState("");
+  const [turns, setTurns] = useState("");
+  const [hours, setHours] = useState("");
   const [message, setMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -206,7 +209,7 @@ function SpendCeilingControls(props: {
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
     if (scope === undefined) return;
-    const tokenBudget = Number.parseInt(budget, 10);
+    const limits = spendCeilingLimits({ tokens: budget, turns, hours });
     const expectedVersion = decodeAggregateVersion(version);
     const command =
       kind === "clear"
@@ -216,13 +219,13 @@ function SpendCeilingControls(props: {
               kind: "raise-spend-ceiling" as const,
               scope,
               expectedVersion,
-              tokenBudget,
+              ...limits,
             }
           : {
               kind: "set-spend-ceiling" as const,
               scope,
               expectedVersion,
-              policy: { tokenBudget },
+              policy: limits,
               window: { kind: "lifetime" as const },
             };
     try {
@@ -247,15 +250,14 @@ function SpendCeilingControls(props: {
   return (
     <div className="thread-usage__ceiling">
       <div className="thread-usage__ceiling-head">
-        <h4 className="thread-usage__subtitle">Token ceiling</h4>
+        <h4 className="thread-usage__subtitle">Spend ceiling</h4>
         {remaining === undefined ? (
           <p className="thread-usage__ceiling-value" role="note">
             None
           </p>
         ) : (
           <p className="thread-usage__ceiling-value" role="status">
-            {remaining.remainingTokens.toLocaleString()} of{" "}
-            {remaining.ceilingTokens.toLocaleString()} tokens remaining
+            {remaining.join(" · ")}
           </p>
         )}
       </div>
@@ -282,8 +284,22 @@ function SpendCeilingControls(props: {
             placeholder={threadCeilingSet ? "New ceiling in tokens" : "Tokens, e.g. 200000"}
             value={budget}
           />
+          <OctantInput
+            aria-label="Turn ceiling"
+            inputMode="numeric"
+            onChange={(event) => setTurns(event.target.value)}
+            placeholder="Turns"
+            value={turns}
+          />
+          <OctantInput
+            aria-label="Agent run time ceiling in hours"
+            inputMode="decimal"
+            onChange={(event) => setHours(event.target.value)}
+            placeholder="Hours"
+            value={hours}
+          />
           <OctantButton
-            aria-label={threadCeilingSet ? "Raise token ceiling" : "Set token ceiling"}
+            aria-label={threadCeilingSet ? "Raise spend ceiling" : "Set spend ceiling"}
             size="sm"
             type="submit"
             variant="outline"

@@ -4,30 +4,35 @@ import { isAbsolute, resolve } from "node:path";
 import {
   decodeProviderFailure,
   decodeProviderObservedState,
-  type CorrelationId,
+  type OctantMode,
   type OpenAiCompatibleProviderConfiguration,
   type ProviderCapabilities,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
-  type ProviderRuntimeEvent,
-  type ProviderSessionId,
   type ProviderToolAnswer,
-  type ProviderToolDefinition,
+  type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
-  renderProviderTurnPrompt,
   textOnlyInputModalities,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
-import { Cause, Effect, Exit, Option, PubSub, Stream } from "effect";
+import { Cause, Effect, Exit, Option } from "effect";
+import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
+import type {
+  NativeHarnessRequest,
+  NativeHarnessStreamEvent,
+  NativeHarnessTransport,
+} from "../harness/nativeHarnessTransport";
+import {
+  MemoryNativeHarnessTranscriptStore,
+  type NativeHarnessTranscriptStore,
+} from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
-import type { ObservedRateLimitBucket } from "./rateLimitHeaders";
 import {
   makeOpenAiCompatibleEndpoint,
   markCompatibleModelVerified,
@@ -44,21 +49,16 @@ import {
 import {
   sendResponsesTurn,
   type ProtocolHistoryMessage,
-  type ProtocolToolCall,
   type ProtocolTurnEvent,
   type ProtocolTurnFailureMetadata,
   type ProtocolTurnResult,
 } from "./openAiResponses";
-import {
-  capabilityEchoToolDefinition,
-  isCapabilityEchoToolCall,
-  normalizeToolName,
-} from "./openAiToolEncoding";
+import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
-  resume: "unsupported",
+  resume: "supported",
   interruption: "supported",
   approvals: "unsupported",
   userQuestions: "unsupported",
@@ -93,24 +93,12 @@ export interface OpenAiCompatibleDriverOptions {
    * core with `azure-foundry` identity and `api-key` authentication.
    */
   readonly profile?: OpenAiCompatibleDriverProfile;
-}
-
-interface SessionState {
-  readonly sessionId: ProviderSessionId;
-  readonly modelId: ProviderModelId;
-  readonly correlationId: CorrelationId;
-  endpoint: OpenAiCompatibleEndpoint | undefined;
-  readonly history: ProtocolHistoryMessage[];
-  nextSequence: number;
-  inFlight: Promise<void> | undefined;
-  abortController: AbortController | undefined;
-  active: boolean;
-  stopped: boolean;
-  pendingToolCalls: readonly ProtocolToolCall[];
-  toolAnswers: ProviderToolAnswer[];
-  activeTools: readonly ProviderToolDefinition[];
-  accumulatedInputTokens: number;
-  accumulatedOutputTokens: number;
+  /**
+   * Where harness sessions keep their conversation. Shared by every
+   * connection of this driver, so a later turn can resume what an earlier
+   * one started; the server passes the journal-backed store.
+   */
+  readonly transcripts?: NativeHarnessTranscriptStore;
 }
 
 type CompatibleTurnResult = ProtocolTurnResult | ChatCompletionsTurnResult;
@@ -122,6 +110,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
     driverKind: "openai-compatible",
     authStrategy: options.configuration.authentication,
   };
+  const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
   return {
     kind: profile.driverKind,
     probe: ({ instanceId }) =>
@@ -196,7 +185,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
             },
             catch: sanitizeFailure,
           }),
-    acquire: ({ instanceId, projectRoot }) =>
+    acquire: ({ instanceId, projectRoot, mode }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : !isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot
@@ -206,7 +195,10 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                 "Provider Project root must be an absolute normalized path.",
               ),
             )
-          : makeConnection(options, profile, clock, makeCorrelation),
+          : makeConnection(options, profile, clock, makeCorrelation, transcripts, {
+              projectRoot,
+              mode: mode ?? "chat",
+            }),
   };
 }
 
@@ -215,367 +207,173 @@ function makeConnection(
   profile: OpenAiCompatibleDriverProfile,
   clock: () => string,
   makeCorrelation: () => string,
+  transcripts: NativeHarnessTranscriptStore,
+  input: { readonly projectRoot: string; readonly mode: OctantMode },
 ): Effect.Effect<ProviderConnection, never, import("effect").Scope.Scope> {
-  return Effect.gen(function* () {
-    const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-    const sessions = new Map<ProviderSessionId, SessionState>();
-    const offer = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(PubSub.publish(events, event));
-    };
-    const deactivate = (state: SessionState) => {
-      if (!state.active) return;
-      state.active = false;
+  return createNativeHarnessConnection({
+    instanceId: options.instanceId,
+    driverKind: profile.driverKind,
+    projectRoot: input.projectRoot,
+    mode: input.mode,
+    transport: openAiCompatibleTransport(options, profile, clock),
+    transcripts,
+    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+    onSessionCountChange: (delta) =>
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
-        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
-      );
-    };
-    const releaseSession = (state: SessionState) => {
-      state.history.length = 0;
-      state.abortController = undefined;
-      state.inFlight = undefined;
-      state.endpoint = undefined;
-      state.stopped = true;
-      state.pendingToolCalls = [];
-      state.toolAnswers = [];
-      state.activeTools = [];
-      deactivate(state);
-      if (sessions.get(state.sessionId) === state) sessions.delete(state.sessionId);
-    };
-
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        for (const state of sessions.values()) state.abortController?.abort();
-        await Promise.allSettled(
-          [...sessions.values()].flatMap((state) =>
-            state.inFlight === undefined ? [] : [state.inFlight],
-          ),
-        );
-        for (const state of sessions.values()) releaseSession(state);
-        sessions.clear();
-        await Effect.runPromise(PubSub.shutdown(events));
-        options.onConnectionReleased?.();
-      }),
-    );
-
-    const stateFor = (sessionId: ProviderSessionId): SessionState => {
-      const state = sessions.get(sessionId);
-      if (state === undefined) throw failure("protocol", "Provider session is not active.");
-      return state;
-    };
-
-    return {
-      subscribe: Stream.fromPubSub(events, { scoped: true }),
-      start: (input) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (sessions.has(input.sessionId)) {
-              throw failure("protocol", "Provider session is already active.");
-            }
-            const credential = await resolveSessionCredential(options, profile);
-            const endpoint = endpointFor(
-              options,
-              credential === undefined
-                ? undefined
-                : { has: async () => true, resolve: async () => credential },
-              profile,
-            );
-            const state: SessionState = {
-              sessionId: input.sessionId,
-              modelId: input.modelId,
-              correlationId: makeCorrelation() as CorrelationId,
-              endpoint,
-              history: [],
-              nextSequence: 1,
-              inFlight: undefined,
-              abortController: undefined,
-              active: true,
-              stopped: false,
-              pendingToolCalls: [],
-              toolAnswers: [],
-              activeTools: [],
-              accumulatedInputTokens: 0,
-              accumulatedOutputTokens: 0,
-            };
-            sessions.set(input.sessionId, state);
-            options.runtimeRegistry.setActiveSessionCount(
-              options.instanceId,
-              options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,
-            );
-            return { sessionId: input.sessionId };
-          },
-          catch: sanitizeFailure,
-        }),
-      resume: () =>
-        Effect.fail(failure("unsupported", "This provider does not support session resume.")),
-      send: (input) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = stateFor(input.sessionId);
-            if (state.stopped) throw failure("protocol", "Provider session is not active.");
-            if (state.inFlight !== undefined) {
-              throw failure("protocol", "Provider session already has an in-flight turn.");
-            }
-            const observed = options.runtimeRegistry.observedState(options.instanceId);
-            const model = observed?.models.find((candidate) => candidate.id === state.modelId);
-            const isCapabilityEchoProbe =
-              input.tools.length > 0 &&
-              input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
-            // For Azure AI Foundry, tool support is verified per-deployment via
-            // the separate verify-foundry-tools path. The sender gates tool
-            // requests on the per-model verifiedToolModelIds set, not on the
-            // provider-level appManagedTools flag, so one verified deployment
-            // does not unlock tools for other deployments in the same profile.
-            const isFoundry = options.profile?.driverKind === "azure-foundry";
-            const isVerifiedModel =
-              observed?.verifiedToolModelIds?.some((id) => String(id) === String(state.modelId)) ??
-              false;
-            const providerToolSupport =
-              observed?.capabilities.appManagedTools ?? initialCapabilities.appManagedTools;
-            const effectiveCapabilities = isCapabilityEchoProbe
-              ? {
-                  ...(observed?.capabilities ?? initialCapabilities),
-                  appManagedTools: "supported" as const,
-                }
-              : isFoundry
-                ? {
-                    ...(observed?.capabilities ?? initialCapabilities),
-                    // Foundry: only per-model verification gates tools, never
-                    // the provider-level flag.
-                    appManagedTools: isVerifiedModel
-                      ? ("supported" as const)
-                      : ("unsupported" as const),
-                  }
-                : {
-                    ...(observed?.capabilities ?? initialCapabilities),
-                    appManagedTools: isVerifiedModel ? ("supported" as const) : providerToolSupport,
-                  };
-            const rejected = validateChatTurnInput(input, effectiveCapabilities, model);
-            if (rejected !== undefined) throw rejected;
-            const controller = new AbortController();
-            const started = deferred();
-            const priorHistory = state.history.slice();
-            const prompt = renderProviderTurnPrompt(input);
-            assertTurnRequestConstructable(options, state, priorHistory, prompt);
-            state.abortController = controller;
-            state.history.push({ role: "user", text: prompt });
-            state.pendingToolCalls = [];
-            state.toolAnswers = [];
-            state.activeTools = input.tools;
-            state.accumulatedInputTokens = 0;
-            state.accumulatedOutputTokens = 0;
-            const turn = runTurn(
-              options,
-              state,
-              priorHistory,
-              prompt,
-              input.tools,
-              [],
-              controller.signal,
-              offer,
-              clock,
-              started.resolve,
-            )
-              .then((result) => finishSuccessfulTurn(options, state, result, offer, clock))
-              .catch((error) =>
-                finishFailedTurn(options.instanceId, state, sanitizeFailure(error), offer, clock),
-              )
-              .finally(() => {
-                // Keep the turn in-flight while waiting for answerTool so
-                // interrupt/stop continue to work during the tool phase.
-                if (state.pendingToolCalls.length > 0) return;
-                state.inFlight = undefined;
-                state.abortController = undefined;
-              });
-            state.inFlight = turn;
-            await started.promise;
-          },
-          catch: sanitizeFailure,
-        }),
-      interrupt: (sessionId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = stateFor(sessionId);
-            if (state.inFlight === undefined || state.abortController === undefined) {
-              throw failure("protocol", "Provider session has no in-flight turn.");
-            }
-            state.stopped = true;
-            state.abortController.abort();
-            await state.inFlight;
-            // If the turn is in the tool phase (pendingToolCalls > 0), the
-            // inFlight promise is already settled and aborting the completed
-            // request cannot trigger finishFailedTurn. Emit an interrupted
-            // terminal so consumers observe the cancellation (P2 #6).
-            if (state.pendingToolCalls.length > 0) {
-              state.pendingToolCalls = [];
-              state.toolAnswers = [];
-              state.activeTools = [];
-              offer(
-                terminalEvent(
-                  options.instanceId,
-                  state,
-                  { kind: "interrupted", message: "The provider request was cancelled." },
-                  clock,
-                ),
-              );
-            }
-            releaseSession(state);
-          },
-          catch: sanitizeFailure,
-        }),
-      stop: (sessionId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = sessions.get(sessionId);
-            if (state === undefined) return;
-            state.stopped = true;
-            state.abortController?.abort();
-            if (state.inFlight !== undefined) await state.inFlight;
-            releaseSession(state);
-          },
-          catch: sanitizeFailure,
-        }),
-      answerApproval: () =>
-        Effect.fail(failure("unsupported", "This provider does not support approval requests.")),
-      answerUserInput: () =>
-        Effect.fail(failure("unsupported", "This provider does not support user questions.")),
-      answerTool: (input) =>
-        answerToolEffect(options, stateFor(input.sessionId), input, offer, clock),
-    };
+        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) + delta),
+      ),
+    ...(options.onConnectionReleased === undefined
+      ? {}
+      : { onReleased: options.onConnectionReleased }),
+    clock,
+    correlationId: makeCorrelation,
   });
 }
 
-function answerToolEffect(
+/** Whether the endpoint accepts this turn's input for the session's model. */
+function admitTurn(
   options: OpenAiCompatibleDriverOptions,
-  state: SessionState,
-  input: ProviderToolAnswer,
-  offer: (event: ProviderRuntimeEvent) => void,
+  input: ProviderTurnInput,
+  modelId: ProviderModelId,
+): ProviderFailure | undefined {
+  const observed = options.runtimeRegistry.observedState(options.instanceId);
+  const model = observed?.models.find((candidate) => candidate.id === modelId);
+  const isCapabilityEchoProbe =
+    input.tools.length > 0 && input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
+  // For Azure AI Foundry, tool support is verified per-deployment via the
+  // separate verify-foundry-tools path. The sender gates tool requests on the
+  // per-model verifiedToolModelIds set, not on the provider-level
+  // appManagedTools flag, so one verified deployment does not unlock tools for
+  // other deployments in the same profile.
+  const isFoundry = options.profile?.driverKind === "azure-foundry";
+  const isVerifiedModel =
+    observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
+  const providerToolSupport =
+    observed?.capabilities.appManagedTools ?? initialCapabilities.appManagedTools;
+  const effectiveCapabilities = isCapabilityEchoProbe
+    ? { ...(observed?.capabilities ?? initialCapabilities), appManagedTools: "supported" as const }
+    : isFoundry
+      ? {
+          ...(observed?.capabilities ?? initialCapabilities),
+          appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
+        }
+      : {
+          ...(observed?.capabilities ?? initialCapabilities),
+          appManagedTools: isVerifiedModel ? ("supported" as const) : providerToolSupport,
+        };
+  return validateChatTurnInput(input, effectiveCapabilities, model);
+}
+
+/**
+ * The endpoint as the harness loop sees it: one request at a time over
+ * whichever OpenAI protocol the endpoint speaks, plus what each response
+ * teaches the registry about the model.
+ */
+function openAiCompatibleTransport(
+  options: OpenAiCompatibleDriverOptions,
+  profile: OpenAiCompatibleDriverProfile,
   clock: () => string,
-): Effect.Effect<void, ProviderFailure> {
-  if (state.activeTools.length === 0) {
-    return unsupportedAnswerTool(initialCapabilities.appManagedTools);
-  }
-  if (state.pendingToolCalls.length === 0) {
-    return Effect.fail(failure("protocol", "The tool request is unknown."));
-  }
-  const known = state.pendingToolCalls.some((call) => call.toolCallId === input.requestId);
-  if (!known) {
-    return Effect.fail(failure("protocol", "The tool request is unknown."));
-  }
-  // Reject duplicate tool answers (P2 #5): if the app retries an answerTool
-  // call for an already-recorded request, ignore the duplicate instead of
-  // appending it. A duplicate would start a second continuation while the
-  // first is running (single call) or encode duplicate tool results (parallel).
-  const alreadyAnswered = state.toolAnswers.some((answer) => answer.requestId === input.requestId);
-  if (alreadyAnswered) {
-    return Effect.void;
-  }
-  state.toolAnswers.push(input);
-  const allAnswered = state.pendingToolCalls.every((call) =>
-    state.toolAnswers.some((answer) => answer.requestId === call.toolCallId),
-  );
-  if (!allAnswered) return Effect.void;
-  // Persist tool results in history before starting the continuation (P2 #2):
-  // if the continuation fails or asks for another tool, the stored conversation
-  // must already include the tool outputs that answer the prior assistant
-  // tool_calls, or subsequent recovery sends replay invalid history.
-  state.history.push({
-    role: "assistant",
-    text: "",
-    toolResults: state.toolAnswers.map((answer) => ({
-      toolCallId: answer.requestId,
-      resultJson: answer.resultJson,
-      isError: answer.isError,
-      ...(answer.images === undefined ? {} : { images: answer.images }),
-    })),
-  });
-  return Effect.tryPromise({
-    try: async () => {
-      const controller = new AbortController();
-      state.abortController = controller;
-      const priorHistory = state.history.slice();
-      const prompt = "";
-      const started = deferred();
-      const turn = runTurn(
+): NativeHarnessTransport {
+  return {
+    open: async () => {
+      const credential = await resolveSessionCredential(options, profile);
+      let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(
         options,
-        state,
-        priorHistory,
-        prompt,
-        state.activeTools,
-        state.toolAnswers.slice(),
-        controller.signal,
-        offer,
-        clock,
-        started.resolve,
-      )
-        .then((result) => finishSuccessfulTurn(options, state, result, offer, clock))
-        .catch((error) =>
-          finishFailedTurn(options.instanceId, state, sanitizeFailure(error), offer, clock),
-        )
-        .finally(() => {
-          if (state.pendingToolCalls.length > 0) return;
-          state.inFlight = undefined;
-          state.abortController = undefined;
-        });
-      state.inFlight = turn;
-      await started.promise;
+        credential === undefined
+          ? undefined
+          : { has: async () => true, resolve: async () => credential },
+        profile,
+      );
+      return {
+        fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
+        send: async (request, stream) => {
+          const active = endpoint;
+          if (active === undefined) throw failure("protocol", "Provider session is not active.");
+          const result = await sendCompatibleRequest(options, active, request, stream);
+          recordObservedTurn(options, result, clock);
+          return {
+            text: result.text,
+            toolCalls: result.toolCalls,
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+            ...(result.rateLimitBuckets === undefined
+              ? {}
+              : { rateLimitBuckets: result.rateLimitBuckets }),
+          };
+        },
+        release: () => {
+          endpoint = undefined;
+        },
+      };
     },
-    catch: sanitizeFailure,
-  });
+  };
 }
 
-async function runTurn(
+/**
+ * The wire split both OpenAI protocols expect: a trailing plain user message
+ * is the turn's prompt, and a trailing results message continues a tool loop.
+ * Results are sent once, from the conversation; passing them again as answers
+ * would encode every result twice.
+ */
+function protocolInput(request: NativeHarnessRequest): {
+  readonly history: readonly ProtocolHistoryMessage[];
+  readonly prompt: string;
+  readonly toolAnswers: readonly ProviderToolAnswer[] | undefined;
+} {
+  const last = request.history.at(-1);
+  if (last?.role === "user" && last.toolResults === undefined) {
+    return {
+      history: request.history.slice(0, -1),
+      prompt: last.text,
+      toolAnswers: undefined,
+    };
+  }
+  return {
+    history: request.history,
+    prompt: "",
+    toolAnswers: [],
+  };
+}
+
+async function sendCompatibleRequest(
   options: OpenAiCompatibleDriverOptions,
-  state: SessionState,
-  history: readonly ProtocolHistoryMessage[],
-  prompt: string,
-  tools: readonly ProviderToolDefinition[],
-  toolAnswers: readonly ProviderToolAnswer[],
-  signal: AbortSignal,
-  offer: (event: ProviderRuntimeEvent) => void,
-  clock: () => string,
-  started: () => void,
+  endpoint: OpenAiCompatibleEndpoint,
+  request: NativeHarnessRequest,
+  stream: {
+    readonly signal: AbortSignal;
+    readonly onEvent: (event: NativeHarnessStreamEvent) => void;
+  },
 ): Promise<CompatibleTurnResult> {
-  const endpoint = state.endpoint;
-  if (endpoint === undefined) throw failure("protocol", "Provider session is not active.");
+  const { history, prompt, toolAnswers } = protocolInput(request);
   const onEvent = (event: ProtocolTurnEvent) => {
-    state.nextSequence = event.sequence + 1;
-    // The tool-call kind is an internal protocol event; the driver emits the
-    // public tool-request event separately after the turn completes.
+    // Tool calls arrive on the result; the loop asks for them as a step.
     if (event.kind === "tool-call") return;
-    offer(runtimeEvent(options.instanceId, state, event, clock));
+    stream.onEvent(
+      event.kind === "usage"
+        ? { kind: "usage", inputTokens: event.inputTokens, outputTokens: event.outputTokens }
+        : { kind: event.kind, text: event.text },
+    );
   };
-  const cache = {
-    get: () => options.runtimeRegistry.compatibleProtocol(options.instanceId),
-    set: (_instanceId: string, protocol: CompatibleProtocol) =>
-      options.runtimeRegistry.setCompatibleProtocol(options.instanceId, protocol),
-    delete: () => options.runtimeRegistry.clearCompatibleProtocol(options.instanceId),
-    clear: () => options.runtimeRegistry.clearCompatibleProtocol(options.instanceId),
+  const shared = {
+    endpoint,
+    modelId: request.modelId,
+    history,
+    prompt,
+    ...(request.system === undefined ? {} : { system: request.system }),
+    ...(request.tools.length === 0 ? {} : { tools: request.tools }),
+    ...(toolAnswers === undefined ? {} : { toolAnswers }),
+    signal: stream.signal,
+    onEvent,
   };
-  started();
+  const { signal } = stream;
   return selectCompatibleProtocol({
     instanceId: options.instanceId,
     preference: options.configuration.protocol,
-    cache,
+    cache: protocolCache(options),
     attempt: async (protocol): Promise<CompatibleProtocolAttemptResult<CompatibleTurnResult>> => {
       if (protocol === "chat-completions") {
         try {
-          return {
-            ok: true,
-            value: await Effect.runPromise(
-              sendChatCompletionsTurn({
-                endpoint,
-                modelId: state.modelId,
-                history,
-                prompt,
-                ...(tools.length === 0 ? {} : { tools }),
-                ...(toolAnswers.length === 0 ? {} : { toolAnswers }),
-                sequenceStart: state.nextSequence,
-                signal,
-                onEvent,
-              }),
-            ),
-          };
+          return { ok: true, value: await Effect.runPromise(sendChatCompletionsTurn(shared)) };
         } catch (error) {
           return {
             ok: false,
@@ -593,15 +391,7 @@ async function runTurn(
           ok: true,
           value: await Effect.runPromise(
             sendResponsesTurn({
-              endpoint,
-              modelId: state.modelId,
-              history,
-              prompt,
-              ...(tools.length === 0 ? {} : { tools }),
-              ...(toolAnswers.length === 0 ? {} : { toolAnswers }),
-              sequenceStart: state.nextSequence,
-              signal,
-              onEvent,
+              ...shared,
               onAttemptFailure: (value) => {
                 metadata = value;
               },
@@ -623,18 +413,22 @@ async function runTurn(
   });
 }
 
-function finishSuccessfulTurn(
+function protocolCache(options: OpenAiCompatibleDriverOptions) {
+  return {
+    get: () => options.runtimeRegistry.compatibleProtocol(options.instanceId),
+    set: (_instanceId: string, protocol: CompatibleProtocol) =>
+      options.runtimeRegistry.setCompatibleProtocol(options.instanceId, protocol),
+    delete: () => options.runtimeRegistry.clearCompatibleProtocol(options.instanceId),
+    clear: () => options.runtimeRegistry.clearCompatibleProtocol(options.instanceId),
+  };
+}
+
+/** What a successful response proves about the endpoint and its model. */
+function recordObservedTurn(
   options: OpenAiCompatibleDriverOptions,
-  state: SessionState,
   result: CompatibleTurnResult,
-  offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
 ): void {
-  // Header buckets go out first: they describe the account after this
-  // response, and a consumer that stops at the terminal event still sees them.
-  for (const bucket of result.rateLimitBuckets ?? []) {
-    offer(rateLimitBucketEvent(options.instanceId, state, bucket, clock));
-  }
   const current = options.runtimeRegistry.observedState(options.instanceId);
   const models = markCompatibleModelVerified(
     current?.models ?? manualModels(options.configuration.manualModelIds),
@@ -642,7 +436,7 @@ function finishSuccessfulTurn(
   );
   const toolCallingObserved = result.terminal === "tool-calls";
   // Tool support is sticky once observed: a follow-up plain completion after
-  // answerTool must not downgrade appManagedTools back to unsupported.
+  // a tool step must not downgrade appManagedTools back to unsupported.
   const priorToolSupport = current?.capabilities.appManagedTools ?? "unsupported";
   // For Azure AI Foundry, tool support is per-deployment (gated by
   // verifiedToolModelIds), so the provider-level appManagedTools flag must
@@ -655,111 +449,6 @@ function finishSuccessfulTurn(
     : priorToolSupport === "supported" || toolCallingObserved
       ? ("supported" as const)
       : priorToolSupport;
-  // Accumulate usage across the tool loop so the final completed terminal
-  // carries the total cost of the logical turn (P2 #9).
-  if (result.usage !== undefined) {
-    state.accumulatedInputTokens += result.usage.inputTokens;
-    state.accumulatedOutputTokens += result.usage.outputTokens;
-  }
-  if (toolCallingObserved) {
-    // Reject duplicate tool call identifiers before publishing any requests
-    // (P2 #8): a malformed provider response with reused call ids would make
-    // answerTool treat one answer as satisfying every duplicate.
-    const seenCallIds = new Set<string>();
-    for (const call of result.toolCalls) {
-      if (seenCallIds.has(call.toolCallId)) {
-        state.pendingToolCalls = [];
-        state.toolAnswers = [];
-        state.activeTools = [];
-        offer(
-          terminalEvent(
-            options.instanceId,
-            state,
-            {
-              kind: "failed",
-              failure: {
-                category: "protocol",
-                message: "The provider returned duplicate tool call identifiers.",
-              },
-            },
-            clock,
-          ),
-        );
-        return;
-      }
-      seenCallIds.add(call.toolCallId);
-    }
-    // Reject unoffered tool calls before emitting requests (P2 #5): if the
-    // provider returns a tool name that was not in the active tool set, fail
-    // closed instead of waiting for the app to answer an unauthorized tool.
-    const activeToolNames = new Set(state.activeTools.map((tool) => normalizeToolName(tool.name)));
-    for (const call of result.toolCalls) {
-      if (!activeToolNames.has(call.toolName)) {
-        state.pendingToolCalls = [];
-        state.toolAnswers = [];
-        state.activeTools = [];
-        offer(
-          terminalEvent(
-            options.instanceId,
-            state,
-            {
-              kind: "failed",
-              failure: {
-                category: "protocol",
-                message: `The provider requested an unsupported tool: ${call.toolName}.`,
-              },
-            },
-            clock,
-          ),
-        );
-        return;
-      }
-    }
-    state.pendingToolCalls = result.toolCalls;
-    // Clear tool answers from the previous round; the new tool-call requests
-    // start a fresh tool phase. Prior tool results are already in history.
-    state.toolAnswers = [];
-    // Preserve the assistant tool-call message in history so continuation
-    // requests include the model call that the tool answers respond to.
-    state.history.push({ role: "assistant", text: result.text, toolCalls: result.toolCalls });
-    for (const call of result.toolCalls) {
-      offer(toolRequestEvent(options.instanceId, state, call, clock));
-    }
-    // Do not emit a terminal: the turn stays in-flight until answerTool
-    // completes the tool loop and produces the final completed/failed event.
-  } else {
-    // Tool results are already persisted in history by answerTool before
-    // starting the continuation (P2 #2), so only append the final assistant
-    // text and clear tool state here.
-    const wasContinuation = state.toolAnswers.length > 0;
-    state.pendingToolCalls = [];
-    state.toolAnswers = [];
-    state.activeTools = [];
-    state.history.push({ role: "assistant", text: result.text });
-    // Emit a final usage event with the accumulated total before the
-    // completed terminal so consumers persist the full turn cost (P2 #9).
-    // Only emit for continuation turns; single turns already emitted usage
-    // during the stream and a duplicate would confuse consumers.
-    if (
-      wasContinuation &&
-      (state.accumulatedInputTokens > 0 || state.accumulatedOutputTokens > 0)
-    ) {
-      offer(
-        runtimeEvent(
-          options.instanceId,
-          state,
-          {
-            kind: "usage",
-            sequence: state.nextSequence++,
-            inputTokens: state.accumulatedInputTokens,
-            outputTokens: state.accumulatedOutputTokens,
-          },
-          clock,
-        ),
-      );
-    }
-    offer(terminalEvent(options.instanceId, state, { kind: "completed" }, clock));
-  }
   options.runtimeRegistry.setObservedState({
     instanceId: options.instanceId,
     readiness: current?.readiness ?? "degraded",
@@ -783,101 +472,6 @@ function finishSuccessfulTurn(
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),
     observedAt: clock(),
   });
-}
-
-function finishFailedTurn(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  failed: ProviderFailure,
-  offer: (event: ProviderRuntimeEvent) => void,
-  clock: () => string,
-): void {
-  // Clear pending tool state on failure (P2 #4): if the follow-up request
-  // after answerTool fails, pendingToolCalls must be cleared so the .finally
-  // guard in the turn chain cleans up inFlight and later send calls succeed.
-  state.pendingToolCalls = [];
-  state.toolAnswers = [];
-  state.activeTools = [];
-  offer(
-    failed.category === "interrupted"
-      ? terminalEvent(
-          instanceId,
-          state,
-          { kind: "interrupted", message: "The provider request was cancelled." },
-          clock,
-        )
-      : terminalEvent(instanceId, state, { kind: "failed", failure: failed }, clock),
-  );
-}
-
-function runtimeEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  event: ProtocolTurnEvent,
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    ...event,
-    instanceId,
-    sessionId: state.sessionId,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
-}
-
-function toolRequestEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  call: ProtocolToolCall,
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    kind: "tool-request",
-    requestId: call.toolCallId,
-    toolName: call.toolName,
-    inputJson: call.argumentsJson,
-    instanceId,
-    sessionId: state.sessionId,
-    sequence: state.nextSequence++,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
-}
-
-function terminalEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  terminal:
-    | { readonly kind: "completed" }
-    | { readonly kind: "interrupted"; readonly message: string }
-    | { readonly kind: "failed"; readonly failure: ProviderFailure },
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    ...terminal,
-    instanceId,
-    sessionId: state.sessionId,
-    sequence: state.nextSequence++,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
-}
-
-function rateLimitBucketEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  bucket: ObservedRateLimitBucket,
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    kind: "rate-limit-bucket",
-    ...bucket,
-    instanceId,
-    sessionId: state.sessionId,
-    sequence: state.nextSequence++,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
 }
 
 function authStrategyOf(options: OpenAiCompatibleDriverOptions): OpenAiCompatibleAuthStrategy {
@@ -1026,19 +620,19 @@ function manualModels(modelIds: readonly ProviderModelId[]) {
   }));
 }
 
-function assertTurnRequestConstructable(
+/**
+ * Whether a request fits the endpoint as the selected protocol would send it.
+ * The measured body carries the system prompt, every message including tool
+ * payloads, and the tool schemas, so the estimate matches the real request.
+ */
+function requestFits(
   options: OpenAiCompatibleDriverOptions,
-  state: SessionState,
-  history: readonly ProtocolHistoryMessage[],
-  prompt: string,
-): void {
-  const endpoint = state.endpoint;
-  if (endpoint === undefined) throw failure("protocol", "Provider session is not active.");
-  // Account for tool payloads in the size estimate (P2 #6): history can
-  // contain toolResults entries and the active turn can include tool schemas,
-  // both of which contribute to the real request body size.
+  endpoint: OpenAiCompatibleEndpoint,
+  request: NativeHarnessRequest,
+): boolean {
   const messages = [
-    ...history.flatMap((entry): Record<string, unknown>[] => {
+    ...(request.system === undefined ? [] : [{ role: "system", content: request.system }]),
+    ...request.history.flatMap((entry): Record<string, unknown>[] => {
       if (entry.toolResults !== undefined) {
         return [
           ...entry.toolResults.map((result) => ({
@@ -1063,37 +657,20 @@ function assertTurnRequestConstructable(
             },
       ];
     }),
-    { role: "user" as const, content: prompt },
   ];
-  const selected =
-    options.configuration.protocol === "auto"
-      ? (options.runtimeRegistry.compatibleProtocol(options.instanceId) ?? "responses")
-      : options.configuration.protocol;
-  const toolsField =
-    state.activeTools.length === 0
+  const tools =
+    request.tools.length === 0
       ? {}
-      : {
-          tools: state.activeTools.map((tool) => ({
-            type: "function",
-            function: { name: tool.name },
-          })),
-        };
-  const body =
-    selected === "responses"
-      ? { model: state.modelId, input: messages, stream: true, store: false, ...toolsField }
-      : {
-          model: state.modelId,
-          messages,
-          stream: true,
-          stream_options: { include_usage: true },
-          ...toolsField,
-        };
+      : { tools: request.tools.map((tool) => ({ type: "function", function: tool })) };
+  const body = { model: request.modelId, messages, stream: true, ...tools };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > endpoint.limits.requestBodyBytes) {
-    throw failure(
-      "invalid-configuration",
-      "The provider request exceeded the configured size limit.",
-    );
+    return false;
   }
+  const contextLimit = options.runtimeRegistry
+    .observedState(options.instanceId)
+    ?.models.find((model) => String(model.id) === String(request.modelId))?.contextLimit;
+  // Roughly four bytes per token; only a model whose window is known is held to it.
+  return contextLimit === undefined || JSON.stringify(body).length / 4 <= contextLimit;
 }
 
 function sanitizeFailure(error: unknown): ProviderFailure {
@@ -1111,12 +688,4 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
-}
-
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
 }

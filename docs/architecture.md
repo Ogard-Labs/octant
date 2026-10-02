@@ -923,11 +923,18 @@ Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
 
 Optional Project and
-thread token spend ceilings (0060) are host owner policy: the server refuses a
-provider-consuming turn at admission when remaining reserved capacity cannot
-cover a declared per-turn bound, and the composer and Environment name a
-recovery. Spend is the existing `UsageRecord` ledger, never imported provider
-history.
+thread spend ceilings (0060) are host owner policy over three dimensions:
+tokens, turns, and total agent run time per window (for example two hours a
+day for a Project). The server refuses a provider-consuming turn at admission
+when remaining reserved token capacity cannot cover a declared per-turn bound,
+when the turn count is used up, or when settled plus in-flight run time has
+reached the budget, and the composer and Environment name the exhausted
+dimension and a recovery. Token spend is the existing `UsageRecord` ledger,
+never imported provider history. Turns and run time come from journaled
+`spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
+actual admitted-to-settled time; a turn still in flight counts its elapsed time,
+and a turn a host exit interrupted records nothing. Monetary ceilings stay
+unenforced until pricing metadata exists.
 
 ### Native harness
 
@@ -935,6 +942,30 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`; `ollama` joins once its driver runs the tool loop) run under the
 native harness in `apps/server/src/harness`:
 
+- **Loop.** `createNativeHarnessConnection` is the harness's agent loop and
+  the `ProviderConnection` every direct-endpoint driver hands out. Each driver
+  supplies only a `NativeHarnessTransport` (one request over its wire
+  protocol, its size bounds, and what a response teaches the registry); the
+  loop owns the conversation. Instructions blocks become the system prompt
+  (plus one sorted line per Octant tool on offer), so the prefix stays
+  byte-stable. A step's calls go out as `tool-request` events and the turn
+  runner executes them through its tool set; once every call is answered the
+  results return in one message in call order. A request that outgrows the
+  endpoint is shrunk in the request only — older tool results first, then
+  whole earlier exchanges behind a note — and refused if the latest message
+  alone does not fit.
+- **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
+  each step as it happens (`native-harness-transcript`, one aggregate per
+  session): the user message once the request is known to fit, each reply,
+  and each tool call the moment it settles. Sessions therefore report
+  `resume: supported` and return a resume cursor, which is how a Code thread
+  continues the same conversation on its next turn. `start` under an existing
+  id begins a new generation. A resume first closes any call the process
+  stopped in the middle of with a journaled interrupted result that says
+  whether the tool only reads (`replay: "safe"`, call it again) or may have
+  taken effect (`replay: "unsafe"`, check before repeating); nothing is
+  silently re-run. Chat and Work still rebuild their history on the host and
+  start a fresh session each turn.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). Every call decodes its

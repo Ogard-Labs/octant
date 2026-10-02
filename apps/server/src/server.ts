@@ -448,6 +448,10 @@ import {
   ProviderDriverConfigurationError,
 } from "./providers/providerDriverFactory";
 import { JournalOllamaHistoryStore, type OllamaHistoryStore } from "./providers/ollamaHistoryStore";
+import {
+  JournalNativeHarnessTranscriptStore,
+  type NativeHarnessTranscriptStore,
+} from "./harness/nativeHarnessTranscriptStore";
 import { makeOpenCodeProcessLive } from "./providers/openCodeProcess";
 import type { OpenCodeProcessPort } from "./providers/openCodeProcess";
 import { makeOhMyPiProcessLive, type OhMyPiProcessPort } from "./providers/ohMyPiProcess";
@@ -867,6 +871,8 @@ interface ConfiguredProviderDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly ollamaHistoryStore?: OllamaHistoryStore;
+  /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
+  readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
   readonly localUsageHistorySourceForInstance?: (
@@ -894,6 +900,9 @@ export function makeConfiguredProviderDriver(
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
+      ...(options.nativeHarnessTranscripts === undefined
+        ? {}
+        : { transcripts: options.nativeHarnessTranscripts }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -904,6 +913,9 @@ export function makeConfiguredProviderDriver(
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
+      ...(options.nativeHarnessTranscripts === undefined
+        ? {}
+        : { transcripts: options.nativeHarnessTranscripts }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -914,6 +926,9 @@ export function makeConfiguredProviderDriver(
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
+      ...(options.nativeHarnessTranscripts === undefined
+        ? {}
+        : { transcripts: options.nativeHarnessTranscripts }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -3655,6 +3670,12 @@ export function startOctantServer(
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
       });
+    const nativeHarnessTranscripts = new JournalNativeHarnessTranscriptStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
     const credentialResolver =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
@@ -3684,6 +3705,7 @@ export function startOctantServer(
             ohMyPiProcess,
             ohMyPiHome,
             ollamaHistoryStore,
+            nativeHarnessTranscripts,
             claudeProcess,
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
@@ -3759,6 +3781,7 @@ export function startOctantServer(
       ohMyPiProcess,
       ohMyPiHome,
       ollamaHistoryStore,
+      nativeHarnessTranscripts,
       claudeProcess,
       claudeSdk,
       claudeResumeIdentityPort: claudeResumeIdentityStore,

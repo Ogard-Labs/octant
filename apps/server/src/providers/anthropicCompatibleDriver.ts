@@ -4,25 +4,29 @@ import {
   decodeProviderFailure,
   decodeProviderObservedState,
   type AnthropicCompatibleProviderConfiguration,
-  type CorrelationId,
+  type OctantMode,
   type ProviderCapabilities,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
-  type ProviderRuntimeEvent,
-  type ProviderSessionId,
-  type ProviderToolAnswer,
-  type ProviderToolDefinition,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
-  renderProviderTurnPrompt,
   textOnlyInputModalities,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, PubSub, Stream } from "effect";
+import { Effect } from "effect";
+import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
+import type {
+  NativeHarnessRequest,
+  NativeHarnessTransport,
+} from "../harness/nativeHarnessTransport";
+import {
+  MemoryNativeHarnessTranscriptStore,
+  type NativeHarnessTranscriptStore,
+} from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   makeAnthropicCompatibleEndpoint,
@@ -34,17 +38,14 @@ import {
 import {
   buildAnthropicMessagesBody,
   sendAnthropicMessagesTurn,
-  type AnthropicHistoryMessage,
-  type AnthropicToolCall,
   type AnthropicTurnEvent,
   type AnthropicTurnResult,
 } from "./anthropicMessages";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import type { ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
-  resume: "unsupported",
+  resume: "supported",
   interruption: "supported",
   approvals: "unsupported",
   userQuestions: "unsupported",
@@ -72,24 +73,8 @@ export interface AnthropicCompatibleDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly onConnectionReleased?: () => void;
-}
-
-interface SessionState {
-  readonly sessionId: ProviderSessionId;
-  readonly modelId: ProviderModelId;
-  readonly correlationId: CorrelationId;
-  endpoint: AnthropicCompatibleEndpoint | undefined;
-  readonly history: AnthropicHistoryMessage[];
-  nextSequence: number;
-  inFlight: Promise<void> | undefined;
-  abortController: AbortController | undefined;
-  active: boolean;
-  stopped: boolean;
-  pendingToolCalls: readonly AnthropicToolCall[];
-  toolAnswers: ProviderToolAnswer[];
-  activeTools: readonly ProviderToolDefinition[];
-  accumulatedInputTokens: number;
-  accumulatedOutputTokens: number;
+  /** Where harness sessions keep their conversation; see the OpenAI-compatible driver. */
+  readonly transcripts?: NativeHarnessTranscriptStore;
 }
 
 export function makeAnthropicCompatibleDriver(
@@ -97,6 +82,7 @@ export function makeAnthropicCompatibleDriver(
 ): ProviderDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? randomUUID;
+  const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
   return {
     kind: "anthropic-compatible",
     probe: ({ instanceId }) =>
@@ -125,7 +111,7 @@ export function makeAnthropicCompatibleDriver(
             },
             catch: sanitizeFailure,
           }),
-    acquire: ({ instanceId, projectRoot }) =>
+    acquire: ({ instanceId, projectRoot, mode }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : !isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot
@@ -135,7 +121,10 @@ export function makeAnthropicCompatibleDriver(
                 "Provider Project root must be an absolute normalized path.",
               ),
             )
-          : makeConnection(options, clock, makeCorrelation),
+          : makeConnection(options, clock, makeCorrelation, transcripts, {
+              projectRoot,
+              mode: mode ?? "chat",
+            }),
   };
 }
 
@@ -143,332 +132,111 @@ function makeConnection(
   options: AnthropicCompatibleDriverOptions,
   clock: () => string,
   makeCorrelation: () => string,
+  transcripts: NativeHarnessTranscriptStore,
+  input: { readonly projectRoot: string; readonly mode: OctantMode },
 ): Effect.Effect<ProviderConnection, never, import("effect").Scope.Scope> {
-  return Effect.gen(function* () {
-    const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-    const sessions = new Map<ProviderSessionId, SessionState>();
-    const offer = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(PubSub.publish(events, event));
-    };
-    const deactivate = (state: SessionState) => {
-      if (!state.active) return;
-      state.active = false;
+  return createNativeHarnessConnection({
+    instanceId: options.instanceId,
+    driverKind: "anthropic-compatible",
+    projectRoot: input.projectRoot,
+    mode: input.mode,
+    transport: anthropicCompatibleTransport(options, clock),
+    transcripts,
+    admitTurn: (turn, modelId) => {
+      const observed = options.runtimeRegistry.observedState(options.instanceId);
+      const model = observed?.models.find((candidate) => candidate.id === modelId);
+      return validateChatTurnInput(turn, observed?.capabilities ?? initialCapabilities, model);
+    },
+    onSessionCountChange: (delta) =>
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
-        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
-      );
-    };
-    const releaseSession = (state: SessionState) => {
-      state.history.length = 0;
-      state.abortController = undefined;
-      state.inFlight = undefined;
-      state.endpoint = undefined;
-      state.stopped = true;
-      deactivate(state);
-      if (sessions.get(state.sessionId) === state) sessions.delete(state.sessionId);
-    };
-
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        for (const state of sessions.values()) state.abortController?.abort();
-        await Promise.allSettled(
-          [...sessions.values()].flatMap((state) =>
-            state.inFlight === undefined ? [] : [state.inFlight],
-          ),
-        );
-        for (const state of sessions.values()) releaseSession(state);
-        sessions.clear();
-        await Effect.runPromise(PubSub.shutdown(events));
-        options.onConnectionReleased?.();
-      }),
-    );
-
-    const stateFor = (sessionId: ProviderSessionId): SessionState => {
-      const state = sessions.get(sessionId);
-      if (state === undefined) throw failure("protocol", "Provider session is not active.");
-      return state;
-    };
-
-    return {
-      subscribe: Stream.fromPubSub(events, { scoped: true }),
-      start: (input) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (sessions.has(input.sessionId)) {
-              throw failure("protocol", "Provider session is already active.");
-            }
-            const credential = await resolveSessionCredential(options);
-            const endpoint = endpointFor(
-              options,
-              credential === undefined
-                ? undefined
-                : { has: async () => true, resolve: async () => credential },
-            );
-            const state: SessionState = {
-              sessionId: input.sessionId,
-              modelId: input.modelId,
-              correlationId: makeCorrelation() as CorrelationId,
-              endpoint,
-              history: [],
-              nextSequence: 1,
-              inFlight: undefined,
-              abortController: undefined,
-              active: true,
-              stopped: false,
-              pendingToolCalls: [],
-              toolAnswers: [],
-              activeTools: [],
-              accumulatedInputTokens: 0,
-              accumulatedOutputTokens: 0,
-            };
-            sessions.set(input.sessionId, state);
-            options.runtimeRegistry.setActiveSessionCount(
-              options.instanceId,
-              options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,
-            );
-            return { sessionId: input.sessionId };
-          },
-          catch: sanitizeFailure,
-        }),
-      resume: () =>
-        Effect.fail(failure("unsupported", "This provider does not support session resume.")),
-      send: (input) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = stateFor(input.sessionId);
-            if (state.stopped) throw failure("protocol", "Provider session is not active.");
-            if (state.inFlight !== undefined) {
-              throw failure("protocol", "Provider session already has an in-flight turn.");
-            }
-            const observed = options.runtimeRegistry.observedState(options.instanceId);
-            const model = observed?.models.find((candidate) => candidate.id === state.modelId);
-            const rejected = validateChatTurnInput(
-              input,
-              observed?.capabilities ?? initialCapabilities,
-              model,
-            );
-            if (rejected !== undefined) throw rejected;
-            const controller = new AbortController();
-            const started = deferred();
-            const priorHistory = state.history.slice();
-            const prompt = renderProviderTurnPrompt(input);
-            assertTurnRequestConstructable(options, state, priorHistory, prompt, input.tools, []);
-            state.abortController = controller;
-            state.history.push({ role: "user", text: prompt });
-            state.pendingToolCalls = [];
-            state.toolAnswers = [];
-            state.activeTools = input.tools;
-            state.accumulatedInputTokens = 0;
-            state.accumulatedOutputTokens = 0;
-            const turn = runTurn(
-              options,
-              state,
-              priorHistory,
-              prompt,
-              input.tools,
-              [],
-              controller.signal,
-              offer,
-              clock,
-              started.resolve,
-            )
-              .then((result) => finishSuccessfulTurn(options, state, result, offer, clock))
-              .catch((error) =>
-                finishFailedTurn(options.instanceId, state, sanitizeFailure(error), offer, clock),
-              )
-              .finally(() => {
-                // The turn stays in flight while tool answers are pending, so
-                // interrupt and stop keep working during the tool phase.
-                if (state.pendingToolCalls.length > 0) return;
-                state.inFlight = undefined;
-                state.abortController = undefined;
-              });
-            state.inFlight = turn;
-            await started.promise;
-          },
-          catch: sanitizeFailure,
-        }),
-      interrupt: (sessionId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = stateFor(sessionId);
-            if (state.inFlight === undefined || state.abortController === undefined) {
-              throw failure("protocol", "Provider session has no in-flight turn.");
-            }
-            state.stopped = true;
-            state.abortController.abort();
-            await state.inFlight;
-            if (state.pendingToolCalls.length > 0) {
-              // The request already settled; only the tool phase was open, so
-              // nothing else will report the cancellation.
-              state.pendingToolCalls = [];
-              state.toolAnswers = [];
-              state.activeTools = [];
-              offer(
-                terminalEvent(
-                  options.instanceId,
-                  state,
-                  { kind: "interrupted", message: "The provider request was cancelled." },
-                  clock,
-                ),
-              );
-            }
-            releaseSession(state);
-          },
-          catch: sanitizeFailure,
-        }),
-      stop: (sessionId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = sessions.get(sessionId);
-            if (state === undefined) return;
-            state.stopped = true;
-            state.abortController?.abort();
-            if (state.inFlight !== undefined) await state.inFlight;
-            releaseSession(state);
-          },
-          catch: sanitizeFailure,
-        }),
-      answerApproval: () =>
-        Effect.fail(failure("unsupported", "This provider does not support approval requests.")),
-      answerUserInput: () =>
-        Effect.fail(failure("unsupported", "This provider does not support user questions.")),
-      answerTool: (input) =>
-        Effect.try({
-          try: () => stateFor(input.sessionId),
-          catch: (error) => sanitizeFailure(error),
-        }).pipe(Effect.flatMap((state) => answerToolEffect(options, state, input, offer, clock))),
-    };
+        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) + delta),
+      ),
+    ...(options.onConnectionReleased === undefined
+      ? {}
+      : { onReleased: options.onConnectionReleased }),
+    clock,
+    correlationId: makeCorrelation,
   });
 }
 
-function answerToolEffect(
+/**
+ * The endpoint as the harness loop sees it. The Messages API takes the whole
+ * conversation, results included, so the request is the loop's history as is;
+ * the system prompt goes in its cached system block.
+ */
+function anthropicCompatibleTransport(
   options: AnthropicCompatibleDriverOptions,
-  state: SessionState,
-  input: ProviderToolAnswer,
-  offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
-): Effect.Effect<void, ProviderFailure> {
-  if (state.activeTools.length === 0 || state.pendingToolCalls.length === 0) {
-    return Effect.fail(failure("protocol", "The tool request is unknown."));
-  }
-  if (!state.pendingToolCalls.some((call) => call.toolCallId === input.requestId)) {
-    return Effect.fail(failure("protocol", "The tool request is unknown."));
-  }
-  // A retried answer must not start a second continuation or send the same
-  // tool_result twice.
-  if (state.toolAnswers.some((answer) => answer.requestId === input.requestId)) {
-    return Effect.void;
-  }
-  state.toolAnswers.push(input);
-  const allAnswered = state.pendingToolCalls.every((call) =>
-    state.toolAnswers.some((answer) => answer.requestId === call.toolCallId),
-  );
-  if (!allAnswered) return Effect.void;
-  // Results go into history before the continuation starts, so a continuation
-  // that fails or asks for another tool leaves a history whose tool_use blocks
-  // all have their tool_result.
-  state.history.push({
-    role: "assistant",
-    text: "",
-    toolResults: state.toolAnswers.map((answer) => ({
-      toolCallId: answer.requestId,
-      resultJson: answer.resultJson,
-      isError: answer.isError,
-      ...(answer.images === undefined ? {} : { images: answer.images }),
-    })),
-  });
-  return Effect.tryPromise({
-    try: async () => {
-      const controller = new AbortController();
-      state.abortController = controller;
-      const priorHistory = state.history.slice();
-      const started = deferred();
-      // The history entry above already carries every tool_result; sending
-      // the answers again would put each tool_use_id in two blocks.
-      const turn = runTurn(
+): NativeHarnessTransport {
+  return {
+    open: async () => {
+      const credential = await resolveSessionCredential(options);
+      let endpoint: AnthropicCompatibleEndpoint | undefined = endpointFor(
         options,
-        state,
-        priorHistory,
-        "",
-        state.activeTools,
-        [],
-        controller.signal,
-        offer,
-        clock,
-        started.resolve,
-      )
-        .then((result) => finishSuccessfulTurn(options, state, result, offer, clock))
-        .catch((error) =>
-          finishFailedTurn(options.instanceId, state, sanitizeFailure(error), offer, clock),
-        )
-        .finally(() => {
-          if (state.pendingToolCalls.length > 0) return;
-          state.inFlight = undefined;
-          state.abortController = undefined;
-        });
-      state.inFlight = turn;
-      await started.promise;
+        credential === undefined
+          ? undefined
+          : { has: async () => true, resolve: async () => credential },
+      );
+      return {
+        fits: (request) => endpoint !== undefined && requestFits(options, endpoint, request),
+        send: async (request, stream) => {
+          const active = endpoint;
+          if (active === undefined) throw failure("protocol", "Provider session is not active.");
+          let result: AnthropicTurnResult;
+          try {
+            result = await Effect.runPromise(
+              sendAnthropicMessagesTurn({
+                endpoint: active,
+                modelId: request.modelId,
+                history: request.history,
+                prompt: "",
+                ...(request.system === undefined ? {} : { system: request.system }),
+                tools: request.tools,
+                toolAnswers: [],
+                signal: stream.signal,
+                onEvent: (event: AnthropicTurnEvent) =>
+                  stream.onEvent(
+                    event.kind === "usage"
+                      ? {
+                          kind: "usage",
+                          inputTokens: event.inputTokens,
+                          outputTokens: event.outputTokens,
+                        }
+                      : { kind: event.kind, text: event.text },
+                  ),
+              }),
+            );
+          } catch (error) {
+            if (stream.signal.aborted) {
+              throw failure("interrupted", "The provider request was cancelled.");
+            }
+            throw error;
+          }
+          recordObservedTurn(options, result, clock);
+          return {
+            text: result.text,
+            toolCalls: result.toolCalls,
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+            ...(result.rateLimitBuckets === undefined
+              ? {}
+              : { rateLimitBuckets: result.rateLimitBuckets }),
+          };
+        },
+        release: () => {
+          endpoint = undefined;
+        },
+      };
     },
-    catch: sanitizeFailure,
-  });
-}
-
-async function runTurn(
-  options: AnthropicCompatibleDriverOptions,
-  state: SessionState,
-  history: readonly AnthropicHistoryMessage[],
-  prompt: string,
-  tools: readonly ProviderToolDefinition[],
-  toolAnswers: readonly ProviderToolAnswer[],
-  signal: AbortSignal,
-  offer: (event: ProviderRuntimeEvent) => void,
-  clock: () => string,
-  started: () => void,
-): Promise<AnthropicTurnResult> {
-  const endpoint = state.endpoint;
-  if (endpoint === undefined) throw failure("protocol", "Provider session is not active.");
-  const onEvent = (event: AnthropicTurnEvent) => {
-    state.nextSequence = event.sequence + 1;
-    offer(runtimeEvent(options.instanceId, state, event, clock));
   };
-  started();
-  try {
-    return await Effect.runPromise(
-      sendAnthropicMessagesTurn({
-        endpoint,
-        modelId: state.modelId,
-        history,
-        prompt,
-        tools,
-        toolAnswers,
-        sequenceStart: state.nextSequence,
-        signal,
-        onEvent,
-      }),
-    );
-  } catch (error) {
-    if (signal.aborted) throw failure("interrupted", "The provider request was cancelled.");
-    throw error;
-  }
 }
 
-function finishSuccessfulTurn(
+/** What a successful response proves about the endpoint and its model. */
+function recordObservedTurn(
   options: AnthropicCompatibleDriverOptions,
-  state: SessionState,
   result: AnthropicTurnResult,
-  offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
 ): void {
-  // Header buckets go out first: they describe the account after this
-  // response, and a consumer that stops at the terminal event still sees them.
-  for (const bucket of result.rateLimitBuckets ?? []) {
-    offer(rateLimitBucketEvent(options.instanceId, state, bucket, clock));
-  }
-  if (result.usage !== undefined) {
-    state.accumulatedInputTokens += result.usage.inputTokens;
-    state.accumulatedOutputTokens += result.usage.outputTokens;
-  }
   const current = options.runtimeRegistry.observedState(options.instanceId);
   const models = markAnthropicModelVerified(
     current?.models ?? manualModels(options.configuration.manualModelIds),
@@ -492,146 +260,6 @@ function finishSuccessfulTurn(
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),
     observedAt: clock(),
   });
-  if (result.toolCalls.length > 0) {
-    // A name outside the offered set fails closed rather than waiting for an
-    // answer nobody was authorized to give.
-    const offered = new Set(state.activeTools.map((tool) => tool.name));
-    for (const call of result.toolCalls) {
-      if (!offered.has(call.toolName)) {
-        state.pendingToolCalls = [];
-        state.toolAnswers = [];
-        state.activeTools = [];
-        offer(
-          terminalEvent(
-            options.instanceId,
-            state,
-            {
-              kind: "failed",
-              failure: {
-                category: "protocol",
-                message: `The provider requested an unsupported tool: ${call.toolName}.`,
-              },
-            },
-            clock,
-          ),
-        );
-        return;
-      }
-    }
-    state.pendingToolCalls = result.toolCalls;
-    state.toolAnswers = [];
-    state.history.push({ role: "assistant", text: result.text, toolCalls: result.toolCalls });
-    for (const call of result.toolCalls) {
-      offer({
-        kind: "tool-request",
-        requestId: call.toolCallId,
-        toolName: call.toolName,
-        inputJson: call.argumentsJson,
-        instanceId: options.instanceId,
-        sessionId: state.sessionId,
-        sequence: state.nextSequence++,
-        correlationId: state.correlationId,
-        occurredAt: clock() as UtcTimestamp,
-      } as ProviderRuntimeEvent);
-    }
-    // No terminal yet: the turn ends when the tool loop does.
-    return;
-  }
-  const wasContinuation = state.toolAnswers.length > 0;
-  state.pendingToolCalls = [];
-  state.toolAnswers = [];
-  state.activeTools = [];
-  state.history.push({ role: "assistant", text: result.text });
-  if (wasContinuation && state.accumulatedInputTokens + state.accumulatedOutputTokens > 0) {
-    // One usage figure for the whole loop, so the turn's cost is recorded in full.
-    offer(
-      runtimeEvent(
-        options.instanceId,
-        state,
-        {
-          kind: "usage",
-          sequence: state.nextSequence++,
-          inputTokens: state.accumulatedInputTokens,
-          outputTokens: state.accumulatedOutputTokens,
-        },
-        clock,
-      ),
-    );
-  }
-  offer(terminalEvent(options.instanceId, state, { kind: "completed" }, clock));
-}
-
-function finishFailedTurn(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  failed: ProviderFailure,
-  offer: (event: ProviderRuntimeEvent) => void,
-  clock: () => string,
-): void {
-  state.pendingToolCalls = [];
-  state.toolAnswers = [];
-  state.activeTools = [];
-  offer(
-    failed.category === "interrupted"
-      ? terminalEvent(
-          instanceId,
-          state,
-          { kind: "interrupted", message: "The provider request was cancelled." },
-          clock,
-        )
-      : terminalEvent(instanceId, state, { kind: "failed", failure: failed }, clock),
-  );
-}
-
-function runtimeEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  event: AnthropicTurnEvent,
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    ...event,
-    instanceId,
-    sessionId: state.sessionId,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
-}
-
-function terminalEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  terminal:
-    | { readonly kind: "completed" }
-    | { readonly kind: "interrupted"; readonly message: string }
-    | { readonly kind: "failed"; readonly failure: ProviderFailure },
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    ...terminal,
-    instanceId,
-    sessionId: state.sessionId,
-    sequence: state.nextSequence++,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
-}
-
-function rateLimitBucketEvent(
-  instanceId: ProviderInstanceId,
-  state: SessionState,
-  bucket: ObservedRateLimitBucket,
-  clock: () => string,
-): ProviderRuntimeEvent {
-  return {
-    kind: "rate-limit-bucket",
-    ...bucket,
-    instanceId,
-    sessionId: state.sessionId,
-    sequence: state.nextSequence++,
-    correlationId: state.correlationId,
-    occurredAt: clock() as UtcTimestamp,
-  } as ProviderRuntimeEvent;
 }
 
 function endpointFor(
@@ -671,29 +299,28 @@ function manualModels(modelIds: readonly ProviderModelId[]) {
   }));
 }
 
-function assertTurnRequestConstructable(
+/** Whether a request fits the endpoint, measured on the body that would be sent. */
+function requestFits(
   options: AnthropicCompatibleDriverOptions,
-  state: SessionState,
-  history: readonly AnthropicHistoryMessage[],
-  prompt: string,
-  tools: readonly ProviderToolDefinition[],
-  toolAnswers: readonly ProviderToolAnswer[],
-): void {
-  const endpoint = state.endpoint;
-  if (endpoint === undefined) throw failure("protocol", "Provider session is not active.");
-  const body = buildAnthropicMessagesBody({
-    modelId: state.modelId,
-    history,
-    prompt,
-    tools,
-    toolAnswers,
-  });
-  if (Buffer.byteLength(JSON.stringify(body), "utf8") > endpoint.limits.requestBodyBytes) {
-    throw failure(
-      "invalid-configuration",
-      "The provider request exceeded the configured size limit.",
-    );
-  }
+  endpoint: AnthropicCompatibleEndpoint,
+  request: NativeHarnessRequest,
+): boolean {
+  const body = JSON.stringify(
+    buildAnthropicMessagesBody({
+      modelId: request.modelId,
+      history: request.history,
+      prompt: "",
+      ...(request.system === undefined ? {} : { system: request.system }),
+      tools: request.tools,
+      toolAnswers: [],
+    }),
+  );
+  if (Buffer.byteLength(body, "utf8") > endpoint.limits.requestBodyBytes) return false;
+  const contextLimit = options.runtimeRegistry
+    .observedState(options.instanceId)
+    ?.models.find((model) => String(model.id) === String(request.modelId))?.contextLimit;
+  // Roughly four bytes per token; only a model whose window is known is held to it.
+  return contextLimit === undefined || body.length / 4 <= contextLimit;
 }
 
 function sanitizeFailure(error: unknown): ProviderFailure {
@@ -711,12 +338,4 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
-}
-
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
 }

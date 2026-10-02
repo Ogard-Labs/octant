@@ -14,6 +14,7 @@ import {
 } from "./openAiCompatibleDriver";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { NativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 
 export interface AzureFoundryDriverOptions {
   readonly instanceId: ProviderInstanceId;
@@ -24,6 +25,7 @@ export interface AzureFoundryDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly onConnectionReleased?: () => void;
+  readonly transcripts?: NativeHarnessTranscriptStore;
 }
 
 const FOUNDRY_PROFILE: OpenAiCompatibleDriverProfile = {
@@ -62,6 +64,7 @@ export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): Prov
     ...(options.onConnectionReleased === undefined
       ? {}
       : { onConnectionReleased: options.onConnectionReleased }),
+    ...(options.transcripts === undefined ? {} : { transcripts: options.transcripts }),
     profile: FOUNDRY_PROFILE,
   });
   // Per the approved Foundry profile design, treat missing/incomplete model discovery as

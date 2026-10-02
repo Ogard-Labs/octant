@@ -198,10 +198,10 @@ describe("ThreadUsagePanel", () => {
       expect(screen.getByRole("status")).toHaveTextContent("150 of 500 tokens remaining"),
     );
     expect(document.querySelector("form")).toHaveAttribute("novalidate");
-    expect(screen.getByRole("button", { name: "Raise token ceiling" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Raise spend ceiling" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear ceiling" })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Token spend ceiling"), "2000");
-    await userEvent.click(screen.getByRole("button", { name: "Raise token ceiling" }));
+    await userEvent.click(screen.getByRole("button", { name: "Raise spend ceiling" }));
     await waitFor(() => expect(execute).toHaveBeenCalled());
     expect(execute.mock.calls[0]![0]).toMatchObject({
       kind: "raise-spend-ceiling",
@@ -236,10 +236,10 @@ describe("ThreadUsagePanel", () => {
       expect(screen.getByRole("status")).toHaveTextContent("150 of 500 tokens remaining"),
     );
     expect(document.querySelector("form")).toHaveAttribute("novalidate");
-    expect(screen.getByRole("button", { name: "Set token ceiling" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set spend ceiling" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Clear ceiling" })).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Token spend ceiling"), "400");
-    await userEvent.click(screen.getByRole("button", { name: "Set token ceiling" }));
+    await userEvent.click(screen.getByRole("button", { name: "Set spend ceiling" }));
     await waitFor(() => expect(execute).toHaveBeenCalled());
     expect(execute.mock.calls[0]![0]).toMatchObject({
       kind: "set-spend-ceiling",
