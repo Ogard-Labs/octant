@@ -170,11 +170,16 @@ html[data-octant-native-host="true"]
 }
 
 /* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
-   column and material, at a width that still clears the native traffic
-   lights, and the chrome and workspace return to the second column. */
+   column and material, and the chrome and workspace return to the second
+   column. The rail is one icon wide; in the desktop app it widens just
+   enough to clear the native traffic lights that sit at its top. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-rendered-sidebar-width: var(--oct-sidebar-rail-w, 76px);
+  --octant-rendered-sidebar-width: 56px;
   grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+}
+
+.shell.shell-frame.shell--sidebar-rail:has(> .sidebar-rail[data-native-host]) {
+  --octant-rendered-sidebar-width: 76px;
 }
 
 .shell--sidebar-rail.shell-frame > .window-chrome,
@@ -233,13 +238,20 @@ html[data-octant-native-host="true"]
   --sidebar-rail-fill: transparent;
   position: relative;
   display: flex;
-  width: 44px;
+  width: 40px;
   height: 40px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
   background: var(--sidebar-rail-fill);
   color: var(--oct-muted);
+}
+
+/* The shared button recipe sizes every glyph inside a button to 1rem, which
+   drew the rail's 20px icons at 13px; the rail keeps the size it asks for. */
+.sidebar-rail__face > svg {
+  width: 20px;
+  height: 20px;
 }
 
 .sidebar-rail__button:hover .sidebar-rail__face,

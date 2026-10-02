@@ -683,11 +683,12 @@ surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing. Hide sidebar
-collapses it to a 76px icon rail by default: Show sidebar, New thread, and
+collapses it to a 56px icon rail by default (76px in the desktop app, where
+the native traffic lights sit at its top): Show sidebar, New thread, and
 Search at the top, then the modes, the count tiles as icons with their counts
 as badges, the remaining destination rows, up to six Project letter tiles with
 a Projects button for the rest, the Activity feed, and Settings at the foot.
-Rail icons are 20px on a 44 by 40px face. Every rail control names itself in
+Rail icons are 20px on a 40px face. Every rail control names itself in
 its accessible name and in a label that opens beside the rail on hover or
 keyboard focus. Settings ›
 Sidebar › When collapsed can choose Hidden instead, which removes the sidebar

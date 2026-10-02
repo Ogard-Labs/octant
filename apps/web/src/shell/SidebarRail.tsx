@@ -74,7 +74,12 @@ export function SidebarRail(props: SidebarRailProps) {
   const activeMode = visibleModeOf(props.activeMode);
   const visibleProjects = props.projects.slice(0, RAIL_PROJECT_LIMIT);
   return (
-    <aside aria-label="Octant sidebar, collapsed" className="sidebar-rail" data-octant-sidebar-rail>
+    <aside
+      aria-label="Octant sidebar, collapsed"
+      className="sidebar-rail"
+      data-native-host={props.nativeHost ? "" : undefined}
+      data-octant-sidebar-rail
+    >
       {props.nativeHost ? (
         <span aria-hidden="true" className="sidebar-rail__traffic-lights window-drag-region" />
       ) : null}
