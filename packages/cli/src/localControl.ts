@@ -58,11 +58,15 @@ export async function openLocalControlSession(
   }
   const windowId = randomUUID();
   const capability = randomBytes(32).toString("base64url");
+  // The same server-bound identity the desktop renderer registers. It is what
+  // lets this window keep a workspace — bind a Project, open a thread — which
+  // Code checkouts, goals, and harness approvals are authorized against.
+  const rendererIdentity = randomBytes(32).toString("base64url");
   const authorityUrl = new URL("/api/desktop/window-authorities", info.url).toString();
   const registration = await call(authorityUrl, {
     method: "POST",
     headers: { "content-type": "application/json", "x-octant-desktop-secret": secret },
-    body: JSON.stringify({ windowId, capability }),
+    body: JSON.stringify({ windowId, capability, rendererIdentity }),
   }).catch(() => undefined);
   if (registration === undefined || registration.status !== 204) {
     return { kind: "refuses", reason: "Octant refused this command's local authority." };
@@ -80,6 +84,7 @@ export async function openLocalControlSession(
           ...request.headers,
           "x-octant-desktop-secret": secret,
           "x-octant-window-capability": capability,
+          "x-octant-renderer-identity": rendererIdentity,
         },
         ...(request.bytes !== undefined
           ? { body: new Blob([request.bytes as BlobPart]) }

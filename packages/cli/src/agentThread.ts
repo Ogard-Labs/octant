@@ -4,6 +4,7 @@ import { resolve, sep } from "node:path";
 import {
   decodeChatCommandResult,
   decodeChatThreadView,
+  decodeCodeBootstrap,
   decodeCodeCommandResult,
   decodeCodeConversationPage,
   decodeCodeEvidenceBatchResponse,
@@ -25,6 +26,7 @@ import {
   type HostRefusal,
 } from "./agentHost";
 import type { OpenedLocalControlSession } from "./localControl";
+import { openAgentWindow } from "./agentWindow";
 
 /**
  * One thread as the terminal shows it, whatever mode it lives in. Chat,
@@ -423,6 +425,8 @@ export async function createAgentThread(
     readonly title: string;
     readonly projectName?: string | undefined;
     readonly cwd?: string | undefined;
+    /** `model` or `endpoint/model`; the first harness model when absent. */
+    readonly model?: string | undefined;
   },
 ): Promise<
   | HostRefusal
@@ -494,13 +498,23 @@ export async function createAgentThread(
   if (project === undefined || project.type !== mode) {
     return { kind: "refused", message: "The Project for this thread is unavailable." };
   }
-  const model = (await listAgentModels(session))[0];
+  const models = await listAgentModels(session);
+  const model = input.model === undefined ? models[0] : pickAgentModel(models, input.model);
   if (model === undefined) {
     return {
       kind: "refused",
-      message: "No harness endpoint offers a model yet. Add one in Settings → Providers.",
+      message:
+        input.model === undefined
+          ? "No harness endpoint offers a model yet. Add one in Settings → Providers."
+          : `No harness endpoint offers "${input.model}". Models here: ${models.map((entry) => `${entry.endpoint}/${entry.modelId}`).join(", ") || "none"}.`,
     };
   }
+  const projectOpened = await openAgentWindow(session, {
+    mode,
+    projectId: String(project.id),
+    projectName: project.name,
+  });
+  if (projectOpened.kind === "refused") return projectOpened;
   if (mode === "work") {
     const threadId = randomUUID();
     const response = await session.send({
@@ -524,9 +538,18 @@ export async function createAgentThread(
       };
     }
     const created = decodeWorkThreadCommandResult(response.body);
-    return "kind" in created && created.kind === "thread-created"
-      ? { kind: "created", threadId, mode: "work", projectName: project.name }
-      : { kind: "refused", message: "The host did not create the Work thread." };
+    if (!("kind" in created) || created.kind !== "thread-created") {
+      return { kind: "refused", message: "The host did not create the Work thread." };
+    }
+    const threadOpened = await openAgentWindow(session, {
+      mode,
+      projectId: String(project.id),
+      projectName: project.name,
+      thread: { id: threadId, title: input.title },
+    });
+    return threadOpened.kind === "refused"
+      ? threadOpened
+      : { kind: "created", threadId, mode: "work", projectName: project.name };
   }
   const prepared = await session.send({
     path: "/api/code/commands",
@@ -589,9 +612,133 @@ export async function createAgentThread(
     };
   }
   const created = decodeCodeCommandResult(response.body);
-  return created.kind === "thread-created"
-    ? { kind: "created", threadId, mode: "code", projectName: project.name }
-    : { kind: "refused", message: "The host did not create the Code thread." };
+  if (created.kind !== "thread-created") {
+    return { kind: "refused", message: "The host did not create the Code thread." };
+  }
+  const threadOpened = await openAgentWindow(session, {
+    mode,
+    projectId: String(project.id),
+    projectName: project.name,
+    thread: { id: threadId, title: input.title },
+  });
+  return threadOpened.kind === "refused"
+    ? threadOpened
+    : { kind: "created", threadId, mode: "code", projectName: project.name };
+}
+
+/**
+ * Finds an existing Work or Code thread — the one named, or the latest — and
+ * opens it in this terminal's window. A thread's Project decides what the
+ * window may reach, so the folder you are in (or `--project`) is searched
+ * first, then every other Work and Code Project. A named thread found in none
+ * of them is left to the Chat port.
+ */
+export async function attachAgentThread(
+  session: OpenedLocalControlSession,
+  input: {
+    readonly threadId?: string | undefined;
+    readonly mode: OctantMode | "auto";
+    readonly projectName?: string | undefined;
+    readonly cwd?: string | undefined;
+  },
+): Promise<
+  | HostRefusal
+  | { readonly kind: "not-found" }
+  | {
+      readonly kind: "attached";
+      readonly threadId: string;
+      readonly mode: "work" | "code";
+      readonly projectName: string;
+    }
+> {
+  const projects = await session.send({ path: "/api/projects/bootstrap", method: "GET" });
+  if (projects.status !== 200) {
+    return {
+      kind: "refused",
+      message: refusalMessage(projects, "Projects are unavailable on this host."),
+    };
+  }
+  const active = decodeProjectBootstrap(projects.body).active.filter(
+    (entry) =>
+      (entry.type === "code" || entry.type === "work") &&
+      (input.mode === "auto" || input.mode === entry.type),
+  );
+  const wanted = input.projectName?.trim().toLowerCase();
+  const first =
+    wanted === undefined
+      ? projectHolding(active, input.cwd ?? process.cwd())
+      : active.find((entry) => entry.name.trim().toLowerCase() === wanted);
+  // Without a thread id, "latest" only means something for the Project here.
+  const candidates =
+    input.threadId === undefined
+      ? first === undefined
+        ? []
+        : [first]
+      : [...(first === undefined ? [] : [first]), ...active.filter((entry) => entry !== first)];
+  for (const project of candidates) {
+    if (project.type !== "code" && project.type !== "work") continue;
+    const mode = project.type;
+    const opened = await openAgentWindow(session, {
+      mode,
+      projectId: String(project.id),
+      projectName: project.name,
+    });
+    if (opened.kind === "refused") return opened;
+    const threads = await projectThreads(session, mode, String(project.id));
+    const thread =
+      input.threadId === undefined
+        ? threads[0]
+        : threads.find((entry) => entry.id === input.threadId);
+    if (thread === undefined) continue;
+    const threadOpened = await openAgentWindow(session, {
+      mode,
+      projectId: String(project.id),
+      projectName: project.name,
+      thread,
+    });
+    if (threadOpened.kind === "refused") return threadOpened;
+    return { kind: "attached", threadId: thread.id, mode, projectName: project.name };
+  }
+  return { kind: "not-found" };
+}
+
+/** A Project's active threads in this mode, most recently updated first. */
+async function projectThreads(
+  session: OpenedLocalControlSession,
+  mode: "work" | "code",
+  projectId: string,
+): Promise<ReadonlyArray<{ readonly id: string; readonly title: string }>> {
+  const response = await session.send({
+    path: mode === "code" ? "/api/code/bootstrap" : "/api/work/threads/bootstrap",
+    method: "GET",
+  });
+  if (response.status !== 200) return [];
+  const threads =
+    mode === "code"
+      ? decodeCodeBootstrap(response.body).threads
+      : decodeWorkThreadBootstrap(response.body).threads;
+  return threads
+    .filter((thread) => String(thread.projectId) === projectId && thread.lifecycle === "active")
+    .toSorted((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .map((thread) => ({ id: String(thread.id), title: thread.title }));
+}
+
+/**
+ * The model a `--model` value names: a model id, or `endpoint/model` when the
+ * same id is offered by more than one endpoint. Matching ignores case so a
+ * typed name finds the listed one.
+ */
+export function pickAgentModel<T extends { readonly endpoint: string; readonly modelId: string }>(
+  models: ReadonlyArray<T>,
+  wanted: string,
+): T | undefined {
+  const value = wanted.trim().toLowerCase();
+  const qualified = models.find(
+    (entry) => `${entry.endpoint}/${entry.modelId}`.toLowerCase() === value,
+  );
+  if (qualified !== undefined) return qualified;
+  const byId = models.filter((entry) => entry.modelId.toLowerCase() === value);
+  return byId.length === 1 ? byId[0] : undefined;
 }
 
 /** The Work or Code Project whose bound folder holds the directory, deepest match first. */
