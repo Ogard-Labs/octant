@@ -191,9 +191,8 @@ describe("ComposerModelPicker", () => {
       providerInstanceId: providerB,
       modelId: modelThree,
     });
-    expect(
-      screen.queryByRole("dialog", { name: "Choose provider and model" }),
-    ).not.toBeInTheDocument();
+    // Choosing a model leaves the menu open for the reasoning level beneath.
+    expect(screen.getByRole("dialog", { name: "Choose provider and model" })).toBeVisible();
   });
 
   it("keeps the active provider when discovery refreshes the groups", async () => {
@@ -591,7 +590,7 @@ describe("ComposerModelPicker", () => {
     expect(screen.getByRole("option", { name: "Model Two" })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerA, modelId: modelTwo });
-    expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
+    expect(screen.getByRole("searchbox", { name: "Search models" })).toBeVisible();
   });
 
   it("keeps the level control out when no reasoning option is declared", async () => {

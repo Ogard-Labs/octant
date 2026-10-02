@@ -320,8 +320,9 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             rememberModel(group.instance.id, modelId);
             if (props.rememberChoice !== false)
               rememberModelChoice({ providerInstanceId: group.instance.id, modelId });
+            // The menu stays open: the next thing a person often does is set
+            // the reasoning level for the model they just chose.
             props.onSelect({ providerInstanceId: group.instance.id, modelId });
-            setOpen(false);
           }}
           role="option"
           title={picker.unavailableReason}
@@ -745,8 +746,14 @@ function LevelSlider(props: {
   }
   const label = props.labels[index] ?? "Default";
   const stopCount = props.labels.length;
+  const intensity = stopCount <= 1 ? 0 : index / (stopCount - 1);
   return (
-    <div className="composer-model-picker__level">
+    <div
+      className="composer-model-picker__level"
+      // The higher the level, the denser and brighter the fill: the control
+      // says how much thinking was asked for before the label is read.
+      style={{ "--composer-model-picker-intensity": intensity } as CSSProperties}
+    >
       <div className="composer-model-picker__level-reading">
         <span className="composer-model-picker__level-label">{props.displayName}</span>
         <strong className="composer-model-picker__level-value">{label}</strong>
@@ -762,54 +769,62 @@ function LevelSlider(props: {
           <RotateCcw aria-hidden="true" size={14} />
         </OctantButton>
       </div>
-      <div className="composer-model-picker__level-control">
-        <div aria-hidden="true" className="composer-model-picker__level-track">
-          <span
-            className="composer-model-picker__level-fill"
-            style={
-              {
-                "--composer-model-picker-level-fill": `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%`,
-              } as CSSProperties
-            }
+      <div className="composer-model-picker__level-row">
+        <span aria-hidden="true" className="composer-model-picker__level-end">
+          Faster
+        </span>
+        <div className="composer-model-picker__level-control">
+          <div aria-hidden="true" className="composer-model-picker__level-track">
+            <span
+              className="composer-model-picker__level-fill"
+              style={
+                {
+                  "--composer-model-picker-level-fill": `${stopCount <= 1 ? 0 : (index / (stopCount - 1)) * 100}%`,
+                } as CSSProperties
+              }
+            />
+            <span className="composer-model-picker__level-stops">
+              {props.labels.map((stop, position) => (
+                <span key={`${position}:${stop}`} title={stop} />
+              ))}
+            </span>
+          </div>
+          <OctantSlider
+            className="composer-model-picker__reasoning-slider"
+            aria-label={`${props.displayName} level`}
+            aria-valuemax={stopCount - 1}
+            aria-valuemin={0}
+            aria-valuenow={index}
+            aria-valuetext={label}
+            disabled={props.disabled}
+            min={0}
+            max={stopCount - 1}
+            step={1}
+            value={index}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              setDragIndex(props.index);
+            }}
+            onLostPointerCapture={() => setDragIndex(undefined)}
+            onPointerCancel={() => setDragIndex(undefined)}
+            onPointerUp={(event) => {
+              const next = event.currentTarget.valueAsNumber;
+              setDragIndex(undefined);
+              commit(next);
+            }}
+            onChange={(event) => {
+              const next = event.currentTarget.valueAsNumber;
+              // Existing threads persist through versioned commands. Preview the
+              // drag locally and send its final value once, rather than racing a
+              // command for every intermediate stop against the same version.
+              if (dragIndex !== undefined) setDragIndex(next);
+              else commit(next);
+            }}
           />
-          <span className="composer-model-picker__level-stops">
-            {props.labels.map((stop, position) => (
-              <span key={`${position}:${stop}`} title={stop} />
-            ))}
-          </span>
         </div>
-        <OctantSlider
-          className="composer-model-picker__reasoning-slider"
-          aria-label={`${props.displayName} level`}
-          aria-valuemax={stopCount - 1}
-          aria-valuemin={0}
-          aria-valuenow={index}
-          aria-valuetext={label}
-          disabled={props.disabled}
-          min={0}
-          max={stopCount - 1}
-          step={1}
-          value={index}
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            setDragIndex(props.index);
-          }}
-          onLostPointerCapture={() => setDragIndex(undefined)}
-          onPointerCancel={() => setDragIndex(undefined)}
-          onPointerUp={(event) => {
-            const next = event.currentTarget.valueAsNumber;
-            setDragIndex(undefined);
-            commit(next);
-          }}
-          onChange={(event) => {
-            const next = event.currentTarget.valueAsNumber;
-            // Existing threads persist through versioned commands. Preview the
-            // drag locally and send its final value once, rather than racing a
-            // command for every intermediate stop against the same version.
-            if (dragIndex !== undefined) setDragIndex(next);
-            else commit(next);
-          }}
-        />
+        <span aria-hidden="true" className="composer-model-picker__level-end">
+          Smarter
+        </span>
       </div>
     </div>
   );
