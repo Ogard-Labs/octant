@@ -1308,6 +1308,13 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ### Confirmation and dialog behavior
 
+Inline provider, extension, and Browser permission requests use
+`OctantApprovalCard` in the thread column. It owns the neutral card material,
+pending icon, readable summary and detail, wrapping action row, and inline
+failure announcement. The requesting feature supplies the scope, choices, and
+callbacks; the existing host or server still decides whether an action may
+proceed. Native Code approvals keep their isolated host-owned document.
+
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
 remote listener confirmation shows the address, origin, network reach, and

@@ -101,6 +101,7 @@ import {
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
@@ -1667,50 +1668,43 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         turnActive={turnRunning}
       />
       {pendingBrowserApproval === undefined ? null : (
-        <section
-          aria-label="Browser origin approval"
-          className="approval-row approval-row--request thread-column"
-          role="group"
-        >
-          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span className="approval-row__text">
-            Allow Browser to open {pendingBrowserApproval.origin}?
-            <span className="approval-row__detail">Shell and file access stay unchanged</span>
-          </span>
-          <div className="approval-row__actions">
-            <OctantButton
-              disabled={browserApprovalBusy}
-              onClick={() => void decideBrowserApproval("approved")}
-              size="sm"
-              type="button"
-            >
-              Approve once
-            </OctantButton>
-            <OctantButton
-              disabled={browserApprovalBusy}
-              onClick={() => void decideBrowserApproval("approved", true)}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Always allow
-            </OctantButton>
-            <OctantButton
-              disabled={browserApprovalBusy}
-              onClick={() => void decideBrowserApproval("denied")}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Deny
-            </OctantButton>
-          </div>
-          {browserApprovalMessage === undefined ? null : (
-            <p className="approval-row__detail" role="alert">
-              {browserApprovalMessage}
-            </p>
-          )}
-        </section>
+        <OctantApprovalCard
+          actions={
+            <>
+              <OctantButton
+                disabled={browserApprovalBusy}
+                onClick={() => void decideBrowserApproval("approved")}
+                size="sm"
+                type="button"
+              >
+                Approve once
+              </OctantButton>
+              <OctantButton
+                disabled={browserApprovalBusy}
+                onClick={() => void decideBrowserApproval("approved", true)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Always allow
+              </OctantButton>
+              <OctantButton
+                disabled={browserApprovalBusy}
+                onClick={() => void decideBrowserApproval("denied")}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Deny
+              </OctantButton>
+            </>
+          }
+          className="thread-column"
+          detail="Shell and file access stay unchanged"
+          error={browserApprovalMessage}
+          label="Browser origin approval"
+          summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+        />
       )}
       <ThreadComposer
         presentation="follow-up"

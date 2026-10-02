@@ -2612,6 +2612,13 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
 }
+.approval-row__error {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-detail);
+  overflow-wrap: anywhere;
+}
 .approval-row__code {
   flex: 1 1 100%;
   min-width: 0;
@@ -2623,9 +2630,12 @@ input.switch:checked::after {
 }
 .approval-row__actions {
   display: inline-flex;
+  flex-wrap: wrap;
   flex: 0 0 auto;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  max-width: 100%;
   margin-inline-start: auto;
 }
 
