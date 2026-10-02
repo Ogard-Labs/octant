@@ -26,6 +26,7 @@ import {
   type CanvasCommentsOutcome,
   type CanvasDiagramLayoutReviseCommand,
   type CanvasDiagramLayoutReviseResult,
+  type CanvasPlanTaskReviseCommand,
   type CanvasInventoryList,
   type CanvasReviseRequest,
   type CanvasReviseResult,
@@ -62,6 +63,11 @@ export interface CanvasClient {
   reviseDiagramLayout?(
     command: CanvasDiagramLayoutReviseCommand,
   ): Promise<CanvasDiagramLayoutReviseResult>;
+  /**
+   * Journal a person's change to one plan task's status as a new version.
+   * Optional: a host without the route leaves plans readable but fixed.
+   */
+  revisePlanTask?(command: CanvasPlanTaskReviseCommand): Promise<CanvasDiagramLayoutReviseResult>;
   /** Comments on a Canvas and the commands that change them; host-journaled. */
   comments?(canvasId: CanvasId): Promise<CanvasCommentsOutcome>;
   comment?(command: CanvasCommentCommand): Promise<CanvasCommentCommandResult>;
@@ -170,6 +176,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
       return request(
         options.fetch,
         new URL("/api/canvas/layout-revise", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasDiagramLayoutReviseResult,
+      );
+    },
+    revisePlanTask(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/plan-revise", options.baseUrl).toString(),
         {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },

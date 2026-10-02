@@ -286,6 +286,60 @@ function layoutReviseCommand(overrides: Record<string, unknown> = {}) {
 const boardContext = { mode: "chat", projectId: ids.project } as const;
 const boardProject = { id: ids.project, type: "chat", lifecycle: "active" } as const;
 
+const planDefinition = {
+  ...definition,
+  blocks: [
+    ...definition.blocks,
+    {
+      blockId: "plan-1",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "plan",
+      title: "Launch plan",
+      phases: [{ phaseId: "build", title: "Build" }],
+      tasks: [
+        { taskId: "api", phaseId: "build", title: "Ship the API", status: "doing" },
+        { taskId: "docs", phaseId: "build", title: "Write the docs", status: "todo" },
+      ],
+    },
+  ],
+} as const;
+
+describe("CanvasService plan tasks", () => {
+  it("records a person's check-off as a new version the agent reads back, authored by the person", () => {
+    const { service } = createService(
+      undefined,
+      undefined,
+      version({ definition: planDefinition }),
+    );
+    const result = service.revisePlanTask(
+      {
+        kind: "canvas-plan-task-revise",
+        canvasId: ids.canvas,
+        versionId: ids.version2,
+        blockId: "plan-1",
+        taskId: "api",
+        status: "done",
+        actor: { kind: "agent", actorId: provenance.actor.actorId },
+        expectedSequence: 1,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        issuedAt: later,
+      },
+      boardContext,
+      boardProject,
+    );
+    expect(result).toMatchObject({ kind: "accepted", sequence: 2, versionId: ids.version2 });
+
+    // The agent's next read sees the checked task.
+    const read = service.get(canvasId, boardContext, boardProject);
+    expect(read.kind).toBe("ready");
+    if (read.kind !== "ready") return;
+    expect(read.version.createdBy.kind).toBe("local-user");
+    const plan = read.version.definition.blocks.find((block) => block.kind === "plan");
+    if (plan?.kind !== "plan") throw new Error("expected a plan");
+    expect(plan.tasks.find((task) => task.taskId === "api")?.status).toBe("done");
+  });
+});
+
 describe("CanvasService board layout", () => {
   it("journals a user's node drag as a new immutable version that survives reload", () => {
     const { service, projection, journal, connection } = createService(

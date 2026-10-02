@@ -298,6 +298,8 @@ function commentDenialCode(code: CanvasBoardRejectionCode): CanvasCommentDenialC
     case "not-a-diagram":
     case "unknown-node":
     case "missing-position":
+    case "not-a-plan":
+    case "unknown-task":
       return "malformed-request";
   }
 }

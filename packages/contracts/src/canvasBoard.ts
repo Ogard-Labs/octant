@@ -9,6 +9,7 @@ import {
   CanvasSchemaVersion,
   CanvasVersionId,
 } from "./canvasIdentity";
+import { CanvasPlanTaskId, CanvasPlanTaskStatus } from "./canvas";
 import { UtcTimestamp } from "./events";
 
 export { CANVAS_SCHEMA_VERSION };
@@ -341,6 +342,8 @@ export const CanvasBoardDenialCode = Schema.Literal(
   "not-a-diagram",
   "unknown-node",
   "missing-position",
+  "not-a-plan",
+  "unknown-task",
 );
 export type CanvasBoardDenialCode = typeof CanvasBoardDenialCode.Type;
 
@@ -358,6 +361,30 @@ export const CanvasDiagramLayoutReviseResult = Schema.Union(
   }).annotations(strict),
 );
 export type CanvasDiagramLayoutReviseResult = typeof CanvasDiagramLayoutReviseResult.Type;
+
+// ── Plan task revision ───────────────────────────────────────────────────────
+//
+// A person checking a task off or moving it between statuses records a new
+// immutable Canvas version through the same canvas.version-appended@1
+// envelope as any revision, so the agent reads the change on its next turn.
+
+export const CanvasPlanTaskReviseCommand = Schema.Struct({
+  kind: Schema.Literal("canvas-plan-task-revise"),
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  blockId: CanvasBlockId,
+  taskId: CanvasPlanTaskId,
+  status: CanvasPlanTaskStatus,
+  actor: CanvasActor,
+  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  schemaVersion: CanvasSchemaVersion,
+  issuedAt: UtcTimestamp,
+}).annotations(strict);
+export type CanvasPlanTaskReviseCommand = typeof CanvasPlanTaskReviseCommand.Type;
+
+/** A board revision's answer: the new version, or why it was refused. */
+export const CanvasPlanTaskReviseResult = CanvasDiagramLayoutReviseResult;
+export type CanvasPlanTaskReviseResult = CanvasDiagramLayoutReviseResult;
 
 // ── Decoders ─────────────────────────────────────────────────────────────────
 
@@ -388,6 +415,12 @@ export const decodeCanvasDiagramLayoutRevised = Schema.decodeUnknownSync(
 );
 export const decodeCanvasDiagramLayoutReviseResult = Schema.decodeUnknownSync(
   CanvasDiagramLayoutReviseResult,
+);
+export const decodeCanvasPlanTaskReviseCommand = Schema.decodeUnknownSync(
+  CanvasPlanTaskReviseCommand,
+);
+export const decodeCanvasPlanTaskReviseResult = Schema.decodeUnknownSync(
+  CanvasPlanTaskReviseResult,
 );
 export const decodeCanvasCommentOrigin = Schema.decodeUnknownSync(CanvasCommentOrigin);
 export const decodeCanvasCommentEvent = Schema.decodeUnknownSync(CanvasCommentEvent);

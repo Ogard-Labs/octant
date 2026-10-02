@@ -113,6 +113,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "history" &&
       route !== "revise" &&
       route !== "layout-revise" &&
+      route !== "plan-revise" &&
       route !== "comments" &&
       route !== "comment" &&
       route !== "refresh" &&
@@ -333,14 +334,17 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return jsonResponse(decodeCanvasReviseResult(result), 200, origin);
       }
 
-      if (route === "layout-revise" && request.method === "POST") {
+      // A drag on a diagram and a person's change to a plan task are both board
+      // revisions: the same authorization, the same answer shape.
+      if ((route === "layout-revise" || route === "plan-revise") && request.method === "POST") {
+        const what = route === "plan-revise" ? "plan revision" : "layout revision";
         const body = await readJson(request);
         const malformed = () =>
           jsonResponse(
             decodeCanvasDiagramLayoutReviseResult({
               kind: "denied",
               denialCode: "malformed-request",
-              message: "Canvas layout revision is malformed.",
+              message: `Canvas ${what} is malformed.`,
             }),
             200,
             origin,
@@ -362,7 +366,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             decodeCanvasDiagramLayoutReviseResult({
               kind: "denied",
               denialCode: "unauthorized",
-              message: "Canvas layout revision is not authorized in this workspace.",
+              message: `Canvas ${what} is not authorized in this workspace.`,
             }),
             200,
             origin,
@@ -379,17 +383,21 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const result = dependencies.canvasService.reviseDiagramLayout(
-          body.value,
-          {
-            mode: context.activeContext.mode,
-            projectId:
-              context.activeContext.projectId === null
-                ? null
-                : String(context.activeContext.projectId),
-          },
-          context.project,
-        );
+        const authorization = {
+          mode: context.activeContext.mode,
+          projectId:
+            context.activeContext.projectId === null
+              ? null
+              : String(context.activeContext.projectId),
+        };
+        const result =
+          route === "plan-revise"
+            ? dependencies.canvasService.revisePlanTask(body.value, authorization, context.project)
+            : dependencies.canvasService.reviseDiagramLayout(
+                body.value,
+                authorization,
+                context.project,
+              );
         return jsonResponse(decodeCanvasDiagramLayoutReviseResult(result), 200, origin);
       }
 

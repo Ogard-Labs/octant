@@ -3,6 +3,7 @@ import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
+import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
@@ -20,6 +21,8 @@ export interface CanvasDocumentProps {
    * and pans but its nodes stay where the version put them.
    */
   readonly layoutRuntime?: DiagramBoardLayoutRuntime;
+  /** Host-owned journaling for a plan task's status. Without it a plan reads only. */
+  readonly planRuntime?: PlanTaskRuntime;
   /**
    * Comment markers beside each block. Offered only when the host journals
    * comments; `openCounts` holds the unresolved threads anchored to a block,
@@ -40,6 +43,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return block.text;
     case "diagram":
       return "Board";
+    case "plan":
+      return block.title;
     case "callout":
       return block.title ?? "Callout";
     default:
@@ -51,6 +56,7 @@ export function CanvasDocument({
   definition,
   actionRuntime,
   layoutRuntime,
+  planRuntime,
   comments,
 }: CanvasDocumentProps) {
   // Action blocks are collected out of the inline flow into one panel so the
@@ -72,6 +78,7 @@ export function CanvasDocument({
             <CanvasBlockRenderer
               block={block}
               {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+              {...(planRuntime === undefined ? {} : { planRuntime })}
             />
             {comments === undefined ? null : (
               <CommentMarker

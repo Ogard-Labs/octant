@@ -219,15 +219,50 @@
   color: var(--oct-muted);
 }
 
-.canvas-plan__task[data-status="doing"] .canvas-plan__task-mark {
+/* The status mark doubles as its own menu trigger where the plan is editable;
+   the face stays the mark, with a soft fill on hover. */
+.canvas-plan__status-trigger {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  margin: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.canvas-plan__status-trigger:hover {
+  background: var(--oct-fg-soft);
+}
+
+.canvas-plan__status-trigger .canvas-plan__task-mark {
+  margin-top: 0;
+}
+
+.canvas-plan__card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oct-space-2);
+}
+
+.canvas-plan__notice {
+  margin: 0;
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-plan [data-status="doing"] .canvas-plan__task-mark {
   color: var(--oct-fg);
 }
 
-.canvas-plan__task[data-status="blocked"] .canvas-plan__task-mark {
+.canvas-plan [data-status="blocked"] .canvas-plan__task-mark {
   color: var(--oct-danger-fg);
 }
 
-.canvas-plan__task[data-status="done"] .canvas-plan__task-mark {
+.canvas-plan [data-status="done"] .canvas-plan__task-mark {
   color: var(--oct-success-fg);
 }
 

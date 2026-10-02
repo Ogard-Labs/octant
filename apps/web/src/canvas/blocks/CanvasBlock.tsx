@@ -1,7 +1,7 @@
 import type { CanvasBlock } from "@octant/contracts/canvas";
 import { CodeBlocks } from "./CodeBlocks";
 import { DataBlocks } from "./DataBlocks";
-import { PlanBlock } from "./PlanBlock";
+import { PlanBlock, type PlanTaskRuntime } from "./PlanBlock";
 import { ReferenceBlocks } from "./ReferenceBlocks";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
 import { StructuredBlocks } from "./StructuredBlocks";
@@ -10,10 +10,13 @@ import { TextBlocks } from "./TextBlocks";
 export function CanvasBlockRenderer({
   block,
   layoutRuntime,
+  planRuntime,
 }: {
   readonly block: CanvasBlock;
   /** Lets a diagram journal a drag; absent on surfaces that cannot. */
   readonly layoutRuntime?: DiagramBoardLayoutRuntime;
+  /** Lets a plan journal a task's status; absent on surfaces that cannot. */
+  readonly planRuntime?: PlanTaskRuntime;
 }) {
   switch (block.kind) {
     case "heading":
@@ -52,7 +55,9 @@ export function CanvasBlockRenderer({
     case "image":
       return <ReferenceBlocks block={block} />;
     case "plan":
-      return <PlanBlock block={block} />;
+      return (
+        <PlanBlock block={block} {...(planRuntime === undefined ? {} : { runtime: planRuntime })} />
+      );
     default:
       return null;
   }

@@ -257,7 +257,14 @@ phase, a dangling or circular dependency, or a missing source. Tasks are not
 nested in phases because nesting puts a task's dependencies past the Canvas
 depth budget. The renderer offers checklist, status-board, and timeline views;
 switching is a reading choice and revises nothing. A shared snapshot keeps the
-plan but drops its source ids.
+plan but drops its source ids. A person sets a task's status from its mark;
+`/api/canvas/plan-revise` journals that as a new `canvas.version-appended@1`
+version, admitted by the pure `admitCanvasPlanTaskRevision` policy (the block
+must be a plan, the task must exist, the sequence must be the head). As with a
+drag, the host stamps its own `local-user` actor and the renderer shows the
+change at once, putting it back with the host's reason when refused. Agent
+revisions and person changes share one history, so the agent reads the change
+when it next reads the Canvas.
 Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required
