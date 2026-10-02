@@ -870,7 +870,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
-  every child environment. Linear is the first bundled-off Integration plugin:
+  every child environment. Linear is the first bundled Integration plugin, enabled by default:
   it contributes a Settings card through `settings.section`, connects with
   authorization-code + PKCE, and stores access and refresh tokens only in that
   host credential service. Connect opens a short-lived loopback listener on
@@ -1158,7 +1158,7 @@ The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
 curated re-export of contracts, preserving the contracts package's dependency
 direction. Some Settings rows remain host-compiled. Linear uses the Integration
-port as a bundled-off plugin; extracting the remaining GitHub and board packages
+port as a bundled plugin; extracting the remaining GitHub and board packages
 and packaging remaining appearance/viewer assets is unfinished work, tracked in
 Linear rather than inferred from archive status.
 

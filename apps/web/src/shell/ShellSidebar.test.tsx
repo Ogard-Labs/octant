@@ -188,6 +188,7 @@ describe("ShellSidebar", () => {
       <ShellSidebar
         automationsEnabled={false}
         codeNavigation={{ actions: { "linear-issues": vi.fn() } }}
+        firstPartyPluginsEffective={new Map([["linear-integration", false]])}
         onAddFolder={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
