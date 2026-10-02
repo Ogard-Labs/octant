@@ -409,6 +409,44 @@ describe("App", () => {
     expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
   });
 
+  it("closes the phone drawer when the dimmed page behind it is tapped", async () => {
+    const user = userEvent.setup();
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: query === "(max-width: 680px)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      render(
+        <App
+          chatClient={chats()}
+          codeClient={codes()}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providers()}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Show sidebar" }));
+      expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
+      // The scrim is the frame's own ::after, so a tap on it lands on the frame.
+      const frame = document.querySelector(".shell-frame");
+      if (frame === null) throw new Error("the shell frame did not render");
+      await user.pointer({ keys: "[MouseLeft]", target: frame });
+      expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).toBeNull();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
   it("sends Plugins to the Settings destination that actually exists", async () => {
     const user = userEvent.setup();
     render(

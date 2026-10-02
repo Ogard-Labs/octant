@@ -2179,6 +2179,18 @@ html[data-octant-native-host="true"]
     width: min(320px, calc(100vw - 56px));
   }
 
+  /* The open drawer sat over the page with nothing dimmed behind it, so the
+     page read as still usable. The scrim is the frame's own pseudo-element: a
+     tap on it is a tap outside the drawer, which App already closes on. */
+  .shell.shell-frame:not(.shell--sidebar-collapsed)::after {
+    content: "";
+    position: absolute;
+    z-index: 5;
+    inset: 0;
+    background: var(--oct-scrim);
+    animation: shell-drawer-scrim-in var(--oct-motion-fast) var(--oct-ease-standard);
+  }
+
   .sidebar--projects > .sidebar__primary {
     display: none;
   }
@@ -2216,6 +2228,18 @@ html[data-octant-native-host="true"]
   .shell-frame > .workspace-layer {
     grid-column: 1;
     grid-row: 2;
+  }
+}
+
+@keyframes shell-drawer-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell.shell-frame:not(.shell--sidebar-collapsed)::after {
+    animation: none;
   }
 }
 
