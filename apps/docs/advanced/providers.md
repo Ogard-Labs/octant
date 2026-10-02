@@ -296,6 +296,14 @@ connection check refuses, Settings names an Octant-authored reason and the
 next action instead of a generic incompatibility sentence. Detected versions
 stay visible when the probe read them. Raw provider output never appears here.
 
+A Codex CLI configured for Amazon Bedrock authenticates with
+`AWS_BEARER_TOKEN_BEDROCK` (plus `AWS_REGION`) or an `AWS_PROFILE` whose keys
+are in the AWS shared config. Octant deliberately does not pass static IAM
+keys exported in the environment (`AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) to the Codex runtime, so a host
+that relies on them shows Codex as not ready with that reason. This is
+intended, not a bug: move the keys into a profile or use the bearer token.
+
 ## Next steps
 
 - [Context budgets and limits](/advanced/context-budgets) to understand how turns fit provider limits

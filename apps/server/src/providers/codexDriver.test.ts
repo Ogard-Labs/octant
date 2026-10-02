@@ -797,6 +797,30 @@ describe("Codex driver probe and runtime lifecycle", () => {
       );
       expect(emptyBearerProbe.readiness).toBe("unauthenticated");
       expect(emptyBearerProbe.message).toContain("AWS profile");
+
+      const staticKeys = fixture({
+        account: {
+          account: { type: "apiKey" as const },
+          requiresOpenaiAuth: false,
+        },
+      });
+      const staticKeysProbe = await Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(
+            staticKeys.options({
+              environment: {
+                CODEX_HOME: codexHome,
+                AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+                AWS_SECRET_ACCESS_KEY: "secret",
+                AWS_REGION: "us-east-1",
+              },
+            }),
+          ).probe({ instanceId }),
+        ),
+      );
+      expect(staticKeysProbe.readiness).toBe("unauthenticated");
+      expect(staticKeysProbe.message).toContain("does not pass static AWS IAM keys");
+      expect(staticKeysProbe.message).not.toContain("secret");
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
