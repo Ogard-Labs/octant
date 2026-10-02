@@ -10,6 +10,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ProviderUsageHistoryChart } from "./ProviderUsageHistoryChart";
+import { SettingsSection } from "../settings/primitives";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import "./providerUsageHistory.css";
 
@@ -173,6 +174,19 @@ export function ProviderUsageHistoryWorkspace(props: {
           ),
     [data, metric, costBasis],
   );
+  const breakdownToggle = (
+    <OctantToggleGroup<"model" | "day">
+      aria-label="Breakdown by"
+      value={[breakdown]}
+      onValueChange={(values) => {
+        const next = values[0];
+        if (next !== undefined) setBreakdown(next);
+      }}
+    >
+      <OctantToggleGroupItem value="model">Model</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="day">Day</OctantToggleGroupItem>
+    </OctantToggleGroup>
+  );
   return (
     <section className="provider-history" aria-label="Local provider usage history">
       <header className="provider-history__header">
@@ -247,10 +261,12 @@ export function ProviderUsageHistoryWorkspace(props: {
                     ? "Some sources are incomplete or unavailable. See source coverage."
                     : "Local provider history · this computer"}
         </p>
-        <section
+        <HistoryBlock
+          ariaLabel="Usage overview"
+          busy={busy}
           className="provider-history__overview"
-          aria-label="Usage overview"
-          aria-busy={busy}
+          embedded={props.embedded === true}
+          title="Overview"
         >
           <div className="provider-history__summary">
             <h3>
@@ -323,8 +339,13 @@ export function ProviderUsageHistoryWorkspace(props: {
             ) : null}
           </div>
           <ProviderUsageHistoryChart data={data} metric={metric} basis={costBasis} loading={busy} />
-        </section>
-        <section aria-label="Token totals" className="provider-history__totals">
+        </HistoryBlock>
+        <HistoryBlock
+          ariaLabel="Token totals"
+          className="provider-history__totals"
+          embedded={props.embedded === true}
+          title="Token totals"
+        >
           <Metric
             label="Processed tokens"
             value={hasHistorySource ? data?.totals.totalTokens : undefined}
@@ -369,23 +390,21 @@ export function ProviderUsageHistoryWorkspace(props: {
             value={hasHistorySource ? data?.totals.outputTokens : undefined}
             loading={busy && data === undefined}
           />
-        </section>
+        </HistoryBlock>
         {props.limits}
-        <section aria-label="Usage breakdown" className="provider-history__breakdown">
-          <div className="provider-history__section-heading">
-            <h3>Breakdown</h3>
-            <OctantToggleGroup<"model" | "day">
-              aria-label="Breakdown by"
-              value={[breakdown]}
-              onValueChange={(values) => {
-                const next = values[0];
-                if (next !== undefined) setBreakdown(next);
-              }}
-            >
-              <OctantToggleGroupItem value="model">Model</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="day">Day</OctantToggleGroupItem>
-            </OctantToggleGroup>
-          </div>
+        <HistoryBlock
+          actions={breakdownToggle}
+          ariaLabel="Usage breakdown"
+          className="provider-history__breakdown"
+          embedded={props.embedded === true}
+          title="Breakdown"
+        >
+          {props.embedded === true ? null : (
+            <div className="provider-history__section-heading">
+              <h3>Breakdown</h3>
+              {breakdownToggle}
+            </div>
+          )}
           <div
             className="provider-history__table-scroll"
             tabIndex={0}
@@ -433,7 +452,7 @@ export function ProviderUsageHistoryWorkspace(props: {
               title="No provider history was found in this period."
             />
           ) : null}
-        </section>
+        </HistoryBlock>
         {data === undefined ? null : (
           <details className="provider-history__coverage">
             <summary>Source coverage</summary>
@@ -574,4 +593,45 @@ function pauseImport(signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", finish, { once: true });
     if (signal.aborted) finish();
   });
+}
+
+/**
+ * One block of the history. Inside Settings it is a kit section (a label over
+ * one card) so the page's only title is the Settings header; on the standalone
+ * Usage page it is the plain labelled section it always was.
+ */
+function HistoryBlock(props: {
+  readonly ariaLabel: string;
+  readonly className: string;
+  readonly embedded: boolean;
+  readonly title: string;
+  readonly busy?: boolean;
+  readonly actions?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  if (!props.embedded) {
+    return (
+      <section
+        aria-label={props.ariaLabel}
+        {...(props.busy === undefined ? {} : { "aria-busy": props.busy })}
+        className={props.className}
+      >
+        {props.children}
+      </section>
+    );
+  }
+  return (
+    <SettingsSection
+      {...(props.actions === undefined ? {} : { actions: props.actions })}
+      ariaLabel={props.ariaLabel}
+      title={props.title}
+    >
+      <div
+        {...(props.busy === undefined ? {} : { "aria-busy": props.busy })}
+        className={`settings-panel__body ${props.className}`}
+      >
+        {props.children}
+      </div>
+    </SettingsSection>
+  );
 }

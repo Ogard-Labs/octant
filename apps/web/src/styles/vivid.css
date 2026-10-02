@@ -1,0 +1,25 @@
+/* ── Vivid style ────────────────────────────────────────────────────────
+   Settings › Appearance › Style. Default keeps the chrome monochrome; Vivid
+   lets the places that name something carry colour: the welcome greeting,
+   the sidebar's count tiles, board column marks, and a Project's accent.
+   Status marks that warn or fail keep their own roles in both styles.
+
+   Every hue comes from the preset's palette roles, so a tinted preset or a
+   light theme recolours Vivid with it, and each role already carries its
+   contrast target. The provider never publishes "vivid" under increased
+   contrast, so nothing here has to undo itself there. */
+
+:root[data-octant-style="vivid"] {
+  --oct-vivid-accent: var(--octant-palette-purple, currentColor);
+  --oct-vivid-inbox: var(--octant-palette-blue, currentColor);
+  --oct-vivid-running: var(--octant-palette-orange, currentColor);
+  --oct-vivid-review: var(--octant-palette-purple, currentColor);
+  --oct-vivid-done: var(--octant-palette-green, currentColor);
+  /* Provider state dots in Settings: ready is green, setup or sign-in orange. */
+  --oct-provider-ready: var(--octant-palette-green, currentColor);
+  --oct-provider-setup: var(--octant-palette-orange, currentColor);
+}
+
+:root[data-octant-style="vivid"] .welcome__heading > .oct-title--hero {
+  color: var(--oct-vivid-accent);
+}

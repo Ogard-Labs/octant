@@ -336,16 +336,16 @@ export const FIRST_PARTY_PLUGIN_CATALOG: ReadonlyArray<ExtensionPackageManifest>
 ];
 
 /**
- * Stand-in for the server's first-party plugin activation state. Most
- * packages are bundled and enabled by default with no toggle UI yet; Linear
- * is bundled-off until that catalog is sourced from the server. Step 4
- * replaces this with a value sourced from the server catalog.
+ * Stand-in for the server's first-party plugin activation state. Every
+ * bundled package is enabled by default with no toggle UI yet; it must match
+ * the server's missing-row default until this is sourced from the server
+ * catalog.
  */
 export const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> =
   new Map([
     ["board", true],
     ["github-integration", true],
-    ["linear-integration", false],
+    ["linear-integration", true],
     ["appearance-pack", true],
     ["preview-viewers", true],
   ]);

@@ -59,6 +59,34 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getAllByText(/Worked for/)).toHaveLength(1);
   });
 
+  it("re-reads the thread's Canvas cards once a running reply settles", async () => {
+    const threadReferenceCards = vi.fn(async () => ({ cards: [] }));
+    const reply = (status: "incomplete" | "completed") =>
+      controller({
+        conversation: [{ id: "reply", role: "assistant", text: "Drafting the plan.", status }],
+      });
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        canvasClient={{ threadReferenceCards } as never}
+        controller={reply("incomplete")}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(threadReferenceCards).toHaveBeenCalledTimes(1));
+    expect(threadReferenceCards).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "code", threadId: String(threadId) }),
+    );
+
+    rerender(
+      <CodeThreadWorkspace
+        canvasClient={{ threadReferenceCards } as never}
+        controller={reply("completed")}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(threadReferenceCards).toHaveBeenCalledTimes(2));
+  });
+
   it("keeps the starting profile in the access menu, and stays quiet when it has none", async () => {
     const user = userEvent.setup();
     const profileId = "60000000-0000-4000-8000-000000000001";
@@ -1248,7 +1276,7 @@ describe("CodeThreadWorkspace", () => {
   it("keeps post-preview Canvas tools out of the live thread toolbar", () => {
     render(
       <CodeThreadWorkspace
-        canvasClient={{} as never}
+        canvasClient={{ threadReferenceCards: async () => ({ cards: [] }) } as never}
         controller={controller()}
         threadId={threadId}
       />,

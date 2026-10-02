@@ -140,6 +140,14 @@ export type SplitRatio = typeof SplitRatio.Type;
 export const ModeSwitcherPresentation = Schema.Literal("buttons", "dropdown");
 export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
 
+/** How the sidebar offers its thread filter: behind an icon, or always shown. */
+export const SidebarSearchPresentation = Schema.Literal("icon", "field");
+export type SidebarSearchPresentation = typeof SidebarSearchPresentation.Type;
+
+/** What a collapsed sidebar becomes: an icon rail, or hidden outright. */
+export const SidebarCollapsedPresentation = Schema.Literal("rail", "hidden");
+export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.Type;
+
 /**
  * A destination the sidebar can offer, named for what the person using the
  * shell wants rather than for the per-mode row that renders it: one
@@ -444,6 +452,27 @@ export const ShellSettings = Schema.Struct({
    * persisted before this setting shipped decodes to on.
    */
   sidebarMoreEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Whether Inbox, Running, To review, and Done today sit in the sidebar as
+   * count tiles. Off keeps the plain Inbox and Board rows. A store persisted
+   * before the tiles shipped decodes to on.
+   */
+  sidebarCountTiles: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * The sidebar's thread filter: an icon that opens a field, or a field that
+   * is always there. A store persisted before the choice decodes to the icon.
+   */
+  sidebarSearchPresentation: Schema.optionalWith(SidebarSearchPresentation, {
+    default: () => "icon" as const,
+  }),
+  /**
+   * What Hide sidebar leaves behind: a narrow rail of icons, or nothing (the
+   * window chrome then offers Show sidebar). A store persisted before the
+   * rail shipped decodes to the rail.
+   */
+  sidebarCollapsedPresentation: Schema.optionalWith(SidebarCollapsedPresentation, {
+    default: () => "rail" as const,
+  }),
   environmentPresentationByMode: Schema.optionalWith(EnvironmentPresentationByMode, {
     default: () => DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   }),

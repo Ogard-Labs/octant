@@ -148,6 +148,14 @@ export interface CodeComposerAdapterProps {
   readonly createFromControl?: ReactNode;
   /** Ready-made prompts shown under the composer; choosing one fills the prompt. */
   readonly suggestions?: ReadonlyArray<CodeComposerSuggestion>;
+  /** Threads executing now, and finished ones waiting for review, for the heading's line. */
+  readonly runningCount?: number | undefined;
+  readonly reviewCount?: number | undefined;
+  /**
+   * The start screen's action tiles and Running now strip, directly under the
+   * composer and its suggestions, ahead of the sections in `beneath`.
+   */
+  readonly homeStart?: ReactNode;
   /** Content shown under the composer (what is waiting, what to continue). */
   readonly beneath?: ReactNode;
   /**
@@ -676,7 +684,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading greetingName={props.greetingName} question="What should we build?" />
+          <WelcomeHeading
+            greetingName={props.greetingName}
+            reviewCount={props.reviewCount}
+            runningCount={props.runningCount}
+          />
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (
@@ -685,24 +697,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray composer-tray--above" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              {projectControl}
-              {branchControl}
-              {environmentControl}
-            </div>
-            <div className="composer-tray__trailing">
-              {hasProject ? (
-                <CodeWorkspaceSelector
-                  onChange={setWorkspaceOverride}
-                  value={workspace}
-                  {...(props.creating === true ? { disabled: true } : {})}
-                />
-              ) : null}
-              {props.createFromControl}
-            </div>
-          </div>
           <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  {projectControl}
+                  {branchControl}
+                  {environmentControl}
+                </div>
+                <div className="composer-tray__trailing">
+                  {hasProject ? (
+                    <CodeWorkspaceSelector
+                      onChange={setWorkspaceOverride}
+                      value={workspace}
+                      {...(props.creating === true ? { disabled: true } : {})}
+                    />
+                  ) : null}
+                  {props.createFromControl}
+                </div>
+              </div>
+            }
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
@@ -911,6 +925,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         )}
 
+        {/* The action tiles and Running now come first: a running thread is
+            what a person most often came back to, and below the five
+            suggestions it sat under the fold. */}
+        {props.homeStart}
         {/* A draft of only spaces is empty to submit, so it is empty here too:
             the suggestions stay reachable instead of disappearing behind a
             stray space. */}
@@ -926,14 +944,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 key={suggestion.id}
                 onClick={() => applySuggestion(suggestion)}
                 size="sm"
+                title={suggestion.prompt}
                 type="button"
                 variant="ghost"
               >
-                <span className="code-home__suggestion-label">{suggestion.label}</span>
-                <span
-                  className="code-home__suggestion-text"
-                  id={`${suggestionDescriptionId}-${suggestion.id}`}
-                >
+                {suggestion.label}
+                <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
                   {suggestion.prompt}
                 </span>
               </OctantButton>

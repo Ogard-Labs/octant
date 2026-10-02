@@ -24,20 +24,28 @@
   overflow: visible;
 }
 
-/* The track is the whole window, so it has to read as a ring on its own. At
-   the border ink it disappeared and a short arc looked like a spinner. Mixing
-   from the foreground keeps it a fixed step below the arc in every theme. */
+/* The context ring is the one composer mark that carries colour in every
+   style: a reader checks how full the window is at a glance, and a grey arc
+   beside grey controls had to be read rather than seen. The arc takes the
+   palette's amber, the track a faint step of the same hue so the ring reads
+   whole, and a near-full window turns it red. */
+.composer-context-meter {
+  --composer-context-meter-ink: var(--octant-palette-orange, var(--octant-text-primary));
+}
+
+.composer-context-meter[data-fill="high"] {
+  --composer-context-meter-ink: var(--octant-palette-red, var(--oct-warn-fg));
+}
+
 .composer-context-meter__track {
-  stroke: color-mix(in oklab, var(--octant-text-primary) 30%, transparent);
+  stroke: color-mix(in oklab, var(--composer-context-meter-ink) 28%, transparent);
   stroke-width: 2;
 }
 
-/* The arc wears the foreground ink rather than the button's secondary ink:
-   it is the figure, and the track is the ground. It moves to its new length
-   rather than jumping to it — a value that snaps between renders reads as a
-   redraw rather than as consumption. */
+/* The arc moves to its new length rather than jumping to it — a value that
+   snaps between renders reads as a redraw rather than as consumption. */
 .composer-context-meter__used {
-  stroke: var(--octant-text-primary);
+  stroke: var(--composer-context-meter-ink);
   stroke-width: 2;
   stroke-linecap: round;
   transition: stroke-dasharray var(--oct-motion-base) var(--oct-ease-motion);
@@ -49,12 +57,9 @@
   }
 }
 
-/* Past four fifths of the window the next long turn may not fit; the arc
-   takes the theme's warning ink, and the trigger's name carries the figure
-   for anyone who cannot see the change. */
-.composer-context-meter[data-fill="high"] .composer-context-meter__used {
-  stroke: var(--oct-warn-fg);
-}
+/* Past four fifths of the window the next long turn may not fit; the ring
+   turns red (above), and the trigger's name carries the figure for anyone
+   who cannot see the change. */
 
 /* A provider usage limit is at warning or exhausted. The dot is the only
    at-a-glance alert left in the composer row now that the status line lives
@@ -71,12 +76,12 @@
    (side="top" align="end"); width, padding, and the neutral ramp below are
    this surface's own. */
 .context-window-popover {
-  /* A graded neutral ramp for the breakdown. The default theme puts no hue
-     on marks, so categories are told apart by lightness, mixed from the
-     foreground into the popover's own ground so a swatch in the key and its
-     segment in the bar are the same paint. */
+  /* Each category of the context window takes its own palette hue, so a
+     swatch in the key and its segment in the bar match at a glance, and the
+     biggest share (the conversation) reads in blue. Every hue comes from the
+     theme's palette roles, which carry their own contrast on the panel. */
   --context-window-track: color-mix(in oklab, var(--oct-fg) 10%, var(--octant-floating));
-  --context-window-tone: var(--oct-fg);
+  --context-window-tone: var(--octant-palette-blue, var(--oct-fg));
 
   width: min(320px, calc(100vw - 24px));
   padding: 12px;
@@ -85,31 +90,31 @@
 }
 
 .context-window-popover [data-tone="2"] {
-  --context-window-tone: color-mix(in oklab, var(--oct-fg) 78%, var(--octant-floating));
+  --context-window-tone: var(--octant-palette-orange, var(--oct-fg));
 }
 
 .context-window-popover [data-tone="3"] {
-  --context-window-tone: color-mix(in oklab, var(--oct-fg) 62%, var(--octant-floating));
+  --context-window-tone: var(--octant-palette-purple, var(--oct-fg));
 }
 
 .context-window-popover [data-tone="4"] {
-  --context-window-tone: color-mix(in oklab, var(--oct-fg) 48%, var(--octant-floating));
+  --context-window-tone: var(--octant-palette-teal, var(--oct-fg));
 }
 
 .context-window-popover [data-tone="5"] {
-  --context-window-tone: color-mix(in oklab, var(--oct-fg) 38%, var(--octant-floating));
+  --context-window-tone: var(--octant-palette-green, var(--oct-fg));
 }
 
 .context-window-popover [data-tone="6"] {
-  --context-window-tone: color-mix(in oklab, var(--oct-fg) 30%, var(--octant-floating));
+  --context-window-tone: var(--octant-palette-pink, var(--oct-fg));
 }
 
 .context-window-popover [data-tone="7"] {
-  --context-window-tone: color-mix(in oklab, var(--oct-fg) 20%, var(--octant-floating));
+  --context-window-tone: var(--octant-palette-yellow, var(--oct-fg));
 }
 
 .context-window-popover [data-tone="8"] {
-  --context-window-tone: var(--context-window-track);
+  --context-window-tone: var(--octant-palette-red, var(--oct-fg));
 }
 
 .context-window-popover__header {
@@ -345,10 +350,13 @@
   border-radius: var(--oct-radius-pill);
 }
 
+/* Limit bars fill in the palette's blue, so a glance at the panel tells how
+   much is used without reading each figure; near and spent keep their own
+   warning and danger inks. */
 .context-window-popover__limit-meter > span {
   display: block;
   height: 100%;
-  background: var(--oct-fg);
+  background: var(--octant-palette-blue, var(--oct-fg));
   border-radius: inherit;
   transition: width var(--oct-motion-base) var(--oct-ease-motion);
 }

@@ -264,12 +264,22 @@ export const AppBackground = Schema.Union(
 );
 export type AppBackground = typeof AppBackground.Type;
 
-// The retired pattern kind still decodes so older rows load, but the default
-// is the plain page: defaulting to "theme" wrote the retired kind into every
-// new settings row even though it resolves to nothing.
+// The retired pattern kind still decodes so older rows load. A new install
+// starts on the soft gradient: a flat page made the start screens read as an
+// empty grey box. Rows saved since the ground existed carry their own choice,
+// "none" included, so this reaches fresh installs and Reset only.
 export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({
-  kind: "none",
+  kind: "builtin",
+  presetId: "soft-glow",
 });
+
+// What a row written before the ground existed replays as. Those people saw
+// a plain page, and a replay must not repaint what they already had.
+const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({ kind: "none" });
+
+/** How much colour the chrome carries; the palette itself stays the preset's. */
+export const ThemeStyle = Schema.Literal("default", "vivid");
+export type ThemeStyle = typeof ThemeStyle.Type;
 
 export const ThemeSettings = Schema.Struct({
   mode: ThemeMode,
@@ -286,9 +296,10 @@ export const ThemeSettings = Schema.Struct({
   semanticOverrides: ThemeSemanticOverrides,
   sidebarBackground: SidebarBackground,
   // Optional on the wire so journal events and projection rows written before
-  // the application background existed still replay; they decode to the default.
+  // the application background existed still replay; they decode to the plain
+  // page they showed, not to today's default picture.
   appBackground: Schema.optionalWith(AppBackground, {
-    default: () => DEFAULT_APP_BACKGROUND,
+    default: () => PLAIN_APP_BACKGROUND,
   }),
   /**
    * How much of the theme's sidebar colour lies over the glass behind the
@@ -297,6 +308,12 @@ export const ThemeSettings = Schema.Struct({
    * written before the slider existed still decode.
    */
   glassTint: Schema.optional(Schema.Int.pipe(Schema.between(0, 90))),
+  /**
+   * Default keeps the chrome monochrome; Vivid lets count tiles, board marks,
+   * Project accents, and the welcome greeting take colour. Optional so rows
+   * written before the choice existed still decode, as Default.
+   */
+  style: Schema.optional(ThemeStyle),
   increasedContrast: Schema.Boolean,
   reducedMotion: Schema.Boolean,
   reducedTransparency: Schema.Boolean,

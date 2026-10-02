@@ -63,6 +63,7 @@ import {
   ProjectLifecycleChanged,
   ProjectOrderChanged,
   ProjectProviderPolicyChanged,
+  ProjectColorChanged,
   ProjectRenamed,
   ProviderDefaultsUpdated,
   ProviderCatalogUpdated,
@@ -255,6 +256,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     })
     .register("project.created@1", 1, ProjectCreated)
     .register("project.renamed@1", 1, ProjectRenamed)
+    .register("project.color-changed@1", 1, ProjectColorChanged)
     .register("project.order-changed@1", 1, ProjectOrderChanged)
     .register("project.lifecycle-changed@1", 1, ProjectLifecycleChanged)
     .register("project.binding-relinked@1", 1, ProjectBindingRelinked)

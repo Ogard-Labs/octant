@@ -222,6 +222,9 @@ describe("Journal", () => {
         environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
         sidebarDestinations: { order: [], visibility: [] },
         sidebarMoreEnabled: true,
+        sidebarCountTiles: true,
+        sidebarSearchPresentation: "icon",
+        sidebarCollapsedPresentation: "rail",
       },
     } as const;
 

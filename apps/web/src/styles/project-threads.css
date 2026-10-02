@@ -328,7 +328,7 @@
 .project-row__select {
   display: grid;
   min-width: 0;
-  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   gap: var(--oct-space-2);
   align-items: center;
   min-height: var(--oct-nav-row-h);
@@ -345,15 +345,53 @@
   background: transparent;
 }
 
-.project-row__folder-icon {
+/* A Project's identity: its first letter on a tile in the colour the person
+   picked. The fill reads the same palette role the saved-view swatches do, via
+   the data-view-color hook. It is mixed toward black so the white initial holds
+   its contrast on the lighter dark-theme palette. With no colour the tile is
+   neutral. The colour names the Project; it never carries status. */
+.project-tile {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--octant-project-view-color) 80%, black);
+  color: white;
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+}
+
+.project-tile[data-project-color="none"] {
+  background: var(--octant-control-hover);
   color: var(--oct-muted);
 }
 
-.project-row[data-active="true"] .project-row__folder-icon {
-  color: var(--oct-fg);
+.project-tile__dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-project-view-color, transparent);
+  box-shadow: inset 0 0 0 1px var(--octant-border);
+}
+
+/* The overview's tile is the colour picker, so it is a menu trigger that
+   keeps the tile's own shape. */
+.project-overview__color {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  cursor: pointer;
 }
 
 .project-row__copy {

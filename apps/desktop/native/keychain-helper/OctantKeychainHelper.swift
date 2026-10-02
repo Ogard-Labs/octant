@@ -52,6 +52,12 @@ private struct LegacyOwnedCredential {
     let persistentReference: Data
 }
 
+// File-based Keychain items trust the cdhash of the binary that created them,
+// and an ad-hoc helper's cdhash changes with every source change. A foreign
+// item would otherwise block on a SecurityAgent prompt until the desktop kills
+// the helper; LAContext does not suppress that legacy prompt.
+_ = SecKeychainSetUserInteractionAllowed(false)
+
 private var input = FileHandle.standardInput.readData(ofLength: maximumMessageBytes + 1)
 
 private func emit(_ response: [String: Any]) -> Never {
@@ -414,6 +420,32 @@ private func migrateLegacyHostIdentityCredential(
     )
 }
 
+// SecItemUpdate replaces the data of an item another code identity owns while
+// leaving that owner's ACL, so this helper still cannot read it back.
+private func providerItemReadable(account: String, storeScope: String) -> Bool {
+    var query = baseQuery(service: providerService, account: account, storeScope: storeScope)
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    query[kSecReturnData as String] = true
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    if var data = result as? Data { data.resetBytes(in: 0..<data.count) }
+    result = nil
+    return status == errSecSuccess
+}
+
+// SecItemDelete refuses an item owned by another code identity
+// (errSecInvalidOwnerEdit); deleting the exact item reference does not.
+private func deleteProviderItem(account: String, storeScope: String) -> OSStatus {
+    var query = baseQuery(service: providerService, account: account, storeScope: storeScope)
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    query[kSecReturnRef as String] = true
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess else { return status }
+    guard let result, CFGetTypeID(result) == SecKeychainItemGetTypeID() else { return errSecInternalError }
+    return SecKeychainItemDelete(result as! SecKeychainItem)
+}
+
 private func baseQuery(service: String, account: String, storeScope: String) -> [String: Any] {
     [
         kSecClass as String: kSecClassGenericPassword,
@@ -772,7 +804,18 @@ case "set":
 
     var addQuery = baseQuery(service: providerService, account: providerAccount, storeScope: storeScope)
     addQuery[kSecValueData as String] = credentialData
-    let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+    var addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+    if addStatus == errSecDuplicateItem,
+       !providerItemReadable(account: providerAccount, storeScope: storeScope)
+    {
+        let deleteStatus = deleteProviderItem(account: providerAccount, storeScope: storeScope)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            addQuery.removeValue(forKey: kSecValueData as String)
+            credentialData.resetBytes(in: 0..<credentialData.count)
+            fail(mapStatus(deleteStatus))
+        }
+        addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+    }
     let finalStatus: OSStatus
     if addStatus == errSecDuplicateItem {
         finalStatus = SecItemUpdate(
@@ -785,6 +828,7 @@ case "set":
     addQuery.removeValue(forKey: kSecValueData as String)
     credentialData.resetBytes(in: 0..<credentialData.count)
     guard finalStatus == errSecSuccess else { fail(mapStatus(finalStatus)) }
+    guard providerItemReadable(account: providerAccount, storeScope: storeScope) else { fail(.unavailable) }
     emit(["version": protocolVersion, "ok": true])
 
 case "has":
@@ -868,7 +912,7 @@ case "delete":
     } catch {
         fail(.failed)
     }
-    let status = SecItemDelete(baseQuery(service: providerService, account: providerAccount, storeScope: storeScope) as CFDictionary)
+    let status = deleteProviderItem(account: providerAccount, storeScope: storeScope)
     guard status == errSecSuccess || status == errSecItemNotFound else { fail(mapStatus(status)) }
     emit(["version": protocolVersion, "ok": true])
 

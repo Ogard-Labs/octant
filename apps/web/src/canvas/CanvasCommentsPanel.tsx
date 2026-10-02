@@ -11,6 +11,7 @@ import {
 import type { CanvasActor, CanvasDefinition, CanvasId } from "@octant/contracts/canvas";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { canvasBlockLabel } from "./CanvasDocument";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -22,7 +23,23 @@ export interface CanvasCommentsPanelProps {
   readonly author: CanvasActor;
   readonly load: (canvasId: CanvasId) => Promise<CanvasCommentsOutcome>;
   readonly send: (command: CanvasCommentCommand) => Promise<CanvasCommentCommandResult>;
+  /**
+   * The block a reader opened comments from. The list narrows to that block's
+   * threads and a new comment lands on it until the reader shows them all.
+   */
+  readonly focusedBlockId?: string;
+  readonly onShowAllBlocks?: () => void;
+  /** Every journaled thread, reported whenever the host's list is reloaded. */
+  readonly onThreadsChange?: (threads: ReadonlyArray<CanvasCommentThread>) => void;
 }
+
+type CommentFilter = "open" | "resolved" | "all";
+
+const FILTERS: ReadonlyArray<{ readonly id: CommentFilter; readonly label: string }> = [
+  { id: "open", label: "Open" },
+  { id: "resolved", label: "Resolved" },
+  { id: "all", label: "All" },
+];
 
 interface AnchorChoice {
   readonly id: string;
@@ -33,8 +50,7 @@ interface AnchorChoice {
 function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice> {
   const choices: AnchorChoice[] = [];
   for (const block of definition.blocks) {
-    const blockLabel =
-      block.kind === "heading" ? block.text : block.kind === "diagram" ? "Board" : block.kind;
+    const blockLabel = canvasBlockLabel(block);
     choices.push({
       id: `block:${String(block.blockId)}`,
       label: blockLabel,
@@ -63,8 +79,10 @@ function anchorLabel(anchor: CanvasCommentAnchor, choices: ReadonlyArray<AnchorC
   });
   // A comment whose anchor left the document is shown, not dropped: the
   // conversation outlives the block it was about.
-  return match?.label ?? "No longer on the canvas";
+  return match?.label ?? OUTDATED_ANCHOR_LABEL;
 }
+
+const OUTDATED_ANCHOR_LABEL = "No longer on the canvas";
 
 function authorLabel(thread: CanvasCommentThread["comment"]): string {
   const who = thread.author.kind === "agent" ? "Agent" : "You";
@@ -85,11 +103,20 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
   const [working, setWorking] = useState(false);
   const choices = useMemo(() => anchorChoices(props.definition), [props.definition]);
   const [anchorId, setAnchorId] = useState<string>();
+  const [filter, setFilter] = useState<CommentFilter>("open");
+  const focusedChoiceId =
+    props.focusedBlockId === undefined ? undefined : `block:${props.focusedBlockId}`;
+  useEffect(() => {
+    if (focusedChoiceId !== undefined) setAnchorId(focusedChoiceId);
+  }, [focusedChoiceId]);
   const selectedAnchor = choices.find((choice) => choice.id === anchorId) ?? choices[0];
+  const { onThreadsChange } = props;
 
   const reload = useCallback(async () => {
     try {
-      setOutcome(await props.load(props.canvasId));
+      const next = await props.load(props.canvasId);
+      setOutcome(next);
+      onThreadsChange?.(next.kind === "ready" ? next.threads : []);
     } catch {
       setOutcome({
         kind: "unavailable",
@@ -97,7 +124,7 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
         reason: "Comments could not be loaded from the host.",
       });
     }
-  }, [props.canvasId, props.load]);
+  }, [props.canvasId, props.load, onThreadsChange]);
 
   useEffect(() => {
     void reload();
@@ -134,30 +161,69 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
   if (outcome.kind === "unavailable") {
     return (
       <section aria-label="Canvas comments" className="canvas-comments">
-        <h3 className="canvas-comments__title">Comments</h3>
         <p className="canvas-comments__note">{outcome.reason}</p>
       </section>
     );
   }
 
+  const focusedLabel = choices.find((choice) => choice.id === focusedChoiceId)?.label;
+  const visible = outcome.threads.filter((thread) => {
+    const resolved = thread.comment.resolvedAt !== undefined;
+    if (filter === "open" && resolved) return false;
+    if (filter === "resolved" && !resolved) return false;
+    return (
+      props.focusedBlockId === undefined ||
+      String(thread.comment.anchor.blockId) === props.focusedBlockId
+    );
+  });
+
   return (
     <section aria-label="Canvas comments" className="canvas-comments">
-      <h3 className="canvas-comments__title">Comments</h3>
+      <div aria-label="Show comments" className="canvas-comments__filters" role="group">
+        {FILTERS.map((option) => (
+          <OctantButton
+            aria-pressed={filter === option.id}
+            key={option.id}
+            onClick={() => setFilter(option.id)}
+            size="sm"
+            type="button"
+            variant={filter === option.id ? "secondary" : "ghost"}
+          >
+            {option.label}
+          </OctantButton>
+        ))}
+      </div>
+      {props.focusedBlockId === undefined ? null : (
+        <p className="canvas-comments__scope">
+          <span>On {focusedLabel ?? OUTDATED_ANCHOR_LABEL}</span>
+          {props.onShowAllBlocks === undefined ? null : (
+            <OctantButton onClick={props.onShowAllBlocks} size="sm" type="button" variant="ghost">
+              Show all
+            </OctantButton>
+          )}
+        </p>
+      )}
       {outcome.threads.length === 0 ? (
         <p className="canvas-comments__note">No comments yet.</p>
+      ) : visible.length === 0 ? (
+        <p className="canvas-comments__note">
+          {filter === "resolved" ? "No resolved comments." : "No open comments."}
+        </p>
       ) : (
         <ul aria-label="Comment threads" className="canvas-comments__list">
-          {outcome.threads.map((thread) => {
+          {visible.map((thread) => {
             const commentId = String(thread.comment.commentId);
             const resolved = thread.comment.resolvedAt !== undefined;
+            const onLabel = anchorLabel(thread.comment.anchor, choices);
             return (
               <li
                 className="canvas-comments__thread"
+                data-outdated={onLabel === OUTDATED_ANCHOR_LABEL ? "true" : "false"}
                 data-resolved={resolved ? "true" : "false"}
                 key={commentId}
               >
                 <p className="canvas-comments__meta">
-                  <span>{anchorLabel(thread.comment.anchor, choices)}</span>
+                  <span>{onLabel}</span>
                   <span>{authorLabel(thread.comment)}</span>
                   {resolved ? <span>Resolved</span> : null}
                 </p>

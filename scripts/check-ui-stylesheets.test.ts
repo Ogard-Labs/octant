@@ -236,7 +236,7 @@ describe("UI stylesheet check", () => {
         [CSS]: [
           '.a::after { content: "Use !important"; }',
           ".b { --status: !important-foo; }",
-          ".c { font-weight: 600 !important; }",
+          ".c { font-weight: 700 !important; }",
         ].join("\n"),
       }).map((finding) => `${finding.rule} ${String(finding.line)}`),
     ).toEqual(["important 3", "heavy-weight 3"]);
@@ -277,28 +277,55 @@ describe("UI stylesheet check", () => {
     ).toEqual(["motion-literal 1", "motion-literal 2"]);
   });
 
-  it("flags a numeric weight above 500 that is not a hundred step", () => {
+  it("flags a numeric weight above 600 that is not a hundred step", () => {
     expect(
       findStylesheetFindings({
         [CSS]: [
-          ".a { font-weight: 550; }",
-          ".b { font-weight: 600 !important; }",
-          ".c { font-weight: 500; }",
+          ".a { font-weight: 650; }",
+          ".b { font-weight: 700 !important; }",
+          ".c { font-weight: 600; }",
         ].join("\n"),
       }).map((finding) => `${finding.rule} ${String(finding.line)}`),
     ).toEqual(["heavy-weight 1", "important 2", "heavy-weight 2"]);
   });
 
-  it("flags bold weights so only page titles and content emphasis stay heavy", () => {
+  it("allows emphasis at 600 and keeps bold for the title roles", () => {
     expect(
       findStylesheetFindings({
         [CSS]: [
           ".a { font-weight: var(--oct-weight-display); }",
           ".b { font-weight: 600; }",
           ".c { font-weight: var(--oct-weight-strong); }",
+          ".d { font-weight: bold; }",
+          ".e { font-weight: 700; }",
         ].join("\n"),
       }).map((finding) => `${finding.rule} ${String(finding.line)}`),
-    ).toEqual(["heavy-weight 2", "heavy-weight 3"]);
+    ).toEqual(["heavy-weight 4", "heavy-weight 5"]);
+  });
+
+  it("lets only the title roles in surface.css use the title weight", () => {
+    const rule = ".oct-title { font-weight: var(--oct-weight-title); }";
+    expect(
+      findStylesheetFindings({ "apps/web/src/styles/surface.css": rule }).map(
+        (finding) => finding.rule,
+      ),
+    ).toEqual([]);
+    expect(
+      findStylesheetFindings({ [CSS]: rule }).map(
+        (finding) => `${finding.rule} ${String(finding.line)}`,
+      ),
+    ).toEqual(["heavy-weight 1"]);
+  });
+
+  it("lets a feature paint a button it asked for in the bare variant", () => {
+    const primitives = collectPrimitiveClasses({
+      "Tile.tsx": '<OctantButton className="tile" variant="bare">x</OctantButton>',
+      "Card.tsx": "<OctantButton className=\"card\" variant={'bare'}>x</OctantButton>",
+      "Row.tsx": '<OctantButton className="row" variant="ghost">x</OctantButton>',
+    });
+    expect(primitives.has("tile")).toBe(false);
+    expect(primitives.has("card")).toBe(false);
+    expect(primitives.get("row")).toBe("OctantButton");
   });
 
   it("flags feature rules that repaint a shared control instead of placing it", () => {

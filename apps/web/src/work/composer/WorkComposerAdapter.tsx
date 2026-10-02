@@ -63,6 +63,7 @@ import {
 import { useThreadMentions } from "../../chat/useThreadMentions";
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
+import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
 
 export interface WorkComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -96,6 +97,11 @@ export interface WorkComposerAdapterProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
+  /** Threads executing now, and finished ones waiting for review, for the heading's line. */
+  readonly runningCount?: number | undefined;
+  readonly reviewCount?: number | undefined;
+  /** The start screen's action tiles and Running now strip, under the composer. */
+  readonly homeStart?: ReactNode;
   readonly folderControl?: ReactNode;
   readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
@@ -338,20 +344,27 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading greetingName={props.greetingName} question="What are we working on?" />
+          <WelcomeHeading
+            greetingName={props.greetingName}
+            reviewCount={props.reviewCount}
+            runningCount={props.runningCount}
+          />
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray composer-tray--above" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              {projectControl}
-              {environmentControl}
-            </div>
-            {props.createFromControl === undefined ? null : (
-              <div className="composer-tray__trailing">{props.createFromControl}</div>
-            )}
-          </div>
           <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  <WorkKindSwitch />
+                  {projectControl}
+                  {environmentControl}
+                </div>
+                {props.createFromControl === undefined ? null : (
+                  <div className="composer-tray__trailing">{props.createFromControl}</div>
+                )}
+              </div>
+            }
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
@@ -519,6 +532,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             }}
           />
         </div>
+
+        {props.homeStart}
 
         {props.errorMessage !== undefined ? (
           <p className="work-composer-adapter__error" role="alert">

@@ -8,7 +8,7 @@ import type {
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { SettingRow, SettingsFactList, SettingsState } from "./primitives";
+import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
 
 /**
  * The compact Settings connection card for one host's
@@ -120,9 +120,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
 
   return (
     <section aria-label="GitHub" className="github-settings" id="settings-github">
-      <section aria-label="Account" className="settings-card-section settings-card-section--open">
-        <h2>Account</h2>
-        <p className="settings-section-note">GitHub authentication on the selected host.</p>
+      <SettingsSection description="GitHub authentication on the selected host." title="Account">
         <SettingsFactList
           facts={[
             { label: "State", value: STATE_LABELS[snapshot.state] },
@@ -151,16 +149,11 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             <code className="github-settings__device-code">{snapshot.interaction.userCode}</code>
           </div>
         )}
-      </section>
+      </SettingsSection>
 
       {snapshot.capabilities.length === 0 ? null : (
-        <section
-          aria-label="Capabilities"
-          className="settings-card-section settings-card-section--open"
-        >
-          <h2>Capabilities</h2>
-          <p className="settings-section-note">GitHub data available to Octant.</p>
-          <ul className="github-settings__capabilities">
+        <SettingsSection description="GitHub data available to Octant." title="Capabilities">
+          <ul className="setgroup github-settings__capabilities">
             {snapshot.capabilities.map((capability) => (
               <li key={capability.kind}>
                 <span className="oct-row-label">{CAPABILITY_LABELS[capability.kind]}</span>
@@ -179,25 +172,21 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
               </li>
             ))}
           </ul>
-        </section>
+        </SettingsSection>
       )}
 
-      <section
-        aria-label="Connection"
-        className="settings-card-section settings-card-section--open"
+      <SettingsSection
+        {...(snapshot.state === "insecure-storage"
+          ? {
+              description:
+                "This host's GitHub token is stored in gh's plaintext config file, so Octant blocks GitHub until it moves. Moving it keeps the same token and account; Octant writes it to this host's secure credential store and only then lets gh drop the plaintext copy. If the secure store is unavailable the credential is left untouched.",
+            }
+          : {})}
+        title="Connection"
       >
-        <h2>Connection</h2>
-        {snapshot.state === "insecure-storage" ? (
-          <p className="settings-section-note">
-            This host's GitHub token is stored in gh's plaintext config file, so Octant blocks
-            GitHub until it moves. Moving it keeps the same token and account; Octant writes it to
-            this host's secure credential store and only then lets gh drop the plaintext copy. If
-            the secure store is unavailable the credential is left untouched.
-          </p>
-        ) : null}
         <div className="setgroup">
           <SettingRow
-            description="Refresh scopes or remove local credentials."
+            description="Set up, refresh scopes, or move the credential to secure storage."
             label="Connection"
             labelledBySection
             scope="host"
@@ -259,69 +248,18 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                   Enable Projects metadata
                 </OctantButton>
               ) : null}
-              {credentialRemovable ? (
-                logoutArmed ? (
-                  <OctantButton
-                    disabled={commandBusy}
-                    onClick={() =>
-                      void runCommand({
-                        kind: "logout",
-                        confirmation: "confirm-github-local-logout",
-                      })
-                    }
-                    size="sm"
-                    type="button"
-                    variant="destructive"
-                  >
-                    {snapshot.state === "insecure-storage"
-                      ? "Confirm credential removal"
-                      : "Confirm local logout"}
-                  </OctantButton>
-                ) : (
-                  <OctantButton
-                    disabled={commandBusy}
-                    onClick={() => setLogoutArmed(true)}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    {snapshot.state === "insecure-storage"
-                      ? "Remove insecure credential"
-                      : "Log out on this host"}
-                  </OctantButton>
-                )
-              ) : null}
             </div>
           </SettingRow>
         </div>
         {commandError === undefined ? null : (
           <SettingsState kind="error">{commandError}</SettingsState>
         )}
-      </section>
+      </SettingsSection>
 
-      <section
-        aria-label="Revoke access on GitHub"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Revoke access on GitHub</h2>
-        <p className="settings-section-line">
-          Logging out removes the credential from this host only; it does not revoke Octant's GitHub
-          authorization. To revoke it, open your{" "}
-          <a href={GITHUB_APPLICATIONS_URL} rel="noreferrer" target="_blank">
-            GitHub application settings
-          </a>{" "}
-          and remove the GitHub CLI authorization.
-        </p>
-      </section>
-
-      {/* The disclosure is the section's label row: one name for the group
-          and the control that opens it, rather than a heading and a button
-          that both say "Advanced diagnostics". */}
-      <section
-        aria-label="Advanced diagnostics"
-        className="settings-card-section settings-card-section--open"
-      >
-        <div className="settings-section-head">
+      {/* The disclosure sits on the section's label line: the label names the
+          group and the control opens it. */}
+      <SettingsSection
+        actions={
           <OctantButton
             aria-expanded={diagnosticsOpen}
             className="github-settings__diagnostics-trigger"
@@ -333,7 +271,9 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             Advanced diagnostics
             <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
           </OctantButton>
-        </div>
+        }
+        title="Diagnostics"
+      >
         {diagnosticsOpen ? (
           <SettingsFactList
             facts={[
@@ -357,7 +297,71 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             ]}
           />
         ) : null}
-      </section>
+      </SettingsSection>
+
+      {/* Logging out and GitHub-side revocation are the page's destructive
+          group, so they sit last, after the connection and diagnostics. */}
+      <SettingsSection
+        description={
+          <>
+            Logging out removes the credential from this host only; it does not revoke Octant's
+            GitHub authorization. To revoke it, open your{" "}
+            <a href={GITHUB_APPLICATIONS_URL} rel="noreferrer" target="_blank">
+              GitHub application settings
+            </a>{" "}
+            and remove the GitHub CLI authorization.
+          </>
+        }
+        tone="danger"
+        title="Revoke access on GitHub"
+      >
+        {credentialRemovable ? (
+          <div className="setgroup">
+            <SettingRow
+              description="Removes the credential from this host. It stays authorized on GitHub until you revoke it there."
+              label="Log out"
+              labelledBySection
+              scope="host"
+              settingId="github-logout"
+            >
+              <div className="github-settings__controls">
+                {credentialRemovable ? (
+                  logoutArmed ? (
+                    <OctantButton
+                      disabled={commandBusy}
+                      onClick={() =>
+                        void runCommand({
+                          kind: "logout",
+                          confirmation: "confirm-github-local-logout",
+                        })
+                      }
+                      size="sm"
+                      type="button"
+                      variant="destructive"
+                    >
+                      {snapshot.state === "insecure-storage"
+                        ? "Confirm credential removal"
+                        : "Confirm local logout"}
+                    </OctantButton>
+                  ) : (
+                    <OctantButton
+                      disabled={commandBusy}
+                      onClick={() => setLogoutArmed(true)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {snapshot.state === "insecure-storage"
+                        ? "Remove insecure credential"
+                        : "Log out on this host"}
+                    </OctantButton>
+                  )
+                ) : null}
+              </div>
+            </SettingRow>
+          </div>
+        ) : null}
+      </SettingsSection>
     </section>
   );
 }

@@ -22,6 +22,7 @@ export interface OctantCommandSources {
   readonly projects: ReadonlyArray<CommandProject>;
   readonly onOpenProject: (project: CommandProject) => void;
   readonly skills: ReadonlyArray<CommandSkill>;
+  readonly pluginServers: ReadonlyArray<CommandPluginServer>;
   /**
    * Apple projects the host listed in the active Code thread's checkout. A
    * thread with none contributes no workbench command, because there would be
@@ -63,6 +64,13 @@ export interface CommandSkill {
    */
   readonly skillId: string;
   readonly displayName: string;
+}
+
+export interface CommandPluginServer {
+  /** The composer reference, `@plugin/component`, resolved by the host at send. */
+  readonly reference: string;
+  readonly displayName: string;
+  readonly pluginName: string;
 }
 
 const MODE_LABEL: Record<OctantMode, string> = { chat: "Chat", work: "Work", code: "Code" };
@@ -141,6 +149,17 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
       detail: "Skill",
       keywords: ["skill", skill.skillId],
       action: { kind: "address", reference: `$${skill.skillId}` },
+    });
+  }
+
+  for (const server of sources.pluginServers) {
+    commands.push({
+      id: `plugin:${server.reference}`,
+      title: server.displayName,
+      group: "Plugins",
+      detail: `MCP server · ${server.pluginName}`,
+      keywords: ["plugin", "mcp", server.pluginName, server.reference],
+      action: { kind: "address", reference: server.reference },
     });
   }
 
