@@ -92,7 +92,7 @@ export function ProjectSpendCeilingSection(props: {
       <h3>Spend ceiling</h3>
       {remaining === undefined ? (
         <p role="note">
-          No token ceiling is set on this Project. A turn must also stay under any thread ceiling.
+          No spend ceiling is set on this Project. A turn must also stay under any thread ceiling.
           Setting one is a host owner command. Tokens, turns, and total agent run time each count
           over the calendar window you choose.
         </p>
