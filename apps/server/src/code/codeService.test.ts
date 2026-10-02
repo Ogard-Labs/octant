@@ -866,6 +866,12 @@ describe("CodeService commands", () => {
       modelId: "model-b",
     });
     expect(changed.kind === "thread-updated" && changed.thread.modelOptionValues).toBeUndefined();
+    // The journal refuses a payload holding an undefined field, so switching
+    // models must drop the old options rather than write the key as undefined;
+    // writing it made every model switch in a running thread fail.
+    expect(
+      changed.kind === "thread-updated" && Object.hasOwn(changed.thread, "modelOptionValues"),
+    ).toBe(false);
   });
 
   it("changes provider/model without changing Code authority or delivery", async () => {

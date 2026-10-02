@@ -1959,16 +1959,10 @@ export class CodeService {
                         }
                       : command.kind === "change-code-thread-provider"
                         ? {
-                            ...current,
+                            ...withoutModelOptionValues(current),
                             providerInstanceId: command.providerInstanceId,
                             modelId: command.modelId,
-                            modelOptionValues:
-                              command.modelOptionValues ??
-                              (String(current.providerInstanceId) ===
-                                String(command.providerInstanceId) &&
-                              String(current.modelId) === String(command.modelId)
-                                ? current.modelOptionValues
-                                : undefined),
+                            ...nextModelOptionValues(current, command),
                             ...(String(current.providerInstanceId) ===
                               String(command.providerInstanceId) &&
                             String(current.modelId) === String(command.modelId)
@@ -3350,3 +3344,29 @@ export class CodeService {
 }
 
 export type { CodeFileSaveResult };
+
+/*
+ * A thread record goes into the journal, which refuses any field holding
+ * `undefined`. Switching to another model used to write `modelOptionValues:
+ * undefined`, and every model switch in an existing thread then failed with a
+ * generic service error. The options are left out instead.
+ */
+function withoutModelOptionValues(thread: CodeThread): CodeThread {
+  const { modelOptionValues: _dropped, ...rest } = thread;
+  return rest;
+}
+
+function nextModelOptionValues(
+  current: CodeThread,
+  command: Readonly<{
+    providerInstanceId: CodeThread["providerInstanceId"];
+    modelId: ProviderModelId;
+    modelOptionValues?: ProviderModelOptionValues | undefined;
+  }>,
+): Pick<CodeThread, "modelOptionValues"> {
+  const sameModel =
+    String(current.providerInstanceId) === String(command.providerInstanceId) &&
+    String(current.modelId) === String(command.modelId);
+  const values = command.modelOptionValues ?? (sameModel ? current.modelOptionValues : undefined);
+  return values === undefined ? {} : { modelOptionValues: values };
+}
