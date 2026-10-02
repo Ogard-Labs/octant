@@ -1026,7 +1026,11 @@ native harness in `apps/server/src/harness`:
   the harness calls, `agentTuiModel.ts` the pure presentation (transcript,
   footer, palette projected from `@octant/theme` tokens), and `agentTui.ts`
   the OpenTUI screen, loaded only when stdout is a terminal and `--plain` or
-  `--json` was not asked for.
+  `--json` was not asked for. The terminal registers a window authority with
+  a renderer identity, like the desktop renderer, and `agentWindow.ts` opens
+  the Project and then the thread in that window before driving it, because
+  Code checkouts, goals, and harness approvals are authorized against what a
+  window has open.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
