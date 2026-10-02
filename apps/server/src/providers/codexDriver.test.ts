@@ -993,6 +993,56 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("runs a resumed thread's turns on the model it was switched to, with that model's reasoning", async () => {
+    const f = fixture({
+      modelPages: [
+        { data: [model(), { ...model("gpt-5.5"), isDefault: false }], nextCursor: null },
+      ],
+    });
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const acquired = await acquireConnection(driver);
+    // The fake records the thread as gpt-5.4; the thread now asks for gpt-5.5.
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+        modelId: "gpt-5.5" as never,
+        modelOptionValues: { reasoning: "low" },
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      model: "gpt-5.5",
+      effort: "low",
+    });
+    await acquired.close();
+  });
+
+  it("leaves the model to Codex when a resumed thread keeps the model it recorded", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+        modelId: "gpt-5.4" as never,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    const turn = f.calls.find(({ method }) => method === "turn/start");
+    expect(turn?.input).not.toHaveProperty("model");
+    expect(turn?.input).not.toHaveProperty("effort");
+    await acquired.close();
+  });
+
   it("fails a start that declares option values instead of dropping them without a catalog", async () => {
     const f = fixture();
     const registry = new ProviderRuntimeRegistry();

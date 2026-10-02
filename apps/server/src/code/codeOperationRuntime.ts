@@ -270,6 +270,12 @@ export interface CodeOperationRuntimeOptions {
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
+   * Whether the thread's provider can carry its native session on to another
+   * of its models. A host that cannot say so answers false, and a turn whose
+   * model differs from its session's is refused as before.
+   */
+  readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
+  /**
    * Whether the thread's provider can take an image. A host that cannot say so
    * answers false: a turn that attached images then fails in words rather than
    * reaching the provider with the pictures silently dropped.
@@ -1541,10 +1547,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const previous = recovered.session;
     const priorTurn = recovered.priorTurn;
     const priorTurnSettled = recovered.priorTurnSettled;
+    // The composer offers another model of the same provider in a started
+    // thread; refusing every turn after that switch left the thread stuck. A
+    // provider that can resume onto the new model keeps the conversation, and
+    // the turn records the new model on its session.
     if (
       previous?.kind === "provider-session-ready" &&
       (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
-        String(previous.modelId) !== String(input.thread.modelId) ||
+        (String(previous.modelId) !== String(input.thread.modelId) &&
+          this.#options.supportsModelSwitch?.(input.thread) !== true) ||
         String(previous.checkoutId) !== String(input.thread.checkoutId))
     )
       return failStart(

@@ -25,6 +25,7 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   pickerGroupCarriesAppManagedTools,
+  startedThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
 import { CirclePause, X } from "lucide-react";
@@ -623,6 +624,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const canSend =
     trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
+  // Computed in place rather than memoised: this runs after the early returns
+  // above, where a hook would change the hook order between renders.
+  const threadModelGroups = startedThreadPickerGroups(providerGroups, {
+    providerInstanceId: thread.providerInstanceId,
+    modelId: thread.modelId,
+  });
   const messages = props.controller.conversation;
   const settledReplyCount = messages.filter(
     (message) =>
@@ -1858,7 +1865,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy}
-                groups={providerGroups}
+                groups={threadModelGroups}
                 {...(thread.modelOptionValues === undefined
                   ? {}
                   : { modelOptionValues: thread.modelOptionValues })}

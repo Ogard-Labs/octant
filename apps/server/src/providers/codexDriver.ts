@@ -185,6 +185,14 @@ export interface CodexTurnStartInput {
     | { readonly type: "workspaceWrite" }
     | { readonly type: "readOnly" };
   readonly approvalsReviewer: "auto_review" | "user";
+  /**
+   * The thread's current model and reasoning effort, restated per turn once a
+   * resumed session has moved to a model other than the one Codex recorded.
+   * `thread/resume` takes no model; `turn/start` documents `model` and
+   * `effort` as overrides for this turn and subsequent ones.
+   */
+  readonly model?: string;
+  readonly effort?: string;
 }
 
 export interface CodexApprovalResponse {
@@ -237,6 +245,7 @@ interface SessionState {
   readonly autoApprove: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
+  readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -267,6 +276,7 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
+  modelSwitch: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 } as const;
@@ -1135,6 +1145,7 @@ function makeConnection(
       },
       thread: CodexThreadResult,
       modelId: string,
+      turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
     ) => {
       const previous = sessions.get(input.sessionId);
       if (previous !== undefined) {
@@ -1151,6 +1162,7 @@ function makeConnection(
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
         threadId: thread.thread.id,
+        ...(turnOverrides === undefined ? {} : { turnOverrides }),
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
         terminal: false,
@@ -1283,7 +1295,33 @@ function makeConnection(
                 failure("unauthorized", "Codex thread belongs to a different Project root."),
               );
             }
-            register(input, thread, thread.model);
+            // A thread whose model was switched resumes on what Codex recorded,
+            // so the new model and its reasoning ride on every turn instead.
+            const modelId = input.modelId === undefined ? thread.model : String(input.modelId);
+            if (modelId === thread.model) {
+              register(input, thread, thread.model);
+              return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
+            }
+            const switchedModel = options.runtimeRegistry
+              .observedState(options.instanceId)
+              ?.models.find((candidate) => candidate.id === modelId);
+            if (switchedModel === undefined) {
+              return yield* Effect.fail(
+                failure(
+                  "invalid-configuration",
+                  "Codex model is not available in the observed provider catalog.",
+                ),
+              );
+            }
+            const effort =
+              input.modelOptionValues === undefined
+                ? undefined
+                : codexModelOptionSettings(switchedModel, input.modelOptionValues).config
+                    ?.model_reasoning_effort;
+            register(input, thread, modelId, {
+              model: modelId,
+              ...(effort === undefined ? {} : { effort }),
+            });
             return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
           }),
         );
@@ -1312,6 +1350,7 @@ function makeConnection(
                       threadId: state.threadId,
                       input: codexTurnInput(input),
                       ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
+                      ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),
                     });
                     if (state.activeTurnId !== undefined && state.activeTurnId !== turn.turn.id) {

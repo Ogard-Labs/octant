@@ -190,6 +190,12 @@ export interface WorkTurnServiceDependencies {
   ) => ProviderDriver | undefined;
   readonly attachments?: WorkAttachmentStore;
   /**
+   * Whether a provider can carry its native session on to another of its
+   * models. Absent or false keeps refusing a follow-up whose model differs
+   * from the session's.
+   */
+  readonly supportsModelSwitch?: (providerInstanceId: WorkThread["providerInstanceId"]) => boolean;
+  /**
    * Whether the selected provider and model honestly accept images. The host
    * refuses a turn that names attachments when this is false, rather than
    * sending the prompt with its pictures quietly removed.
@@ -318,6 +324,7 @@ export class WorkTurnService {
   readonly #resolveDriver: WorkTurnServiceDependencies["resolveDriver"];
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
+  readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
@@ -360,6 +367,7 @@ export class WorkTurnService {
     this.#resolveDriver = dependencies.resolveDriver;
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
+    this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
@@ -601,7 +609,8 @@ export class WorkTurnService {
         previous.providerSessionId === undefined ||
         previous.resumeCursor === undefined ||
         previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
-        previous.authority.modelId !== command.authority.modelId ||
+        (previous.authority.modelId !== command.authority.modelId &&
+          this.#supportsModelSwitch?.(command.authority.providerInstanceId) !== true) ||
         previous.authority.bindingRevisionId !== command.authority.bindingRevisionId ||
         previous.authority.workingDirectory !== command.authority.workingDirectory)
     ) {

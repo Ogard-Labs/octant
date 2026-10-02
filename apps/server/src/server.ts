@@ -4224,6 +4224,9 @@ export function startOctantServer(
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .acpClientCapabilities === "supported",
+        supportsModelSwitch: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .modelSwitch === "supported",
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           if (observed?.capabilities.nativeAttachments !== "supported") return false;
@@ -6145,6 +6148,9 @@ export function startOctantServer(
         );
       },
       attachments: workAttachments,
+      supportsModelSwitch: (providerInstanceId) =>
+        providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
+        "supported",
       supportsAttachments: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         if (observed?.capabilities.nativeAttachments !== "supported") return false;
