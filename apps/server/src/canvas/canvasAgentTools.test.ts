@@ -436,11 +436,77 @@ describe("createCanvasAgentTools", () => {
       expect(create).not.toHaveBeenCalled();
     });
 
-    it("tells the agent to prefer a Canvas for plans and reviews bound to the thread's checkout", () => {
+    it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {
       const description = boundTools("code").set.definitions[0]?.description ?? "";
-      expect(description).toContain("plan, review, audit, report");
+      expect(description).toContain("deliver it as a Canvas rather than as a long reply");
+      expect(description).toContain("design or mockup, diagram, report, review, audit");
+      expect(description).toContain("Keep short answers");
+      expect(description).toContain("Text renders as plain text, not Markdown");
+      expect(description).toContain(
+        "revise the thread's existing Canvas instead of creating another",
+      );
       expect(description).toContain("this Code thread's checkout");
       expect(description).toContain("grants no file, shell, Git, or network access");
+    });
+
+    it("lists the thread's Canvases with the sequence a revision must name", async () => {
+      const threadReferenceCards = vi.fn(() => [{ canvasId: "canvas-1", title: "Plan" }]);
+      const get = vi.fn(() => ({
+        kind: "ready" as const,
+        version: { sequence: 3, definition: { title: "Plan", blocks: [diagram] } },
+      }));
+      const { set } = boundTools("work", {
+        canvas: { create: vi.fn(), revise: vi.fn(), threadReferenceCards, get },
+      });
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "list" }),
+      });
+
+      expect(outcome.isError).not.toBe(true);
+      expect(outcome.result).toEqual({
+        canvases: [{ canvasId: "canvas-1", title: "Plan", sequence: 3 }],
+      });
+      expect(threadReferenceCards).toHaveBeenCalledWith({ mode: "work", threadId, projectId });
+      expect(get).toHaveBeenCalledWith(
+        "canvas-1",
+        expect.objectContaining({ mode: "work", workspace: workspaces.work }),
+        expect.objectContaining({ type: "work" }),
+      );
+    });
+
+    it("reads a Canvas's current blocks so a follow-up can revise it in place", async () => {
+      const get = vi.fn(() => ({
+        kind: "ready" as const,
+        version: { sequence: 2, definition: { title: "Plan", blocks: [diagram] } },
+      }));
+      const { set } = boundTools("code", {
+        canvas: { create: vi.fn(), revise: vi.fn(), threadReferenceCards: vi.fn(), get },
+      });
+      const canvasId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "read", canvasId }),
+      });
+
+      expect(outcome.result).toEqual({ canvasId, title: "Plan", sequence: 2, blocks: [diagram] });
+    });
+
+    it("refuses to read a Canvas the thread's scope does not authorize", async () => {
+      const get = vi.fn(() => ({ kind: "unauthorized" as const, canvasId: "x" }));
+      const { set } = boundTools("code", {
+        canvas: { create: vi.fn(), revise: vi.fn(), threadReferenceCards: vi.fn(), get },
+      });
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({
+          operation: "read",
+          canvasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        }),
+      });
+
+      expect(outcome.isError).toBe(true);
+      expect(outcome.result).toEqual({ error: "That Canvas is unavailable." });
     });
   });
 });
