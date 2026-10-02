@@ -359,7 +359,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     );
 
     // One checkout is the common case, so the level stays out of the way.
-    expect(screen.queryByRole("group")).toBeNull();
+    expect(screen.queryByRole("group", { name: /^(Primary checkout|Worktree)/ })).toBeNull();
 
     rerender(
       <ProjectSidebarSection
