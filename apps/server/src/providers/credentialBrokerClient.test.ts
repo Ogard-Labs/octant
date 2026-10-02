@@ -95,6 +95,27 @@ describe("makeCredentialBrokerClient", () => {
       expect(String(failure)).not.toContain(brokerToken);
     }
   });
+
+  it("reports a missing credential as unauthenticated and a store failure as the credential store", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ error: "missing" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ error: "failed" }, { status: 500 }));
+    const resolver = makeCredentialBrokerClient({
+      url: "http://127.0.0.1:41000/",
+      token: "broker-token",
+      fetch,
+    });
+
+    await expect(resolver.resolve(providerInstanceId)).rejects.toEqual({
+      category: "unauthenticated",
+      message: "The provider credential is missing or unavailable.",
+    });
+    await expect(resolver.resolve(providerInstanceId)).rejects.toEqual({
+      category: "unavailable",
+      message: "The provider credential store is unavailable.",
+    });
+  });
 });
 
 describe("makeCredentialCleanupClient", () => {
