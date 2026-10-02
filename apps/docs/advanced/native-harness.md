@@ -87,8 +87,8 @@ independent tasks side by side, then starts a task that needs their output with
 `after`. That task begins only once all of them have finished, with their
 replies in front of it; if one of them fails or is cancelled, it never runs.
 `delegate wait` blocks until the children finish, and `status` shows what each
-one is waiting on. At most three children of a thread are active at once,
-waiting ones included.
+one is waiting on. How many children run at once is a setting (below); a
+child that is only waiting does not take a slot.
 
 This is how a frontier model plans and reviews while cheaper models read and
 implement: put the strong model on `default` and `slow`, the cheap one on

@@ -58,8 +58,14 @@ export function agentRunResultReference(runId: AgentRun["id"]): string {
 }
 
 export const AGENT_RUN_MAX_DEPTH = 2;
-export const AGENT_RUN_MAX_ACTIVE_GLOBAL = 4;
-export const AGENT_RUN_MAX_ACTIVE_PER_PARENT = 3;
+/**
+ * How many unfinished children may exist at all — running, starting, or
+ * waiting for a slot or a dependency. This is the runaway guard; how many of
+ * them run at once is the person's concurrency setting, enforced by the run
+ * slots and never above `MAX_AGENT_RUN_CONCURRENCY`.
+ */
+export const AGENT_RUN_MAX_ACTIVE_GLOBAL = 32;
+export const AGENT_RUN_MAX_ACTIVE_PER_PARENT = 16;
 
 export function isAgentRunTerminalStatus(status: AgentRunLifecycleStatus): boolean {
   return (AGENT_RUN_TERMINAL_STATUSES as ReadonlyArray<string>).includes(status);

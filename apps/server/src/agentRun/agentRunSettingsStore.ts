@@ -6,6 +6,7 @@ import {
   EventId,
   DEFAULT_AGENT_RUN_CREATION_POSTURE,
   decodeAgentRunPolicySettings,
+  type AgentRunConcurrency,
   type AgentRunPolicySettings,
   type AgentRunSelectableCreationPosture,
 } from "@octant/contracts";
@@ -48,6 +49,8 @@ export interface AgentRunSettingsStoreOptions {
 
 export interface UpdateAgentRunSettingsInput {
   readonly creationPosture: AgentRunSelectableCreationPosture;
+  /** Absent keeps the current limits. */
+  readonly concurrency?: AgentRunConcurrency | undefined;
   readonly expectedVersion: number;
 }
 
@@ -97,8 +100,10 @@ export class AgentRunSettingsStore {
     const updatedAt = this.#clock();
     let settings: AgentRunPolicySettings;
     try {
+      const concurrency = input.concurrency ?? this.#current.concurrency;
       settings = decodeAgentRunPolicySettings({
         creationPosture: input.creationPosture,
+        ...(concurrency === undefined ? {} : { concurrency }),
         version: decodeAggregateVersion(this.#current.version + 1),
         updatedAt,
       });
